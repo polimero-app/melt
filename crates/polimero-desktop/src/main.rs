@@ -1,8 +1,8 @@
 use polimero_core::{
     AppInfo,
     config::{Config, config_dir},
-    drivers,
-    keychain::SystemKeychain,
+    drivers::{self, DriverError},
+    keychain::{SERVICE, SecretError, SecretStore, SystemKeychain, account},
     profiles,
 };
 use serde::Serialize;
@@ -43,6 +43,41 @@ fn registered_drivers() -> Vec<drivers::DriverInfo> {
 }
 
 #[tauri::command]
+fn printer_status(name: String) -> Result<polimero_core::moonraker::Status, String> {
+    let config = Config::load().map_err(|_| "Unable to read printer configuration.".to_string())?;
+    let profile = config
+        .get_profile(&name)
+        .ok_or_else(|| "Printer profile not found.".to_string())?;
+    let driver_profile = drivers::profile(profile).map_err(status_error)?;
+    if !driver_profile.driver().supports(drivers::Operation::Status) {
+        return Err(status_error(DriverError::UnsupportedOperation(
+            driver_profile.driver(),
+            drivers::Operation::Status,
+        )));
+    }
+    let access_code =
+        match SystemKeychain.get(SERVICE, &account(&profile.driver, &name, "access-code")) {
+            Ok(access_code) => Some(access_code),
+            Err(SecretError::NotFound) => None,
+            Err(SecretError::Unavailable(_)) => return Err("Keychain operation failed.".into()),
+        };
+    drivers::status(&driver_profile, access_code.as_deref()).map_err(status_error)
+}
+
+fn status_error(error: DriverError) -> String {
+    match error {
+        DriverError::Unknown(_) | DriverError::InvalidProfile(_) | DriverError::InvalidTimeout => {
+            "Invalid printer profile.".into()
+        }
+        DriverError::UnsupportedOperation(_, _) => "This driver does not support status.".into(),
+        DriverError::Moonraker(polimero_core::moonraker::Error::Authentication) => {
+            "Printer authentication failed.".into()
+        }
+        DriverError::Moonraker(_) => "Printer status request failed.".into(),
+    }
+}
+
+#[tauri::command]
 fn remove_configured_printer(name: String) -> Result<profiles::RemoveResult, String> {
     let dir = config_dir().map_err(|_| "Unable to read printer configuration.".to_string())?;
     profiles::remove(dir, &SystemKeychain, &name).map_err(|error| error.to_string())
@@ -63,6 +98,7 @@ fn main() {
             app_info,
             configured_printers,
             registered_drivers,
+            printer_status,
             remove_configured_printer
         ])
         .run(tauri::generate_context!())

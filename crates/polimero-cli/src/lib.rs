@@ -8,8 +8,8 @@ use std::{
 use polimero_core::{
     AppError, app_info,
     config::{Config, ConfigError, NamedProfile},
-    drivers,
-    keychain::SystemKeychain,
+    drivers::{self, DriverError},
+    keychain::{SERVICE, SecretError, SecretStore, SystemKeychain, account},
     profiles::{self, ProfileError},
 };
 use serde::Serialize;
@@ -78,6 +78,9 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         [printer, drivers] if printer.as_str() == "printer" && drivers.as_str() == "drivers" => {
             write_drivers(invocation.format, out)
         }
+        [status, name] if status.as_str() == "status" => {
+            printer_status(invocation.format, name, out, err)
+        }
         [printer, remove, name] if printer.as_str() == "printer" && remove.as_str() == "remove" => {
             remove_profile(invocation.format, name, false, out, err)
         }
@@ -95,6 +98,100 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             out,
             err,
         ),
+    }
+}
+
+fn printer_status(
+    format: OutputFormat,
+    name: &str,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let config = match Config::load() {
+        Ok(config) => config,
+        Err(error) => return write_error("status", format, config_error(error), out, err),
+    };
+    let profile = match config.get_profile(name) {
+        Some(profile) => profile,
+        None => {
+            return write_error(
+                "status",
+                format,
+                AppError::usage(format!("printer profile {name:?} not found")),
+                out,
+                err,
+            );
+        }
+    };
+    let driver_profile = match drivers::profile(profile) {
+        Ok(profile) => profile,
+        Err(error) => return write_error("status", format, driver_error(error), out, err),
+    };
+    if !driver_profile.driver().supports(drivers::Operation::Status) {
+        return write_error(
+            "status",
+            format,
+            driver_error(DriverError::UnsupportedOperation(
+                driver_profile.driver(),
+                drivers::Operation::Status,
+            )),
+            out,
+            err,
+        );
+    }
+    let access_code =
+        match SystemKeychain.get(SERVICE, &account(&profile.driver, name, "access-code")) {
+            Ok(access_code) => Some(access_code),
+            Err(SecretError::NotFound) => None,
+            Err(SecretError::Unavailable(_)) => {
+                return write_error(
+                    "status",
+                    format,
+                    AppError {
+                        exit_code: 3,
+                        code: "secret-store-failed",
+                        message: "keychain operation failed".into(),
+                    },
+                    out,
+                    err,
+                );
+            }
+        };
+    match drivers::status(&driver_profile, access_code.as_deref()) {
+        Ok(status) => {
+            let state = status.state;
+            write_success(
+                "status",
+                format,
+                status,
+                |out| writeln!(out, "STATE\t{state:?}"),
+                out,
+            )
+        }
+        Err(error) => write_error("status", format, driver_error(error), out, err),
+    }
+}
+
+fn driver_error(error: DriverError) -> AppError {
+    match error {
+        DriverError::Unknown(_) | DriverError::InvalidProfile(_) | DriverError::InvalidTimeout => {
+            AppError::usage(error.to_string())
+        }
+        DriverError::UnsupportedOperation(_, _) => AppError {
+            exit_code: 2,
+            code: "unsupported-operation",
+            message: error.to_string(),
+        },
+        DriverError::Moonraker(polimero_core::moonraker::Error::Authentication) => AppError {
+            exit_code: 3,
+            code: "authentication-failed",
+            message: "printer authentication failed".into(),
+        },
+        DriverError::Moonraker(_) => AppError {
+            exit_code: 1,
+            code: "printer-unavailable",
+            message: "printer status request failed".into(),
+        },
     }
 }
 
@@ -459,6 +556,17 @@ mod tests {
         assert!(output.contains(r#""command": "printer drivers""#));
         assert!(output.contains(r#""drivers": ["#));
         assert!(output.contains("bambu-lan"));
+    }
+
+    #[test]
+    fn unsupported_driver_status_has_a_stable_error_code() {
+        let error = driver_error(DriverError::UnsupportedOperation(
+            drivers::Driver::BambuLan,
+            drivers::Operation::Status,
+        ));
+
+        assert_eq!(error.exit_code, 2);
+        assert_eq!(error.code, "unsupported-operation");
     }
 
     #[test]
