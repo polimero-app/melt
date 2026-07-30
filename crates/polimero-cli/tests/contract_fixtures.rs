@@ -41,7 +41,7 @@ fn contract_fixtures_reference_public_commands_and_valid_envelopes() {
 
     let manifest: Manifest = serde_json::from_value(read_json("manifest.json")).expect("manifest");
     assert_eq!(manifest.schema_version, 1);
-    assert_eq!(manifest.fixtures.len(), 4);
+    assert_eq!(manifest.fixtures.len(), 5);
     let mut fixture_ids = HashSet::new();
 
     for fixture in manifest.fixtures {

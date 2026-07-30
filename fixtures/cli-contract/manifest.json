@@ -36,6 +36,15 @@
       "stdout": "golden/unknown-command.json",
       "stderr": "",
       "ignoreJsonPointers": []
+    },
+    {
+      "id": "camera-snapshot-unavailable-json",
+      "command": "camera snapshot",
+      "args": ["camera", "snapshot", "garage", "--output", "json"],
+      "exitCode": 5,
+      "stdout": "golden/camera-snapshot-unavailable.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
     }
   ]
 }

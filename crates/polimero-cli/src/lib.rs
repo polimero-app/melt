@@ -1,8 +1,10 @@
 //! CLI rendering for shared Polimero operations.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
+    fs,
     io::{IsTerminal, Write},
+    path::{Path, PathBuf},
 };
 
 use polimero_core::{
@@ -25,6 +27,35 @@ struct Invocation<'a> {
     format: OutputFormat,
 }
 
+#[derive(Default)]
+struct ParsedOptions {
+    flags: BTreeSet<String>,
+    values: BTreeMap<String, String>,
+}
+
+impl ParsedOptions {
+    fn enabled(&self, name: &str) -> bool {
+        self.flags.contains(name)
+    }
+
+    fn value(&self, name: &str) -> Option<&str> {
+        self.values.get(name).map(String::as_str)
+    }
+}
+
+#[derive(Default)]
+struct ConnectionOptions {
+    timeout: Option<String>,
+    insecure: bool,
+}
+
+struct ResolvedPrinter {
+    name: String,
+    driver: drivers::Profile,
+    driver_kind: drivers::Driver,
+    access_code: Option<String>,
+}
+
 #[derive(Serialize)]
 struct Meta<'a> {
     command: &'a str,
@@ -45,6 +76,16 @@ struct Envelope<'a, T: Serialize> {
     meta: Meta<'a>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VersionData {
+    version: &'static str,
+    commit: &'static str,
+    go_version: &'static str,
+    platform: String,
+    modes: [&'static str; 2],
+}
+
 pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let invocation = match Invocation::parse(args) {
         Ok(invocation) => invocation,
@@ -53,16 +94,19 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let command = command_name(&invocation.command);
 
     match invocation.command.as_slice() {
-        [version] if version.as_str() == "version" => {
-            let info = app_info();
-            write_success(
-                "version",
-                invocation.format,
-                info,
-                |out| writeln!(out, "polimero version {}", app_info().version),
-                out,
-            )
-        }
+        [version] if version.as_str() == "version" => write_success(
+            "version",
+            invocation.format,
+            VersionData {
+                version: app_info().version,
+                commit: "unknown",
+                go_version: "rust",
+                platform: format!("{}/{}", std::env::consts::OS, std::env::consts::ARCH),
+                modes: ["gui", "headless"],
+            },
+            |out| writeln!(out, "polimero version {}", app_info().version),
+            out,
+        ),
         [printer, list] if printer.as_str() == "printer" && list.as_str() == "list" => {
             match Config::load() {
                 Ok(config) => write_printer_list(invocation.format, config.sorted_profiles(), out),
@@ -83,8 +127,8 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         {
             add_profile(invocation.format, name, flags, out, err)
         }
-        [status, name] if status.as_str() == "status" => {
-            printer_status(invocation.format, name, out, err)
+        [status, rest @ ..] if status.as_str() == "status" => {
+            printer_status(invocation.format, rest, out, err)
         }
         [printer, remove, name] if printer.as_str() == "printer" && remove.as_str() == "remove" => {
             remove_profile(invocation.format, name, false, out, err)
@@ -96,10 +140,70 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         {
             remove_profile(invocation.format, name, true, out, err)
         }
+        [files, roots, rest @ ..] if files.as_str() == "files" && roots.as_str() == "roots" => {
+            files_roots(invocation.format, rest, out, err)
+        }
+        [files, list, rest @ ..] if files.as_str() == "files" && list.as_str() == "list" => {
+            files_list(invocation.format, rest, out, err)
+        }
+        [jobs, action, rest @ ..]
+            if jobs.as_str() == "jobs"
+                && matches!(action.as_str(), "start" | "pause" | "resume" | "cancel") =>
+        {
+            job_action(invocation.format, action, rest, out, err)
+        }
+        [emergency_stop, rest @ ..] if emergency_stop.as_str() == "emergency-stop" => {
+            emergency_stop_command(invocation.format, rest, out, err)
+        }
+        [temperature, set, rest @ ..]
+            if temperature.as_str() == "temperature" && set.as_str() == "set" =>
+        {
+            temperature_set(invocation.format, rest, out, err)
+        }
+        [motion, home, rest @ ..] if motion.as_str() == "motion" && home.as_str() == "home" => {
+            motion_home(invocation.format, rest, out, err)
+        }
+        [motion, jog, rest @ ..] if motion.as_str() == "motion" && jog.as_str() == "jog" => {
+            motion_jog(invocation.format, rest, out, err)
+        }
+        [fans, set, rest @ ..] if fans.as_str() == "fans" && set.as_str() == "set" => {
+            fan_set(invocation.format, rest, out, err)
+        }
+        [speed, set, rest @ ..] if speed.as_str() == "speed" && set.as_str() == "set" => {
+            speed_set(invocation.format, rest, out, err)
+        }
+        [files, upload, rest @ ..] if files.as_str() == "files" && upload.as_str() == "upload" => {
+            files_upload(invocation.format, rest, out, err)
+        }
+        [files, download, rest @ ..]
+            if files.as_str() == "files" && download.as_str() == "download" =>
+        {
+            files_download(invocation.format, rest, out, err)
+        }
+        [camera, action, rest @ ..]
+            if camera.as_str() == "camera" && matches!(action.as_str(), "snapshot" | "stream") =>
+        {
+            unsupported_command(&format!("camera {}", action), invocation.format, out, err)
+        }
+        [lights, set, rest @ ..] if lights.as_str() == "lights" && set.as_str() == "set" => {
+            unsupported_command("lights set", invocation.format, out, err)
+        }
+        [printer, discover, rest @ ..]
+            if printer.as_str() == "printer" && discover.as_str() == "discover" =>
+        {
+            unsupported_command("printer discover", invocation.format, out, err)
+        }
+        [printer, tls, refresh, rest @ ..]
+            if printer.as_str() == "printer"
+                && tls.as_str() == "tls"
+                && refresh.as_str() == "refresh" =>
+        {
+            unsupported_command("printer tls refresh", invocation.format, out, err)
+        }
         _ => write_error(
             &command,
             invocation.format,
-            AppError::usage(format!("unknown command {command:?}")),
+            AppError::usage(format!("unknown command {command:?} for \"polimero\"")),
             out,
             err,
         ),
@@ -215,67 +319,43 @@ fn read_access_code_file(path: &str) -> Result<String, String> {
 
 fn printer_status(
     format: OutputFormat,
-    name: &str,
+    args: &[&String],
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
-    let config = match Config::load() {
-        Ok(config) => config,
-        Err(error) => return write_error("status", format, config_error(error), out, err),
+    let (positionals, options) = match parse_options(
+        args,
+        &["insecure", "detailed"],
+        &["timeout", "protocol-trace"],
+    ) {
+        Ok(value) => value,
+        Err(error) => return write_error("status", format, AppError::usage(error), out, err),
     };
-    let profile = match config.get_profile(name) {
-        Some(profile) => profile,
-        None => {
-            return write_error(
-                "status",
-                format,
-                AppError::usage(format!("printer profile {name:?} not found")),
-                out,
-                err,
-            );
-        }
+    let name = match one_positional("status", &positionals) {
+        Ok(name) => name,
+        Err(error) => return write_error("status", format, error, out, err),
     };
-    let driver_profile = match drivers::profile(profile) {
-        Ok(profile) => profile,
-        Err(error) => return write_error("status", format, driver_error(error), out, err),
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("status", format, error, out, err),
     };
-    if !driver_profile.driver().supports(drivers::Operation::Status) {
-        return write_error(
-            "status",
-            format,
-            driver_error(DriverError::UnsupportedOperation(
-                driver_profile.driver(),
-                drivers::Operation::Status,
-            )),
-            out,
-            err,
-        );
-    }
-    let access_code =
-        match SystemKeychain.get(SERVICE, &account(&profile.driver, name, "access-code")) {
-            Ok(access_code) => Some(access_code),
-            Err(SecretError::NotFound) => None,
-            Err(SecretError::Unavailable(_)) => {
-                return write_error(
-                    "status",
-                    format,
-                    AppError {
-                        exit_code: 3,
-                        code: "secret-store-failed",
-                        message: "keychain operation failed".into(),
-                    },
-                    out,
-                    err,
-                );
-            }
-        };
-    match drivers::status(&driver_profile, access_code.as_deref()) {
+    let printer = match resolve_printer(name, connection, drivers::Operation::Status) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("status", format, error, out, err),
+    };
+
+    match drivers::status(&printer.driver, printer.access_code.as_deref()) {
         Ok(status) => {
             let state = status.state;
             write_success(
                 "status",
                 format,
-                status,
+                StatusData {
+                    profile: printer.name,
+                    driver: printer.driver_kind.name(),
+                    status,
+                    capabilities: printer.driver_kind.capabilities(),
+                },
                 |out| writeln!(out, "STATE\t{state:?}"),
                 out,
             )
@@ -284,14 +364,1465 @@ fn printer_status(
     }
 }
 
+#[derive(Serialize)]
+struct StatusData {
+    profile: String,
+    driver: &'static str,
+    #[serde(flatten)]
+    status: polimero_core::moonraker::Status,
+    capabilities: drivers::Capabilities,
+}
+
+fn parse_options(
+    args: &[&String],
+    boolean_options: &[&str],
+    value_options: &[&str],
+) -> Result<(Vec<String>, ParsedOptions), String> {
+    let mut positionals = Vec::new();
+    let mut options = ParsedOptions::default();
+    let mut index = 0;
+    while index < args.len() {
+        let argument = args[index].as_str();
+        if !argument.starts_with("--") {
+            positionals.push(argument.to_owned());
+            index += 1;
+            continue;
+        }
+        let (name, inline_value) = argument
+            .strip_prefix("--")
+            .expect("options start with two dashes")
+            .split_once('=')
+            .map_or(
+                (argument.trim_start_matches("--"), None),
+                |(name, value)| (name, Some(value)),
+            );
+        if boolean_options.contains(&name) {
+            if inline_value.is_some() {
+                return Err(format!("--{name} does not take a value"));
+            }
+            options.flags.insert(name.to_owned());
+            index += 1;
+            continue;
+        }
+        if value_options.contains(&name) {
+            let value = match inline_value {
+                Some(value) if !value.is_empty() => value.to_owned(),
+                Some(_) => return Err(format!("--{name} requires a value")),
+                None => {
+                    index += 1;
+                    args.get(index)
+                        .map(|value| (*value).clone())
+                        .ok_or_else(|| format!("--{name} requires a value"))?
+                }
+            };
+            if options.values.insert(name.to_owned(), value).is_some() {
+                return Err(format!("--{name} may only be specified once"));
+            }
+            index += 1;
+            continue;
+        }
+        return Err(format!("unknown option {argument:?}"));
+    }
+    Ok((positionals, options))
+}
+
+fn one_positional<'a>(command: &str, positionals: &'a [String]) -> Result<&'a str, AppError> {
+    match positionals {
+        [name] => Ok(name),
+        [] => Err(AppError::usage(format!(
+            "{command} requires a printer profile name"
+        ))),
+        _ => Err(AppError::usage(format!(
+            "{command} expects exactly one printer profile name"
+        ))),
+    }
+}
+
+fn connection_options(options: &ParsedOptions) -> Result<ConnectionOptions, AppError> {
+    if options.value("protocol-trace").is_some() {
+        return Err(AppError {
+            exit_code: 5,
+            code: "capability-unsupported",
+            message: "protocol tracing is not available in the Rust driver yet".into(),
+        });
+    }
+    Ok(ConnectionOptions {
+        timeout: options.value("timeout").map(str::to_owned),
+        insecure: options.enabled("insecure"),
+    })
+}
+
+fn resolve_printer(
+    requested_name: &str,
+    connection: ConnectionOptions,
+    operation: drivers::Operation,
+) -> Result<ResolvedPrinter, AppError> {
+    let name = requested_name.to_ascii_lowercase();
+    let config = Config::load().map_err(config_error)?;
+    let mut profile = config
+        .get_profile(&name)
+        .cloned()
+        .ok_or_else(|| AppError::usage(format!("printer profile {requested_name:?} not found")))?;
+    if let Some(timeout) = connection.timeout {
+        profile.timeout = timeout;
+    }
+    if connection.insecure {
+        profile.insecure = true;
+    }
+    let driver = drivers::profile(&profile).map_err(driver_error)?;
+    let driver_kind = driver.driver();
+    if !driver_kind.supports(operation) {
+        return Err(driver_error(DriverError::UnsupportedOperation(
+            driver_kind,
+            operation,
+        )));
+    }
+
+    let access_code =
+        match SystemKeychain.get(SERVICE, &account(&profile.driver, &name, "access-code")) {
+            Ok(access_code) => Some(access_code),
+            Err(SecretError::NotFound) => None,
+            // Moonraker supports a keyless trusted-LAN configuration, so an
+            // unavailable keychain cannot block it when no credential is needed.
+            Err(SecretError::Unavailable(_)) if driver_kind == drivers::Driver::Moonraker => None,
+            Err(SecretError::Unavailable(_)) => {
+                return Err(AppError {
+                    exit_code: 3,
+                    code: "secret-store-failed",
+                    message: "keychain operation failed".into(),
+                });
+            }
+        };
+
+    Ok(ResolvedPrinter {
+        name,
+        driver,
+        driver_kind,
+        access_code,
+    })
+}
+
+fn require_confirmation(
+    command: &str,
+    yes: bool,
+    prompt: &str,
+    format: OutputFormat,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Result<(), i32> {
+    if yes {
+        return Ok(());
+    }
+    if !std::io::stdin().is_terminal() {
+        return Err(write_error(
+            command,
+            format,
+            AppError::usage("non-interactive mode requires --yes"),
+            out,
+            err,
+        ));
+    }
+    if write!(err, "{prompt}").is_err() {
+        return Err(1);
+    }
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_err() {
+        return Err(write_error(
+            command,
+            format,
+            AppError {
+                exit_code: 1,
+                code: "internal-error",
+                message: "cannot read confirmation".into(),
+            },
+            out,
+            err,
+        ));
+    }
+    if answer.trim_end() != "yes" {
+        return Err(write_error(
+            command,
+            format,
+            AppError::usage("confirmation declined; no printer action was sent"),
+            out,
+            err,
+        ));
+    }
+    Ok(())
+}
+
+fn require_state(
+    command: &str,
+    printer: &ResolvedPrinter,
+    allowed: &[polimero_core::moonraker::PrinterState],
+) -> Result<(), AppError> {
+    let status =
+        drivers::status(&printer.driver, printer.access_code.as_deref()).map_err(driver_error)?;
+    if allowed.contains(&status.state) {
+        return Ok(());
+    }
+    Err(AppError {
+        exit_code: 2,
+        code: "invalid-printer-state",
+        message: format!("printer state {:?} does not allow {command}", status.state),
+    })
+}
+
+fn unsupported_command(
+    command: &str,
+    format: OutputFormat,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    write_error(
+        command,
+        format,
+        AppError {
+            exit_code: 5,
+            code: "capability-unsupported",
+            message: format!(
+                "{command} is unavailable because its required driver transport is not implemented"
+            ),
+        },
+        out,
+        err,
+    )
+}
+
+fn files_roots(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) =
+        match parse_options(args, &["insecure"], &["timeout", "protocol-trace"]) {
+            Ok(value) => value,
+            Err(error) => {
+                return write_error("files roots", format, AppError::usage(error), out, err);
+            }
+        };
+    let name = match one_positional("files roots", &positionals) {
+        Ok(name) => name,
+        Err(error) => return write_error("files roots", format, error, out, err),
+    };
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("files roots", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::FileList) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("files roots", format, error, out, err),
+    };
+    match drivers::file_roots(&printer.driver) {
+        Ok(roots) => {
+            let human_roots = roots.clone();
+            write_success(
+                "files roots",
+                format,
+                FileRootsData {
+                    profile: printer.name,
+                    driver: printer.driver_kind.name(),
+                    roots,
+                    warnings: Vec::new(),
+                    capabilities: file_capabilities(printer.driver_kind.capabilities()),
+                },
+                |out| {
+                    writeln!(out, "ROOT\tWRITABLE\tDESCRIPTION")?;
+                    for root in &human_roots {
+                        writeln!(
+                            out,
+                            "{}\t{}\t{}",
+                            root.name, root.writable, root.description
+                        )?;
+                    }
+                    Ok(())
+                },
+                out,
+            )
+        }
+        Err(error) => write_error("files roots", format, driver_error(error), out, err),
+    }
+}
+
+fn files_list(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) = match parse_options(
+        args,
+        &["insecure", "recursive"],
+        &["timeout", "protocol-trace"],
+    ) {
+        Ok(value) => value,
+        Err(error) => return write_error("files list", format, AppError::usage(error), out, err),
+    };
+    let (name, requested_paths) = match positionals.split_first() {
+        Some(value) => value,
+        None => {
+            return write_error(
+                "files list",
+                format,
+                AppError::usage("files list requires a printer profile name"),
+                out,
+                err,
+            );
+        }
+    };
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("files list", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::FileList) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("files list", format, error, out, err),
+    };
+    let paths = if requested_paths.is_empty() {
+        vec![("/".to_owned(), "gcodes:/".to_owned())]
+    } else {
+        let mut paths = Vec::new();
+        for path in requested_paths {
+            match parse_gcodes_path(path) {
+                Ok(path) => paths.push(path),
+                Err(error) => return write_error("files list", format, error, out, err),
+            }
+        }
+        paths
+    };
+    let mut results = Vec::new();
+    for (path, device_path) in paths {
+        match drivers::file_list(
+            &printer.driver,
+            printer.access_code.as_deref(),
+            &path,
+            options.enabled("recursive"),
+        ) {
+            Ok(listing) => results.push(FilePathData {
+                device_path,
+                entries: listing.entries,
+            }),
+            Err(error) => return write_error("files list", format, driver_error(error), out, err),
+        }
+    }
+    write_success(
+        "files list",
+        format,
+        FileListData {
+            profile: printer.name,
+            driver: printer.driver_kind.name(),
+            paths: results,
+            warnings: Vec::new(),
+            capabilities: file_capabilities(printer.driver_kind.capabilities()),
+        },
+        |out| writeln!(out, "File listing retrieved."),
+        out,
+    )
+}
+
+fn parse_gcodes_path(value: &str) -> Result<(String, String), AppError> {
+    let (root, path) = value
+        .split_once(':')
+        .ok_or_else(|| AppError::usage("device path must use the gcodes:/path form"))?;
+    if root != "gcodes" {
+        return Err(AppError::usage(format!("unsupported file root {root:?}")));
+    }
+    let path = if path.is_empty() { "/" } else { path };
+    Ok((path.to_owned(), format!("gcodes:{path}")))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileCapabilities {
+    file_list: bool,
+    file_download: bool,
+    file_upload: bool,
+}
+
+fn file_capabilities(capabilities: drivers::Capabilities) -> FileCapabilities {
+    FileCapabilities {
+        file_list: capabilities.file_list,
+        file_download: capabilities.file_download,
+        file_upload: capabilities.file_upload,
+    }
+}
+
+#[derive(Serialize)]
+struct FileRootsData {
+    profile: String,
+    driver: &'static str,
+    roots: Vec<polimero_core::moonraker::FileRoot>,
+    warnings: Vec<String>,
+    capabilities: FileCapabilities,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FilePathData {
+    device_path: String,
+    entries: Vec<polimero_core::moonraker::FileEntry>,
+}
+
+#[derive(Serialize)]
+struct FileListData {
+    profile: String,
+    driver: &'static str,
+    paths: Vec<FilePathData>,
+    warnings: Vec<String>,
+    capabilities: FileCapabilities,
+}
+
+fn files_upload(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) = match parse_options(
+        args,
+        &["insecure", "overwrite"],
+        &["timeout", "protocol-trace"],
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return write_error("files upload", format, AppError::usage(error), out, err);
+        }
+    };
+    let (name, source, requested_destination) = match positionals.as_slice() {
+        [name, source] => (name.as_str(), PathBuf::from(source), None),
+        [name, source, destination] => (
+            name.as_str(),
+            PathBuf::from(source),
+            Some(destination.as_str()),
+        ),
+        _ => {
+            return write_error(
+                "files upload",
+                format,
+                AppError::usage(
+                    "files upload requires a printer profile, local path, and optional device path",
+                ),
+                out,
+                err,
+            );
+        }
+    };
+    let source_metadata = match fs::metadata(&source) {
+        Ok(metadata) if metadata.is_file() => metadata,
+        Ok(_) => {
+            return write_error(
+                "files upload",
+                format,
+                AppError::usage("local source must be a regular file"),
+                out,
+                err,
+            );
+        }
+        Err(_) => {
+            return write_error(
+                "files upload",
+                format,
+                AppError::usage("local source does not exist"),
+                out,
+                err,
+            );
+        }
+    };
+    let source_name = match source.file_name().and_then(|name| name.to_str()) {
+        Some(name) if !name.is_empty() => name,
+        _ => {
+            return write_error(
+                "files upload",
+                format,
+                AppError::usage("local source must have a valid file name"),
+                out,
+                err,
+            );
+        }
+    };
+    let (destination, destination_display) =
+        match upload_destination(requested_destination, source_name) {
+            Ok(destination) => destination,
+            Err(error) => return write_error("files upload", format, error, out, err),
+        };
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("files upload", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::FileUpload) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("files upload", format, error, out, err),
+    };
+    match drivers::upload_file(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        &source,
+        &destination,
+        options.enabled("overwrite"),
+    ) {
+        Ok(transferred) => write_success(
+            "files upload",
+            format,
+            FileTransferData {
+                profile: printer.name,
+                driver: printer.driver_kind.name(),
+                source: source.display().to_string(),
+                destination: destination_display,
+                bytes_transferred: transferred,
+                warnings: Vec::new(),
+                capabilities: file_capabilities(printer.driver_kind.capabilities()),
+            },
+            |out| writeln!(out, "Uploaded {} bytes.", source_metadata.len()),
+            out,
+        ),
+        Err(error) => write_error("files upload", format, driver_error(error), out, err),
+    }
+}
+
+fn upload_destination(
+    requested: Option<&str>,
+    source_name: &str,
+) -> Result<(String, String), AppError> {
+    let raw = requested.unwrap_or("gcodes:/");
+    let (mut path, _) = parse_gcodes_path(raw)?;
+    if raw.ends_with('/') || path == "/" {
+        path = format!("{}/{}", path.trim_end_matches('/'), source_name);
+        if !path.starts_with('/') {
+            path.insert(0, '/');
+        }
+    }
+    if path == "/" {
+        return Err(AppError::usage(
+            "upload destination must include a file name",
+        ));
+    }
+    Ok((path.clone(), format!("gcodes:{path}")))
+}
+
+fn files_download(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) = match parse_options(
+        args,
+        &["insecure", "overwrite"],
+        &["to", "timeout", "protocol-trace"],
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return write_error("files download", format, AppError::usage(error), out, err);
+        }
+    };
+    let (name, device_path) = match positionals.as_slice() {
+        [name, path] => match parse_gcodes_path(path) {
+            Ok(value) => (name.as_str(), value),
+            Err(error) => return write_error("files download", format, error, out, err),
+        },
+        _ => {
+            return write_error(
+                "files download",
+                format,
+                AppError::usage("files download requires a printer profile and device path"),
+                out,
+                err,
+            );
+        }
+    };
+    if device_path.0 == "/" {
+        return write_error(
+            "files download",
+            format,
+            AppError::usage("cannot download a directory; specify a file path"),
+            out,
+            err,
+        );
+    }
+    let destination = match download_destination(options.value("to"), &device_path.0) {
+        Ok(path) => path,
+        Err(error) => return write_error("files download", format, error, out, err),
+    };
+    if destination.exists() && !options.enabled("overwrite") {
+        return write_error(
+            "files download",
+            format,
+            AppError::usage(format!(
+                "destination file already exists: {} (use --overwrite to replace)",
+                destination.display()
+            )),
+            out,
+            err,
+        );
+    }
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("files download", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::FileDownload) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("files download", format, error, out, err),
+    };
+    let parent = destination
+        .parent()
+        .expect("download destination has a parent");
+    let mut temporary = match tempfile::NamedTempFile::new_in(parent) {
+        Ok(file) => file,
+        Err(_) => {
+            return write_error(
+                "files download",
+                format,
+                AppError {
+                    exit_code: 1,
+                    code: "internal-error",
+                    message: "cannot create destination file".into(),
+                },
+                out,
+                err,
+            );
+        }
+    };
+    let transferred = match drivers::download_to(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        &device_path.0,
+        temporary.as_file_mut(),
+    ) {
+        Ok(transferred) => transferred,
+        Err(error) => return write_error("files download", format, driver_error(error), out, err),
+    };
+    if temporary.as_file_mut().sync_all().is_err() {
+        return write_error(
+            "files download",
+            format,
+            AppError {
+                exit_code: 1,
+                code: "internal-error",
+                message: "cannot finalize downloaded file".into(),
+            },
+            out,
+            err,
+        );
+    }
+    let commit = if options.enabled("overwrite") {
+        temporary.persist(&destination)
+    } else {
+        temporary.persist_noclobber(&destination)
+    };
+    if commit.is_err() {
+        return write_error(
+            "files download",
+            format,
+            AppError {
+                exit_code: 1,
+                code: "internal-error",
+                message: "cannot move downloaded file into place".into(),
+            },
+            out,
+            err,
+        );
+    }
+    let destination = destination.display().to_string();
+    write_success(
+        "files download",
+        format,
+        FileTransferData {
+            profile: printer.name,
+            driver: printer.driver_kind.name(),
+            source: device_path.1,
+            destination: destination.clone(),
+            bytes_transferred: transferred,
+            warnings: Vec::new(),
+            capabilities: file_capabilities(printer.driver_kind.capabilities()),
+        },
+        |out| writeln!(out, "Downloaded file to {destination}."),
+        out,
+    )
+}
+
+fn download_destination(destination: Option<&str>, device_path: &str) -> Result<PathBuf, AppError> {
+    let name = device_path
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| AppError::usage("cannot download a directory"))?;
+    let destination = destination
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(name));
+    if destination.is_dir() {
+        return Ok(destination.join(name));
+    }
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    match fs::metadata(parent) {
+        Ok(metadata) if metadata.is_dir() => Ok(destination),
+        _ => Err(AppError::usage(format!(
+            "destination directory does not exist: {}",
+            parent.display()
+        ))),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileTransferData {
+    profile: String,
+    driver: &'static str,
+    source: String,
+    destination: String,
+    bytes_transferred: u64,
+    warnings: Vec<String>,
+    capabilities: FileCapabilities,
+}
+
+fn job_action(
+    format: OutputFormat,
+    action: &str,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) = match parse_options(
+        args,
+        &["yes", "insecure", "skip-leveling"],
+        &["timeout", "protocol-trace", "plate"],
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return write_error(
+                &format!("jobs {action}"),
+                format,
+                AppError::usage(error),
+                out,
+                err,
+            );
+        }
+    };
+    let command = format!("jobs {action}");
+    let (name, device_path) = match (action, positionals.as_slice()) {
+        ("start", [name, path]) => match parse_gcodes_path(path) {
+            Ok((path, device_path)) => (name.as_str(), Some((path, device_path))),
+            Err(error) => return write_error(&command, format, error, out, err),
+        },
+        ("start", _) => {
+            return write_error(
+                &command,
+                format,
+                AppError::usage("jobs start requires a printer profile and device path"),
+                out,
+                err,
+            );
+        }
+        (_, [name]) => (name.as_str(), None),
+        _ => {
+            return write_error(
+                &command,
+                format,
+                AppError::usage(format!(
+                    "{command} requires exactly one printer profile name"
+                )),
+                out,
+                err,
+            );
+        }
+    };
+    if action == "start" && options.value("plate").is_some() {
+        return write_error(
+            &command,
+            format,
+            AppError {
+                exit_code: 5,
+                code: "capability-unsupported",
+                message: "Moonraker does not support --plate; a gcode file contains one print"
+                    .into(),
+            },
+            out,
+            err,
+        );
+    }
+    if action == "start" && options.enabled("skip-leveling") {
+        return write_error(
+            &command,
+            format,
+            AppError {
+                exit_code: 5,
+                code: "capability-unsupported",
+                message:
+                    "Moonraker does not support --skip-leveling; the start macro controls leveling"
+                        .into(),
+            },
+            out,
+            err,
+        );
+    }
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error(&command, format, error, out, err),
+    };
+    let operation = match action {
+        "start" => drivers::Operation::JobStart,
+        "pause" => drivers::Operation::JobPause,
+        "resume" => drivers::Operation::JobResume,
+        "cancel" => drivers::Operation::JobCancel,
+        _ => unreachable!("job action is matched by dispatch"),
+    };
+    let printer = match resolve_printer(name, connection, operation) {
+        Ok(printer) => printer,
+        Err(error) => return write_error(&command, format, error, out, err),
+    };
+    let allowed = match action {
+        "start" => &[polimero_core::moonraker::PrinterState::Idle][..],
+        "pause" => &[polimero_core::moonraker::PrinterState::Printing][..],
+        "resume" => &[polimero_core::moonraker::PrinterState::Paused][..],
+        "cancel" => &[
+            polimero_core::moonraker::PrinterState::Printing,
+            polimero_core::moonraker::PrinterState::Paused,
+        ][..],
+        _ => unreachable!("job action is matched by dispatch"),
+    };
+    if let Err(error) = require_state(&command, &printer, allowed) {
+        return write_error(&command, format, error, out, err);
+    }
+    if let Err(code) = require_confirmation(
+        &command,
+        options.enabled("yes"),
+        &format!(
+            "{} the active print on {}? Type 'yes' to continue: ",
+            action, printer.name
+        ),
+        format,
+        out,
+        err,
+    ) {
+        return code;
+    }
+    let result = match action {
+        "start" => drivers::job_start(
+            &printer.driver,
+            printer.access_code.as_deref(),
+            &device_path
+                .as_ref()
+                .expect("jobs start always has a device path")
+                .0,
+        ),
+        "pause" => drivers::job_pause(&printer.driver, printer.access_code.as_deref()),
+        "resume" => drivers::job_resume(&printer.driver, printer.access_code.as_deref()),
+        "cancel" => drivers::job_cancel(&printer.driver, printer.access_code.as_deref()),
+        _ => unreachable!("job action is matched by dispatch"),
+    };
+    match result {
+        Ok(result) => write_success(
+            &command,
+            format,
+            JobActionData {
+                profile: printer.name,
+                driver: printer.driver_kind.name(),
+                action: action.to_owned(),
+                state: result.state,
+                device_path: device_path.map(|(_, device_path)| device_path),
+                warnings: Vec::new(),
+                capabilities: printer.driver_kind.capabilities(),
+            },
+            |out| writeln!(out, "Job {action} command accepted."),
+            out,
+        ),
+        Err(error) => write_error(&command, format, driver_error(error), out, err),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JobActionData {
+    profile: String,
+    driver: &'static str,
+    action: String,
+    state: polimero_core::moonraker::PrinterState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device_path: Option<String>,
+    warnings: Vec<String>,
+    capabilities: drivers::Capabilities,
+}
+
+fn emergency_stop_command(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) =
+        match parse_options(args, &["insecure"], &["timeout", "protocol-trace"]) {
+            Ok(value) => value,
+            Err(error) => {
+                return write_error("emergency-stop", format, AppError::usage(error), out, err);
+            }
+        };
+    let name = match one_positional("emergency-stop", &positionals) {
+        Ok(name) => name,
+        Err(error) => return write_error("emergency-stop", format, error, out, err),
+    };
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("emergency-stop", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::EmergencyStop) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("emergency-stop", format, error, out, err),
+    };
+    match drivers::emergency_stop(&printer.driver, printer.access_code.as_deref()) {
+        Ok(()) => write_success(
+            "emergency-stop",
+            format,
+            EmergencyStopData {
+                profile: printer.name,
+                driver: printer.driver_kind.name(),
+                action: "emergency-stop",
+                recovery: "Run FIRMWARE_RESTART on the printer to clear the emergency stop.",
+                capabilities: printer.driver_kind.capabilities(),
+            },
+            |out| writeln!(out, "Emergency stop sent."),
+            out,
+        ),
+        Err(error) => write_error("emergency-stop", format, driver_error(error), out, err),
+    }
+}
+
+#[derive(Serialize)]
+struct EmergencyStopData {
+    profile: String,
+    driver: &'static str,
+    action: &'static str,
+    recovery: &'static str,
+    capabilities: drivers::Capabilities,
+}
+
+fn temperature_set(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) = match parse_options(
+        args,
+        &["yes", "insecure"],
+        &["nozzle", "bed", "chamber", "timeout", "protocol-trace"],
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return write_error("temperature set", format, AppError::usage(error), out, err);
+        }
+    };
+    let name = match one_positional("temperature set", &positionals) {
+        Ok(name) => name,
+        Err(error) => return write_error("temperature set", format, error, out, err),
+    };
+    let targets = match temperature_targets(&options) {
+        Ok(targets) => targets,
+        Err(error) => return write_error("temperature set", format, error, out, err),
+    };
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("temperature set", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::TemperatureSet) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("temperature set", format, error, out, err),
+    };
+    if let Err(error) = require_state(
+        "temperature set",
+        &printer,
+        &[polimero_core::moonraker::PrinterState::Idle],
+    ) {
+        return write_error("temperature set", format, error, out, err);
+    }
+    if let Err(code) = require_confirmation(
+        "temperature set",
+        options.enabled("yes"),
+        &format!(
+            "Set temperature targets on {}? Type 'yes' to continue: ",
+            printer.name
+        ),
+        format,
+        out,
+        err,
+    ) {
+        return code;
+    }
+    match drivers::temperature_set(&printer.driver, printer.access_code.as_deref(), targets) {
+        Ok(result) => write_success(
+            "temperature set",
+            format,
+            TemperatureSetData {
+                profile: printer.name,
+                driver: printer.driver_kind.name(),
+                targets: result.targets,
+                warnings: Vec::new(),
+                capabilities: printer.driver_kind.capabilities(),
+            },
+            |out| writeln!(out, "Temperature targets updated."),
+            out,
+        ),
+        Err(error) => write_error("temperature set", format, driver_error(error), out, err),
+    }
+}
+
+fn temperature_targets(
+    options: &ParsedOptions,
+) -> Result<polimero_core::moonraker::TemperatureTargets, AppError> {
+    let parse = |name: &str| {
+        options
+            .value(name)
+            .map(|value| {
+                value.parse::<f64>().map_err(|_| {
+                    AppError::usage(format!("--{name} must be a temperature in Celsius"))
+                })
+            })
+            .transpose()
+    };
+    let targets = polimero_core::moonraker::TemperatureTargets {
+        nozzle_celsius: parse("nozzle")?,
+        bed_celsius: parse("bed")?,
+        chamber_celsius: parse("chamber")?,
+    };
+    if targets.nozzle_celsius.is_none()
+        && targets.bed_celsius.is_none()
+        && targets.chamber_celsius.is_none()
+    {
+        return Err(AppError::usage(
+            "at least one of --nozzle, --bed, --chamber is required",
+        ));
+    }
+    Ok(targets)
+}
+
+#[derive(Serialize)]
+struct TemperatureSetData {
+    profile: String,
+    driver: &'static str,
+    targets: polimero_core::moonraker::TemperatureTargets,
+    warnings: Vec<String>,
+    capabilities: drivers::Capabilities,
+}
+
+fn motion_home(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) = match parse_options(
+        args,
+        &["yes", "insecure"],
+        &["axis", "timeout", "protocol-trace"],
+    ) {
+        Ok(value) => value,
+        Err(error) => return write_error("motion home", format, AppError::usage(error), out, err),
+    };
+    let name = match one_positional("motion home", &positionals) {
+        Ok(name) => name,
+        Err(error) => return write_error("motion home", format, error, out, err),
+    };
+    let axes = match home_axes(options.value("axis")) {
+        Ok(axes) => axes,
+        Err(error) => return write_error("motion home", format, error, out, err),
+    };
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("motion home", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::MotionHome) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("motion home", format, error, out, err),
+    };
+    if let Err(error) = require_state(
+        "motion home",
+        &printer,
+        &[polimero_core::moonraker::PrinterState::Idle],
+    ) {
+        return write_error("motion home", format, error, out, err);
+    }
+    if let Err(code) = require_confirmation(
+        "motion home",
+        options.enabled("yes"),
+        &format!("Home axes on {}? Type 'yes' to continue: ", printer.name),
+        format,
+        out,
+        err,
+    ) {
+        return code;
+    }
+    match drivers::motion_home(&printer.driver, printer.access_code.as_deref(), &axes) {
+        Ok(result) => write_success(
+            "motion home",
+            format,
+            MotionData {
+                profile: printer.name,
+                driver: printer.driver_kind.name(),
+                action: "home",
+                state: result.state,
+                warnings: Vec::new(),
+                capabilities: printer.driver_kind.capabilities(),
+            },
+            |out| writeln!(out, "Homing command accepted."),
+            out,
+        ),
+        Err(error) => write_error("motion home", format, driver_error(error), out, err),
+    }
+}
+
+fn home_axes(value: Option<&str>) -> Result<Vec<polimero_core::moonraker::Axis>, AppError> {
+    let value = value.unwrap_or("x,y,z");
+    let mut axes = Vec::new();
+    for axis in value
+        .split(',')
+        .map(str::trim)
+        .filter(|axis| !axis.is_empty())
+    {
+        let axis = match axis.to_ascii_lowercase().as_str() {
+            "x" => polimero_core::moonraker::Axis::X,
+            "y" => polimero_core::moonraker::Axis::Y,
+            "z" => polimero_core::moonraker::Axis::Z,
+            _ => {
+                return Err(AppError::usage(format!(
+                    "invalid axis {axis:?}: use x, y, or z"
+                )));
+            }
+        };
+        if !axes.contains(&axis) {
+            axes.push(axis);
+        }
+    }
+    if axes.is_empty() {
+        return Err(AppError::usage("at least one axis is required"));
+    }
+    Ok(axes)
+}
+
+fn motion_jog(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) = match parse_options(
+        args,
+        &["yes", "insecure"],
+        &["x", "y", "z", "feedrate", "timeout", "protocol-trace"],
+    ) {
+        Ok(value) => value,
+        Err(error) => return write_error("motion jog", format, AppError::usage(error), out, err),
+    };
+    let name = match one_positional("motion jog", &positionals) {
+        Ok(name) => name,
+        Err(error) => return write_error("motion jog", format, error, out, err),
+    };
+    let delta = match jog_delta(&options) {
+        Ok(delta) => delta,
+        Err(error) => return write_error("motion jog", format, error, out, err),
+    };
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("motion jog", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::MotionJog) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("motion jog", format, error, out, err),
+    };
+    if let Err(error) = require_state(
+        "motion jog",
+        &printer,
+        &[polimero_core::moonraker::PrinterState::Idle],
+    ) {
+        return write_error("motion jog", format, error, out, err);
+    }
+    if let Err(code) = require_confirmation(
+        "motion jog",
+        options.enabled("yes"),
+        &format!("Move axes on {}? Type 'yes' to continue: ", printer.name),
+        format,
+        out,
+        err,
+    ) {
+        return code;
+    }
+    match drivers::motion_jog(&printer.driver, printer.access_code.as_deref(), delta) {
+        Ok(result) => write_success(
+            "motion jog",
+            format,
+            MotionData {
+                profile: printer.name,
+                driver: printer.driver_kind.name(),
+                action: "jog",
+                state: result.state,
+                warnings: Vec::new(),
+                capabilities: printer.driver_kind.capabilities(),
+            },
+            |out| writeln!(out, "Jog command accepted."),
+            out,
+        ),
+        Err(error) => write_error("motion jog", format, driver_error(error), out, err),
+    }
+}
+
+fn jog_delta(options: &ParsedOptions) -> Result<polimero_core::moonraker::JogDelta, AppError> {
+    let parse = |name: &str| {
+        options
+            .value(name)
+            .map(|value| {
+                value
+                    .parse::<f64>()
+                    .map_err(|_| AppError::usage(format!("--{name} must be a distance in mm")))
+            })
+            .transpose()
+    };
+    let delta = polimero_core::moonraker::JogDelta {
+        x_millimeters: parse("x")?,
+        y_millimeters: parse("y")?,
+        z_millimeters: parse("z")?,
+        feedrate_mm_per_min: options
+            .value("feedrate")
+            .map(|value| {
+                value
+                    .parse()
+                    .map_err(|_| AppError::usage("--feedrate must be an integer"))
+            })
+            .transpose()?
+            .unwrap_or(1500),
+    };
+    if delta.x_millimeters.is_none()
+        && delta.y_millimeters.is_none()
+        && delta.z_millimeters.is_none()
+    {
+        return Err(AppError::usage("at least one of --x, --y, --z is required"));
+    }
+    Ok(delta)
+}
+
+#[derive(Serialize)]
+struct MotionData {
+    profile: String,
+    driver: &'static str,
+    action: &'static str,
+    state: polimero_core::moonraker::MotionState,
+    warnings: Vec<String>,
+    capabilities: drivers::Capabilities,
+}
+
+fn fan_set(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) =
+        match parse_options(args, &["yes", "insecure"], &["timeout", "protocol-trace"]) {
+            Ok(value) => value,
+            Err(error) => return write_error("fans set", format, AppError::usage(error), out, err),
+        };
+    let (name, fan, speed_percent) = match positionals.as_slice() {
+        [name, fan, speed] => match speed.parse::<u8>() {
+            Ok(speed) => (name.as_str(), fan.as_str(), speed),
+            Err(_) => {
+                return write_error(
+                    "fans set",
+                    format,
+                    AppError::usage("fan percent must be an integer from 0 to 100"),
+                    out,
+                    err,
+                );
+            }
+        },
+        _ => {
+            return write_error(
+                "fans set",
+                format,
+                AppError::usage("fans set requires a printer profile, fan name, and percent"),
+                out,
+                err,
+            );
+        }
+    };
+    if speed_percent > 100 {
+        return write_error(
+            "fans set",
+            format,
+            AppError::usage("fan percent must be an integer from 0 to 100"),
+            out,
+            err,
+        );
+    }
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("fans set", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::FanSet) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("fans set", format, error, out, err),
+    };
+    if let Err(error) = require_state(
+        "fans set",
+        &printer,
+        &[
+            polimero_core::moonraker::PrinterState::Idle,
+            polimero_core::moonraker::PrinterState::Printing,
+            polimero_core::moonraker::PrinterState::Paused,
+            polimero_core::moonraker::PrinterState::Error,
+        ],
+    ) {
+        return write_error("fans set", format, error, out, err);
+    }
+    if let Err(code) = require_confirmation(
+        "fans set",
+        options.enabled("yes"),
+        &format!(
+            "Set {fan} fan to {speed_percent}% on {}? Type 'yes' to continue: ",
+            printer.name
+        ),
+        format,
+        out,
+        err,
+    ) {
+        return code;
+    }
+    match drivers::fan_set(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        fan,
+        speed_percent,
+    ) {
+        Ok(result) => write_success(
+            "fans set",
+            format,
+            FanSetData {
+                profile: printer.name,
+                driver: printer.driver_kind.name(),
+                fan: result.fan,
+                speed_percent: result.speed_percent,
+                warnings: Vec::new(),
+                capabilities: printer.driver_kind.capabilities(),
+            },
+            |out| writeln!(out, "Fan speed updated."),
+            out,
+        ),
+        Err(error) => write_error("fans set", format, driver_error(error), out, err),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FanSetData {
+    profile: String,
+    driver: &'static str,
+    fan: String,
+    speed_percent: u8,
+    warnings: Vec<String>,
+    capabilities: drivers::Capabilities,
+}
+
+fn speed_set(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) =
+        match parse_options(args, &["yes", "insecure"], &["timeout", "protocol-trace"]) {
+            Ok(value) => value,
+            Err(error) => {
+                return write_error("speed set", format, AppError::usage(error), out, err);
+            }
+        };
+    let (name, speed_profile) = match positionals.as_slice() {
+        [name, speed_profile] => (name.as_str(), speed_profile.as_str()),
+        _ => {
+            return write_error(
+                "speed set",
+                format,
+                AppError::usage("speed set requires a printer profile and speed profile"),
+                out,
+                err,
+            );
+        }
+    };
+    if !["silent", "standard", "sport", "ludicrous"].contains(&speed_profile) {
+        return write_error(
+            "speed set",
+            format,
+            AppError::usage("speed profile must be silent, standard, sport, or ludicrous"),
+            out,
+            err,
+        );
+    }
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("speed set", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::SpeedSet) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("speed set", format, error, out, err),
+    };
+    if let Err(error) = require_state(
+        "speed set",
+        &printer,
+        &[
+            polimero_core::moonraker::PrinterState::Printing,
+            polimero_core::moonraker::PrinterState::Paused,
+        ],
+    ) {
+        return write_error("speed set", format, error, out, err);
+    }
+    if let Err(code) = require_confirmation(
+        "speed set",
+        options.enabled("yes"),
+        &format!(
+            "Set speed profile {speed_profile} on {}? Type 'yes' to continue: ",
+            printer.name
+        ),
+        format,
+        out,
+        err,
+    ) {
+        return code;
+    }
+    match drivers::speed_set(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        speed_profile,
+    ) {
+        Ok(result) => write_success(
+            "speed set",
+            format,
+            SpeedSetData {
+                profile: printer.name,
+                driver: printer.driver_kind.name(),
+                speed_profile: result.speed_profile,
+                warnings: Vec::new(),
+                capabilities: printer.driver_kind.capabilities(),
+            },
+            |out| writeln!(out, "Speed profile updated."),
+            out,
+        ),
+        Err(error) => write_error("speed set", format, driver_error(error), out, err),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SpeedSetData {
+    profile: String,
+    driver: &'static str,
+    speed_profile: String,
+    warnings: Vec<String>,
+    capabilities: drivers::Capabilities,
+}
+
 fn driver_error(error: DriverError) -> AppError {
     match error {
         DriverError::Unknown(_) | DriverError::InvalidProfile(_) | DriverError::InvalidTimeout => {
             AppError::usage(error.to_string())
         }
         DriverError::UnsupportedOperation(_, _) => AppError {
-            exit_code: 2,
-            code: "unsupported-operation",
+            exit_code: 5,
+            code: "capability-unsupported",
             message: error.to_string(),
         },
         DriverError::Moonraker(polimero_core::moonraker::Error::Authentication) => AppError {
@@ -299,10 +1830,33 @@ fn driver_error(error: DriverError) -> AppError {
             code: "authentication-failed",
             message: "printer authentication failed".into(),
         },
+        DriverError::Moonraker(polimero_core::moonraker::Error::Timeout) => AppError {
+            exit_code: 4,
+            code: "timeout",
+            message: "printer operation timed out".into(),
+        },
+        DriverError::Moonraker(polimero_core::moonraker::Error::Unsupported(_)) => AppError {
+            exit_code: 5,
+            code: "capability-unsupported",
+            message: error.to_string(),
+        },
+        DriverError::Moonraker(polimero_core::moonraker::Error::InvalidDevicePath)
+        | DriverError::Moonraker(polimero_core::moonraker::Error::InvalidTemperatureTarget)
+        | DriverError::Moonraker(polimero_core::moonraker::Error::InvalidJog)
+        | DriverError::Moonraker(polimero_core::moonraker::Error::InvalidSpeedProfile)
+        | DriverError::Moonraker(polimero_core::moonraker::Error::FileAlreadyExists)
+        | DriverError::Moonraker(polimero_core::moonraker::Error::DirectoryDestination) => {
+            AppError::usage(error.to_string())
+        }
+        DriverError::Moonraker(polimero_core::moonraker::Error::LocalIo(_)) => AppError {
+            exit_code: 1,
+            code: "internal-error",
+            message: "local file operation failed".into(),
+        },
         DriverError::Moonraker(_) => AppError {
             exit_code: 1,
             code: "printer-unavailable",
-            message: "printer status request failed".into(),
+            message: "printer request failed".into(),
         },
     }
 }
@@ -459,6 +2013,23 @@ impl<'a> Invocation<'a> {
                     }
                 };
                 index += 2;
+                continue;
+            }
+            if let Some(value) = args[index].strip_prefix("--output=") {
+                format = match value {
+                    "human" => OutputFormat::Human,
+                    "json" => OutputFormat::Json,
+                    _ => {
+                        return Err(AppError::usage(format!(
+                            "invalid output format {value:?}: must be human or json"
+                        )));
+                    }
+                };
+                index += 1;
+                continue;
+            }
+            if matches!(args[index].as_str(), "--verbose" | "-v") {
+                index += 1;
                 continue;
             }
             command.push(&args[index]);
@@ -681,14 +2252,14 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_driver_status_has_a_stable_error_code() {
+    fn unsupported_driver_status_uses_the_capability_error_contract() {
         let error = driver_error(DriverError::UnsupportedOperation(
             drivers::Driver::BambuLan,
             drivers::Operation::Status,
         ));
 
-        assert_eq!(error.exit_code, 2);
-        assert_eq!(error.code, "unsupported-operation");
+        assert_eq!(error.exit_code, 5);
+        assert_eq!(error.code, "capability-unsupported");
     }
 
     #[test]
@@ -731,6 +2302,56 @@ mod tests {
             String::from_utf8(out)
                 .unwrap()
                 .contains("non-interactive mode requires --yes")
+        );
+    }
+
+    #[test]
+    fn global_verbose_flag_does_not_change_command_dispatch() {
+        let args = ["--verbose".into(), "version".into(), "--output=json".into()];
+        let mut out = Vec::new();
+
+        assert_eq!(run(&args, &mut out, &mut Vec::new()), 0);
+        assert!(
+            String::from_utf8(out)
+                .unwrap()
+                .contains(r#""command": "version""#)
+        );
+    }
+
+    #[test]
+    fn unavailable_camera_commands_are_explicit_json_errors() {
+        let args = [
+            "camera".into(),
+            "snapshot".into(),
+            "garage".into(),
+            "--output".into(),
+            "json".into(),
+        ];
+        let mut out = Vec::new();
+
+        assert_eq!(run(&args, &mut out, &mut Vec::new()), 5);
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains(r#""code": "capability-unsupported""#));
+        assert!(output.contains("required driver transport is not implemented"));
+    }
+
+    #[test]
+    fn unsafe_file_roots_are_rejected_before_loading_a_profile() {
+        let args = [
+            "files".into(),
+            "download".into(),
+            "garage".into(),
+            "config:/moonraker.conf".into(),
+            "--output".into(),
+            "json".into(),
+        ];
+        let mut out = Vec::new();
+
+        assert_eq!(run(&args, &mut out, &mut Vec::new()), 2);
+        assert!(
+            String::from_utf8(out)
+                .unwrap()
+                .contains("unsupported file root")
         );
     }
 }

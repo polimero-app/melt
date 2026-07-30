@@ -1,0 +1,12 @@
+{
+  "ok": false,
+  "data": null,
+  "error": {
+    "code": "capability-unsupported",
+    "message": "camera snapshot is unavailable because its required driver transport is not implemented",
+    "details": {}
+  },
+  "meta": {
+    "command": "camera snapshot"
+  }
+}

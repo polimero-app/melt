@@ -2,7 +2,9 @@
 
 use std::{
     collections::BTreeMap,
+    fs::{self, File},
     io::{Read, Write},
+    path::Path,
     thread,
     time::{Duration, Instant},
 };
@@ -114,6 +116,12 @@ pub enum Error {
     InvalidJog,
     #[error("unknown speed profile")]
     InvalidSpeedProfile,
+    #[error("destination file already exists")]
+    FileAlreadyExists,
+    #[error("upload destination is a directory")]
+    DirectoryDestination,
+    #[error("Moonraker returned an unexpected upload status")]
+    UnexpectedUploadStatus,
     #[error("local file operation failed")]
     LocalIo(#[source] std::io::Error),
 }
@@ -262,6 +270,75 @@ impl Client {
             access_code,
         )?;
         std::io::copy(&mut response, destination).map_err(Error::LocalIo)
+    }
+
+    pub fn upload_file(
+        &self,
+        access_code: Option<&str>,
+        source: &Path,
+        device_path: &str,
+        overwrite: bool,
+    ) -> Result<u64, Error> {
+        let metadata = fs::metadata(source).map_err(Error::LocalIo)?;
+        if !metadata.is_file() {
+            return Err(Error::LocalIo(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "upload source is not a regular file",
+            )));
+        }
+        let device_path = normalize_device_path(device_path)?;
+        let (parent, filename) = device_path
+            .rsplit_once('/')
+            .filter(|(_, filename)| !filename.is_empty())
+            .ok_or(Error::InvalidDevicePath)?;
+        let parent = if parent.is_empty() { "/" } else { parent };
+        match self.remote_file_type(access_code, parent, filename)? {
+            Some(FileEntryType::Directory) => return Err(Error::DirectoryDestination),
+            Some(FileEntryType::File) if !overwrite => return Err(Error::FileAlreadyExists),
+            _ => {}
+        }
+
+        let form = reqwest::blocking::multipart::Form::new()
+            .text("root", "gcodes")
+            .text("path", parent.trim_start_matches('/').to_owned())
+            .part(
+                "file",
+                reqwest::blocking::multipart::Part::reader(
+                    File::open(source).map_err(Error::LocalIo)?,
+                )
+                .file_name(filename.to_owned()),
+            );
+        let url = self.endpoint("server/files/upload");
+        let mut request = self
+            .transfer_http
+            .post(url)
+            .header(ACCEPT, "application/json")
+            .multipart(form);
+        if let Some(access_code) = access_code.filter(|value| !value.is_empty()) {
+            let value = HeaderValue::from_str(access_code).map_err(|_| Error::InvalidAccessCode)?;
+            request = request.header("X-Api-Key", value);
+        }
+        let response = request.send().map_err(Error::Transport)?;
+        match response.status() {
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => return Err(Error::Authentication),
+            status if !status.is_success() => return Err(Error::HttpStatus(status)),
+            StatusCode::CREATED => {}
+            _ => return Err(Error::UnexpectedUploadStatus),
+        }
+        let body = read_response(response)?;
+        let envelope: Envelope =
+            serde_json::from_slice(&body).map_err(|_| Error::InvalidResponse)?;
+        if envelope.error.as_ref().is_some_and(|error| {
+            error.message.to_ascii_lowercase().contains("unauthorized")
+                || error.message.to_ascii_lowercase().contains("forbidden")
+        }) {
+            return Err(Error::Authentication);
+        }
+        if envelope.error.is_some() {
+            return Err(Error::Api);
+        }
+        envelope.result.ok_or(Error::MissingResult)?;
+        Ok(metadata.len())
     }
 
     pub fn job_start(
@@ -440,6 +517,23 @@ impl Client {
     ) -> Result<(), Error> {
         self.json_request::<Value>(Method::POST, endpoint, query, access_code)
             .map(|_| ())
+    }
+
+    fn remote_file_type(
+        &self,
+        access_code: Option<&str>,
+        parent: &str,
+        filename: &str,
+    ) -> Result<Option<FileEntryType>, Error> {
+        match self.file_list(access_code, parent, false) {
+            Ok(listing) => Ok(listing
+                .entries
+                .into_iter()
+                .find(|entry| entry.name == filename)
+                .map(|entry| entry.entry_type)),
+            Err(Error::HttpStatus(StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND)) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     fn gcode(&self, access_code: Option<&str>, script: &str) -> Result<(), Error> {
@@ -1329,6 +1423,62 @@ mod tests {
         assert!(second.contains("script=G90"));
     }
 
+    #[test]
+    fn upload_checks_the_destination_before_streaming_a_regular_file() {
+        let (host, requests, server) = scripted_server(vec![
+            r#"{"result":{"dirs":[],"files":[]}}"#,
+            r#"__201__{"result":{"item":{"path":"gcodes/copy.toml"}}}"#,
+        ]);
+        let client = Client::new(Profile::new(&host, false, DEFAULT_TIMEOUT).unwrap()).unwrap();
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let expected_size = std::fs::metadata(&source).unwrap().len();
+
+        let copied = client
+            .upload_file(None, &source, "/copy.toml", false)
+            .unwrap();
+
+        server.join().unwrap();
+        let preflight = requests.recv().unwrap();
+        let upload = requests.recv().unwrap();
+        assert_eq!(copied, expected_size);
+        assert!(preflight.starts_with("GET /server/files/directory?path=gcodes "));
+        assert!(upload.starts_with("POST /server/files/upload "));
+        assert!(
+            upload
+                .to_ascii_lowercase()
+                .contains("content-type: multipart/form-data; boundary=")
+        );
+    }
+
+    #[test]
+    fn temperature_set_checks_the_heater_then_reads_back_the_target() {
+        let (host, requests, server) = scripted_server(vec![
+            r#"{"result":{"status":{"extruder":{"temperature":25,"target":0}}}}"#,
+            r#"{"result":"ok"}"#,
+            r#"{"result":{"status":{"extruder":{"temperature":25,"target":215}}}}"#,
+        ]);
+        let client = Client::new(Profile::new(&host, false, DEFAULT_TIMEOUT).unwrap()).unwrap();
+
+        let result = client
+            .temperature_set(
+                None,
+                TemperatureTargets {
+                    nozzle_celsius: Some(215.0),
+                    ..TemperatureTargets::default()
+                },
+            )
+            .unwrap();
+
+        server.join().unwrap();
+        let available = requests.recv().unwrap();
+        let command = requests.recv().unwrap();
+        let acknowledged = requests.recv().unwrap();
+        assert_eq!(result.targets.nozzle_celsius, Some(215.0));
+        assert!(available.starts_with("GET /printer/objects/query?extruder= "));
+        assert!(command.contains("script=M104+S215"));
+        assert!(acknowledged.starts_with("GET /printer/objects/query?extruder= "));
+    }
+
     fn server(
         body: &'static str,
     ) -> (
@@ -1370,6 +1520,9 @@ mod tests {
         let (sender, requests) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
             for body in bodies {
+                let (status, body) = body
+                    .strip_prefix("__201__")
+                    .map_or(("200 OK", body), |body| ("201 Created", body));
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut request = Vec::new();
                 let mut chunk = [0; 1024];
@@ -1377,10 +1530,27 @@ mod tests {
                     let read = stream.read(&mut chunk).unwrap();
                     request.extend_from_slice(&chunk[..read]);
                 }
+                let header_end = request
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .expect("request headers")
+                    + 4;
+                let content_length = String::from_utf8_lossy(&request[..header_end])
+                    .lines()
+                    .find_map(|line| {
+                        line.split_once(':')
+                            .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+                    })
+                    .unwrap_or_default();
+                while request.len() - header_end < content_length {
+                    let read = stream.read(&mut chunk).unwrap();
+                    request.extend_from_slice(&chunk[..read]);
+                }
                 sender.send(String::from_utf8(request).unwrap()).unwrap();
                 write!(
                     stream,
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 )
                 .unwrap();

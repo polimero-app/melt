@@ -99,6 +99,7 @@ impl Driver {
                 status: true,
                 file_list: true,
                 file_download: true,
+                file_upload: true,
                 job_start: true,
                 job_pause: true,
                 job_resume: true,
@@ -246,6 +247,18 @@ pub fn download_to(
 ) -> Result<u64, DriverError> {
     moonraker_client(profile, Operation::FileDownload)?
         .download_to(access_code, device_path, destination)
+        .map_err(DriverError::Moonraker)
+}
+
+pub fn upload_file(
+    profile: &Profile,
+    access_code: Option<&str>,
+    source: &std::path::Path,
+    device_path: &str,
+    overwrite: bool,
+) -> Result<u64, DriverError> {
+    moonraker_client(profile, Operation::FileUpload)?
+        .upload_file(access_code, source, device_path, overwrite)
         .map_err(DriverError::Moonraker)
 }
 
@@ -462,6 +475,7 @@ mod tests {
         assert!(capabilities.status);
         assert!(capabilities.file_list);
         assert!(capabilities.file_download);
+        assert!(capabilities.file_upload);
         assert!(capabilities.job_start);
         assert!(capabilities.temperature_write);
         assert!(capabilities.motion_control);
