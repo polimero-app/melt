@@ -24,6 +24,8 @@ const printers = ref<Printer[]>([]);
 const drivers = ref<Driver[]>([]);
 const error = ref<string>();
 const aboutOpen = ref(false);
+const removalOpen = ref(false);
+const removing = ref<string>();
 const status = computed(() => (error.value ? "offline" : info.value ? "ready" : "connecting"));
 
 onMounted(async () => {
@@ -37,6 +39,17 @@ onMounted(async () => {
     error.value = reason instanceof Error ? reason.message : String(reason);
   }
 });
+
+async function removePrinter() {
+  if (!removing.value) return;
+  try {
+    await invoke("remove_configured_printer", { name: removing.value });
+    printers.value = printers.value.filter((printer) => printer.name !== removing.value);
+    removalOpen.value = false;
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : String(reason);
+  }
+}
 </script>
 
 <template>
@@ -69,6 +82,7 @@ onMounted(async () => {
           <article v-for="printer in printers" :key="printer.name">
             <p>{{ printer.name }}</p>
             <span>{{ printer.driver }} · {{ printer.host }}</span>
+            <button type="button" @click="removing = printer.name; removalOpen = true">Remove</button>
           </article>
         </div>
         <p v-else class="empty">No printers configured yet. Add one with the headless CLI while the setup flow is migrated.</p>
@@ -94,6 +108,20 @@ onMounted(async () => {
             </li>
           </ul>
           <button type="button" @click="aboutOpen = false">Close</button>
+        </DialogPanel>
+      </div>
+    </Dialog>
+
+    <Dialog :open="removalOpen" @close="removalOpen = false" class="dialog">
+      <div class="backdrop" aria-hidden="true" />
+      <div class="dialog-frame">
+        <DialogPanel class="dialog-panel">
+          <DialogTitle>Remove {{ removing }}?</DialogTitle>
+          <p>This removes the local profile and its stored credentials. The printer itself is not changed.</p>
+          <div class="actions">
+            <button type="button" @click="removalOpen = false">Cancel</button>
+            <button class="danger" type="button" @click="removePrinter">Remove profile</button>
+          </div>
         </DialogPanel>
       </div>
     </Dialog>

@@ -84,9 +84,10 @@ dl div { min-height: 6rem; padding: 1rem; background: #1b211f; }
 dt { color: #d8a732; font: .7rem "Courier New", monospace; letter-spacing: .12em; text-transform: uppercase; }
 dd { margin: .7rem 0 0; }
 .printers { display: grid; gap: 1px; margin-top: 1px; background: #46524d; }
-.printers article { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: .9rem 1rem; background: #1b211f; }
+.printers article { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; gap: 1rem; padding: .9rem 1rem; background: #1b211f; }
 .printers p { margin: 0; font-size: 1.1rem; }
 .printers span, .empty { color: #b9bcb2; font: .72rem "Courier New", monospace; letter-spacing: .05em; }
+.printers button { border: 0; background: transparent; color: #e47967; cursor: pointer; font: .72rem "Courier New", monospace; text-transform: uppercase; }
 .empty { margin-top: 1px; padding: 1rem; background: #1b211f; line-height: 1.6; }
 .error { color: #e47967; text-transform: none; letter-spacing: normal; }
 
@@ -96,6 +97,8 @@ dd { margin: .7rem 0 0; }
 .dialog-panel { width: min(30rem, 100%); border: 1px solid #d8a732; background: #1b211f; padding: 2rem; box-shadow: 12px 12px 0 #0d0f0e; }
 .dialog-panel p { color: #c6c9bc; line-height: 1.5; }
 .dialog-panel button { border: 1px solid #d8a732; background: transparent; padding: .5rem 1rem; cursor: pointer; }
+.actions { display: flex; justify-content: flex-end; gap: .75rem; }
+.dialog-panel .danger { border-color: #e47967; color: #e47967; }
 .drivers { display: grid; gap: .65rem; margin: 1.5rem 0; padding: 0; list-style: none; }
 .drivers li { display: grid; gap: .2rem; border-left: 1px solid #d8a732; padding-left: .75rem; }
 .drivers strong { font: .78rem "Courier New", monospace; color: #e4e2d7; }

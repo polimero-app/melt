@@ -1,11 +1,16 @@
 //! CLI rendering for shared Polimero operations.
 
-use std::{collections::BTreeMap, io::Write};
+use std::{
+    collections::BTreeMap,
+    io::{IsTerminal, Write},
+};
 
 use polimero_core::{
     AppError, app_info,
     config::{Config, ConfigError, NamedProfile},
     drivers,
+    keychain::SystemKeychain,
+    profiles::{self, ProfileError},
 };
 use serde::Serialize;
 
@@ -73,6 +78,16 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         [printer, drivers] if printer.as_str() == "printer" && drivers.as_str() == "drivers" => {
             write_drivers(invocation.format, out)
         }
+        [printer, remove, name] if printer.as_str() == "printer" && remove.as_str() == "remove" => {
+            remove_profile(invocation.format, name, false, out, err)
+        }
+        [printer, remove, name, yes]
+            if printer.as_str() == "printer"
+                && remove.as_str() == "remove"
+                && yes.as_str() == "--yes" =>
+        {
+            remove_profile(invocation.format, name, true, out, err)
+        }
         _ => write_error(
             &command,
             invocation.format,
@@ -80,6 +95,103 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             out,
             err,
         ),
+    }
+}
+
+fn remove_profile(
+    format: OutputFormat,
+    name: &str,
+    yes: bool,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    if !yes && !std::io::stdin().is_terminal() {
+        return write_error(
+            "printer remove",
+            format,
+            AppError::usage("non-interactive mode requires --yes"),
+            out,
+            err,
+        );
+    }
+    if !yes {
+        let _ = write!(
+            err,
+            "Remove printer profile {name} and its stored secrets? Type 'yes' to continue: "
+        );
+        let mut answer = String::new();
+        if std::io::stdin().read_line(&mut answer).is_err() {
+            return write_error(
+                "printer remove",
+                format,
+                AppError {
+                    exit_code: 1,
+                    code: "internal-error",
+                    message: "cannot read confirmation".into(),
+                },
+                out,
+                err,
+            );
+        }
+        if answer.trim_end() != "yes" {
+            return write_error(
+                "printer remove",
+                format,
+                AppError::usage("confirmation declined; profile not removed"),
+                out,
+                err,
+            );
+        }
+    }
+
+    let dir = match polimero_core::config::config_dir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            return write_error(
+                "printer remove",
+                format,
+                AppError {
+                    exit_code: 1,
+                    code: "internal-error",
+                    message: error.to_string(),
+                },
+                out,
+                err,
+            );
+        }
+    };
+    match profiles::remove(dir, &SystemKeychain, name) {
+        Ok(result) => write_success(
+            "printer remove",
+            format,
+            RemoveData { removed: result },
+            |out| writeln!(out, "Printer profile removed: {name}"),
+            out,
+        ),
+        Err(error) => write_error("printer remove", format, profile_error(error), out, err),
+    }
+}
+
+#[derive(Serialize)]
+struct RemoveData {
+    removed: profiles::RemoveResult,
+}
+
+fn profile_error(error: ProfileError) -> AppError {
+    match error {
+        ProfileError::MissingName | ProfileError::InvalidName | ProfileError::NotFound(_) => {
+            AppError::usage(error.to_string())
+        }
+        ProfileError::Secret(_) => AppError {
+            exit_code: 3,
+            code: "secret-store-failed",
+            message: "keychain operation failed".into(),
+        },
+        ProfileError::Config(_) | ProfileError::RollbackFailed => AppError {
+            exit_code: 1,
+            code: "internal-error",
+            message: error.to_string(),
+        },
     }
 }
 
@@ -346,5 +458,24 @@ mod tests {
         assert!(output.contains(r#""command": "printer drivers""#));
         assert!(output.contains(r#""drivers": ["#));
         assert!(output.contains("bambu-lan"));
+    }
+
+    #[test]
+    fn profile_removal_requires_yes_when_not_interactive() {
+        let args = [
+            "printer".into(),
+            "remove".into(),
+            "garage".into(),
+            "--output".into(),
+            "json".into(),
+        ];
+        let mut out = Vec::new();
+
+        assert_eq!(run(&args, &mut out, &mut Vec::new()), 2);
+        assert!(
+            String::from_utf8(out)
+                .unwrap()
+                .contains("non-interactive mode requires --yes")
+        );
     }
 }
