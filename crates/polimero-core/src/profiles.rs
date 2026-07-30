@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{net::IpAddr, path::Path};
 
 use serde::Serialize;
 use thiserror::Error;
@@ -14,6 +14,8 @@ pub enum ProfileError {
     MissingName,
     #[error("invalid profile name")]
     InvalidName,
+    #[error("invalid printer host")]
+    InvalidHost,
     #[error("printer profile {0:?} not found")]
     NotFound(String),
     #[error("keychain operation failed")]
@@ -94,6 +96,7 @@ fn normalize_name(name: &str) -> Result<String, ProfileError> {
     if name.is_empty() {
         return Err(ProfileError::MissingName);
     }
+
     if name.len() > 64
         || !name.bytes().enumerate().all(|(index, byte)| {
             byte.is_ascii_alphanumeric() || (index > 0 && matches!(byte, b'.' | b'_' | b'-'))
@@ -102,6 +105,44 @@ fn normalize_name(name: &str) -> Result<String, ProfileError> {
         return Err(ProfileError::InvalidName);
     }
     Ok(name)
+}
+
+pub fn validate_host(host: &str) -> Result<(), ProfileError> {
+    if host.is_empty() || host.trim() != host || host.chars().any(char::is_whitespace) {
+        return Err(ProfileError::InvalidHost);
+    }
+    if host.parse::<IpAddr>().is_ok() {
+        return Ok(());
+    }
+    let authority = match host {
+        host if host.starts_with("http://") => &host["http://".len()..],
+        host if host.starts_with("https://") => &host["https://".len()..],
+        host if host.contains("://") => return Err(ProfileError::InvalidHost),
+        host => host,
+    };
+    if authority.contains('@') {
+        return Err(ProfileError::InvalidHost);
+    }
+    let authority = authority.split('/').next().unwrap_or_default();
+    let hostname = authority
+        .strip_prefix('[')
+        .and_then(|value| value.split(']').next())
+        .unwrap_or_else(|| authority.split(':').next().unwrap_or_default());
+    if hostname.is_empty()
+        || hostname.len() > 253
+        || hostname.split('.').any(|label| {
+            label.is_empty()
+                || label.len() > 63
+                || label.starts_with('-')
+                || label.ends_with('-')
+                || !label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+    {
+        return Err(ProfileError::InvalidHost);
+    }
+    Ok(())
 }
 
 struct StoredSecret {
@@ -229,5 +270,24 @@ mod tests {
             store.get(SERVICE, "bambu-lan:garage:access-code"),
             Err(SecretError::NotFound)
         );
+    }
+
+    #[test]
+    fn accepts_supported_host_shapes_and_rejects_credentials() {
+        for host in [
+            "192.0.2.10",
+            "printer.local",
+            "https://printer.local:7125/api",
+        ] {
+            assert!(validate_host(host).is_ok(), "{host}");
+        }
+        for host in [
+            "",
+            " printer.local",
+            "http://user:secret@printer.local",
+            "bad_host",
+        ] {
+            assert!(validate_host(host).is_err(), "{host}");
+        }
     }
 }
