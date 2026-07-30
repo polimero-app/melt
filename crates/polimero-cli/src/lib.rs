@@ -201,7 +201,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             unsupported_command("printer tls refresh", invocation.format, out, err)
         }
         _ => write_error(
-            &command,
+            "polimero",
             invocation.format,
             AppError::usage(format!("unknown command {command:?} for \"polimero\"")),
             out,

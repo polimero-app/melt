@@ -1,4 +1,4 @@
-.PHONY: build test lint ci cargo-build cargo-test cargo-lint ui-install ui-build ui-test
+.PHONY: build test lint ci contract release-gate cargo-build cargo-test cargo-lint ui-install ui-build ui-test
 
 build: cargo-build ui-build
 
@@ -6,7 +6,14 @@ test: cargo-test ui-test
 
 lint: cargo-lint
 
-ci: ui-install lint test build
+ci: ui-install lint test build contract
+
+contract:
+	cargo test -p polimero-cli --test contract_fixtures --locked
+
+release-gate: contract cargo-build
+	POLIMERO_CONFIG_DIR="$(CURDIR)/fixtures/cli-contract/config/empty" \
+		./target/debug/polimero version --output json
 
 cargo-build:
 	cargo build --workspace --locked

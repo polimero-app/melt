@@ -19,7 +19,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-      - run: make cargo-lint cargo-test cargo-build
+      - run: make cargo-lint cargo-test cargo-build contract
 
   ui:
     runs-on: ubuntu-latest
@@ -31,3 +31,14 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - run: make ui-install ui-test ui-build
+
+  native-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-13, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build -p polimero-desktop --locked

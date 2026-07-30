@@ -1,0 +1,70 @@
+name: Release packaging
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            os: ubuntu-latest
+            bundles: deb,rpm
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            bundles: deb,rpm
+          - name: macos-amd64
+            os: macos-13
+            bundles: dmg
+          - name: macos-arm64
+            os: macos-14
+            bundles: dmg
+          - name: windows-amd64
+            os: windows-latest
+            bundles: msi
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install Linux bundle dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev rpm
+      - run: npm --prefix ui ci
+      - name: Verify headless release gate
+        if: runner.os == 'Linux'
+        run: make release-gate
+      - run: npm --prefix ui run build
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked
+      - name: Build native installer
+        run: cargo tauri build --bundles ${{ matrix.bundles }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}-packages
+          path: target/release/bundle/
+          if-no-files-found: error
+
+  release-evidence:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require frozen release evidence
+        run: |
+          test -f "docs/releases/${GITHUB_REF_NAME}/release-packaging-checklist.md"
+          test -f "docs/releases/${GITHUB_REF_NAME}/updater-verification-report.md"

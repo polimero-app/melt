@@ -2382,6 +2382,7 @@ dependencies = [
  "polimero-cli",
  "polimero-core",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
 ]

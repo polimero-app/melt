@@ -21,9 +21,9 @@ empty for every JSON fixture.
 
 ```sh
 POLIMERO_CONFIG_DIR="$PWD/fixtures/cli-contract/config/empty" \
-  ./target/debug/polimero-desktop version --output json
+  ./target/debug/polimero version --output json
 ```
 
-The Rust test only validates inventory/fixture wiring and envelope shape. It
-does not execute product commands, so incomplete migration work does not turn
-the foundation into a permanently failing test.
+The Rust contract test executes every fixture against `polimero-cli`, compares
+the exit code, stderr, and JSON envelope, and removes only the documented
+host-dependent JSON pointers before comparison.
