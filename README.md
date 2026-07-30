@@ -27,6 +27,7 @@ Camera media, discovery, TLS fingerprint refresh, Bambu LAN transport, and
 generic Klipper light control remain explicit capability errors. They are not
 represented as working controls until their driver prerequisites exist.
 
-The desktop polls configured profiles locally every five seconds while open and
-offers a redacted diagnostics report. Release tags run native installer builds
-for the required OS/architecture matrix and require frozen release evidence.
+The desktop polls configured profiles locally every five seconds while open;
+failed profiles back off independently to one minute. It offers a redacted
+diagnostics report. Release tags run native installer builds for the required
+OS/architecture matrix and require frozen release evidence.

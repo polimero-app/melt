@@ -1,10 +1,12 @@
+use std::{collections::BTreeMap, sync::Mutex, time::Instant};
+
 use polimero_core::{
     AppInfo,
     config::{Config, ConfigError, Profile, config_dir},
     diagnostics,
     drivers::{self, Capabilities, DriverError, Operation},
     keychain::{SERVICE, SecretError, SecretStore, SystemKeychain, account},
-    moonraker, profiles,
+    monitor, moonraker, profiles,
 };
 use serde::{Deserialize, Serialize};
 
@@ -33,13 +35,24 @@ struct PrinterCapabilities {
     capabilities: Capabilities,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MonitorEntry {
     name: String,
     driver: String,
     status: Option<moonraker::Status>,
     error: Option<String>,
+}
+
+struct CachedMonitor {
+    next_poll: Instant,
+    backoff: monitor::Backoff,
+    entry: MonitorEntry,
+}
+
+#[derive(Default)]
+struct MonitorState {
+    entries: Mutex<BTreeMap<String, CachedMonitor>>,
 }
 
 #[derive(Deserialize)]
@@ -112,13 +125,42 @@ fn printer_capabilities(name: String) -> Result<PrinterCapabilities, String> {
 }
 
 #[tauri::command]
-fn monitored_printers() -> Result<Vec<MonitorEntry>, String> {
+fn monitored_printers(state: tauri::State<'_, MonitorState>) -> Result<Vec<MonitorEntry>, String> {
     let config = Config::load().map_err(|_| "Unable to read printer configuration.".to_string())?;
-    Ok(config
-        .sorted_profiles()
+    let profiles = config.sorted_profiles();
+    let mut entries = state
+        .entries
+        .lock()
+        .map_err(|_| "Monitoring is unavailable.".to_string())?;
+    entries.retain(|name, _| profiles.iter().any(|profile| profile.name == *name));
+    drop(entries);
+
+    Ok(profiles
         .into_iter()
-        .map(|named| monitor_printer(named.name, named.profile))
+        .map(|named| cached_monitor_entry(&state, named.name, named.profile))
         .collect())
+}
+
+fn cached_monitor_entry(state: &MonitorState, name: String, profile: Profile) -> MonitorEntry {
+    let now = Instant::now();
+    if let Ok(entries) = state.entries.lock() {
+        if let Some(cached) = entries.get(&name).filter(|cached| cached.next_poll > now) {
+            return cached.entry.clone();
+        }
+    }
+
+    let entry = monitor_printer(name.clone(), profile);
+    if let Ok(mut entries) = state.entries.lock() {
+        let cached = entries.entry(name).or_insert_with(|| CachedMonitor {
+            next_poll: now,
+            backoff: monitor::Backoff::new(monitor::DEFAULT_INTERVAL),
+            entry: entry.clone(),
+        });
+        let delay = cached.backoff.after_result(entry.error.is_none());
+        cached.next_poll = now + delay;
+        cached.entry = entry.clone();
+    }
+    entry
 }
 
 fn monitor_printer(name: String, profile: Profile) -> MonitorEntry {
@@ -443,6 +485,7 @@ fn main() {
     }
 
     tauri::Builder::default()
+        .manage(MonitorState::default())
         .invoke_handler(tauri::generate_handler![
             app_info,
             configured_printers,
