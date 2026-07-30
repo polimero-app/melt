@@ -22,6 +22,16 @@ enum OutputFormat {
     Json,
 }
 
+fn validate_known_file_root(value: &str) -> Result<(), AppError> {
+    let (root, _) = value
+        .split_once(':')
+        .ok_or_else(|| AppError::usage("device path must include a file root"))?;
+    if !["gcodes", "sdcard"].contains(&root) {
+        return Err(AppError::usage(format!("unsupported file root {root:?}")));
+    }
+    Ok(())
+}
+
 struct Invocation<'a> {
     command: Vec<&'a String>,
     format: OutputFormat,
@@ -54,6 +64,7 @@ struct ResolvedPrinter {
     driver: drivers::Profile,
     driver_kind: drivers::Driver,
     access_code: Option<String>,
+    tls_fingerprint: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -344,7 +355,11 @@ fn printer_status(
         Err(error) => return write_error("status", format, error, out, err),
     };
 
-    match drivers::status(&printer.driver, printer.access_code.as_deref()) {
+    match drivers::status(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+    ) {
         Ok(status) => {
             let state = status.state;
             write_success(
@@ -481,6 +496,13 @@ fn resolve_printer(
     let access_code =
         match SystemKeychain.get(SERVICE, &account(&profile.driver, &name, "access-code")) {
             Ok(access_code) => Some(access_code),
+            Err(SecretError::NotFound) if driver_kind.requires_access_code() => {
+                return Err(AppError {
+                    exit_code: 3,
+                    code: "secret-not-found",
+                    message: "required printer access code is unavailable".into(),
+                });
+            }
             Err(SecretError::NotFound) => None,
             // Moonraker supports a keyless trusted-LAN configuration, so an
             // unavailable keychain cannot block it when no credential is needed.
@@ -493,12 +515,34 @@ fn resolve_printer(
                 });
             }
         };
+    let tls_fingerprint = if driver_kind == drivers::Driver::BambuLan && !profile.insecure {
+        match SystemKeychain.get(SERVICE, &account(&profile.driver, &name, "tls-fingerprint")) {
+            Ok(fingerprint) => Some(fingerprint),
+            Err(SecretError::NotFound) => {
+                return Err(AppError {
+                    exit_code: 3,
+                    code: "secret-not-found",
+                    message: "required printer TLS fingerprint is unavailable".into(),
+                });
+            }
+            Err(SecretError::Unavailable(_)) => {
+                return Err(AppError {
+                    exit_code: 3,
+                    code: "secret-store-failed",
+                    message: "keychain operation failed".into(),
+                });
+            }
+        }
+    } else {
+        None
+    };
 
     Ok(ResolvedPrinter {
         name,
         driver,
         driver_kind,
         access_code,
+        tls_fingerprint,
     })
 }
 
@@ -556,8 +600,12 @@ fn require_state(
     printer: &ResolvedPrinter,
     allowed: &[polimero_core::moonraker::PrinterState],
 ) -> Result<(), AppError> {
-    let status =
-        drivers::status(&printer.driver, printer.access_code.as_deref()).map_err(driver_error)?;
+    let status = drivers::status(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+    )
+    .map_err(driver_error)?;
     if allowed.contains(&status.state) {
         return Ok(());
     }
@@ -614,7 +662,11 @@ fn files_roots(
         Ok(printer) => printer,
         Err(error) => return write_error("files roots", format, error, out, err),
     };
-    match drivers::file_roots(&printer.driver) {
+    match drivers::file_roots(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+    ) {
         Ok(roots) => {
             let human_roots = roots.clone();
             write_success(
@@ -671,6 +723,11 @@ fn files_list(
             );
         }
     };
+    for path in requested_paths {
+        if let Err(error) = validate_known_file_root(path) {
+            return write_error("files list", format, error, out, err);
+        }
+    }
     let connection = match connection_options(&options) {
         Ok(connection) => connection,
         Err(error) => return write_error("files list", format, error, out, err),
@@ -679,12 +736,13 @@ fn files_list(
         Ok(printer) => printer,
         Err(error) => return write_error("files list", format, error, out, err),
     };
+    let root = file_root(printer.driver_kind);
     let paths = if requested_paths.is_empty() {
-        vec![("/".to_owned(), "gcodes:/".to_owned())]
+        vec![("/".to_owned(), format!("{root}:/"))]
     } else {
         let mut paths = Vec::new();
         for path in requested_paths {
-            match parse_gcodes_path(path) {
+            match parse_device_path(path, root) {
                 Ok(path) => paths.push(path),
                 Err(error) => return write_error("files list", format, error, out, err),
             }
@@ -696,6 +754,7 @@ fn files_list(
         match drivers::file_list(
             &printer.driver,
             printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
             &path,
             options.enabled("recursive"),
         ) {
@@ -721,15 +780,24 @@ fn files_list(
     )
 }
 
-fn parse_gcodes_path(value: &str) -> Result<(String, String), AppError> {
-    let (root, path) = value
-        .split_once(':')
-        .ok_or_else(|| AppError::usage("device path must use the gcodes:/path form"))?;
-    if root != "gcodes" {
+fn file_root(driver: drivers::Driver) -> &'static str {
+    match driver {
+        drivers::Driver::BambuLan => "sdcard",
+        drivers::Driver::Moonraker => "gcodes",
+    }
+}
+
+fn parse_device_path(value: &str, expected_root: &str) -> Result<(String, String), AppError> {
+    let (root, path) = value.split_once(':').ok_or_else(|| {
+        AppError::usage(format!(
+            "device path must use the {expected_root}:/path form"
+        ))
+    })?;
+    if root != expected_root {
         return Err(AppError::usage(format!("unsupported file root {root:?}")));
     }
     let path = if path.is_empty() { "/" } else { path };
-    Ok((path.to_owned(), format!("gcodes:{path}")))
+    Ok((path.to_owned(), format!("{expected_root}:{path}")))
 }
 
 #[derive(Serialize)]
@@ -808,6 +876,11 @@ fn files_upload(
             );
         }
     };
+    if let Some(destination) = requested_destination {
+        if let Err(error) = validate_known_file_root(destination) {
+            return write_error("files upload", format, error, out, err);
+        }
+    }
     let source_metadata = match fs::metadata(&source) {
         Ok(metadata) if metadata.is_file() => metadata,
         Ok(_) => {
@@ -841,11 +914,6 @@ fn files_upload(
             );
         }
     };
-    let (destination, destination_display) =
-        match upload_destination(requested_destination, source_name) {
-            Ok(destination) => destination,
-            Err(error) => return write_error("files upload", format, error, out, err),
-        };
     let connection = match connection_options(&options) {
         Ok(connection) => connection,
         Err(error) => return write_error("files upload", format, error, out, err),
@@ -854,9 +922,18 @@ fn files_upload(
         Ok(printer) => printer,
         Err(error) => return write_error("files upload", format, error, out, err),
     };
+    let (destination, destination_display) = match upload_destination(
+        requested_destination,
+        source_name,
+        file_root(printer.driver_kind),
+    ) {
+        Ok(destination) => destination,
+        Err(error) => return write_error("files upload", format, error, out, err),
+    };
     match drivers::upload_file(
         &printer.driver,
         printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
         &source,
         &destination,
         options.enabled("overwrite"),
@@ -883,9 +960,11 @@ fn files_upload(
 fn upload_destination(
     requested: Option<&str>,
     source_name: &str,
+    root: &str,
 ) -> Result<(String, String), AppError> {
-    let raw = requested.unwrap_or("gcodes:/");
-    let (mut path, _) = parse_gcodes_path(raw)?;
+    let default = format!("{root}:/");
+    let raw = requested.unwrap_or(&default);
+    let (mut path, _) = parse_device_path(raw, root)?;
     if raw.ends_with('/') || path == "/" {
         path = format!("{}/{}", path.trim_end_matches('/'), source_name);
         if !path.starts_with('/') {
@@ -897,7 +976,7 @@ fn upload_destination(
             "upload destination must include a file name",
         ));
     }
-    Ok((path.clone(), format!("gcodes:{path}")))
+    Ok((path.clone(), format!("{root}:{path}")))
 }
 
 fn files_download(
@@ -916,11 +995,8 @@ fn files_download(
             return write_error("files download", format, AppError::usage(error), out, err);
         }
     };
-    let (name, device_path) = match positionals.as_slice() {
-        [name, path] => match parse_gcodes_path(path) {
-            Ok(value) => (name.as_str(), value),
-            Err(error) => return write_error("files download", format, error, out, err),
-        },
+    let (name, requested_path) = match positionals.as_slice() {
+        [name, path] => (name.as_str(), path.as_str()),
         _ => {
             return write_error(
                 "files download",
@@ -930,6 +1006,21 @@ fn files_download(
                 err,
             );
         }
+    };
+    if let Err(error) = validate_known_file_root(requested_path) {
+        return write_error("files download", format, error, out, err);
+    }
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("files download", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::FileDownload) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("files download", format, error, out, err),
+    };
+    let device_path = match parse_device_path(requested_path, file_root(printer.driver_kind)) {
+        Ok(path) => path,
+        Err(error) => return write_error("files download", format, error, out, err),
     };
     if device_path.0 == "/" {
         return write_error(
@@ -956,14 +1047,6 @@ fn files_download(
             err,
         );
     }
-    let connection = match connection_options(&options) {
-        Ok(connection) => connection,
-        Err(error) => return write_error("files download", format, error, out, err),
-    };
-    let printer = match resolve_printer(name, connection, drivers::Operation::FileDownload) {
-        Ok(printer) => printer,
-        Err(error) => return write_error("files download", format, error, out, err),
-    };
     let parent = destination
         .parent()
         .expect("download destination has a parent");
@@ -986,6 +1069,7 @@ fn files_download(
     let transferred = match drivers::download_to(
         &printer.driver,
         printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
         &device_path.0,
         temporary.as_file_mut(),
     ) {
@@ -1099,11 +1183,8 @@ fn job_action(
         }
     };
     let command = format!("jobs {action}");
-    let (name, device_path) = match (action, positionals.as_slice()) {
-        ("start", [name, path]) => match parse_gcodes_path(path) {
-            Ok((path, device_path)) => (name.as_str(), Some((path, device_path))),
-            Err(error) => return write_error(&command, format, error, out, err),
-        },
+    let (name, requested_path) = match (action, positionals.as_slice()) {
+        ("start", [name, path]) => (name.as_str(), Some(path.as_str())),
         ("start", _) => {
             return write_error(
                 &command,
@@ -1126,34 +1207,10 @@ fn job_action(
             );
         }
     };
-    if action == "start" && options.value("plate").is_some() {
-        return write_error(
-            &command,
-            format,
-            AppError {
-                exit_code: 5,
-                code: "capability-unsupported",
-                message: "Moonraker does not support --plate; a gcode file contains one print"
-                    .into(),
-            },
-            out,
-            err,
-        );
-    }
-    if action == "start" && options.enabled("skip-leveling") {
-        return write_error(
-            &command,
-            format,
-            AppError {
-                exit_code: 5,
-                code: "capability-unsupported",
-                message:
-                    "Moonraker does not support --skip-leveling; the start macro controls leveling"
-                        .into(),
-            },
-            out,
-            err,
-        );
+    if let Some(path) = requested_path {
+        if let Err(error) = validate_known_file_root(path) {
+            return write_error(&command, format, error, out, err);
+        }
     }
     let connection = match connection_options(&options) {
         Ok(connection) => connection,
@@ -1169,6 +1226,50 @@ fn job_action(
     let printer = match resolve_printer(name, connection, operation) {
         Ok(printer) => printer,
         Err(error) => return write_error(&command, format, error, out, err),
+    };
+    if action == "start"
+        && printer.driver_kind == drivers::Driver::Moonraker
+        && (options.value("plate").is_some() || options.enabled("skip-leveling"))
+    {
+        return write_error(
+            &command,
+            format,
+            AppError {
+                exit_code: 5,
+                code: "capability-unsupported",
+                message: "Moonraker does not support Bambu job start options".into(),
+            },
+            out,
+            err,
+        );
+    }
+    let device_path = match requested_path {
+        Some(path) => match parse_device_path(path, file_root(printer.driver_kind)) {
+            Ok(path) => Some(path),
+            Err(error) => return write_error(&command, format, error, out, err),
+        },
+        None => None,
+    };
+    let start_options = match options.value("plate") {
+        Some(value) => match value.parse() {
+            Ok(plate) => polimero_core::bambu::JobStartOptions {
+                plate: Some(plate),
+                skip_leveling: options.enabled("skip-leveling"),
+            },
+            Err(_) => {
+                return write_error(
+                    &command,
+                    format,
+                    AppError::usage("--plate must be a non-negative integer"),
+                    out,
+                    err,
+                );
+            }
+        },
+        None => polimero_core::bambu::JobStartOptions {
+            plate: None,
+            skip_leveling: options.enabled("skip-leveling"),
+        },
     };
     let allowed = match action {
         "start" => &[polimero_core::moonraker::PrinterState::Idle][..],
@@ -1200,14 +1301,28 @@ fn job_action(
         "start" => drivers::job_start(
             &printer.driver,
             printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
             &device_path
                 .as_ref()
                 .expect("jobs start always has a device path")
                 .0,
+            start_options,
         ),
-        "pause" => drivers::job_pause(&printer.driver, printer.access_code.as_deref()),
-        "resume" => drivers::job_resume(&printer.driver, printer.access_code.as_deref()),
-        "cancel" => drivers::job_cancel(&printer.driver, printer.access_code.as_deref()),
+        "pause" => drivers::job_pause(
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+        ),
+        "resume" => drivers::job_resume(
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+        ),
+        "cancel" => drivers::job_cancel(
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+        ),
         _ => unreachable!("job action is matched by dispatch"),
     };
     match result {
@@ -1268,7 +1383,17 @@ fn emergency_stop_command(
         Ok(printer) => printer,
         Err(error) => return write_error("emergency-stop", format, error, out, err),
     };
-    match drivers::emergency_stop(&printer.driver, printer.access_code.as_deref()) {
+    let recovery = match printer.driver_kind {
+        drivers::Driver::BambuLan => "Power-cycle the printer to clear the emergency stop.",
+        drivers::Driver::Moonraker => {
+            "Run FIRMWARE_RESTART on the printer to clear the emergency stop."
+        }
+    };
+    match drivers::emergency_stop(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+    ) {
         Ok(()) => write_success(
             "emergency-stop",
             format,
@@ -1276,7 +1401,7 @@ fn emergency_stop_command(
                 profile: printer.name,
                 driver: printer.driver_kind.name(),
                 action: "emergency-stop",
-                recovery: "Run FIRMWARE_RESTART on the printer to clear the emergency stop.",
+                recovery,
                 capabilities: printer.driver_kind.capabilities(),
             },
             |out| writeln!(out, "Emergency stop sent."),
@@ -1347,7 +1472,12 @@ fn temperature_set(
     ) {
         return code;
     }
-    match drivers::temperature_set(&printer.driver, printer.access_code.as_deref(), targets) {
+    match drivers::temperature_set(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+        targets,
+    ) {
         Ok(result) => write_success(
             "temperature set",
             format,
@@ -1450,7 +1580,12 @@ fn motion_home(
     ) {
         return code;
     }
-    match drivers::motion_home(&printer.driver, printer.access_code.as_deref(), &axes) {
+    match drivers::motion_home(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+        &axes,
+    ) {
         Ok(result) => write_success(
             "motion home",
             format,
@@ -1544,7 +1679,12 @@ fn motion_jog(
     ) {
         return code;
     }
-    match drivers::motion_jog(&printer.driver, printer.access_code.as_deref(), delta) {
+    match drivers::motion_jog(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+        delta,
+    ) {
         Ok(result) => write_success(
             "motion jog",
             format,
@@ -1686,6 +1826,7 @@ fn fan_set(
     match drivers::fan_set(
         &printer.driver,
         printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
         fan,
         speed_percent,
     ) {
@@ -1786,6 +1927,7 @@ fn speed_set(
     match drivers::speed_set(
         &printer.driver,
         printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
         speed_profile,
     ) {
         Ok(result) => write_success(
@@ -1866,6 +2008,57 @@ fn driver_error(error: DriverError) -> AppError {
             exit_code: 1,
             code: "internal-error",
             message: "local file operation failed".into(),
+        },
+        DriverError::Bambu(
+            polimero_core::bambu::TransportError::Authentication
+            | polimero_core::bambu::TransportError::UnsignedCommand
+            | polimero_core::bambu::TransportError::Pin(_),
+        ) => AppError {
+            exit_code: 3,
+            code: "authentication-failed",
+            message: "printer authentication failed".into(),
+        },
+        DriverError::Bambu(polimero_core::bambu::TransportError::Timeout) => AppError {
+            exit_code: 4,
+            code: "timeout",
+            message: "printer operation timed out".into(),
+        },
+        DriverError::Bambu(
+            polimero_core::bambu::TransportError::Connection
+            | polimero_core::bambu::TransportError::Tls
+            | polimero_core::bambu::TransportError::MissingCertificate
+            | polimero_core::bambu::TransportError::FileTransfer,
+        ) => AppError {
+            exit_code: 4,
+            code: "connection-failed",
+            message: "printer connection failed".into(),
+        },
+        DriverError::Bambu(
+            polimero_core::bambu::TransportError::Unsupported(_)
+            | polimero_core::bambu::TransportError::InvalidSpeedProfile,
+        ) => AppError {
+            exit_code: 5,
+            code: "capability-unsupported",
+            message: error.to_string(),
+        },
+        DriverError::Bambu(
+            polimero_core::bambu::TransportError::MissingAccessCode
+            | polimero_core::bambu::TransportError::InvalidAccessCode
+            | polimero_core::bambu::TransportError::InvalidDevicePath
+            | polimero_core::bambu::TransportError::FileAlreadyExists
+            | polimero_core::bambu::TransportError::DirectoryDestination
+            | polimero_core::bambu::TransportError::InvalidTemperatureTarget
+            | polimero_core::bambu::TransportError::InvalidMotion,
+        ) => AppError::usage(error.to_string()),
+        DriverError::Bambu(polimero_core::bambu::TransportError::LocalIo) => AppError {
+            exit_code: 1,
+            code: "internal-error",
+            message: "local file operation failed".into(),
+        },
+        DriverError::Bambu(_) => AppError {
+            exit_code: 1,
+            code: "printer-unavailable",
+            message: "printer request failed".into(),
         },
         DriverError::Moonraker(_) => AppError {
             exit_code: 1,
@@ -1970,6 +2163,7 @@ fn profile_error(error: ProfileError) -> AppError {
         | ProfileError::InvalidName
         | ProfileError::InvalidHost
         | ProfileError::InvalidAccessCode
+        | ProfileError::MissingAccessCode
         | ProfileError::NotFound(_) => AppError::usage(error.to_string()),
         ProfileError::Driver(error) => driver_error(error),
         ProfileError::Secret(_) => AppError {

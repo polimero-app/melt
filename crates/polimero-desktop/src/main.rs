@@ -217,7 +217,22 @@ fn monitor_printer(name: String, profile: Profile) -> MonitorEntry {
             };
         }
     };
-    match drivers::status(&driver_profile, access_code.as_deref()) {
+    let tls_fingerprint = match tls_fingerprint(&profile.driver, &name, kind, profile.insecure) {
+        Ok(fingerprint) => fingerprint,
+        Err(error) => {
+            return MonitorEntry {
+                name,
+                driver,
+                status: None,
+                error: Some(error),
+            };
+        }
+    };
+    match drivers::status(
+        &driver_profile,
+        access_code.as_deref(),
+        tls_fingerprint.as_deref(),
+    ) {
         Ok(status) => MonitorEntry {
             name,
             driver,
@@ -246,14 +261,11 @@ fn create_error(error: profiles::ProfileError) -> String {
         profiles::ProfileError::MissingName
         | profiles::ProfileError::InvalidName
         | profiles::ProfileError::InvalidHost
-        | profiles::ProfileError::InvalidAccessCode => error.to_string(),
+        | profiles::ProfileError::InvalidAccessCode
+        | profiles::ProfileError::MissingAccessCode => error.to_string(),
         profiles::ProfileError::Config(ConfigError::ProfileAlreadyExists) => {
             "A printer profile with this name already exists.".into()
         }
-        profiles::ProfileError::Driver(DriverError::UnsupportedOperation(
-            _,
-            drivers::Operation::Verify,
-        )) => "This driver cannot verify printer profiles yet.".into(),
         profiles::ProfileError::Driver(error) => operation_error(error, "profile verification"),
         profiles::ProfileError::Secret(_) | profiles::ProfileError::RollbackFailed => {
             "Keychain operation failed.".into()
@@ -266,15 +278,25 @@ fn create_error(error: profiles::ProfileError) -> String {
 #[tauri::command]
 fn printer_status(name: String) -> Result<polimero_core::moonraker::Status, String> {
     let printer = desktop_printer(&name, Operation::Status)?;
-    drivers::status(&printer.driver, printer.access_code.as_deref())
-        .map_err(|error| operation_error(error, "status"))
+    drivers::status(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+    )
+    .map_err(|error| operation_error(error, "status"))
 }
 
 #[tauri::command]
 fn printer_files(name: String) -> Result<moonraker::FileList, String> {
     let printer = desktop_printer(&name, Operation::FileList)?;
-    drivers::file_list(&printer.driver, printer.access_code.as_deref(), "/", false)
-        .map_err(|error| operation_error(error, "file listing"))
+    drivers::file_list(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+        "/",
+        false,
+    )
+    .map_err(|error| operation_error(error, "file listing"))
 }
 
 #[tauri::command]
@@ -308,11 +330,29 @@ fn printer_job_action(request: JobActionRequest) -> Result<moonraker::JobResult,
                 .as_deref()
                 .filter(|path| !path.is_empty())
                 .ok_or_else(|| "Choose a printer file before starting a job.".to_string())?;
-            drivers::job_start(&printer.driver, printer.access_code.as_deref(), device_path)
+            drivers::job_start(
+                &printer.driver,
+                printer.access_code.as_deref(),
+                printer.tls_fingerprint.as_deref(),
+                device_path,
+                polimero_core::bambu::JobStartOptions::default(),
+            )
         }
-        "pause" => drivers::job_pause(&printer.driver, printer.access_code.as_deref()),
-        "resume" => drivers::job_resume(&printer.driver, printer.access_code.as_deref()),
-        "cancel" => drivers::job_cancel(&printer.driver, printer.access_code.as_deref()),
+        "pause" => drivers::job_pause(
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+        ),
+        "resume" => drivers::job_resume(
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+        ),
+        "cancel" => drivers::job_cancel(
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+        ),
         _ => unreachable!("action is validated above"),
     }
     .map_err(|error| operation_error(error, &request.action))
@@ -336,8 +376,13 @@ fn printer_temperature_set(
         &[moonraker::PrinterState::Idle],
         "set temperature",
     )?;
-    drivers::temperature_set(&printer.driver, printer.access_code.as_deref(), targets)
-        .map_err(|error| operation_error(error, "set temperature"))
+    drivers::temperature_set(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+        targets,
+    )
+    .map_err(|error| operation_error(error, "set temperature"))
 }
 
 #[tauri::command]
@@ -359,6 +404,7 @@ fn printer_fan_set(request: FanRequest) -> Result<moonraker::FanResult, String> 
     drivers::fan_set(
         &printer.driver,
         printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
         &request.fan,
         request.speed_percent,
     )
@@ -375,6 +421,7 @@ fn printer_motion_home(request: MotionHomeRequest) -> Result<moonraker::MotionRe
     drivers::motion_home(
         &printer.driver,
         printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
         &[moonraker::Axis::X, moonraker::Axis::Y, moonraker::Axis::Z],
     )
     .map_err(|error| operation_error(error, "home axes"))
@@ -383,8 +430,12 @@ fn printer_motion_home(request: MotionHomeRequest) -> Result<moonraker::MotionRe
 #[tauri::command]
 fn printer_emergency_stop(name: String) -> Result<(), String> {
     let printer = desktop_printer(&name, Operation::EmergencyStop)?;
-    drivers::emergency_stop(&printer.driver, printer.access_code.as_deref())
-        .map_err(|error| operation_error(error, "emergency stop"))
+    drivers::emergency_stop(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+    )
+    .map_err(|error| operation_error(error, "emergency stop"))
 }
 
 #[tauri::command]
@@ -508,14 +559,7 @@ fn desktop_printer(name: &str, operation: Operation) -> Result<DesktopPrinter, S
         ));
     }
     let access_code = access_code(&profile.driver, &name, driver_kind)?;
-    let tls_fingerprint = if driver_kind == drivers::Driver::BambuLan && !profile.insecure {
-        SystemKeychain
-            .get(SERVICE, &account(&profile.driver, &name, "tls-fingerprint"))
-            .map(Some)
-            .map_err(|_| "Camera TLS credentials are unavailable.".to_string())?
-    } else {
-        None
-    };
+    let tls_fingerprint = tls_fingerprint(&profile.driver, &name, driver_kind, profile.insecure)?;
     Ok(DesktopPrinter {
         driver,
         access_code,
@@ -530,10 +574,28 @@ fn access_code(
 ) -> Result<Option<String>, String> {
     match SystemKeychain.get(SERVICE, &account(driver, name, "access-code")) {
         Ok(access_code) => Ok(Some(access_code)),
+        Err(SecretError::NotFound) if driver_kind.requires_access_code() => {
+            Err("Printer authentication is unavailable.".into())
+        }
         Err(SecretError::NotFound) => Ok(None),
         Err(SecretError::Unavailable(_)) if driver_kind == drivers::Driver::Moonraker => Ok(None),
         Err(SecretError::Unavailable(_)) => Err("Keychain operation failed.".into()),
     }
+}
+
+fn tls_fingerprint(
+    driver: &str,
+    name: &str,
+    driver_kind: drivers::Driver,
+    insecure: bool,
+) -> Result<Option<String>, String> {
+    if driver_kind != drivers::Driver::BambuLan || insecure {
+        return Ok(None);
+    }
+    SystemKeychain
+        .get(SERVICE, &account(driver, name, "tls-fingerprint"))
+        .map(Some)
+        .map_err(|_| "Printer TLS credentials are unavailable.".into())
 }
 
 fn ensure_state(
@@ -541,8 +603,12 @@ fn ensure_state(
     allowed: &[moonraker::PrinterState],
     action: &str,
 ) -> Result<(), String> {
-    let status = drivers::status(&printer.driver, printer.access_code.as_deref())
-        .map_err(|error| operation_error(error, action))?;
+    let status = drivers::status(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+    )
+    .map_err(|error| operation_error(error, action))?;
     if allowed.contains(&status.state) {
         return Ok(());
     }
@@ -588,6 +654,18 @@ fn operation_error(error: DriverError, operation: &str) -> String {
             format!("This driver does not support {operation}.")
         }
         DriverError::Moonraker(_) => format!("Printer {operation} failed."),
+        DriverError::Bambu(
+            polimero_core::bambu::TransportError::Authentication
+            | polimero_core::bambu::TransportError::UnsignedCommand
+            | polimero_core::bambu::TransportError::Pin(_),
+        ) => "Printer authentication failed.".into(),
+        DriverError::Bambu(polimero_core::bambu::TransportError::Timeout) => {
+            format!("Printer {operation} timed out.")
+        }
+        DriverError::Bambu(polimero_core::bambu::TransportError::Unsupported(_)) => {
+            format!("This driver does not support {operation}.")
+        }
+        DriverError::Bambu(_) => format!("Printer {operation} failed."),
         DriverError::Camera(polimero_core::bambu::CameraError::MissingAccessCode) => {
             "Camera authentication is unavailable.".into()
         }

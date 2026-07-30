@@ -26,9 +26,10 @@ actions and keeps emergency stop immediate.
 Bambu LAN camera media uses its authenticated TLS MJPEG endpoint: the desktop
 can proxy a real live stream or capture a real snapshot only when that
 capability is available. The Linux packages declare the FFmpeg runtime used by
-the baseline media policy. Discovery, TLS fingerprint refresh, Bambu LAN
-control transport, and generic Klipper light control remain explicit capability
-errors.
+the baseline media policy. Bambu LAN also supports pinned-TLS MQTT status and
+controls plus authenticated FTPS SD-card file operations. Discovery, TLS
+fingerprint refresh, and generic Klipper light control remain explicit
+capability errors.
 
 The desktop polls configured profiles locally every five seconds while open;
 failed profiles back off independently to one minute. It offers a redacted
