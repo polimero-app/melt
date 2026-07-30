@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { Dialog, DialogPanel, DialogTitle } from "@headlessui/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { preferredLocale, translate, type Locale } from "./i18n";
@@ -26,12 +26,75 @@ type NewPrinter = Printer & {
   insecure: boolean;
 };
 
+type Capabilities = {
+  status: boolean;
+  cameraStream: boolean;
+  cameraSnapshot: boolean;
+  fileList: boolean;
+  fileDownload: boolean;
+  fileUpload: boolean;
+  jobPause: boolean;
+  jobResume: boolean;
+  jobCancel: boolean;
+  emergencyStop: boolean;
+};
+
+type Temperature = {
+  currentCelsius: number;
+  targetCelsius?: number;
+};
+
+type PrinterStatus = {
+  state: "idle" | "printing" | "paused" | "error" | "unknown";
+  temperatures?: { nozzle?: Temperature; bed?: Temperature };
+  job?: { name: string };
+  progress?: { percent: number; currentLayer?: number; totalLayers?: number };
+  errors: { code: string; message: string }[];
+  warnings: { code: string; message: string }[];
+  fans: Record<string, number>;
+};
+
+type MonitorEntry = {
+  name: string;
+  driver: string;
+  status?: PrinterStatus;
+  error?: string;
+};
+
+type FileEntry = {
+  name: string;
+  type: "file" | "directory";
+  sizeBytes?: number;
+  modifiedAt?: string;
+};
+
+type FileList = {
+  entries: FileEntry[];
+};
+
+type Diagnostics = {
+  version: string;
+  platform: string;
+  configuredProfiles: number;
+  drivers: Record<string, number>;
+  identifiersRedacted: boolean;
+  monitorWorkers: number;
+  monitorIntervalSeconds: number;
+  protocolTracesIncluded: boolean;
+};
+
 const info = ref<AppInfo>();
 const printers = ref<Printer[]>([]);
 const drivers = ref<Driver[]>([]);
+const monitoring = ref<MonitorEntry[]>([]);
+const capabilities = ref<Capabilities>();
+const files = ref<FileEntry[]>([]);
 const loading = ref(true);
+const refreshing = ref(false);
+const filesLoading = ref(false);
 const loadError = ref<string>();
 const profileError = ref<string>();
+const workspaceError = ref<string>();
 const aboutOpen = ref(false);
 const additionOpen = ref(false);
 const adding = ref(false);
@@ -40,7 +103,16 @@ const removalOpen = ref(false);
 const selectedPrinter = ref<Printer>();
 const removing = ref(false);
 const removalError = ref<string>();
+const actionOpen = ref(false);
+const pendingAction = ref<"pause" | "resume" | "cancel">();
+const actionSending = ref(false);
+const actionError = ref<string>();
+const diagnosticsOpen = ref(false);
+const diagnostics = ref<Diagnostics>();
+const diagnosticsError = ref<string>();
 const locale = ref<Locale>(preferredLocale());
+let monitorTimer: number | undefined;
+
 const status = computed(() => (loadError.value ? "offline" : info.value ? "ready" : "connecting"));
 const statusKeys = {
   connecting: "status.connecting",
@@ -49,6 +121,9 @@ const statusKeys = {
 } as const;
 const statusLabel = computed(() => t(statusKeys[status.value]));
 const printerCount = computed(() => printers.value.length);
+const selectedMonitor = computed(() => monitoring.value.find((entry) => entry.name === selectedPrinter.value?.name));
+const selectedStatus = computed(() => selectedMonitor.value?.status);
+const selectedError = computed(() => selectedMonitor.value?.error ?? workspaceError.value);
 const draft = ref({
   name: "",
   driver: "",
@@ -81,8 +156,18 @@ async function load() {
   if (appInfo.status === "fulfilled") info.value = appInfo.value;
   else loadError.value = message(appInfo.reason);
 
-  if (profiles.status === "fulfilled") printers.value = profiles.value;
-  else profileError.value = message(profiles.reason);
+  if (profiles.status === "fulfilled") {
+    printers.value = profiles.value;
+    const retained = profiles.value.find((printer) => printer.name === selectedPrinter.value?.name);
+    const printer = retained ?? profiles.value[0];
+    if (printer) await selectPrinter(printer, false);
+    else {
+      selectedPrinter.value = undefined;
+      capabilities.value = undefined;
+      monitoring.value = [];
+      files.value = [];
+    }
+  } else profileError.value = message(profiles.reason);
 
   if (availableDrivers.status === "fulfilled") drivers.value = availableDrivers.value;
   else loadError.value ??= message(availableDrivers.reason);
@@ -90,7 +175,45 @@ async function load() {
   loading.value = false;
 }
 
-onMounted(load);
+async function refreshMonitoring() {
+  if (refreshing.value || !printers.value.length) return;
+  refreshing.value = true;
+  workspaceError.value = undefined;
+  try {
+    monitoring.value = await invoke<MonitorEntry[]>("monitored_printers");
+  } catch (reason) {
+    workspaceError.value = message(reason);
+  } finally {
+    refreshing.value = false;
+  }
+}
+
+async function selectPrinter(printer: Printer, refresh = true) {
+  selectedPrinter.value = printer;
+  capabilities.value = undefined;
+  files.value = [];
+  workspaceError.value = undefined;
+  try {
+    const result = await invoke<{ capabilities: Capabilities }>("printer_capabilities", { name: printer.name });
+    capabilities.value = result.capabilities;
+  } catch (reason) {
+    workspaceError.value = message(reason);
+  }
+  if (refresh) await refreshMonitoring();
+}
+
+async function loadFiles() {
+  if (!selectedPrinter.value || filesLoading.value) return;
+  filesLoading.value = true;
+  workspaceError.value = undefined;
+  try {
+    files.value = (await invoke<FileList>("printer_files", { name: selectedPrinter.value.name })).entries;
+  } catch (reason) {
+    workspaceError.value = message(reason);
+  } finally {
+    filesLoading.value = false;
+  }
+}
 
 function openRemoval(printer: Printer) {
   selectedPrinter.value = printer;
@@ -127,9 +250,11 @@ async function addPrinter() {
 
   try {
     const profile = await invoke<NewPrinter>("create_configured_printer", { request: draft.value });
-    printers.value.push({ name: profile.name, driver: profile.driver, host: profile.host });
+    const printer = { name: profile.name, driver: profile.driver, host: profile.host };
+    printers.value.push(printer);
     additionOpen.value = false;
     draft.value.accessCode = "";
+    await selectPrinter(printer);
   } catch (reason) {
     additionError.value = message(reason);
   } finally {
@@ -141,17 +266,85 @@ async function removePrinter() {
   if (!selectedPrinter.value || removing.value) return;
   removing.value = true;
   removalError.value = undefined;
+  const removed = selectedPrinter.value.name;
 
   try {
-    await invoke("remove_configured_printer", { name: selectedPrinter.value.name });
-    printers.value = printers.value.filter((printer) => printer.name !== selectedPrinter.value?.name);
+    await invoke("remove_configured_printer", { name: removed });
+    printers.value = printers.value.filter((printer) => printer.name !== removed);
+    monitoring.value = monitoring.value.filter((printer) => printer.name !== removed);
     removalOpen.value = false;
+    const next = printers.value[0];
+    if (next) await selectPrinter(next, false);
+    else {
+      selectedPrinter.value = undefined;
+      capabilities.value = undefined;
+      files.value = [];
+    }
   } catch (reason) {
     removalError.value = message(reason);
   } finally {
     removing.value = false;
   }
 }
+
+function openJobAction(action: "pause" | "resume" | "cancel") {
+  actionError.value = undefined;
+  pendingAction.value = action;
+  actionOpen.value = true;
+}
+
+async function sendJobAction() {
+  if (!selectedPrinter.value || !pendingAction.value || actionSending.value) return;
+  actionSending.value = true;
+  actionError.value = undefined;
+  try {
+    await invoke("printer_job_action", {
+      request: { name: selectedPrinter.value.name, action: pendingAction.value, confirmed: true }
+    });
+    actionOpen.value = false;
+    await refreshMonitoring();
+  } catch (reason) {
+    actionError.value = message(reason);
+  } finally {
+    actionSending.value = false;
+  }
+}
+
+async function emergencyStop() {
+  if (!selectedPrinter.value) return;
+  workspaceError.value = undefined;
+  try {
+    await invoke("printer_emergency_stop", { name: selectedPrinter.value.name });
+    await refreshMonitoring();
+  } catch (reason) {
+    workspaceError.value = message(reason);
+  }
+}
+
+async function openDiagnostics() {
+  diagnosticsOpen.value = true;
+  diagnostics.value = undefined;
+  diagnosticsError.value = undefined;
+  try {
+    diagnostics.value = await invoke<Diagnostics>("diagnostics_report");
+  } catch (reason) {
+    diagnosticsError.value = message(reason);
+  }
+}
+
+function formatTemperature(temperature?: Temperature) {
+  if (!temperature) return "—";
+  return `${temperature.currentCelsius.toFixed(1)}°${temperature.targetCelsius === undefined ? "" : ` / ${temperature.targetCelsius.toFixed(1)}°`}`;
+}
+
+onMounted(() => {
+  void load();
+  monitorTimer = window.setInterval(() => void refreshMonitoring(), 5000);
+});
+
+onUnmounted(() => {
+  if (monitorTimer !== undefined) window.clearInterval(monitorTimer);
+});
 </script>
 
 <template>
@@ -162,6 +355,7 @@ async function removePrinter() {
         <h1>{{ t("app.title") }}</h1>
       </div>
       <div class="masthead-actions">
+        <button class="diagnostics-button" type="button" @click="openDiagnostics">{{ t("diagnostics.open") }}</button>
         <label class="locale">
           <span class="sr-only">{{ t("app.locale") }}</span>
           <select v-model="locale">
@@ -170,42 +364,117 @@ async function removePrinter() {
           </select>
         </label>
         <button class="status" type="button" :aria-label="t('app.status', { status: statusLabel })" @click="aboutOpen = true">
-        <span :class="['signal', status]" />
-        {{ statusLabel }}
+          <span :class="['signal', status]" />
+          {{ statusLabel }}
         </button>
       </div>
     </header>
 
-    <section class="workspace" aria-labelledby="migration-title">
+    <section class="workspace" aria-labelledby="workspace-title">
       <div class="rail" aria-hidden="true">
         <span>01</span><i /><span>02</span><i /><span>03</span>
       </div>
       <div class="panel">
-        <p class="eyebrow">{{ t("workspace.eyebrow") }}</p>
-        <h2 id="migration-title">{{ t("workspace.title") }}</h2>
-        <p class="lede">{{ t("workspace.description") }}</p>
+        <p class="eyebrow">{{ selectedPrinter ? t("workspace.monitoring") : t("workspace.eyebrow") }}</p>
+        <h2 id="workspace-title">{{ selectedPrinter ? selectedPrinter.name : t("dashboard.emptyTitle") }}</h2>
+        <p class="lede">{{ selectedPrinter ? `${selectedPrinter.driver} · ${selectedPrinter.host}` : t("dashboard.emptyDescription") }}</p>
+
         <dl>
           <div><dt>{{ t("workspace.configured") }}</dt><dd>{{ printerCount }} {{ t(printerCount === 1 ? "workspace.printer" : "workspace.printers") }}</dd></div>
           <div><dt>{{ t("workspace.core") }}</dt><dd>{{ t("workspace.coreValue") }}</dd></div>
           <div><dt>{{ t("workspace.gui") }}</dt><dd>{{ t("workspace.guiValue") }}</dd></div>
         </dl>
-        <div v-if="loading" class="loading" role="status" aria-live="polite">
-          {{ t("profiles.loading") }}
-        </div>
+
+        <div v-if="loading" class="loading" role="status" aria-live="polite">{{ t("profiles.loading") }}</div>
         <div v-else-if="profileError" class="notice error-notice" role="alert">
           <strong>{{ t("profiles.error") }}</strong>
           <span>{{ profileError }}</span>
           <button type="button" @click="load">{{ t("common.retry") }}</button>
         </div>
-        <div v-else-if="printers.length" class="printers" :aria-label="t('profiles.label')" :aria-busy="loading">
-          <article v-for="printer in printers" :key="printer.name">
-            <p>{{ printer.name }}</p>
-            <span>{{ printer.driver }} · {{ printer.host }}</span>
+        <div v-else-if="printers.length" class="printers" :aria-label="t('profiles.label')">
+          <article v-for="printer in printers" :key="printer.name" :class="{ selected: selectedPrinter?.name === printer.name }">
+            <div>
+              <p>{{ printer.name }}</p>
+              <span>{{ printer.driver }} · {{ printer.host }}</span>
+            </div>
+            <button class="select-profile" type="button" @click="selectPrinter(printer)">{{ t("profiles.select") }}</button>
             <button type="button" @click="openRemoval(printer)">{{ t("profiles.remove") }}</button>
           </article>
         </div>
         <p v-else class="empty">{{ t("profiles.empty") }}</p>
         <button class="add-printer" type="button" :disabled="!drivers.length" @click="openAddition">{{ t("profiles.add") }}</button>
+
+        <section v-if="selectedPrinter" class="dashboard" :aria-label="t('dashboard.title')">
+          <header class="dashboard-header">
+            <div>
+              <p class="eyebrow">{{ t("dashboard.title") }}</p>
+              <span class="monitor-note">{{ t("dashboard.monitoring") }}</span>
+            </div>
+            <button class="refresh-button" type="button" :disabled="refreshing" @click="refreshMonitoring">
+              {{ refreshing ? t("dashboard.refreshing") : t("dashboard.refresh") }}
+            </button>
+          </header>
+
+          <p v-if="selectedError" class="notice dashboard-notice" role="alert">
+            <strong>{{ t("dashboard.monitoringError") }}</strong> {{ selectedError }}
+          </p>
+
+          <div v-else-if="selectedStatus" class="telemetry-grid">
+            <article class="telemetry-state">
+              <span>{{ t("dashboard.state") }}</span>
+              <strong>{{ selectedStatus.state }}</strong>
+            </article>
+            <article>
+              <span>{{ t("dashboard.job") }}</span>
+              <strong>{{ selectedStatus.job?.name ?? t("dashboard.noJob") }}</strong>
+            </article>
+            <article>
+              <span>{{ t("dashboard.progress") }}</span>
+              <strong>{{ selectedStatus.progress ? `${selectedStatus.progress.percent}%` : "—" }}</strong>
+            </article>
+            <article>
+              <span>{{ t("dashboard.temperature") }}</span>
+              <strong>{{ formatTemperature(selectedStatus.temperatures?.nozzle) }} / {{ formatTemperature(selectedStatus.temperatures?.bed) }}</strong>
+            </article>
+          </div>
+
+          <div class="capability-grid">
+            <article v-if="capabilities?.cameraSnapshot || capabilities?.cameraStream" class="capability-card">
+              <p class="eyebrow">CAMERA</p>
+              <strong>Ready</strong>
+            </article>
+            <article v-else class="capability-card muted">
+              <p class="eyebrow">CAMERA</p>
+              <span>{{ t("dashboard.cameraUnavailable") }}</span>
+            </article>
+
+            <article v-if="capabilities?.fileList" class="capability-card files-card">
+              <p class="eyebrow">{{ t("dashboard.files") }}</p>
+              <button type="button" :disabled="filesLoading" @click="loadFiles">{{ filesLoading ? t("common.loading") : t("dashboard.loadFiles") }}</button>
+              <span v-if="files.length">{{ t("dashboard.fileCount", { count: files.length }) }}</span>
+              <ul v-if="files.length" class="file-list">
+                <li v-for="file in files.slice(0, 6)" :key="file.name"><span>{{ file.type === "directory" ? "◫" : "·" }}</span>{{ file.name }}</li>
+              </ul>
+              <span v-else>{{ t("dashboard.noFiles") }}</span>
+            </article>
+
+            <article v-if="capabilities?.jobPause || capabilities?.jobResume || capabilities?.jobCancel" class="capability-card controls-card">
+              <p class="eyebrow">{{ t("dashboard.jobs") }}</p>
+              <div class="control-actions">
+                <button v-if="capabilities.jobPause && selectedStatus?.state === 'printing'" type="button" @click="openJobAction('pause')">{{ t("dashboard.pause") }}</button>
+                <button v-if="capabilities.jobResume && selectedStatus?.state === 'paused'" type="button" @click="openJobAction('resume')">{{ t("dashboard.resume") }}</button>
+                <button v-if="capabilities.jobCancel && ['printing', 'paused'].includes(selectedStatus?.state ?? '')" class="danger" type="button" @click="openJobAction('cancel')">{{ t("dashboard.cancel") }}</button>
+                <span v-if="!['printing', 'paused'].includes(selectedStatus?.state ?? '')">{{ t("dashboard.noJob") }}</span>
+              </div>
+            </article>
+
+            <article v-if="capabilities?.emergencyStop" class="capability-card emergency-card">
+              <p class="eyebrow">M112</p>
+              <button class="emergency-button" type="button" @click="emergencyStop">{{ t("dashboard.emergency") }}</button>
+            </article>
+          </div>
+          <p class="cli-note">{{ t("dashboard.cliOnly") }}</p>
+        </section>
       </div>
     </section>
 
@@ -263,15 +532,46 @@ async function removePrinter() {
         <DialogPanel class="dialog-panel">
           <DialogTitle>{{ t("removal.title", { name: selectedPrinter?.name ?? "" }) }}</DialogTitle>
           <p>{{ t("removal.description") }}</p>
-          <p v-if="removalError" class="dialog-error" role="alert">
-            <strong>{{ t("removal.error") }}</strong> {{ removalError }}
-          </p>
+          <p v-if="removalError" class="dialog-error" role="alert"><strong>{{ t("removal.error") }}</strong> {{ removalError }}</p>
           <div class="actions">
             <button type="button" :disabled="removing" @click="closeRemoval">{{ t("common.cancel") }}</button>
-            <button class="danger" type="button" :disabled="removing" @click="removePrinter">
-              {{ removing ? t("common.removing") : t("removal.confirm") }}
-            </button>
+            <button class="danger" type="button" :disabled="removing" @click="removePrinter">{{ removing ? t("common.removing") : t("removal.confirm") }}</button>
           </div>
+        </DialogPanel>
+      </div>
+    </Dialog>
+
+    <Dialog :open="actionOpen" @close="!actionSending && (actionOpen = false)" class="dialog">
+      <div class="backdrop" aria-hidden="true" />
+      <div class="dialog-frame">
+        <DialogPanel class="dialog-panel">
+          <DialogTitle>{{ t("job.title", { action: pendingAction ?? "" }) }}</DialogTitle>
+          <p>{{ t("job.description") }}</p>
+          <p v-if="actionError" class="dialog-error" role="alert"><strong>{{ t("job.error") }}</strong> {{ actionError }}</p>
+          <div class="actions">
+            <button type="button" :disabled="actionSending" @click="actionOpen = false">{{ t("common.cancel") }}</button>
+            <button class="danger" type="button" :disabled="actionSending" @click="sendJobAction">{{ actionSending ? t("common.sending") : t("job.confirm") }}</button>
+          </div>
+        </DialogPanel>
+      </div>
+    </Dialog>
+
+    <Dialog :open="diagnosticsOpen" @close="diagnosticsOpen = false" class="dialog">
+      <div class="backdrop" aria-hidden="true" />
+      <div class="dialog-frame">
+        <DialogPanel class="dialog-panel diagnostics-panel">
+          <DialogTitle>{{ t("diagnostics.title") }}</DialogTitle>
+          <p>{{ t("diagnostics.description") }}</p>
+          <p class="diagnostics-redacted">{{ t("diagnostics.redacted") }}</p>
+          <dl v-if="diagnostics" class="diagnostic-data">
+            <div><dt>VERSION</dt><dd>{{ diagnostics.version }}</dd></div>
+            <div><dt>PLATFORM</dt><dd>{{ diagnostics.platform }}</dd></div>
+            <div><dt>PROFILES</dt><dd>{{ diagnostics.configuredProfiles }}</dd></div>
+            <div><dt>MONITOR</dt><dd>{{ diagnostics.monitorWorkers }} workers / {{ diagnostics.monitorIntervalSeconds }}s</dd></div>
+          </dl>
+          <p v-else-if="diagnosticsError" class="dialog-error" role="alert">{{ diagnosticsError }}</p>
+          <p v-else class="empty">{{ t("diagnostics.noReport") }}</p>
+          <button type="button" @click="diagnosticsOpen = false">{{ t("common.close") }}</button>
         </DialogPanel>
       </div>
     </Dialog>

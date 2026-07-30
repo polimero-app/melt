@@ -2,8 +2,10 @@
 
 pub mod bambu;
 pub mod config;
+pub mod diagnostics;
 pub mod drivers;
 pub mod keychain;
+pub mod monitor;
 pub mod moonraker;
 pub mod profiles;
 

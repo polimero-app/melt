@@ -72,7 +72,7 @@ h2 { font-size: clamp(2.2rem, 6vw, 5.8rem); line-height: .95; max-width: 11ch; }
   letter-spacing: .08em;
   text-transform: uppercase;
 }
-.status:focus-visible, .dialog-panel button:focus-visible, .dialog-panel input:focus-visible, .dialog-panel select:focus-visible, .printers button:focus-visible, .add-printer:focus-visible, .locale select:focus-visible, .notice button:focus-visible { outline: 2px solid #d8a732; outline-offset: 3px; }
+.status:focus-visible, .diagnostics-button:focus-visible, .dialog-panel button:focus-visible, .dialog-panel input:focus-visible, .dialog-panel select:focus-visible, .printers button:focus-visible, .add-printer:focus-visible, .locale select:focus-visible, .notice button:focus-visible, .dashboard button:focus-visible { outline: 2px solid #d8a732; outline-offset: 3px; }
 .signal { width: .55rem; height: .55rem; border-radius: 50%; background: #d8a732; }
 .signal.ready { background: #84b95a; box-shadow: 0 0 12px #84b95a; }
 .signal.offline { background: #c35a48; }
@@ -94,9 +94,11 @@ dt { color: #d8a732; font: .7rem "Courier New", monospace; letter-spacing: .12em
 dd { margin: .7rem 0 0; }
 .printers { display: grid; gap: 1px; margin-top: 1px; background: #46524d; }
 .printers article { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; gap: 1rem; padding: .9rem 1rem; background: #1b211f; }
+.printers article.selected { background: #242d29; box-shadow: inset 3px 0 #d8a732; }
 .printers p { margin: 0; font-size: 1.1rem; }
 .printers span, .empty { color: #b9bcb2; font: .72rem "Courier New", monospace; letter-spacing: .05em; }
 .printers button { border: 0; background: transparent; color: #e47967; cursor: pointer; font: .72rem "Courier New", monospace; text-transform: uppercase; }
+.printers .select-profile { color: #d8a732; }
 .add-printer { margin-top: 1px; border: 1px solid #d8a732; background: #1b211f; color: inherit; padding: .75rem 1rem; cursor: pointer; font: .72rem "Courier New", monospace; letter-spacing: .08em; text-transform: uppercase; }
 .add-printer:disabled { cursor: wait; opacity: .55; }
 .empty { margin-top: 1px; padding: 1rem; background: #1b211f; line-height: 1.6; }
@@ -126,6 +128,82 @@ dd { margin: .7rem 0 0; }
 .drivers li { display: grid; gap: .2rem; border-left: 1px solid #d8a732; padding-left: .75rem; }
 .drivers strong { font: .78rem "Courier New", monospace; color: #e4e2d7; }
 .drivers span { color: #b9bcb2; font-size: .85rem; }
+.diagnostics-button, .refresh-button {
+  border: 1px solid #46524d;
+  background: #1b211f;
+  color: inherit;
+  cursor: pointer;
+  padding: .62rem .75rem;
+  font: .7rem "Courier New", monospace;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.dashboard {
+  display: grid;
+  gap: 1px;
+  margin-top: 3rem;
+  border: 1px solid #46524d;
+  background: #46524d;
+}
+.dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  background: #1b211f;
+}
+.dashboard-header .eyebrow { margin-bottom: .35rem; }
+.monitor-note, .cli-note { color: #b9bcb2; font: .68rem "Courier New", monospace; line-height: 1.45; letter-spacing: .04em; }
+.refresh-button:disabled, .capability-card button:disabled { cursor: wait; opacity: .55; }
+.dashboard-notice { margin: 0; }
+
+.telemetry-grid, .capability-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: #46524d;
+}
+.telemetry-grid article, .capability-card {
+  display: grid;
+  align-content: start;
+  gap: .6rem;
+  min-height: 7rem;
+  padding: 1rem;
+  background: #1b211f;
+}
+.telemetry-grid span { color: #d8a732; font: .68rem "Courier New", monospace; letter-spacing: .1em; text-transform: uppercase; }
+.telemetry-grid strong { font-size: 1rem; overflow-wrap: anywhere; }
+.telemetry-state strong { color: #84b95a; text-transform: uppercase; }
+.capability-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.capability-card { min-height: 8.5rem; }
+.capability-card > span { color: #c6c9bc; font-size: .88rem; line-height: 1.45; }
+.capability-card.muted { border-left: 3px solid #46524d; }
+.capability-card button, .control-actions button {
+  justify-self: start;
+  border: 1px solid #d8a732;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: .48rem .7rem;
+  font: .7rem "Courier New", monospace;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.file-list { display: grid; gap: .35rem; margin: 0; padding: 0; list-style: none; color: #c6c9bc; font: .76rem "Courier New", monospace; }
+.file-list li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-list li span { display: inline-block; width: 1.25rem; color: #d8a732; }
+.controls-card { grid-column: span 1; }
+.control-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.control-actions .danger, .emergency-button { border-color: #e47967 !important; color: #e47967 !important; }
+.emergency-card { background: linear-gradient(135deg, #291c1b, #1b211f); }
+.emergency-button { justify-self: stretch !important; min-height: 3rem; font-weight: 700 !important; }
+.cli-note { margin: 0; padding: .9rem 1rem; background: #1b211f; }
+.diagnostics-panel { max-width: 38rem; }
+.diagnostics-redacted { border-left: 2px solid #84b95a; padding-left: .75rem; color: #c6c9bc; font: .78rem "Courier New", monospace; }
+.diagnostic-data { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 1.5rem 0; }
+.diagnostic-data div { min-height: 4.5rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 @keyframes spin { to { transform: rotate(1turn); } }
@@ -137,4 +215,7 @@ dd { margin: .7rem 0 0; }
   .masthead-actions { align-items: flex-end; flex-direction: column; }
   .printers article { grid-template-columns: 1fr auto; }
   .printers span { grid-column: 1 / -1; grid-row: 2; }
+  .telemetry-grid, .capability-grid { grid-template-columns: 1fr; }
+  .dashboard-header { align-items: flex-start; flex-direction: column; }
+  .diagnostic-data { grid-template-columns: 1fr; }
 }
