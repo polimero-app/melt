@@ -1,4 +1,4 @@
-use std::{fmt, time::Duration};
+use std::{fmt, io::Read, time::Duration};
 
 use serde::Serialize;
 use thiserror::Error;
@@ -92,9 +92,13 @@ impl Driver {
 
     pub fn capabilities(self) -> Capabilities {
         match self {
-            // Bambu LAN operations require the MQTT/TLS transport, which is
-            // intentionally not claimed until that transport exists.
-            Self::BambuLan => Capabilities::default(),
+            // Camera uses the independent, authenticated TLS MJPEG endpoint.
+            // MQTT controls remain unavailable until their transport exists.
+            Self::BambuLan => Capabilities {
+                camera_stream: true,
+                camera_snapshot: true,
+                ..Capabilities::default()
+            },
             Self::Moonraker => Capabilities {
                 status: true,
                 file_list: true,
@@ -173,6 +177,8 @@ pub enum DriverError {
     UnsupportedOperation(Driver, Operation),
     #[error("printer status request failed")]
     Moonraker(#[source] moonraker::Error),
+    #[error("printer camera request failed")]
+    Camera(#[source] bambu::CameraError),
 }
 
 pub fn registered() -> [DriverInfo; 2] {
@@ -214,6 +220,41 @@ pub fn status(
         Profile::Bambu(_) => Err(DriverError::UnsupportedOperation(
             Driver::BambuLan,
             Operation::Status,
+        )),
+    }
+}
+
+pub fn camera_snapshot(
+    profile: &Profile,
+    access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
+    timeout: Duration,
+) -> Result<Vec<u8>, DriverError> {
+    match profile {
+        Profile::Bambu(profile) => bambu::snapshot(profile, access_code, tls_fingerprint, timeout)
+            .map_err(DriverError::Camera),
+        Profile::Moonraker(_) => Err(DriverError::UnsupportedOperation(
+            Driver::Moonraker,
+            Operation::CameraSnapshot,
+        )),
+    }
+}
+
+pub fn camera_stream(
+    profile: &Profile,
+    access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
+    timeout: Duration,
+) -> Result<Box<dyn Read + Send>, DriverError> {
+    match profile {
+        Profile::Bambu(profile) => {
+            bambu::open_mjpeg_stream(profile, access_code, tls_fingerprint, timeout)
+                .map(|stream| Box::new(stream) as Box<dyn Read + Send>)
+                .map_err(DriverError::Camera)
+        }
+        Profile::Moonraker(_) => Err(DriverError::UnsupportedOperation(
+            Driver::Moonraker,
+            Operation::CameraStream,
         )),
     }
 }
@@ -484,5 +525,15 @@ mod tests {
         assert!(!capabilities.camera_snapshot);
         assert!(!capabilities.camera_stream);
         assert!(!capabilities.light_control);
+    }
+
+    #[test]
+    fn bambu_advertises_only_its_independent_camera_transport() {
+        let capabilities = Driver::BambuLan.capabilities();
+
+        assert!(capabilities.camera_snapshot);
+        assert!(capabilities.camera_stream);
+        assert!(!capabilities.status);
+        assert!(!capabilities.job_start);
     }
 }

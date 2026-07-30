@@ -1872,6 +1872,11 @@ fn driver_error(error: DriverError) -> AppError {
             code: "printer-unavailable",
             message: "printer request failed".into(),
         },
+        DriverError::Camera(_) => AppError {
+            exit_code: 1,
+            code: "printer-unavailable",
+            message: "printer camera request failed".into(),
+        },
     }
 }
 
