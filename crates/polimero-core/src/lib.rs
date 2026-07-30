@@ -1,5 +1,6 @@
 //! UI-agnostic Polimero domain types.
 
+pub mod bambu;
 pub mod config;
 pub mod drivers;
 pub mod keychain;

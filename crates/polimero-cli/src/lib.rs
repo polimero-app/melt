@@ -179,9 +179,10 @@ struct RemoveData {
 
 fn profile_error(error: ProfileError) -> AppError {
     match error {
-        ProfileError::MissingName | ProfileError::InvalidName | ProfileError::NotFound(_) => {
-            AppError::usage(error.to_string())
-        }
+        ProfileError::MissingName
+        | ProfileError::InvalidName
+        | ProfileError::InvalidHost
+        | ProfileError::NotFound(_) => AppError::usage(error.to_string()),
         ProfileError::Secret(_) => AppError {
             exit_code: 3,
             code: "secret-store-failed",
