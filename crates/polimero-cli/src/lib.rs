@@ -1835,6 +1835,20 @@ fn driver_error(error: DriverError) -> AppError {
             code: "timeout",
             message: "printer operation timed out".into(),
         },
+        DriverError::Moonraker(polimero_core::moonraker::Error::Transport(_)) => AppError {
+            exit_code: 4,
+            code: "connection-failed",
+            message: "printer connection failed".into(),
+        },
+        DriverError::Moonraker(polimero_core::moonraker::Error::HttpStatus(status))
+            if matches!(status.as_u16(), 502..=504) =>
+        {
+            AppError {
+                exit_code: 4,
+                code: "connection-failed",
+                message: "printer connection failed".into(),
+            }
+        }
         DriverError::Moonraker(polimero_core::moonraker::Error::Unsupported(_)) => AppError {
             exit_code: 5,
             code: "capability-unsupported",
@@ -2260,6 +2274,16 @@ mod tests {
 
         assert_eq!(error.exit_code, 5);
         assert_eq!(error.code, "capability-unsupported");
+    }
+
+    #[test]
+    fn moonraker_timeout_uses_the_connection_exit_contract() {
+        let error = driver_error(DriverError::Moonraker(
+            polimero_core::moonraker::Error::Timeout,
+        ));
+
+        assert_eq!(error.exit_code, 4);
+        assert_eq!(error.code, "timeout");
     }
 
     #[test]
