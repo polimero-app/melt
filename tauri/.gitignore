@@ -1,4 +1,4 @@
 /target/
+/crates/polimero-desktop/gen/
 /ui/node_modules/
 /ui/dist/
-
