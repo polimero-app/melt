@@ -20,6 +20,8 @@ pub enum ProfileError {
     InvalidHost,
     #[error("access code must not contain control characters")]
     InvalidAccessCode,
+    #[error("an access code is required for this printer driver")]
+    MissingAccessCode,
     #[error("printer profile {0:?} not found")]
     NotFound(String),
     #[error("keychain operation failed")]
@@ -93,34 +95,51 @@ pub fn create(
         updated: now,
     };
     let driver_profile = drivers::profile(&profile)?;
+    if driver_profile.driver().requires_access_code() && request.access_code.is_empty() {
+        return Err(ProfileError::MissingAccessCode);
+    }
     let dir = dir.as_ref();
     let mut config = Config::open(dir).map_err(ProfileError::Config)?;
     if config.get_profile(&name).is_some() {
         return Err(ProfileError::Config(ConfigError::ProfileAlreadyExists));
     }
 
-    drivers::verify(
+    let tls_fingerprint = drivers::verify(
         &driver_profile,
         (!request.access_code.is_empty()).then_some(&request.access_code),
     )?;
 
-    let mut secret = (!request.access_code.is_empty())
-        .then(|| {
-            StoredSecret::replace(
-                store,
-                account(&profile.driver, &name, "access-code"),
-                &request.access_code,
-            )
-        })
-        .transpose()?;
-    config
-        .add_profile(&name, profile.clone())
-        .map_err(ProfileError::Config)?;
+    let mut secrets = Vec::new();
+    if !request.access_code.is_empty() {
+        secrets.push(StoredSecret::replace(
+            store,
+            account(&profile.driver, &name, "access-code"),
+            &request.access_code,
+        )?);
+    }
+    if let Some(fingerprint) = tls_fingerprint {
+        match StoredSecret::replace(
+            store,
+            account(&profile.driver, &name, "tls-fingerprint"),
+            &fingerprint,
+        ) {
+            Ok(secret) => secrets.push(secret),
+            Err(error) => {
+                if restore(store, &mut secrets).is_err() {
+                    return Err(ProfileError::RollbackFailed);
+                }
+                return Err(error);
+            }
+        }
+    }
+    if let Err(error) = config.add_profile(&name, profile.clone()) {
+        if restore(store, &mut secrets).is_err() {
+            return Err(ProfileError::RollbackFailed);
+        }
+        return Err(ProfileError::Config(error));
+    }
     if let Err(error) = config.save(dir) {
-        if secret
-            .as_mut()
-            .is_some_and(|secret| secret.restore(store).is_err())
-        {
+        if restore(store, &mut secrets).is_err() {
             return Err(ProfileError::RollbackFailed);
         }
         return Err(ProfileError::Config(error));
@@ -163,15 +182,15 @@ pub fn remove(
         });
     }
 
-    for secret in &mut secrets {
-        if let Err(error) = secret.delete(store) {
-            restore(store, &secrets)?;
+    for index in 0..secrets.len() {
+        if let Err(error) = secrets[index].delete(store) {
+            restore(store, &mut secrets)?;
             return Err(ProfileError::Secret(error));
         }
     }
     config.remove_profile(&name).map_err(ProfileError::Config)?;
     if let Err(error) = config.save(dir) {
-        restore(store, &secrets)?;
+        restore(store, &mut secrets)?;
         return Err(ProfileError::Config(error));
     }
 
@@ -298,24 +317,19 @@ impl StoredSecret {
         }
         match self.value.as_deref() {
             Some(value) => store.set(SERVICE, &self.account, value)?,
-            None => store.delete(SERVICE, &self.account)?,
+            None => match store.delete(SERVICE, &self.account) {
+                Ok(()) | Err(SecretError::NotFound) => {}
+                Err(error) => return Err(error),
+            },
         }
         self.deleted = false;
         Ok(())
     }
 }
 
-fn restore(store: &dyn SecretStore, secrets: &[StoredSecret]) -> Result<(), ProfileError> {
+fn restore(store: &dyn SecretStore, secrets: &mut [StoredSecret]) -> Result<(), ProfileError> {
     for secret in secrets {
-        if secret.deleted {
-            store
-                .set(
-                    SERVICE,
-                    &secret.account,
-                    secret.value.as_deref().expect("deleted secret has value"),
-                )
-                .map_err(ProfileError::Secret)?;
-        }
+        secret.restore(store).map_err(ProfileError::Secret)?;
     }
     Ok(())
 }
@@ -435,6 +449,34 @@ mod tests {
             validate_access_code("bad\ncode"),
             Err(ProfileError::InvalidAccessCode)
         ));
+    }
+
+    #[test]
+    fn requires_a_bambu_access_code_before_attempting_profile_verification() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let error = create(
+            dir.path(),
+            &MemoryStore::default(),
+            CreateRequest {
+                name: "garage".into(),
+                driver: "bambu-lan".into(),
+                host: "192.0.2.1".into(),
+                serial: "SN001".into(),
+                timeout: "10s".into(),
+                insecure: false,
+                access_code: String::new(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, ProfileError::MissingAccessCode));
+        assert!(
+            Config::open(dir.path())
+                .unwrap()
+                .get_profile("garage")
+                .is_none()
+        );
     }
 
     #[test]

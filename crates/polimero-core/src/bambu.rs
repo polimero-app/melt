@@ -1,7 +1,4 @@
-//! Bambu Lab LAN profile validation and MQTT protocol primitives.
-//!
-//! This module intentionally implements neither MQTT transport nor printer
-//! commands. It does provide Bambu's documented TLS MJPEG camera wire protocol.
+//! Bambu Lab LAN profile validation and authenticated LAN transports.
 
 use std::{
     io::{self, Read, Write},
@@ -15,8 +12,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+mod transport;
+
+pub use transport::{Client, Error as TransportError, JobStartOptions};
+
 pub const MQTT_PORT: u16 = 8883;
 pub const MQTT_USERNAME: &str = "bblp";
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 const CAMERA_PORT: u16 = 6000;
 const CAMERA_AUTH_SIZE: usize = 80;
 const CAMERA_FRAME_HEADER_SIZE: usize = 16;
@@ -28,6 +30,7 @@ pub struct Profile {
     host: String,
     serial: String,
     insecure: bool,
+    timeout: Duration,
 }
 
 impl Profile {
@@ -36,13 +39,26 @@ impl Profile {
         serial: impl Into<String>,
         insecure: bool,
     ) -> Result<Self, ProfileError> {
+        Self::with_timeout(host, serial, insecure, DEFAULT_TIMEOUT)
+    }
+
+    pub fn with_timeout(
+        host: impl Into<String>,
+        serial: impl Into<String>,
+        insecure: bool,
+        timeout: Duration,
+    ) -> Result<Self, ProfileError> {
         let host = host.into();
         let serial = serial.into();
         validate_profile(&host, &serial)?;
+        if timeout.is_zero() {
+            return Err(ProfileError::InvalidTimeout);
+        }
         Ok(Self {
             host,
             serial,
             insecure,
+            timeout,
         })
     }
 
@@ -56,6 +72,10 @@ impl Profile {
 
     pub fn insecure(&self) -> bool {
         self.insecure
+    }
+
+    pub fn timeout(&self) -> Duration {
+        self.timeout
     }
 
     pub fn mqtt_endpoint(&self) -> String {
@@ -79,6 +99,8 @@ pub enum ProfileError {
     SerialTooLong,
     #[error("Bambu LAN serial must be printable ASCII without whitespace")]
     InvalidSerial,
+    #[error("Bambu LAN timeout must be greater than zero")]
+    InvalidTimeout,
 }
 
 pub fn validate_profile(host: &str, serial: &str) -> Result<(), ProfileError> {

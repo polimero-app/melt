@@ -9,7 +9,6 @@ rust-version.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true
-rustls.workspace = true
 url.workspace = true
 keyring.workspace = true
 native-tls.workspace = true
@@ -18,3 +17,6 @@ sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 time.workspace = true
+
+[dev-dependencies]
+openssl = "0.10"

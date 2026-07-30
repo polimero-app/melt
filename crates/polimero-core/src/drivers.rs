@@ -11,13 +11,12 @@ pub struct DriverInfo {
     pub description: &'static str,
 }
 
-pub fn verify(profile: &Profile, access_code: Option<&str>) -> Result<(), DriverError> {
+pub fn verify(profile: &Profile, access_code: Option<&str>) -> Result<Option<String>, DriverError> {
     match profile {
-        Profile::Moonraker(_) => status(profile, access_code).map(|_| ()),
-        Profile::Bambu(_) => Err(DriverError::UnsupportedOperation(
-            Driver::BambuLan,
-            Operation::Verify,
-        )),
+        Profile::Moonraker(_) => status(profile, access_code, None).map(|_| None),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .verify(access_code)
+            .map_err(DriverError::Bambu),
     }
 }
 
@@ -67,6 +66,10 @@ impl Driver {
         }
     }
 
+    pub fn requires_access_code(self) -> bool {
+        matches!(self, Self::BambuLan)
+    }
+
     pub fn supports(self, operation: Operation) -> bool {
         match operation {
             Operation::Status | Operation::Verify => self.capabilities().status,
@@ -92,11 +95,23 @@ impl Driver {
 
     pub fn capabilities(self) -> Capabilities {
         match self {
-            // Camera uses the independent, authenticated TLS MJPEG endpoint.
-            // MQTT controls remain unavailable until their transport exists.
             Self::BambuLan => Capabilities {
+                status: true,
                 camera_stream: true,
                 camera_snapshot: true,
+                file_list: true,
+                file_download: true,
+                file_upload: true,
+                job_start: true,
+                job_pause: true,
+                job_resume: true,
+                job_cancel: true,
+                emergency_stop: true,
+                temperature_read: true,
+                temperature_write: true,
+                motion_control: true,
+                fan_control: true,
+                speed_control: true,
                 ..Capabilities::default()
             },
             Self::Moonraker => Capabilities {
@@ -179,6 +194,8 @@ pub enum DriverError {
     Moonraker(#[source] moonraker::Error),
     #[error("printer camera request failed")]
     Camera(#[source] bambu::CameraError),
+    #[error("Bambu printer request failed")]
+    Bambu(#[source] bambu::TransportError),
 }
 
 pub fn registered() -> [DriverInfo; 2] {
@@ -196,9 +213,14 @@ pub fn registered() -> [DriverInfo; 2] {
 
 pub fn profile(config: &config::Profile) -> Result<Profile, DriverError> {
     match Driver::parse(&config.driver)? {
-        Driver::BambuLan => bambu::Profile::new(&config.host, &config.serial, config.insecure)
-            .map(Profile::Bambu)
-            .map_err(|_| DriverError::InvalidProfile(Driver::BambuLan)),
+        Driver::BambuLan => bambu::Profile::with_timeout(
+            &config.host,
+            &config.serial,
+            config.insecure,
+            parse_timeout(&config.timeout)?,
+        )
+        .map(Profile::Bambu)
+        .map_err(|_| DriverError::InvalidProfile(Driver::BambuLan)),
         Driver::Moonraker => moonraker::Profile::new(
             &config.host,
             config.insecure,
@@ -212,15 +234,15 @@ pub fn profile(config: &config::Profile) -> Result<Profile, DriverError> {
 pub fn status(
     profile: &Profile,
     access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
 ) -> Result<moonraker::Status, DriverError> {
     match profile {
         Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
             .and_then(|client| client.status(access_code))
             .map_err(DriverError::Moonraker),
-        Profile::Bambu(_) => Err(DriverError::UnsupportedOperation(
-            Driver::BambuLan,
-            Operation::Status,
-        )),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .status(access_code, tls_fingerprint)
+            .map_err(DriverError::Bambu),
     }
 }
 
@@ -259,156 +281,226 @@ pub fn camera_stream(
     }
 }
 
-pub fn file_roots(profile: &Profile) -> Result<Vec<moonraker::FileRoot>, DriverError> {
+pub fn file_roots(
+    profile: &Profile,
+    access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
+) -> Result<Vec<moonraker::FileRoot>, DriverError> {
     match profile {
         Profile::Moonraker(_) => Ok(moonraker::Client::file_roots()),
-        Profile::Bambu(_) => Err(DriverError::UnsupportedOperation(
-            Driver::BambuLan,
-            Operation::FileList,
-        )),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .file_roots(access_code, tls_fingerprint)
+            .map_err(DriverError::Bambu),
     }
 }
 
 pub fn file_list(
     profile: &Profile,
     access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
     device_path: &str,
     recursive: bool,
 ) -> Result<moonraker::FileList, DriverError> {
-    moonraker_client(profile, Operation::FileList)?
-        .file_list(access_code, device_path, recursive)
-        .map_err(DriverError::Moonraker)
+    match profile {
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.file_list(access_code, device_path, recursive))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .file_list(access_code, tls_fingerprint, device_path, recursive)
+            .map_err(DriverError::Bambu),
+    }
 }
 
 pub fn download_to(
     profile: &Profile,
     access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
     device_path: &str,
     destination: &mut dyn std::io::Write,
 ) -> Result<u64, DriverError> {
-    moonraker_client(profile, Operation::FileDownload)?
-        .download_to(access_code, device_path, destination)
-        .map_err(DriverError::Moonraker)
+    match profile {
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.download_to(access_code, device_path, destination))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .download_to(access_code, tls_fingerprint, device_path, destination)
+            .map_err(DriverError::Bambu),
+    }
 }
 
 pub fn upload_file(
     profile: &Profile,
     access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
     source: &std::path::Path,
     device_path: &str,
     overwrite: bool,
 ) -> Result<u64, DriverError> {
-    moonraker_client(profile, Operation::FileUpload)?
-        .upload_file(access_code, source, device_path, overwrite)
-        .map_err(DriverError::Moonraker)
+    match profile {
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.upload_file(access_code, source, device_path, overwrite))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .upload_file(access_code, tls_fingerprint, source, device_path, overwrite)
+            .map_err(DriverError::Bambu),
+    }
 }
 
 pub fn job_start(
     profile: &Profile,
     access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
     device_path: &str,
+    options: bambu::JobStartOptions,
 ) -> Result<moonraker::JobResult, DriverError> {
-    moonraker_client(profile, Operation::JobStart)?
-        .job_start(access_code, device_path)
-        .map_err(DriverError::Moonraker)
+    match profile {
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.job_start(access_code, device_path))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .job_start(access_code, tls_fingerprint, device_path, options)
+            .map_err(DriverError::Bambu),
+    }
 }
 
 pub fn job_pause(
     profile: &Profile,
     access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
 ) -> Result<moonraker::JobResult, DriverError> {
-    moonraker_client(profile, Operation::JobPause)?
-        .job_pause(access_code)
-        .map_err(DriverError::Moonraker)
+    match profile {
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.job_pause(access_code))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .job_pause(access_code, tls_fingerprint)
+            .map_err(DriverError::Bambu),
+    }
 }
 
 pub fn job_resume(
     profile: &Profile,
     access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
 ) -> Result<moonraker::JobResult, DriverError> {
-    moonraker_client(profile, Operation::JobResume)?
-        .job_resume(access_code)
-        .map_err(DriverError::Moonraker)
+    match profile {
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.job_resume(access_code))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .job_resume(access_code, tls_fingerprint)
+            .map_err(DriverError::Bambu),
+    }
 }
 
 pub fn job_cancel(
     profile: &Profile,
     access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
 ) -> Result<moonraker::JobResult, DriverError> {
-    moonraker_client(profile, Operation::JobCancel)?
-        .job_cancel(access_code)
-        .map_err(DriverError::Moonraker)
+    match profile {
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.job_cancel(access_code))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .job_cancel(access_code, tls_fingerprint)
+            .map_err(DriverError::Bambu),
+    }
 }
 
-pub fn emergency_stop(profile: &Profile, access_code: Option<&str>) -> Result<(), DriverError> {
-    moonraker_client(profile, Operation::EmergencyStop)?
-        .emergency_stop(access_code)
-        .map_err(DriverError::Moonraker)
+pub fn emergency_stop(
+    profile: &Profile,
+    access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
+) -> Result<(), DriverError> {
+    match profile {
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.emergency_stop(access_code))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .emergency_stop(access_code, tls_fingerprint)
+            .map_err(DriverError::Bambu),
+    }
 }
 
 pub fn temperature_set(
     profile: &Profile,
     access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
     targets: moonraker::TemperatureTargets,
 ) -> Result<moonraker::TemperatureResult, DriverError> {
-    moonraker_client(profile, Operation::TemperatureSet)?
-        .temperature_set(access_code, targets)
-        .map_err(DriverError::Moonraker)
+    match profile {
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.temperature_set(access_code, targets))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .temperature_set(access_code, tls_fingerprint, targets)
+            .map_err(DriverError::Bambu),
+    }
 }
 
 pub fn motion_home(
     profile: &Profile,
     access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
     axes: &[moonraker::Axis],
 ) -> Result<moonraker::MotionResult, DriverError> {
-    moonraker_client(profile, Operation::MotionHome)?
-        .motion_home(access_code, axes)
-        .map_err(DriverError::Moonraker)
+    match profile {
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.motion_home(access_code, axes))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .motion_home(access_code, tls_fingerprint, axes)
+            .map_err(DriverError::Bambu),
+    }
 }
 
 pub fn motion_jog(
     profile: &Profile,
     access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
     delta: moonraker::JogDelta,
 ) -> Result<moonraker::MotionResult, DriverError> {
-    moonraker_client(profile, Operation::MotionJog)?
-        .motion_jog(access_code, delta)
-        .map_err(DriverError::Moonraker)
+    match profile {
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.motion_jog(access_code, delta))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .motion_jog(access_code, tls_fingerprint, delta)
+            .map_err(DriverError::Bambu),
+    }
 }
 
 pub fn fan_set(
     profile: &Profile,
     access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
     fan: &str,
     speed_percent: u8,
 ) -> Result<moonraker::FanResult, DriverError> {
-    moonraker_client(profile, Operation::FanSet)?
-        .fan_set(access_code, fan, speed_percent)
-        .map_err(DriverError::Moonraker)
+    match profile {
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.fan_set(access_code, fan, speed_percent))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .fan_set(access_code, tls_fingerprint, fan, speed_percent)
+            .map_err(DriverError::Bambu),
+    }
 }
 
 pub fn speed_set(
     profile: &Profile,
     access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
     speed_profile: &str,
 ) -> Result<moonraker::SpeedResult, DriverError> {
-    moonraker_client(profile, Operation::SpeedSet)?
-        .speed_set(access_code, speed_profile)
-        .map_err(DriverError::Moonraker)
-}
-
-fn moonraker_client(
-    profile: &Profile,
-    operation: Operation,
-) -> Result<moonraker::Client, DriverError> {
     match profile {
-        Profile::Moonraker(profile) => {
-            moonraker::Client::new(profile.clone()).map_err(DriverError::Moonraker)
-        }
-        Profile::Bambu(_) => Err(DriverError::UnsupportedOperation(
-            Driver::BambuLan,
-            operation,
-        )),
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.speed_set(access_code, speed_profile))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .speed_set(access_code, tls_fingerprint, speed_profile)
+            .map_err(DriverError::Bambu),
     }
 }
 
@@ -467,14 +559,8 @@ mod tests {
         })
         .unwrap();
         assert_eq!(bambu.driver(), Driver::BambuLan);
-        assert!(!bambu.driver().supports(Operation::Status));
-        assert!(matches!(
-            status(&bambu, None),
-            Err(DriverError::UnsupportedOperation(
-                Driver::BambuLan,
-                Operation::Status
-            ))
-        ));
+        assert!(bambu.driver().supports(Operation::Status));
+        assert!(bambu.driver().requires_access_code());
 
         let moonraker = profile(&ConfigProfile {
             driver: "moonraker".into(),
@@ -528,12 +614,22 @@ mod tests {
     }
 
     #[test]
-    fn bambu_advertises_only_its_independent_camera_transport() {
+    fn bambu_advertises_authenticated_lan_operations() {
         let capabilities = Driver::BambuLan.capabilities();
 
+        assert!(capabilities.status);
         assert!(capabilities.camera_snapshot);
         assert!(capabilities.camera_stream);
-        assert!(!capabilities.status);
-        assert!(!capabilities.job_start);
+        assert!(capabilities.file_list);
+        assert!(capabilities.file_download);
+        assert!(capabilities.file_upload);
+        assert!(capabilities.job_start);
+        assert!(capabilities.emergency_stop);
+        assert!(capabilities.temperature_write);
+        assert!(capabilities.motion_control);
+        assert!(capabilities.fan_control);
+        assert!(capabilities.speed_control);
+        assert!(!capabilities.discovery);
+        assert!(!capabilities.tls_refresh);
     }
 }
