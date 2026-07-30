@@ -1,16 +1,22 @@
 //! Moonraker's HTTP status API, independent of profile storage and UI code.
 
-use std::{collections::BTreeMap, io::Read, time::Duration};
+use std::{
+    collections::BTreeMap,
+    io::{Read, Write},
+    thread,
+    time::{Duration, Instant},
+};
 
 use reqwest::{
-    StatusCode,
+    Method, StatusCode,
     blocking::{Client as HttpClient, ClientBuilder},
     header::{ACCEPT, HeaderValue},
     redirect::Policy,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value};
 use thiserror::Error;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use url::Url;
 
 pub const DEFAULT_PORT: u16 = 7125;
@@ -92,12 +98,31 @@ pub enum Error {
     MissingResult,
     #[error("Moonraker API returned an error")]
     Api,
+    #[error("invalid device path")]
+    InvalidDevicePath,
+    #[error("Moonraker response is missing a requested printer object")]
+    MissingObject,
+    #[error("Moonraker returned an unexpected state")]
+    UnexpectedState,
+    #[error("Moonraker operation timed out")]
+    Timeout,
+    #[error("Moonraker does not support {0}")]
+    Unsupported(&'static str),
+    #[error("invalid temperature target")]
+    InvalidTemperatureTarget,
+    #[error("invalid relative motion request")]
+    InvalidJog,
+    #[error("unknown speed profile")]
+    InvalidSpeedProfile,
+    #[error("local file operation failed")]
+    LocalIo(#[source] std::io::Error),
 }
 
 #[derive(Debug)]
 pub struct Client {
     profile: Profile,
     http: HttpClient,
+    transfer_http: HttpClient,
 }
 
 impl Client {
@@ -108,7 +133,17 @@ impl Client {
             .redirect(Policy::none())
             .build()
             .map_err(Error::Client)?;
-        Ok(Self { profile, http })
+        let transfer_http = ClientBuilder::new()
+            .connect_timeout(profile.timeout)
+            .danger_accept_invalid_certs(profile.insecure)
+            .redirect(Policy::none())
+            .build()
+            .map_err(Error::Client)?;
+        Ok(Self {
+            profile,
+            http,
+            transfer_http,
+        })
     }
 
     pub fn status(&self, access_code: Option<&str>) -> Result<Status, Error> {
@@ -156,6 +191,420 @@ impl Client {
             .append_pair("extruder", "")
             .append_pair("heater_bed", "")
             .append_pair("fan", "");
+        url
+    }
+
+    pub fn file_roots() -> Vec<FileRoot> {
+        vec![FileRoot {
+            name: "gcodes",
+            description: "Moonraker gcode storage",
+            writable: true,
+            metadata: BTreeMap::new(),
+        }]
+    }
+
+    pub fn file_list(
+        &self,
+        access_code: Option<&str>,
+        device_path: &str,
+        recursive: bool,
+    ) -> Result<FileList, Error> {
+        let device_path = normalize_device_path(device_path)?;
+        let mut entries: Vec<FileEntry> =
+            if recursive {
+                let files: Vec<Value> = self.json_request(
+                    Method::GET,
+                    "server/files/list",
+                    &[("root", "gcodes".into())],
+                    access_code,
+                )?;
+                files
+                    .iter()
+                    .filter_map(file_entry_from_list_item)
+                    .filter(|entry| under_device_path(&entry.path, &device_path))
+                    .collect()
+            } else {
+                let directory: DirectoryListing = self.json_request(
+                    Method::GET,
+                    "server/files/directory",
+                    &[("path", moonraker_path(&device_path))],
+                    access_code,
+                )?;
+                directory
+                    .dirs
+                    .iter()
+                    .filter_map(|item| file_entry_from_directory_item(item, &device_path, true))
+                    .chain(directory.files.iter().filter_map(|item| {
+                        file_entry_from_directory_item(item, &device_path, false)
+                    }))
+                    .collect()
+            };
+        entries.sort_by(|left, right| left.path.cmp(&right.path));
+        Ok(FileList { entries })
+    }
+
+    pub fn download_to(
+        &self,
+        access_code: Option<&str>,
+        device_path: &str,
+        destination: &mut dyn Write,
+    ) -> Result<u64, Error> {
+        let device_path = normalize_device_path(device_path)?;
+        let relative = device_path.trim_start_matches('/');
+        if relative.is_empty() {
+            return Err(Error::InvalidDevicePath);
+        }
+        let mut response = self.response(
+            &self.transfer_http,
+            Method::GET,
+            &format!("server/files/gcodes/{relative}"),
+            &[],
+            access_code,
+        )?;
+        std::io::copy(&mut response, destination).map_err(Error::LocalIo)
+    }
+
+    pub fn job_start(
+        &self,
+        access_code: Option<&str>,
+        device_path: &str,
+    ) -> Result<JobResult, Error> {
+        let device_path = normalize_device_path(device_path)?;
+        let filename = device_path.trim_start_matches('/');
+        if filename.is_empty() {
+            return Err(Error::InvalidDevicePath);
+        }
+        self.post(
+            "printer/print/start",
+            &[("filename", filename.to_owned())],
+            access_code,
+        )?;
+        self.wait_for_state(access_code, PrinterState::Printing)
+    }
+
+    pub fn job_pause(&self, access_code: Option<&str>) -> Result<JobResult, Error> {
+        self.post("printer/print/pause", &[], access_code)?;
+        self.wait_for_state(access_code, PrinterState::Paused)
+    }
+
+    pub fn job_resume(&self, access_code: Option<&str>) -> Result<JobResult, Error> {
+        self.post("printer/print/resume", &[], access_code)?;
+        self.wait_for_state(access_code, PrinterState::Printing)
+    }
+
+    pub fn job_cancel(&self, access_code: Option<&str>) -> Result<JobResult, Error> {
+        self.post("printer/print/cancel", &[], access_code)?;
+        self.wait_for_state(access_code, PrinterState::Idle)
+    }
+
+    pub fn emergency_stop(&self, access_code: Option<&str>) -> Result<(), Error> {
+        self.post("printer/emergency_stop", &[], access_code)
+    }
+
+    pub fn temperature_set(
+        &self,
+        access_code: Option<&str>,
+        targets: TemperatureTargets,
+    ) -> Result<TemperatureResult, Error> {
+        if targets.chamber_celsius.is_some() {
+            return Err(Error::Unsupported(
+                "stock Klipper has no portable chamber heater command",
+            ));
+        }
+        validate_temperature_targets(&targets)?;
+        if targets.nozzle_celsius.is_none() && targets.bed_celsius.is_none() {
+            return Err(Error::InvalidTemperatureTarget);
+        }
+
+        let mut objects = Vec::new();
+        if targets.nozzle_celsius.is_some() {
+            objects.push("extruder");
+        }
+        if targets.bed_celsius.is_some() {
+            objects.push("heater_bed");
+        }
+        let available = self.object_status(access_code, &objects)?;
+        if targets.nozzle_celsius.is_some() && !available.contains_key("extruder") {
+            return Err(Error::MissingObject);
+        }
+        if targets.bed_celsius.is_some() && !available.contains_key("heater_bed") {
+            return Err(Error::MissingObject);
+        }
+
+        let mut lines = Vec::new();
+        if let Some(nozzle) = targets.nozzle_celsius {
+            lines.push(format!("M104 S{nozzle}"));
+        }
+        if let Some(bed) = targets.bed_celsius {
+            lines.push(format!("M140 S{bed}"));
+        }
+        self.gcode(access_code, &lines.join("\n"))?;
+
+        let mut acknowledged = TemperatureTargets::default();
+        if targets.nozzle_celsius.is_some() {
+            acknowledged.nozzle_celsius =
+                Some(self.wait_for_temperature_target(access_code, "extruder")?);
+        }
+        if targets.bed_celsius.is_some() {
+            acknowledged.bed_celsius =
+                Some(self.wait_for_temperature_target(access_code, "heater_bed")?);
+        }
+        Ok(TemperatureResult {
+            targets: acknowledged,
+        })
+    }
+
+    pub fn motion_home(
+        &self,
+        access_code: Option<&str>,
+        axes: &[Axis],
+    ) -> Result<MotionResult, Error> {
+        let mut gcode = String::from("G28");
+        for axis in axes {
+            gcode.push(' ');
+            gcode.push(axis.letter());
+        }
+        self.gcode(access_code, &gcode)?;
+        Ok(MotionResult {
+            state: MotionState::Accepted,
+        })
+    }
+
+    pub fn motion_jog(
+        &self,
+        access_code: Option<&str>,
+        delta: JogDelta,
+    ) -> Result<MotionResult, Error> {
+        validate_jog(&delta)?;
+        let mut parts = Vec::new();
+        if let Some(x) = delta.x_millimeters {
+            parts.push(format!("X{x:.3}"));
+        }
+        if let Some(y) = delta.y_millimeters {
+            parts.push(format!("Y{y:.3}"));
+        }
+        if let Some(z) = delta.z_millimeters {
+            parts.push(format!("Z{z:.3}"));
+        }
+        if parts.is_empty() {
+            return Err(Error::InvalidJog);
+        }
+        parts.push(format!("F{}", delta.feedrate_mm_per_min));
+        let moved = self.gcode(access_code, &format!("G91\nG1 {}", parts.join(" ")));
+        let restored = self.gcode(access_code, "G90");
+        moved?;
+        restored?;
+        Ok(MotionResult {
+            state: MotionState::Accepted,
+        })
+    }
+
+    pub fn fan_set(
+        &self,
+        access_code: Option<&str>,
+        fan: &str,
+        speed_percent: u8,
+    ) -> Result<FanResult, Error> {
+        if fan != "partCooling" {
+            return Err(Error::Unsupported(
+                "stock Klipper only exposes the portable partCooling fan",
+            ));
+        }
+        let pwm = (u16::from(speed_percent) * 255 + 50) / 100;
+        self.gcode(access_code, &format!("M106 S{pwm}"))?;
+        self.wait_for_fan_speed(access_code, speed_percent)?;
+        Ok(FanResult {
+            fan: fan.to_owned(),
+            speed_percent,
+        })
+    }
+
+    pub fn speed_set(
+        &self,
+        access_code: Option<&str>,
+        speed_profile: &str,
+    ) -> Result<SpeedResult, Error> {
+        let percent = speed_percent(speed_profile).ok_or(Error::InvalidSpeedProfile)?;
+        self.gcode(access_code, &format!("M220 S{percent}"))?;
+        self.wait_for_speed_factor(access_code, percent)?;
+        Ok(SpeedResult {
+            speed_profile: speed_profile.to_owned(),
+        })
+    }
+
+    fn post(
+        &self,
+        endpoint: &str,
+        query: &[(&str, String)],
+        access_code: Option<&str>,
+    ) -> Result<(), Error> {
+        self.json_request::<Value>(Method::POST, endpoint, query, access_code)
+            .map(|_| ())
+    }
+
+    fn gcode(&self, access_code: Option<&str>, script: &str) -> Result<(), Error> {
+        self.post(
+            "printer/gcode/script",
+            &[("script", script.to_owned())],
+            access_code,
+        )
+    }
+
+    fn wait_for_state(
+        &self,
+        access_code: Option<&str>,
+        expected: PrinterState,
+    ) -> Result<JobResult, Error> {
+        let deadline = Instant::now() + self.profile.timeout;
+        loop {
+            let status = self.status(access_code)?;
+            if status.state == expected {
+                return Ok(JobResult { state: expected });
+            }
+            if status.state == PrinterState::Error {
+                return Err(Error::UnexpectedState);
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::Timeout);
+            }
+            thread::sleep(Duration::from_millis(300));
+        }
+    }
+
+    fn wait_for_temperature_target(
+        &self,
+        access_code: Option<&str>,
+        object: &str,
+    ) -> Result<f64, Error> {
+        let deadline = Instant::now() + self.profile.timeout;
+        loop {
+            let objects = self.object_status(access_code, &[object])?;
+            if let Some(target) = objects
+                .get(object)
+                .and_then(Value::as_object)
+                .and_then(|status| number(status, "target"))
+            {
+                return Ok(target);
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::Timeout);
+            }
+            thread::sleep(Duration::from_millis(300));
+        }
+    }
+
+    fn wait_for_fan_speed(&self, access_code: Option<&str>, expected: u8) -> Result<(), Error> {
+        let deadline = Instant::now() + self.profile.timeout;
+        loop {
+            let objects = self.object_status(access_code, &["fan"])?;
+            if objects
+                .get("fan")
+                .and_then(Value::as_object)
+                .and_then(|status| number(status, "speed"))
+                .is_some_and(|speed| (speed * 100.0 - f64::from(expected)).abs() <= 1.0)
+            {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::Timeout);
+            }
+            thread::sleep(Duration::from_millis(300));
+        }
+    }
+
+    fn wait_for_speed_factor(&self, access_code: Option<&str>, expected: u16) -> Result<(), Error> {
+        let deadline = Instant::now() + self.profile.timeout;
+        loop {
+            let objects = self.object_status(access_code, &["gcode_move"])?;
+            if objects
+                .get("gcode_move")
+                .and_then(Value::as_object)
+                .and_then(|status| number(status, "speed_factor"))
+                .is_some_and(|factor| (factor * 100.0 - f64::from(expected)).abs() < 0.5)
+            {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::Timeout);
+            }
+            thread::sleep(Duration::from_millis(300));
+        }
+    }
+
+    fn object_status(
+        &self,
+        access_code: Option<&str>,
+        objects: &[&str],
+    ) -> Result<BTreeMap<String, Value>, Error> {
+        let query = objects
+            .iter()
+            .map(|object| (*object, String::new()))
+            .collect::<Vec<_>>();
+        let payload: StatusPayload =
+            self.json_request(Method::GET, "printer/objects/query", &query, access_code)?;
+        Ok(payload.status)
+    }
+
+    fn json_request<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        endpoint: &str,
+        query: &[(&str, String)],
+        access_code: Option<&str>,
+    ) -> Result<T, Error> {
+        let response = self.response(&self.http, method, endpoint, query, access_code)?;
+        let body = read_response(response)?;
+        let envelope: Envelope =
+            serde_json::from_slice(&body).map_err(|_| Error::InvalidResponse)?;
+        if envelope.error.as_ref().is_some_and(|error| {
+            error.message.to_ascii_lowercase().contains("unauthorized")
+                || error.message.to_ascii_lowercase().contains("forbidden")
+        }) {
+            return Err(Error::Authentication);
+        }
+        if envelope.error.is_some() {
+            return Err(Error::Api);
+        }
+        serde_json::from_value(envelope.result.ok_or(Error::MissingResult)?)
+            .map_err(|_| Error::InvalidResponse)
+    }
+
+    fn response(
+        &self,
+        http: &HttpClient,
+        method: Method,
+        endpoint: &str,
+        query: &[(&str, String)],
+        access_code: Option<&str>,
+    ) -> Result<reqwest::blocking::Response, Error> {
+        let mut url = self.endpoint(endpoint);
+        {
+            let mut pairs = url.query_pairs_mut();
+            for (key, value) in query {
+                pairs.append_pair(key, value);
+            }
+        }
+        let mut request = http.request(method, url).header(ACCEPT, "application/json");
+        if let Some(access_code) = access_code.filter(|value| !value.is_empty()) {
+            let value = HeaderValue::from_str(access_code).map_err(|_| Error::InvalidAccessCode)?;
+            request = request.header("X-Api-Key", value);
+        }
+        let response = request.send().map_err(Error::Transport)?;
+        match response.status() {
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(Error::Authentication),
+            status if !status.is_success() => Err(Error::HttpStatus(status)),
+            _ => Ok(response),
+        }
+    }
+
+    fn endpoint(&self, endpoint: &str) -> Url {
+        let mut url = self.profile.base_url.clone();
+        let path = format!(
+            "{}/{}",
+            url.path().trim_end_matches('/'),
+            endpoint.trim_start_matches('/')
+        );
+        url.set_path(&path);
         url
     }
 }
@@ -266,6 +715,121 @@ pub struct Status {
     pub fans: BTreeMap<String, u8>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct FileRoot {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub writable: bool,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FileEntryType {
+    File,
+    Directory,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileEntry {
+    pub name: String,
+    pub root: &'static str,
+    pub path: String,
+    pub device_path: String,
+    #[serde(rename = "type")]
+    pub entry_type: FileEntryType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_at: Option<String>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct FileList {
+    pub entries: Vec<FileEntry>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MotionState {
+    Accepted,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct MotionResult {
+    pub state: MotionState,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemperatureTargets {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nozzle_celsius: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bed_celsius: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chamber_celsius: Option<f64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct TemperatureResult {
+    pub targets: TemperatureTargets,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct FanResult {
+    pub fan: String,
+    #[serde(rename = "speedPercent")]
+    pub speed_percent: u8,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeedResult {
+    pub speed_profile: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct JobResult {
+    pub state: PrinterState,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Axis {
+    X,
+    Y,
+    Z,
+}
+
+impl Axis {
+    fn letter(self) -> char {
+        match self {
+            Self::X => 'X',
+            Self::Y => 'Y',
+            Self::Z => 'Z',
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct JogDelta {
+    pub x_millimeters: Option<f64>,
+    pub y_millimeters: Option<f64>,
+    pub z_millimeters: Option<f64>,
+    pub feedrate_mm_per_min: u16,
+}
+
+#[derive(Deserialize)]
+struct DirectoryListing {
+    #[serde(default)]
+    dirs: Vec<Value>,
+    #[serde(default)]
+    files: Vec<Value>,
+}
+
 impl Status {
     fn from_objects(status: BTreeMap<String, Value>) -> Self {
         let state = map_state(&status);
@@ -285,6 +849,156 @@ impl Status {
             warnings,
             fans: map_fans(&status),
         }
+    }
+}
+
+fn normalize_device_path(value: &str) -> Result<String, Error> {
+    if value.contains('\0') || value.contains('\\') {
+        return Err(Error::InvalidDevicePath);
+    }
+    let trimmed = value.trim_matches('/');
+    if trimmed.is_empty() {
+        return Ok("/".into());
+    }
+    let segments = trimmed.split('/').collect::<Vec<_>>();
+    if segments
+        .iter()
+        .any(|segment| segment.is_empty() || matches!(*segment, "." | ".."))
+    {
+        return Err(Error::InvalidDevicePath);
+    }
+    Ok(format!("/{}", segments.join("/")))
+}
+
+fn moonraker_path(device_path: &str) -> String {
+    if device_path == "/" {
+        "gcodes".into()
+    } else {
+        format!("gcodes/{}", device_path.trim_start_matches('/'))
+    }
+}
+
+fn under_device_path(entry_path: &str, requested_path: &str) -> bool {
+    requested_path == "/"
+        || entry_path == requested_path
+        || entry_path
+            .strip_prefix(requested_path)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+fn file_entry_from_list_item(value: &Value) -> Option<FileEntry> {
+    let object = value.as_object()?;
+    let path = object.get("path")?.as_str()?;
+    file_entry(path, object, FileEntryType::File)
+}
+
+fn file_entry_from_directory_item(
+    value: &Value,
+    parent: &str,
+    directory: bool,
+) -> Option<FileEntry> {
+    let object = value.as_object()?;
+    let key = if directory { "dirname" } else { "filename" };
+    let path = object
+        .get(key)
+        .and_then(Value::as_str)
+        .map(|name| format!("{}/{}", parent.trim_end_matches('/'), name))
+        .or_else(|| {
+            object
+                .get("path")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })?;
+    file_entry(
+        &path,
+        object,
+        if directory {
+            FileEntryType::Directory
+        } else {
+            FileEntryType::File
+        },
+    )
+}
+
+fn file_entry(
+    raw_path: &str,
+    object: &Map<String, Value>,
+    entry_type: FileEntryType,
+) -> Option<FileEntry> {
+    let path = normalize_device_path(raw_path.strip_prefix("gcodes/").unwrap_or(raw_path)).ok()?;
+    let name = path.rsplit('/').next()?.to_owned();
+    if name.is_empty() {
+        return None;
+    }
+    let size_bytes = (entry_type == FileEntryType::File)
+        .then(|| object.get("size").and_then(json_i64))
+        .flatten();
+    let modified_at = object
+        .get("modified")
+        .and_then(json_i64)
+        .and_then(|seconds| OffsetDateTime::from_unix_timestamp(seconds).ok())
+        .and_then(|time| time.format(&Rfc3339).ok());
+    Some(FileEntry {
+        name,
+        root: "gcodes",
+        device_path: format!("gcodes:{path}"),
+        path,
+        entry_type,
+        size_bytes,
+        modified_at,
+        metadata: BTreeMap::new(),
+    })
+}
+
+fn json_i64(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| {
+            value
+                .as_f64()
+                .filter(|value| value.is_finite())
+                .map(|value| value as i64)
+        })
+        .or_else(|| value.as_str()?.parse().ok())
+}
+
+fn validate_temperature_targets(targets: &TemperatureTargets) -> Result<(), Error> {
+    validate_temperature(targets.nozzle_celsius, 300.0)?;
+    validate_temperature(targets.bed_celsius, 120.0)
+}
+
+fn validate_temperature(value: Option<f64>, maximum: f64) -> Result<(), Error> {
+    if value.is_some_and(|value| !value.is_finite() || !(0.0..=maximum).contains(&value)) {
+        return Err(Error::InvalidTemperatureTarget);
+    }
+    Ok(())
+}
+
+fn validate_jog(delta: &JogDelta) -> Result<(), Error> {
+    if delta.feedrate_mm_per_min == 0 || delta.feedrate_mm_per_min > 24_000 {
+        return Err(Error::InvalidJog);
+    }
+    for distance in [
+        delta.x_millimeters,
+        delta.y_millimeters,
+        delta.z_millimeters,
+    ] {
+        if distance
+            .is_some_and(|distance| !distance.is_finite() || !(-10.0..=10.0).contains(&distance))
+        {
+            return Err(Error::InvalidJog);
+        }
+    }
+    Ok(())
+}
+
+fn speed_percent(profile: &str) -> Option<u16> {
+    match profile {
+        "silent" => Some(20),
+        "standard" => Some(100),
+        "sport" => Some(150),
+        "ludicrous" => Some(300),
+        _ => None,
     }
 }
 
@@ -556,6 +1270,65 @@ mod tests {
         );
     }
 
+    #[test]
+    fn file_requests_reject_path_traversal_before_contacting_the_printer() {
+        let profile = Profile::new("http://127.0.0.1:9", false, DEFAULT_TIMEOUT).unwrap();
+        let client = Client::new(profile).unwrap();
+
+        assert!(matches!(
+            client.file_list(None, "/../moonraker.conf", false),
+            Err(Error::InvalidDevicePath)
+        ));
+    }
+
+    #[test]
+    fn file_listing_uses_the_gcodes_root_without_exposing_parent_paths() {
+        let (host, requests, server) = scripted_server(vec![
+            r#"{"result":{"dirs":[{"dirname":"models"}],"files":[{"filename":"cube.gcode","size":12,"modified":1700000000}]}}"#,
+        ]);
+        let client = Client::new(Profile::new(&host, false, DEFAULT_TIMEOUT).unwrap()).unwrap();
+
+        let listing = client.file_list(Some("api-key"), "/", false).unwrap();
+
+        server.join().unwrap();
+        let request = requests.recv().unwrap();
+        assert!(request.starts_with("GET /server/files/directory?path=gcodes "));
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("x-api-key: api-key\r\n")
+        );
+        assert_eq!(listing.entries.len(), 2);
+        assert_eq!(listing.entries[0].device_path, "gcodes:/cube.gcode");
+        assert_eq!(listing.entries[1].device_path, "gcodes:/models");
+        assert_eq!(listing.entries[0].size_bytes, Some(12));
+    }
+
+    #[test]
+    fn jog_restores_absolute_coordinates_after_an_accepted_move() {
+        let (host, requests, server) =
+            scripted_server(vec![r#"{"result":"ok"}"#, r#"{"result":"ok"}"#]);
+        let client = Client::new(Profile::new(&host, false, DEFAULT_TIMEOUT).unwrap()).unwrap();
+
+        let result = client
+            .motion_jog(
+                None,
+                JogDelta {
+                    x_millimeters: Some(1.0),
+                    feedrate_mm_per_min: 1500,
+                    ..JogDelta::default()
+                },
+            )
+            .unwrap();
+
+        server.join().unwrap();
+        let first = requests.recv().unwrap();
+        let second = requests.recv().unwrap();
+        assert_eq!(result.state, MotionState::Accepted);
+        assert!(first.contains("script=G91%0AG1+X1.000+F1500"));
+        assert!(second.contains("script=G90"));
+    }
+
     fn server(
         body: &'static str,
     ) -> (
@@ -583,5 +1356,36 @@ mod tests {
             .unwrap();
         });
         (host, request, server)
+    }
+
+    fn scripted_server(
+        bodies: Vec<&'static str>,
+    ) -> (
+        String,
+        std::sync::mpsc::Receiver<String>,
+        thread::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let host = format!("http://{}", listener.local_addr().unwrap());
+        let (sender, requests) = std::sync::mpsc::channel();
+        let server = thread::spawn(move || {
+            for body in bodies {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                let mut chunk = [0; 1024];
+                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    let read = stream.read(&mut chunk).unwrap();
+                    request.extend_from_slice(&chunk[..read]);
+                }
+                sender.send(String::from_utf8(request).unwrap()).unwrap();
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+            }
+        });
+        (host, requests, server)
     }
 }

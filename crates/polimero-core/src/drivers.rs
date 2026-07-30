@@ -217,6 +217,147 @@ pub fn status(
     }
 }
 
+pub fn file_roots(profile: &Profile) -> Result<Vec<moonraker::FileRoot>, DriverError> {
+    match profile {
+        Profile::Moonraker(_) => Ok(moonraker::Client::file_roots()),
+        Profile::Bambu(_) => Err(DriverError::UnsupportedOperation(
+            Driver::BambuLan,
+            Operation::FileList,
+        )),
+    }
+}
+
+pub fn file_list(
+    profile: &Profile,
+    access_code: Option<&str>,
+    device_path: &str,
+    recursive: bool,
+) -> Result<moonraker::FileList, DriverError> {
+    moonraker_client(profile, Operation::FileList)?
+        .file_list(access_code, device_path, recursive)
+        .map_err(DriverError::Moonraker)
+}
+
+pub fn download_to(
+    profile: &Profile,
+    access_code: Option<&str>,
+    device_path: &str,
+    destination: &mut dyn std::io::Write,
+) -> Result<u64, DriverError> {
+    moonraker_client(profile, Operation::FileDownload)?
+        .download_to(access_code, device_path, destination)
+        .map_err(DriverError::Moonraker)
+}
+
+pub fn job_start(
+    profile: &Profile,
+    access_code: Option<&str>,
+    device_path: &str,
+) -> Result<moonraker::JobResult, DriverError> {
+    moonraker_client(profile, Operation::JobStart)?
+        .job_start(access_code, device_path)
+        .map_err(DriverError::Moonraker)
+}
+
+pub fn job_pause(
+    profile: &Profile,
+    access_code: Option<&str>,
+) -> Result<moonraker::JobResult, DriverError> {
+    moonraker_client(profile, Operation::JobPause)?
+        .job_pause(access_code)
+        .map_err(DriverError::Moonraker)
+}
+
+pub fn job_resume(
+    profile: &Profile,
+    access_code: Option<&str>,
+) -> Result<moonraker::JobResult, DriverError> {
+    moonraker_client(profile, Operation::JobResume)?
+        .job_resume(access_code)
+        .map_err(DriverError::Moonraker)
+}
+
+pub fn job_cancel(
+    profile: &Profile,
+    access_code: Option<&str>,
+) -> Result<moonraker::JobResult, DriverError> {
+    moonraker_client(profile, Operation::JobCancel)?
+        .job_cancel(access_code)
+        .map_err(DriverError::Moonraker)
+}
+
+pub fn emergency_stop(profile: &Profile, access_code: Option<&str>) -> Result<(), DriverError> {
+    moonraker_client(profile, Operation::EmergencyStop)?
+        .emergency_stop(access_code)
+        .map_err(DriverError::Moonraker)
+}
+
+pub fn temperature_set(
+    profile: &Profile,
+    access_code: Option<&str>,
+    targets: moonraker::TemperatureTargets,
+) -> Result<moonraker::TemperatureResult, DriverError> {
+    moonraker_client(profile, Operation::TemperatureSet)?
+        .temperature_set(access_code, targets)
+        .map_err(DriverError::Moonraker)
+}
+
+pub fn motion_home(
+    profile: &Profile,
+    access_code: Option<&str>,
+    axes: &[moonraker::Axis],
+) -> Result<moonraker::MotionResult, DriverError> {
+    moonraker_client(profile, Operation::MotionHome)?
+        .motion_home(access_code, axes)
+        .map_err(DriverError::Moonraker)
+}
+
+pub fn motion_jog(
+    profile: &Profile,
+    access_code: Option<&str>,
+    delta: moonraker::JogDelta,
+) -> Result<moonraker::MotionResult, DriverError> {
+    moonraker_client(profile, Operation::MotionJog)?
+        .motion_jog(access_code, delta)
+        .map_err(DriverError::Moonraker)
+}
+
+pub fn fan_set(
+    profile: &Profile,
+    access_code: Option<&str>,
+    fan: &str,
+    speed_percent: u8,
+) -> Result<moonraker::FanResult, DriverError> {
+    moonraker_client(profile, Operation::FanSet)?
+        .fan_set(access_code, fan, speed_percent)
+        .map_err(DriverError::Moonraker)
+}
+
+pub fn speed_set(
+    profile: &Profile,
+    access_code: Option<&str>,
+    speed_profile: &str,
+) -> Result<moonraker::SpeedResult, DriverError> {
+    moonraker_client(profile, Operation::SpeedSet)?
+        .speed_set(access_code, speed_profile)
+        .map_err(DriverError::Moonraker)
+}
+
+fn moonraker_client(
+    profile: &Profile,
+    operation: Operation,
+) -> Result<moonraker::Client, DriverError> {
+    match profile {
+        Profile::Moonraker(profile) => {
+            moonraker::Client::new(profile.clone()).map_err(DriverError::Moonraker)
+        }
+        Profile::Bambu(_) => Err(DriverError::UnsupportedOperation(
+            Driver::BambuLan,
+            operation,
+        )),
+    }
+}
+
 fn parse_timeout(value: &str) -> Result<Duration, DriverError> {
     let (amount, unit) = value
         .trim()
