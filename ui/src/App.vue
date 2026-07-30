@@ -343,41 +343,42 @@ async function removePrinter() {
       cameraError.value = undefined;
     }
 
-    async function openTlsRefresh() {
-      if (!selectedPrinter.value || tlsRefreshing.value) return;
-      tlsRefreshing.value = true;
-      tlsError.value = undefined;
-      tlsFingerprint.value = undefined;
-      try {
-        tlsFingerprint.value = await invoke<string>("preview_printer_tls", { name: selectedPrinter.value.name });
-        tlsOpen.value = true;
-      } catch (reason) {
-        workspaceError.value = message(reason);
-      } finally {
-        tlsRefreshing.value = false;
-      }
-    }
-
-    async function refreshTls() {
-      if (!selectedPrinter.value || !tlsFingerprint.value || tlsRefreshing.value) return;
-      tlsRefreshing.value = true;
-      tlsError.value = undefined;
-      try {
-        await invoke("refresh_printer_tls", {
-          request: { name: selectedPrinter.value.name, fingerprint: tlsFingerprint.value, confirmed: true }
-        });
-        tlsOpen.value = false;
-        await refreshMonitoring();
-      } catch (reason) {
-        tlsError.value = message(reason);
-      } finally {
-        tlsRefreshing.value = false;
-      }
-    }
   } catch (reason) {
     removalError.value = message(reason);
   } finally {
     removing.value = false;
+  }
+}
+
+async function openTlsRefresh() {
+  if (!selectedPrinter.value || tlsRefreshing.value) return;
+  tlsRefreshing.value = true;
+  tlsError.value = undefined;
+  tlsFingerprint.value = undefined;
+  try {
+    tlsFingerprint.value = await invoke<string>("preview_printer_tls", { name: selectedPrinter.value.name });
+    tlsOpen.value = true;
+  } catch (reason) {
+    workspaceError.value = message(reason);
+  } finally {
+    tlsRefreshing.value = false;
+  }
+}
+
+async function refreshTls() {
+  if (!selectedPrinter.value || !tlsFingerprint.value || tlsRefreshing.value) return;
+  tlsRefreshing.value = true;
+  tlsError.value = undefined;
+  try {
+    await invoke("refresh_printer_tls", {
+      request: { name: selectedPrinter.value.name, fingerprint: tlsFingerprint.value, confirmed: true }
+    });
+    tlsOpen.value = false;
+    await refreshMonitoring();
+  } catch (reason) {
+    tlsError.value = message(reason);
+  } finally {
+    tlsRefreshing.value = false;
   }
 }
 
