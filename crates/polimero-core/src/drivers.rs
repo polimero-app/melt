@@ -27,6 +27,30 @@ pub enum Driver {
     Moonraker,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Capabilities {
+    pub status: bool,
+    pub discovery: bool,
+    pub camera_stream: bool,
+    pub camera_snapshot: bool,
+    pub file_list: bool,
+    pub file_download: bool,
+    pub file_upload: bool,
+    pub job_start: bool,
+    pub job_pause: bool,
+    pub job_resume: bool,
+    pub job_cancel: bool,
+    pub emergency_stop: bool,
+    pub temperature_read: bool,
+    pub temperature_write: bool,
+    pub motion_control: bool,
+    pub tls_refresh: bool,
+    pub fan_control: bool,
+    pub light_control: bool,
+    pub speed_control: bool,
+}
+
 impl Driver {
     pub fn parse(name: &str) -> Result<Self, DriverError> {
         match name {
@@ -44,10 +68,50 @@ impl Driver {
     }
 
     pub fn supports(self, operation: Operation) -> bool {
-        matches!(
-            (self, operation),
-            (Self::Moonraker, Operation::Status | Operation::Verify)
-        )
+        match operation {
+            Operation::Status | Operation::Verify => self.capabilities().status,
+            Operation::Discovery => self.capabilities().discovery,
+            Operation::CameraStream => self.capabilities().camera_stream,
+            Operation::CameraSnapshot => self.capabilities().camera_snapshot,
+            Operation::FileList => self.capabilities().file_list,
+            Operation::FileDownload => self.capabilities().file_download,
+            Operation::FileUpload => self.capabilities().file_upload,
+            Operation::JobStart => self.capabilities().job_start,
+            Operation::JobPause => self.capabilities().job_pause,
+            Operation::JobResume => self.capabilities().job_resume,
+            Operation::JobCancel => self.capabilities().job_cancel,
+            Operation::EmergencyStop => self.capabilities().emergency_stop,
+            Operation::TemperatureSet => self.capabilities().temperature_write,
+            Operation::MotionHome | Operation::MotionJog => self.capabilities().motion_control,
+            Operation::TlsRefresh => self.capabilities().tls_refresh,
+            Operation::FanSet => self.capabilities().fan_control,
+            Operation::LightSet => self.capabilities().light_control,
+            Operation::SpeedSet => self.capabilities().speed_control,
+        }
+    }
+
+    pub fn capabilities(self) -> Capabilities {
+        match self {
+            // Bambu LAN operations require the MQTT/TLS transport, which is
+            // intentionally not claimed until that transport exists.
+            Self::BambuLan => Capabilities::default(),
+            Self::Moonraker => Capabilities {
+                status: true,
+                file_list: true,
+                file_download: true,
+                job_start: true,
+                job_pause: true,
+                job_resume: true,
+                job_cancel: true,
+                emergency_stop: true,
+                temperature_read: true,
+                temperature_write: true,
+                motion_control: true,
+                fan_control: true,
+                speed_control: true,
+                ..Capabilities::default()
+            },
+        }
     }
 }
 
@@ -61,6 +125,24 @@ impl fmt::Display for Driver {
 pub enum Operation {
     Status,
     Verify,
+    Discovery,
+    CameraStream,
+    CameraSnapshot,
+    FileList,
+    FileDownload,
+    FileUpload,
+    JobStart,
+    JobPause,
+    JobResume,
+    JobCancel,
+    EmergencyStop,
+    TemperatureSet,
+    MotionHome,
+    MotionJog,
+    TlsRefresh,
+    FanSet,
+    LightSet,
+    SpeedSet,
 }
 
 #[derive(Clone, Debug)]
@@ -230,5 +312,22 @@ mod tests {
         config.driver = "moonraker".into();
         config.timeout = "0s".into();
         assert!(matches!(profile(&config), Err(DriverError::InvalidTimeout)));
+    }
+
+    #[test]
+    fn moonraker_advertises_only_operations_implemented_by_the_http_driver() {
+        let capabilities = Driver::Moonraker.capabilities();
+
+        assert!(capabilities.status);
+        assert!(capabilities.file_list);
+        assert!(capabilities.file_download);
+        assert!(capabilities.job_start);
+        assert!(capabilities.temperature_write);
+        assert!(capabilities.motion_control);
+        assert!(capabilities.fan_control);
+        assert!(capabilities.speed_control);
+        assert!(!capabilities.camera_snapshot);
+        assert!(!capabilities.camera_stream);
+        assert!(!capabilities.light_control);
     }
 }
