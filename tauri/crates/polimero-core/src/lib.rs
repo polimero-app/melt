@@ -1,5 +1,7 @@
 //! UI-agnostic Polimero domain types.
 
+pub mod config;
+
 use serde::Serialize;
 use thiserror::Error;
 
