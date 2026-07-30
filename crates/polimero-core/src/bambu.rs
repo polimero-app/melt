@@ -1,7 +1,7 @@
 //! Bambu Lab LAN profile validation and MQTT protocol primitives.
 //!
-//! This module intentionally does not open network connections. Transport code
-//! can use these values with an MQTT/TLS client when one is available.
+//! This module intentionally implements neither MQTT/TLS transport nor printer
+//! commands. Transport code can use these values when one is available.
 
 use std::{net::IpAddr, str::FromStr};
 
