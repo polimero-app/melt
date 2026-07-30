@@ -10,3 +10,5 @@ compatibility gates.
   a no-argument launch.
 - `ui` contains the Vue, TypeScript, Tailwind CSS, and Headless UI frontend.
 
+Run `make ui-install` once, then use `make build`, `make test`, `make lint`,
+or `make ci`.
