@@ -30,4 +30,6 @@ represented as working controls until their driver prerequisites exist.
 The desktop polls configured profiles locally every five seconds while open;
 failed profiles back off independently to one minute. It offers a redacted
 diagnostics report. Release tags run native installer builds for the required
-OS/architecture matrix and require frozen release evidence.
+OS/architecture matrix and require frozen release evidence. See
+[`docs/release-qualification.md`](docs/release-qualification.md) for the
+automated gate and the external/manual evidence that it cannot replace.

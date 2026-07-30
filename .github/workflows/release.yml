@@ -43,11 +43,14 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev rpm
-      - run: npm --prefix ui ci
-      - name: Verify headless release gate
+          sudo apt-get install --yes \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev rpm
+      - name: Verify automated release qualification
         if: runner.os == 'Linux'
-        run: make release-gate
+        run: make release-qualification
+      - run: npm --prefix ui ci
+        if: runner.os != 'Linux'
       - run: npm --prefix ui run build
       - name: Install Tauri CLI
         run: cargo install tauri-cli --locked
@@ -61,10 +64,9 @@ jobs:
 
   release-evidence:
     if: startsWith(github.ref, 'refs/tags/')
+    needs: package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Require frozen release evidence
-        run: |
-          test -f "docs/releases/${GITHUB_REF_NAME}/release-packaging-checklist.md"
-          test -f "docs/releases/${GITHUB_REF_NAME}/updater-verification-report.md"
+        run: make release-evidence RELEASE_TAG="${GITHUB_REF_NAME}"

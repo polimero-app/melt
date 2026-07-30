@@ -1,4 +1,4 @@
-.PHONY: build test lint ci contract release-gate cargo-build cargo-test cargo-lint ui-install ui-build ui-test
+.PHONY: build test lint ci contract release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test
 
 build: cargo-build ui-build
 
@@ -12,8 +12,27 @@ contract:
 	cargo test -p polimero-cli --test contract_fixtures --locked
 
 release-gate: contract cargo-build
+	$(MAKE) release-cli-check
+
+release-cli-check:
 	POLIMERO_CONFIG_DIR="$(CURDIR)/fixtures/cli-contract/config/empty" \
 		./target/debug/polimero version --output json
+
+release-qualification: ci release-cli-check
+
+release-evidence:
+	test -n "$(RELEASE_TAG)"
+	for file in release-packaging-checklist.md updater-verification-report.md; do \
+		path="docs/releases/$(RELEASE_TAG)/$$file"; \
+		test -f "$$path"; \
+		grep -Fqx "Release tag: $(RELEASE_TAG)" "$$path"; \
+		grep -Eq "^Commit: .+" "$$path"; \
+		grep -Eq "^Workflow: .+" "$$path"; \
+		grep -Fqx "## Automated checks" "$$path"; \
+		grep -Fqx "## External/manual evidence" "$$path"; \
+		grep -Fq -- "- [x]" "$$path"; \
+		! grep -Fq -- "- [ ]" "$$path"; \
+	done
 
 cargo-build:
 	cargo build --workspace --locked
