@@ -6,10 +6,11 @@ compatibility gates.
 
 ## Running on Linux Wayland
 
-Use `make run` during development. On a Wayland session that also provides
-XWayland, it starts GTK with `GDK_BACKEND=x11` and disables WebKit DMA-BUF
-rendering before the process loads, which avoids compositor protocol failures
-and GBM buffer warnings. To run a built binary directly, use:
+Use `make run` during development. It starts the Vue dev server before the
+desktop process. On a Wayland session that also provides XWayland, it starts
+GTK with `GDK_BACKEND=x11` and disables WebKit DMA-BUF rendering before the
+process loads, which avoids compositor protocol failures and GBM buffer
+warnings. To run a built binary directly, use:
 
 ```sh
 GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 ./target/debug/polimero
