@@ -67,6 +67,9 @@ export type MessageKey =
   | "dashboard.noJob"
   | "dashboard.temperature"
   | "dashboard.cameraUnavailable"
+  | "dashboard.cameraPreview"
+  | "dashboard.cameraStream"
+  | "dashboard.cameraSnapshot"
   | "dashboard.files"
   | "dashboard.loadFiles"
   | "dashboard.noFiles"
@@ -167,6 +170,9 @@ const messages: Record<Locale, Messages> = {
     "dashboard.noJob": "No active print",
     "dashboard.temperature": "Temperatures",
     "dashboard.cameraUnavailable": "Camera media is unavailable until this driver has a verified camera transport.",
+    "dashboard.cameraPreview": "Camera preview is not running.",
+    "dashboard.cameraStream": "Start live view",
+    "dashboard.cameraSnapshot": "Capture snapshot",
     "dashboard.files": "Printer files",
     "dashboard.loadFiles": "Load files",
     "dashboard.noFiles": "No files reported in the gcodes root.",
@@ -264,6 +270,9 @@ const messages: Record<Locale, Messages> = {
     "dashboard.noJob": "Nenhuma impressão ativa",
     "dashboard.temperature": "Temperaturas",
     "dashboard.cameraUnavailable": "A mídia da câmera não está disponível até que este driver tenha um transporte de câmera verificado.",
+    "dashboard.cameraPreview": "A prévia da câmera não está em execução.",
+    "dashboard.cameraStream": "Iniciar visualização ao vivo",
+    "dashboard.cameraSnapshot": "Capturar imagem",
     "dashboard.files": "Arquivos da impressora",
     "dashboard.loadFiles": "Carregar arquivos",
     "dashboard.noFiles": "Nenhum arquivo foi informado na raiz gcodes.",

@@ -12,6 +12,14 @@ fn package_configuration_keeps_the_native_artifact_and_cli_contracts() {
     assert_eq!(config["identifier"], "app.polimero");
     assert_eq!(config["bundle"]["active"], true);
     assert_eq!(config["bundle"]["targets"], "all");
+    assert_eq!(
+        config["bundle"]["linux"]["deb"]["depends"],
+        serde_json::json!(["ffmpeg"])
+    );
+    assert_eq!(
+        config["bundle"]["linux"]["rpm"]["depends"],
+        serde_json::json!(["ffmpeg"])
+    );
     assert_eq!(config["app"]["windows"][0]["minWidth"], 1280);
     assert_eq!(config["app"]["windows"][0]["minHeight"], 800);
 

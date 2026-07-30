@@ -88,6 +88,14 @@ type Diagnostics = {
   protocolTracesIncluded: boolean;
 };
 
+type CameraSnapshot = {
+  dataUrl: string;
+};
+
+type CameraStream = {
+  url: string;
+};
+
 const info = ref<AppInfo>();
 const printers = ref<Printer[]>([]);
 const drivers = ref<Driver[]>([]);
@@ -117,6 +125,9 @@ const actionError = ref<string>();
 const diagnosticsOpen = ref(false);
 const diagnostics = ref<Diagnostics>();
 const diagnosticsError = ref<string>();
+const cameraUrl = ref<string>();
+const cameraLoading = ref(false);
+const cameraError = ref<string>();
 const locale = ref<Locale>(preferredLocale());
 let monitorTimer: number | undefined;
 
@@ -173,6 +184,8 @@ async function load() {
       capabilities.value = undefined;
       monitoring.value = [];
       files.value = [];
+      cameraUrl.value = undefined;
+      cameraError.value = undefined;
     }
   } else profileError.value = message(profiles.reason);
 
@@ -199,6 +212,8 @@ async function selectPrinter(printer: Printer, refresh = true) {
   selectedPrinter.value = printer;
   capabilities.value = undefined;
   files.value = [];
+  cameraUrl.value = undefined;
+  cameraError.value = undefined;
   workspaceError.value = undefined;
   try {
     const result = await invoke<{ capabilities: Capabilities }>("printer_capabilities", { name: printer.name });
@@ -286,6 +301,8 @@ async function removePrinter() {
       selectedPrinter.value = undefined;
       capabilities.value = undefined;
       files.value = [];
+      cameraUrl.value = undefined;
+      cameraError.value = undefined;
     }
   } catch (reason) {
     removalError.value = message(reason);
@@ -372,6 +389,37 @@ async function emergencyStop() {
     await refreshMonitoring();
   } catch (reason) {
     workspaceError.value = message(reason);
+  }
+}
+
+async function loadCamera() {
+  if (!selectedPrinter.value || cameraLoading.value) return;
+  cameraLoading.value = true;
+  cameraError.value = undefined;
+  try {
+    if (capabilities.value?.cameraStream) {
+      cameraUrl.value = (await invoke<CameraStream>("printer_camera_stream", { name: selectedPrinter.value.name })).url;
+    } else if (capabilities.value?.cameraSnapshot) {
+      cameraUrl.value = (await invoke<CameraSnapshot>("printer_camera_snapshot", { name: selectedPrinter.value.name })).dataUrl;
+    }
+  } catch (reason) {
+    cameraUrl.value = undefined;
+    cameraError.value = message(reason);
+  } finally {
+    cameraLoading.value = false;
+  }
+}
+
+async function captureSnapshot() {
+  if (!selectedPrinter.value || cameraLoading.value || !capabilities.value?.cameraSnapshot) return;
+  cameraLoading.value = true;
+  cameraError.value = undefined;
+  try {
+    cameraUrl.value = (await invoke<CameraSnapshot>("printer_camera_snapshot", { name: selectedPrinter.value.name })).dataUrl;
+  } catch (reason) {
+    cameraError.value = message(reason);
+  } finally {
+    cameraLoading.value = false;
   }
 }
 
@@ -493,7 +541,17 @@ onUnmounted(() => {
           </div>
 
           <div class="capability-grid">
-            <article class="capability-card muted">
+            <article v-if="capabilities?.cameraStream || capabilities?.cameraSnapshot" class="capability-card camera-card">
+              <p class="eyebrow">CAMERA</p>
+              <img v-if="cameraUrl" :src="cameraUrl" :alt="t('dashboard.cameraPreview')" />
+              <span v-else>{{ t("dashboard.cameraPreview") }}</span>
+              <span v-if="cameraError" class="error">{{ cameraError }}</span>
+              <div class="control-actions">
+                <button type="button" :disabled="cameraLoading" @click="loadCamera">{{ cameraLoading ? t("common.loading") : t("dashboard.cameraStream") }}</button>
+                <button v-if="capabilities.cameraSnapshot" type="button" :disabled="cameraLoading" @click="captureSnapshot">{{ t("dashboard.cameraSnapshot") }}</button>
+              </div>
+            </article>
+            <article v-else class="capability-card muted">
               <p class="eyebrow">CAMERA</p>
               <span>{{ t("dashboard.cameraUnavailable") }}</span>
             </article>

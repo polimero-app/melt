@@ -1,5 +1,13 @@
-use std::{collections::BTreeMap, sync::Mutex, time::Instant};
+use std::{
+    collections::BTreeMap,
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
+    sync::Mutex,
+    thread,
+    time::{Duration, Instant},
+};
 
+use base64::{Engine, engine::general_purpose::STANDARD};
 use polimero_core::{
     AppInfo,
     config::{Config, ConfigError, Profile, config_dir},
@@ -26,6 +34,7 @@ struct PrinterSummary {
 struct DesktopPrinter {
     driver: drivers::Profile,
     access_code: Option<String>,
+    tls_fingerprint: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -33,6 +42,18 @@ struct DesktopPrinter {
 struct PrinterCapabilities {
     name: String,
     capabilities: Capabilities,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CameraSnapshot {
+    data_url: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CameraStream {
+    url: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -367,6 +388,97 @@ fn printer_emergency_stop(name: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn printer_camera_snapshot(name: String) -> Result<CameraSnapshot, String> {
+    let printer = desktop_printer(&name, Operation::CameraSnapshot)?;
+    let image = drivers::camera_snapshot(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+        Duration::from_secs(10),
+    )
+    .map_err(|error| operation_error(error, "camera snapshot"))?;
+    Ok(CameraSnapshot {
+        data_url: format!("data:image/jpeg;base64,{}", STANDARD.encode(image)),
+    })
+}
+
+#[tauri::command]
+fn printer_camera_stream(name: String) -> Result<CameraStream, String> {
+    let printer = desktop_printer(&name, Operation::CameraStream)?;
+    let stream = drivers::camera_stream(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+        Duration::from_secs(10),
+    )
+    .map_err(|error| operation_error(error, "camera stream"))?;
+    start_camera_server(stream).map(|url| CameraStream { url })
+}
+
+fn start_camera_server(mut stream: Box<dyn Read + Send>) -> Result<String, String> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .map_err(|_| "Camera preview is unavailable.".to_string())?;
+    let address = listener
+        .local_addr()
+        .map_err(|_| "Camera preview is unavailable.".to_string())?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|_| "Camera preview is unavailable.".to_string())?;
+    thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while Instant::now() < deadline {
+            match listener.accept() {
+                Ok((socket, _)) => {
+                    proxy_camera_stream(&mut stream, socket);
+                    return;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(25));
+                }
+                Err(_) => return,
+            }
+        }
+    });
+    Ok(format!("http://127.0.0.1:{}/stream", address.port()))
+}
+
+fn proxy_camera_stream(stream: &mut dyn Read, mut socket: TcpStream) {
+    let _ = socket.set_read_timeout(Some(Duration::from_secs(5)));
+    let mut request = [0; 4096];
+    let read = socket.read(&mut request).unwrap_or_default();
+    if !camera_preview_request(&request[..read]) {
+        let _ = socket.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
+        return;
+    }
+    if socket
+        .write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
+        )
+        .is_ok()
+    {
+        let _ = std::io::copy(stream, &mut socket);
+    }
+}
+
+fn camera_preview_request(request: &[u8]) -> bool {
+    let Ok(request) = std::str::from_utf8(request) else {
+        return false;
+    };
+    if !request.starts_with("GET /stream ") {
+        return false;
+    }
+    request.lines().any(|line| {
+        let Some(host) = line.strip_prefix("Host:") else {
+            return false;
+        };
+        matches!(
+            host.trim().split(':').next(),
+            Some("127.0.0.1") | Some("localhost")
+        )
+    })
+}
+
+#[tauri::command]
 fn diagnostics_report() -> Result<diagnostics::Report, String> {
     Config::load()
         .map(|config| {
@@ -396,9 +508,18 @@ fn desktop_printer(name: &str, operation: Operation) -> Result<DesktopPrinter, S
         ));
     }
     let access_code = access_code(&profile.driver, &name, driver_kind)?;
+    let tls_fingerprint = if driver_kind == drivers::Driver::BambuLan && !profile.insecure {
+        SystemKeychain
+            .get(SERVICE, &account(&profile.driver, &name, "tls-fingerprint"))
+            .map(Some)
+            .map_err(|_| "Camera TLS credentials are unavailable.".to_string())?
+    } else {
+        None
+    };
     Ok(DesktopPrinter {
         driver,
         access_code,
+        tls_fingerprint,
     })
 }
 
@@ -440,6 +561,8 @@ fn operation_name(operation: Operation) -> &'static str {
         Operation::JobCancel => "cancelling jobs",
         Operation::JobStart => "starting jobs",
         Operation::EmergencyStop => "emergency stop",
+        Operation::CameraSnapshot => "camera snapshots",
+        Operation::CameraStream => "camera streaming",
         Operation::TemperatureSet => "temperature control",
         Operation::FanSet => "fan control",
         Operation::MotionHome => "motion control",
@@ -465,6 +588,14 @@ fn operation_error(error: DriverError, operation: &str) -> String {
             format!("This driver does not support {operation}.")
         }
         DriverError::Moonraker(_) => format!("Printer {operation} failed."),
+        DriverError::Camera(polimero_core::bambu::CameraError::MissingAccessCode) => {
+            "Camera authentication is unavailable.".into()
+        }
+        DriverError::Camera(polimero_core::bambu::CameraError::Pin(_))
+        | DriverError::Camera(polimero_core::bambu::CameraError::MissingCertificate) => {
+            "Camera TLS verification failed.".into()
+        }
+        DriverError::Camera(_) => format!("Printer {operation} failed."),
     }
 }
 
@@ -500,9 +631,32 @@ fn main() {
             printer_fan_set,
             printer_motion_home,
             printer_emergency_stop,
+            printer_camera_snapshot,
+            printer_camera_stream,
             diagnostics_report,
             remove_configured_printer
         ])
         .run(tauri::generate_context!())
         .expect("error while running Polimero");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::camera_preview_request;
+
+    #[test]
+    fn camera_preview_accepts_only_loopback_stream_requests() {
+        assert!(camera_preview_request(
+            b"GET /stream HTTP/1.1\r\nHost: 127.0.0.1:4000\r\n\r\n"
+        ));
+        assert!(camera_preview_request(
+            b"GET /stream HTTP/1.1\r\nHost: localhost:4000\r\n\r\n"
+        ));
+        assert!(!camera_preview_request(
+            b"GET /stream HTTP/1.1\r\nHost: printer.example\r\n\r\n"
+        ));
+        assert!(!camera_preview_request(
+            b"GET /other HTTP/1.1\r\nHost: 127.0.0.1:4000\r\n\r\n"
+        ));
+    }
 }

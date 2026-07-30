@@ -23,9 +23,12 @@ speed controls through the shared core. State-changing CLI commands require
 `--yes` outside a terminal; the desktop requires a confirmation before job
 actions and keeps emergency stop immediate.
 
-Camera media, discovery, TLS fingerprint refresh, Bambu LAN transport, and
-generic Klipper light control remain explicit capability errors. They are not
-represented as working controls until their driver prerequisites exist.
+Bambu LAN camera media uses its authenticated TLS MJPEG endpoint: the desktop
+can proxy a real live stream or capture a real snapshot only when that
+capability is available. The Linux packages declare the FFmpeg runtime used by
+the baseline media policy. Discovery, TLS fingerprint refresh, Bambu LAN
+control transport, and generic Klipper light control remain explicit capability
+errors.
 
 The desktop polls configured profiles locally every five seconds while open;
 failed profiles back off independently to one minute. It offers a redacted

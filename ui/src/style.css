@@ -180,6 +180,7 @@ dd { margin: .7rem 0 0; }
 .capability-card { min-height: 8.5rem; }
 .capability-card > span { color: #c6c9bc; font-size: .88rem; line-height: 1.45; }
 .capability-card.muted { border-left: 3px solid #46524d; }
+.camera-card img { width: 100%; max-height: 15rem; object-fit: contain; background: #121815; }
 .capability-card button, .control-actions button {
   justify-self: start;
   border: 1px solid #d8a732;

@@ -18,12 +18,20 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data: http://127.0.0.1"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": []
+    "icon": [],
+    "linux": {
+      "deb": {
+        "depends": ["ffmpeg"]
+      },
+      "rpm": {
+        "depends": ["ffmpeg"]
+      }
+    }
   }
 }
