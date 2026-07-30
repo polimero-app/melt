@@ -3,6 +3,7 @@
 pub mod config;
 pub mod drivers;
 pub mod keychain;
+pub mod profiles;
 
 use serde::Serialize;
 use thiserror::Error;
