@@ -947,7 +947,7 @@ impl Status {
 }
 
 fn normalize_device_path(value: &str) -> Result<String, Error> {
-    if value.contains('\0') || value.contains('\\') {
+    if value.contains('\0') || value.contains('\\') || value.chars().any(char::is_control) {
         return Err(Error::InvalidDevicePath);
     }
     let trimmed = value.trim_matches('/');
@@ -1369,10 +1369,15 @@ mod tests {
         let profile = Profile::new("http://127.0.0.1:9", false, DEFAULT_TIMEOUT).unwrap();
         let client = Client::new(profile).unwrap();
 
-        assert!(matches!(
-            client.file_list(None, "/../moonraker.conf", false),
-            Err(Error::InvalidDevicePath)
-        ));
+        for path in ["/../moonraker.conf", "/unsafe\nname.gcode"] {
+            assert!(
+                matches!(
+                    client.file_list(None, path, false),
+                    Err(Error::InvalidDevicePath)
+                ),
+                "{path:?}"
+            );
+        }
     }
 
     #[test]
