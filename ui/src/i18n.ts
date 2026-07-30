@@ -72,6 +72,7 @@ export type MessageKey =
   | "dashboard.noFiles"
   | "dashboard.fileCount"
   | "dashboard.jobs"
+  | "dashboard.print"
   | "dashboard.pause"
   | "dashboard.resume"
   | "dashboard.cancel"
@@ -80,6 +81,13 @@ export type MessageKey =
   | "dashboard.monitoring"
   | "dashboard.monitoringError"
   | "dashboard.cliOnly"
+  | "dashboard.nozzle"
+  | "dashboard.bed"
+  | "dashboard.decrease"
+  | "dashboard.increase"
+  | "dashboard.fan"
+  | "dashboard.motion"
+  | "dashboard.home"
   | "job.title"
   | "job.description"
   | "job.confirm"
@@ -164,6 +172,7 @@ const messages: Record<Locale, Messages> = {
     "dashboard.noFiles": "No files reported in the gcodes root.",
     "dashboard.fileCount": "{count} file entries",
     "dashboard.jobs": "Print controls",
+    "dashboard.print": "Print",
     "dashboard.pause": "Pause",
     "dashboard.resume": "Resume",
     "dashboard.cancel": "Cancel print",
@@ -172,6 +181,13 @@ const messages: Record<Locale, Messages> = {
     "dashboard.monitoring": "Configured printer monitor · 5 second local refresh",
     "dashboard.monitoringError": "No live status",
     "dashboard.cliOnly": "File transfer and advanced motion remain available from the CLI until native file selection is integrated.",
+    "dashboard.nozzle": "Nozzle",
+    "dashboard.bed": "Bed",
+    "dashboard.decrease": "Decrease",
+    "dashboard.increase": "Increase",
+    "dashboard.fan": "Part cooling fan",
+    "dashboard.motion": "Motion",
+    "dashboard.home": "Home all axes",
     "job.title": "{action} this print?",
     "job.description": "This sends a state-changing command to the selected local printer.",
     "job.confirm": "Confirm action",
@@ -253,6 +269,7 @@ const messages: Record<Locale, Messages> = {
     "dashboard.noFiles": "Nenhum arquivo foi informado na raiz gcodes.",
     "dashboard.fileCount": "{count} entradas de arquivo",
     "dashboard.jobs": "Controles de impressão",
+    "dashboard.print": "Imprimir",
     "dashboard.pause": "Pausar",
     "dashboard.resume": "Retomar",
     "dashboard.cancel": "Cancelar impressão",
@@ -261,6 +278,13 @@ const messages: Record<Locale, Messages> = {
     "dashboard.monitoring": "Monitor de impressoras configuradas · atualização local a cada 5 segundos",
     "dashboard.monitoringError": "Sem status ao vivo",
     "dashboard.cliOnly": "Transferência de arquivos e movimento avançado continuam disponíveis na CLI até a integração da seleção nativa de arquivos.",
+    "dashboard.nozzle": "Bico",
+    "dashboard.bed": "Mesa",
+    "dashboard.decrease": "Diminuir",
+    "dashboard.increase": "Aumentar",
+    "dashboard.fan": "Ventilação da peça",
+    "dashboard.motion": "Movimento",
+    "dashboard.home": "Referenciar todos os eixos",
     "job.title": "{action} esta impressão?",
     "job.description": "Isso envia um comando que altera o estado para a impressora local selecionada.",
     "job.confirm": "Confirmar ação",

@@ -47,6 +47,32 @@ struct MonitorEntry {
 struct JobActionRequest {
     name: String,
     action: String,
+    #[serde(default)]
+    device_path: Option<String>,
+    confirmed: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TemperatureRequest {
+    name: String,
+    nozzle_celsius: Option<f64>,
+    bed_celsius: Option<f64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FanRequest {
+    name: String,
+    fan: String,
+    speed_percent: u8,
+    confirmed: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MotionHomeRequest {
+    name: String,
     confirmed: bool,
 }
 
@@ -194,6 +220,7 @@ fn printer_job_action(request: JobActionRequest) -> Result<moonraker::JobResult,
         return Err("Confirm this printer action before sending it.".into());
     }
     let operation = match request.action.as_str() {
+        "start" => Operation::JobStart,
         "pause" => Operation::JobPause,
         "resume" => Operation::JobResume,
         "cancel" => Operation::JobCancel,
@@ -201,6 +228,7 @@ fn printer_job_action(request: JobActionRequest) -> Result<moonraker::JobResult,
     };
     let printer = desktop_printer(&request.name, operation)?;
     let allowed = match request.action.as_str() {
+        "start" => &[moonraker::PrinterState::Idle][..],
         "pause" => &[moonraker::PrinterState::Printing][..],
         "resume" => &[moonraker::PrinterState::Paused][..],
         "cancel" => &[
@@ -211,12 +239,82 @@ fn printer_job_action(request: JobActionRequest) -> Result<moonraker::JobResult,
     };
     ensure_state(&printer, allowed, &request.action)?;
     match request.action.as_str() {
+        "start" => {
+            let device_path = request
+                .device_path
+                .as_deref()
+                .filter(|path| !path.is_empty())
+                .ok_or_else(|| "Choose a printer file before starting a job.".to_string())?;
+            drivers::job_start(&printer.driver, printer.access_code.as_deref(), device_path)
+        }
         "pause" => drivers::job_pause(&printer.driver, printer.access_code.as_deref()),
         "resume" => drivers::job_resume(&printer.driver, printer.access_code.as_deref()),
         "cancel" => drivers::job_cancel(&printer.driver, printer.access_code.as_deref()),
         _ => unreachable!("action is validated above"),
     }
     .map_err(|error| operation_error(error, &request.action))
+}
+
+#[tauri::command]
+fn printer_temperature_set(
+    request: TemperatureRequest,
+) -> Result<moonraker::TemperatureResult, String> {
+    let targets = moonraker::TemperatureTargets {
+        nozzle_celsius: request.nozzle_celsius,
+        bed_celsius: request.bed_celsius,
+        chamber_celsius: None,
+    };
+    if targets.nozzle_celsius.is_none() && targets.bed_celsius.is_none() {
+        return Err("Choose a temperature target first.".into());
+    }
+    let printer = desktop_printer(&request.name, Operation::TemperatureSet)?;
+    ensure_state(
+        &printer,
+        &[moonraker::PrinterState::Idle],
+        "set temperature",
+    )?;
+    drivers::temperature_set(&printer.driver, printer.access_code.as_deref(), targets)
+        .map_err(|error| operation_error(error, "set temperature"))
+}
+
+#[tauri::command]
+fn printer_fan_set(request: FanRequest) -> Result<moonraker::FanResult, String> {
+    if !request.confirmed {
+        return Err("Confirm this printer action before sending it.".into());
+    }
+    let printer = desktop_printer(&request.name, Operation::FanSet)?;
+    ensure_state(
+        &printer,
+        &[
+            moonraker::PrinterState::Idle,
+            moonraker::PrinterState::Printing,
+            moonraker::PrinterState::Paused,
+            moonraker::PrinterState::Error,
+        ],
+        "set fan speed",
+    )?;
+    drivers::fan_set(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        &request.fan,
+        request.speed_percent,
+    )
+    .map_err(|error| operation_error(error, "set fan speed"))
+}
+
+#[tauri::command]
+fn printer_motion_home(request: MotionHomeRequest) -> Result<moonraker::MotionResult, String> {
+    if !request.confirmed {
+        return Err("Confirm this printer action before sending it.".into());
+    }
+    let printer = desktop_printer(&request.name, Operation::MotionHome)?;
+    ensure_state(&printer, &[moonraker::PrinterState::Idle], "home axes")?;
+    drivers::motion_home(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        &[moonraker::Axis::X, moonraker::Axis::Y, moonraker::Axis::Z],
+    )
+    .map_err(|error| operation_error(error, "home axes"))
 }
 
 #[tauri::command]
@@ -298,7 +396,11 @@ fn operation_name(operation: Operation) -> &'static str {
         Operation::JobPause => "pausing jobs",
         Operation::JobResume => "resuming jobs",
         Operation::JobCancel => "cancelling jobs",
+        Operation::JobStart => "starting jobs",
         Operation::EmergencyStop => "emergency stop",
+        Operation::TemperatureSet => "temperature control",
+        Operation::FanSet => "fan control",
+        Operation::MotionHome => "motion control",
         _ => "this operation",
     }
 }
@@ -351,6 +453,9 @@ fn main() {
             printer_status,
             printer_files,
             printer_job_action,
+            printer_temperature_set,
+            printer_fan_set,
+            printer_motion_home,
             printer_emergency_stop,
             diagnostics_report,
             remove_configured_printer

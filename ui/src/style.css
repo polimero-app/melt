@@ -192,8 +192,21 @@ dd { margin: .7rem 0 0; }
   text-transform: uppercase;
 }
 .file-list { display: grid; gap: .35rem; margin: 0; padding: 0; list-style: none; color: #c6c9bc; font: .76rem "Courier New", monospace; }
-.file-list li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-list li { display: flex; align-items: center; gap: .35rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-list li span { display: inline-block; width: 1.25rem; color: #d8a732; }
+.file-list li button {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: #d8a732;
+  cursor: pointer;
+  font: .66rem "Courier New", monospace;
+  text-transform: uppercase;
+}
+.stepper { display: grid; gap: .45rem; color: #c6c9bc; font: .75rem "Courier New", monospace; }
+.stepper > div { display: flex; gap: .4rem; }
+.fan-card label { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: .75rem; color: #d8a732; font: .75rem "Courier New", monospace; }
+.fan-card input { accent-color: #d8a732; }
 .controls-card { grid-column: span 1; }
 .control-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .control-actions .danger, .emergency-button { border-color: #e47967 !important; color: #e47967 !important; }

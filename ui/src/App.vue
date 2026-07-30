@@ -33,10 +33,14 @@ type Capabilities = {
   fileList: boolean;
   fileDownload: boolean;
   fileUpload: boolean;
+  jobStart: boolean;
   jobPause: boolean;
   jobResume: boolean;
   jobCancel: boolean;
   emergencyStop: boolean;
+  temperatureWrite: boolean;
+  motionControl: boolean;
+  fanControl: boolean;
 };
 
 type Temperature = {
@@ -63,6 +67,7 @@ type MonitorEntry = {
 
 type FileEntry = {
   name: string;
+  devicePath: string;
   type: "file" | "directory";
   sizeBytes?: number;
   modifiedAt?: string;
@@ -104,7 +109,9 @@ const selectedPrinter = ref<Printer>();
 const removing = ref(false);
 const removalError = ref<string>();
 const actionOpen = ref(false);
-const pendingAction = ref<"pause" | "resume" | "cancel">();
+const pendingAction = ref<"start" | "pause" | "resume" | "cancel" | "fan" | "home">();
+const pendingDevicePath = ref<string>();
+const pendingFanSpeed = ref<number>();
 const actionSending = ref(false);
 const actionError = ref<string>();
 const diagnosticsOpen = ref(false);
@@ -287,20 +294,67 @@ async function removePrinter() {
   }
 }
 
-function openJobAction(action: "pause" | "resume" | "cancel") {
+function openAction(
+  action: "start" | "pause" | "resume" | "cancel" | "fan" | "home",
+  devicePath?: string
+) {
   actionError.value = undefined;
   pendingAction.value = action;
+  pendingDevicePath.value = devicePath;
   actionOpen.value = true;
 }
 
-async function sendJobAction() {
+function queueFan(event: Event) {
+  const speed = Number((event.target as HTMLInputElement).value);
+  if (Number.isInteger(speed)) {
+    pendingFanSpeed.value = speed;
+    openAction("fan");
+  }
+}
+
+async function adjustTemperature(kind: "nozzleCelsius" | "bedCelsius", delta: number) {
+  if (!selectedPrinter.value || !selectedStatus.value) return;
+  const temperature = kind === "nozzleCelsius"
+    ? selectedStatus.value.temperatures?.nozzle
+    : selectedStatus.value.temperatures?.bed;
+  if (!temperature) return;
+  const maximum = kind === "nozzleCelsius" ? 300 : 120;
+  const base = temperature.targetCelsius ?? temperature.currentCelsius;
+  const next = Math.max(0, Math.min(maximum, Math.round((base + delta) / 5) * 5));
+  workspaceError.value = undefined;
+  try {
+    await invoke("printer_temperature_set", {
+      request: { name: selectedPrinter.value.name, [kind]: next }
+    });
+    await refreshMonitoring();
+  } catch (reason) {
+    workspaceError.value = message(reason);
+  }
+}
+
+async function sendAction() {
   if (!selectedPrinter.value || !pendingAction.value || actionSending.value) return;
   actionSending.value = true;
   actionError.value = undefined;
   try {
-    await invoke("printer_job_action", {
-      request: { name: selectedPrinter.value.name, action: pendingAction.value, confirmed: true }
-    });
+    if (pendingAction.value === "fan") {
+      await invoke("printer_fan_set", {
+        request: { name: selectedPrinter.value.name, fan: "partCooling", speedPercent: pendingFanSpeed.value ?? 0, confirmed: true }
+      });
+    } else if (pendingAction.value === "home") {
+      await invoke("printer_motion_home", {
+        request: { name: selectedPrinter.value.name, confirmed: true }
+      });
+    } else {
+      await invoke("printer_job_action", {
+        request: {
+          name: selectedPrinter.value.name,
+          action: pendingAction.value,
+          devicePath: pendingDevicePath.value,
+          confirmed: true
+        }
+      });
+    }
     actionOpen.value = false;
     await refreshMonitoring();
   } catch (reason) {
@@ -439,11 +493,7 @@ onUnmounted(() => {
           </div>
 
           <div class="capability-grid">
-            <article v-if="capabilities?.cameraSnapshot || capabilities?.cameraStream" class="capability-card">
-              <p class="eyebrow">CAMERA</p>
-              <strong>Ready</strong>
-            </article>
-            <article v-else class="capability-card muted">
+            <article class="capability-card muted">
               <p class="eyebrow">CAMERA</p>
               <span>{{ t("dashboard.cameraUnavailable") }}</span>
             </article>
@@ -453,17 +503,45 @@ onUnmounted(() => {
               <button type="button" :disabled="filesLoading" @click="loadFiles">{{ filesLoading ? t("common.loading") : t("dashboard.loadFiles") }}</button>
               <span v-if="files.length">{{ t("dashboard.fileCount", { count: files.length }) }}</span>
               <ul v-if="files.length" class="file-list">
-                <li v-for="file in files.slice(0, 6)" :key="file.name"><span>{{ file.type === "directory" ? "◫" : "·" }}</span>{{ file.name }}</li>
+                <li v-for="file in files.slice(0, 6)" :key="file.devicePath">
+                  <span>{{ file.type === "directory" ? "◫" : "·" }}</span>{{ file.name }}
+                  <button v-if="file.type === 'file' && capabilities?.jobStart && selectedStatus?.state === 'idle'" type="button" @click="openAction('start', file.devicePath)">{{ t("dashboard.print") }}</button>
+                </li>
               </ul>
               <span v-else>{{ t("dashboard.noFiles") }}</span>
             </article>
 
-            <article v-if="capabilities?.jobPause || capabilities?.jobResume || capabilities?.jobCancel" class="capability-card controls-card">
+            <article v-if="capabilities?.temperatureWrite && selectedStatus?.temperatures" class="capability-card temperatures-card">
+              <p class="eyebrow">{{ t("dashboard.temperature") }}</p>
+              <div v-if="selectedStatus.temperatures.nozzle" class="stepper">
+                <span>{{ t("dashboard.nozzle") }} · {{ formatTemperature(selectedStatus.temperatures.nozzle) }}</span>
+                <div><button type="button" :disabled="selectedStatus.state !== 'idle'" :aria-label="t('dashboard.decrease')" @click="adjustTemperature('nozzleCelsius', -5)">−5°</button><button type="button" :disabled="selectedStatus.state !== 'idle'" :aria-label="t('dashboard.increase')" @click="adjustTemperature('nozzleCelsius', 5)">+5°</button></div>
+              </div>
+              <div v-if="selectedStatus.temperatures.bed" class="stepper">
+                <span>{{ t("dashboard.bed") }} · {{ formatTemperature(selectedStatus.temperatures.bed) }}</span>
+                <div><button type="button" :disabled="selectedStatus.state !== 'idle'" :aria-label="t('dashboard.decrease')" @click="adjustTemperature('bedCelsius', -5)">−5°</button><button type="button" :disabled="selectedStatus.state !== 'idle'" :aria-label="t('dashboard.increase')" @click="adjustTemperature('bedCelsius', 5)">+5°</button></div>
+              </div>
+            </article>
+
+            <article v-if="capabilities?.fanControl" class="capability-card fan-card">
+              <p class="eyebrow">{{ t("dashboard.fan") }}</p>
+              <label>
+                <input type="range" min="0" max="100" step="1" :disabled="!selectedStatus" :value="selectedStatus?.fans.partCooling ?? 0" @change="queueFan" />
+                <span>{{ selectedStatus?.fans.partCooling ?? 0 }}%</span>
+              </label>
+            </article>
+
+            <article v-if="capabilities?.motionControl && selectedStatus?.state === 'idle'" class="capability-card motion-card">
+              <p class="eyebrow">{{ t("dashboard.motion") }}</p>
+              <button type="button" @click="openAction('home')">{{ t("dashboard.home") }}</button>
+            </article>
+
+            <article v-if="capabilities?.jobStart || capabilities?.jobPause || capabilities?.jobResume || capabilities?.jobCancel" class="capability-card controls-card">
               <p class="eyebrow">{{ t("dashboard.jobs") }}</p>
               <div class="control-actions">
-                <button v-if="capabilities.jobPause && selectedStatus?.state === 'printing'" type="button" @click="openJobAction('pause')">{{ t("dashboard.pause") }}</button>
-                <button v-if="capabilities.jobResume && selectedStatus?.state === 'paused'" type="button" @click="openJobAction('resume')">{{ t("dashboard.resume") }}</button>
-                <button v-if="capabilities.jobCancel && ['printing', 'paused'].includes(selectedStatus?.state ?? '')" class="danger" type="button" @click="openJobAction('cancel')">{{ t("dashboard.cancel") }}</button>
+                <button v-if="capabilities.jobPause && selectedStatus?.state === 'printing'" type="button" @click="openAction('pause')">{{ t("dashboard.pause") }}</button>
+                <button v-if="capabilities.jobResume && selectedStatus?.state === 'paused'" type="button" @click="openAction('resume')">{{ t("dashboard.resume") }}</button>
+                <button v-if="capabilities.jobCancel && ['printing', 'paused'].includes(selectedStatus?.state ?? '')" class="danger" type="button" @click="openAction('cancel')">{{ t("dashboard.cancel") }}</button>
                 <span v-if="!['printing', 'paused'].includes(selectedStatus?.state ?? '')">{{ t("dashboard.noJob") }}</span>
               </div>
             </article>
@@ -550,7 +628,7 @@ onUnmounted(() => {
           <p v-if="actionError" class="dialog-error" role="alert"><strong>{{ t("job.error") }}</strong> {{ actionError }}</p>
           <div class="actions">
             <button type="button" :disabled="actionSending" @click="actionOpen = false">{{ t("common.cancel") }}</button>
-            <button class="danger" type="button" :disabled="actionSending" @click="sendJobAction">{{ actionSending ? t("common.sending") : t("job.confirm") }}</button>
+            <button class="danger" type="button" :disabled="actionSending" @click="sendAction">{{ actionSending ? t("common.sending") : t("job.confirm") }}</button>
           </div>
         </DialogPanel>
       </div>
