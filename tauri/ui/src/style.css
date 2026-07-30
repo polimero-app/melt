@@ -83,6 +83,11 @@ dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; 
 dl div { min-height: 6rem; padding: 1rem; background: #1b211f; }
 dt { color: #d8a732; font: .7rem "Courier New", monospace; letter-spacing: .12em; text-transform: uppercase; }
 dd { margin: .7rem 0 0; }
+.printers { display: grid; gap: 1px; margin-top: 1px; background: #46524d; }
+.printers article { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: .9rem 1rem; background: #1b211f; }
+.printers p { margin: 0; font-size: 1.1rem; }
+.printers span, .empty { color: #b9bcb2; font: .72rem "Courier New", monospace; letter-spacing: .05em; }
+.empty { margin-top: 1px; padding: 1rem; background: #1b211f; line-height: 1.6; }
 .error { color: #e47967; text-transform: none; letter-spacing: normal; }
 
 .dialog { position: relative; z-index: 10; }
