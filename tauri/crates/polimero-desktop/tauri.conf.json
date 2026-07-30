@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Polimero",
+  "version": "0.1.0",
+  "identifier": "app.polimero",
+  "build": {
+    "frontendDist": "../../../ui/dist",
+    "devUrl": "http://localhost:1420"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Polimero",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 1280,
+        "minHeight": 800
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": []
+  }
+}

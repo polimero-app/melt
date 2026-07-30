@@ -1,0 +1,12 @@
+[package]
+name = "polimero-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+polimero-core = { path = "../polimero-core" }
+serde.workspace = true
+serde_json.workspace = true
+
