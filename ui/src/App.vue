@@ -28,6 +28,7 @@ type NewPrinter = Printer & {
 
 type Capabilities = {
   status: boolean;
+  discovery: boolean;
   cameraStream: boolean;
   cameraSnapshot: boolean;
   fileList: boolean;
@@ -41,6 +42,15 @@ type Capabilities = {
   temperatureWrite: boolean;
   motionControl: boolean;
   fanControl: boolean;
+  tlsRefresh: boolean;
+};
+
+type DiscoveredPrinter = {
+  driver: string;
+  host: string;
+  serial: string;
+  model: string;
+  name: string;
 };
 
 type Temperature = {
@@ -112,6 +122,9 @@ const aboutOpen = ref(false);
 const additionOpen = ref(false);
 const adding = ref(false);
 const additionError = ref<string>();
+const discovered = ref<DiscoveredPrinter[]>([]);
+const discovering = ref(false);
+const discoveryError = ref<string>();
 const removalOpen = ref(false);
 const selectedPrinter = ref<Printer>();
 const removing = ref(false);
@@ -128,6 +141,10 @@ const diagnosticsError = ref<string>();
 const cameraUrl = ref<string>();
 const cameraLoading = ref(false);
 const cameraError = ref<string>();
+const tlsOpen = ref(false);
+const tlsRefreshing = ref(false);
+const tlsError = ref<string>();
+const tlsFingerprint = ref<string>();
 const locale = ref<Locale>(preferredLocale());
 let monitorTimer: number | undefined;
 
@@ -258,11 +275,32 @@ function openAddition() {
     accessCode: ""
   };
   additionError.value = undefined;
+  discoveryError.value = undefined;
   additionOpen.value = true;
 }
 
 function closeAddition() {
   if (!adding.value) additionOpen.value = false;
+}
+
+async function discoverPrinters() {
+  if (discovering.value) return;
+  discovering.value = true;
+  discoveryError.value = undefined;
+  try {
+    discovered.value = await invoke<DiscoveredPrinter[]>("discover_printers");
+  } catch (reason) {
+    discoveryError.value = message(reason);
+  } finally {
+    discovering.value = false;
+  }
+}
+
+function useDiscoveredPrinter(printer: DiscoveredPrinter) {
+  draft.value.driver = printer.driver;
+  draft.value.host = printer.host;
+  draft.value.serial = printer.serial;
+  discovered.value = [];
 }
 
 async function addPrinter() {
@@ -303,6 +341,38 @@ async function removePrinter() {
       files.value = [];
       cameraUrl.value = undefined;
       cameraError.value = undefined;
+    }
+
+    async function openTlsRefresh() {
+      if (!selectedPrinter.value || tlsRefreshing.value) return;
+      tlsRefreshing.value = true;
+      tlsError.value = undefined;
+      tlsFingerprint.value = undefined;
+      try {
+        tlsFingerprint.value = await invoke<string>("preview_printer_tls", { name: selectedPrinter.value.name });
+        tlsOpen.value = true;
+      } catch (reason) {
+        workspaceError.value = message(reason);
+      } finally {
+        tlsRefreshing.value = false;
+      }
+    }
+
+    async function refreshTls() {
+      if (!selectedPrinter.value || !tlsFingerprint.value || tlsRefreshing.value) return;
+      tlsRefreshing.value = true;
+      tlsError.value = undefined;
+      try {
+        await invoke("refresh_printer_tls", {
+          request: { name: selectedPrinter.value.name, fingerprint: tlsFingerprint.value, confirmed: true }
+        });
+        tlsOpen.value = false;
+        await refreshMonitoring();
+      } catch (reason) {
+        tlsError.value = message(reason);
+      } finally {
+        tlsRefreshing.value = false;
+      }
     }
   } catch (reason) {
     removalError.value = message(reason);
@@ -608,6 +678,11 @@ onUnmounted(() => {
               <p class="eyebrow">M112</p>
               <button class="emergency-button" type="button" @click="emergencyStop">{{ t("dashboard.emergency") }}</button>
             </article>
+            <article v-if="capabilities?.tlsRefresh" class="capability-card">
+              <p class="eyebrow">{{ t("tls.title") }}</p>
+              <span>{{ t("tls.description") }}</span>
+              <button type="button" :disabled="tlsRefreshing" @click="openTlsRefresh">{{ tlsRefreshing ? t("common.loading") : t("tls.refresh") }}</button>
+            </article>
           </div>
           <p class="cli-note">{{ t("dashboard.cliOnly") }}</p>
         </section>
@@ -645,6 +720,14 @@ onUnmounted(() => {
           <DialogTitle>{{ t("addition.title") }}</DialogTitle>
           <p>{{ t("addition.description") }}</p>
           <form class="profile-form" @submit.prevent="addPrinter">
+            <button type="button" :disabled="discovering" @click="discoverPrinters">{{ discovering ? t("common.loading") : t("addition.discover") }}</button>
+            <p v-if="discoveryError" class="dialog-error" role="alert">{{ discoveryError }}</p>
+            <ul v-if="discovered.length" class="drivers">
+              <li v-for="printer in discovered" :key="`${printer.serial}:${printer.host}`">
+                <span>{{ printer.name || printer.model || printer.host }} · {{ printer.host }}</span>
+                <button type="button" @click="useDiscoveredPrinter(printer)">{{ t("addition.useDiscovery") }}</button>
+              </li>
+            </ul>
             <label>{{ t("addition.name") }}<input v-model="draft.name" required maxlength="64" autocomplete="off" /></label>
             <label>{{ t("addition.driver") }}<select v-model="draft.driver" required><option v-for="driver in drivers" :key="driver.name" :value="driver.name">{{ driver.name }}</option></select></label>
             <label>{{ t("addition.host") }}<input v-model="draft.host" required autocomplete="off" /></label>
@@ -658,6 +741,22 @@ onUnmounted(() => {
               <button type="submit" :disabled="adding">{{ adding ? t("common.adding") : t("addition.confirm") }}</button>
             </div>
           </form>
+        </DialogPanel>
+      </div>
+    </Dialog>
+
+    <Dialog :open="tlsOpen" @close="!tlsRefreshing && (tlsOpen = false)" class="dialog">
+      <div class="backdrop" aria-hidden="true" />
+      <div class="dialog-frame">
+        <DialogPanel class="dialog-panel">
+          <DialogTitle>{{ t("tls.confirmTitle", { name: selectedPrinter?.name ?? "" }) }}</DialogTitle>
+          <p>{{ t("tls.confirmDescription") }}</p>
+          <code v-if="tlsFingerprint">{{ tlsFingerprint }}</code>
+          <p v-if="tlsError" class="dialog-error" role="alert">{{ tlsError }}</p>
+          <div class="actions">
+            <button type="button" :disabled="tlsRefreshing" @click="tlsOpen = false">{{ t("common.cancel") }}</button>
+            <button type="button" :disabled="tlsRefreshing" @click="refreshTls">{{ tlsRefreshing ? t("common.sending") : t("tls.confirm") }}</button>
+          </div>
         </DialogPanel>
       </div>
     </Dialog>

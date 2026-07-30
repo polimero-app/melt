@@ -56,6 +56,14 @@ export type MessageKey =
   | "addition.insecure"
   | "addition.confirm"
   | "addition.error"
+  | "addition.discover"
+  | "addition.useDiscovery"
+  | "tls.title"
+  | "tls.description"
+  | "tls.refresh"
+  | "tls.confirmTitle"
+  | "tls.confirmDescription"
+  | "tls.confirm"
   | "dashboard.emptyTitle"
   | "dashboard.emptyDescription"
   | "dashboard.title"
@@ -159,6 +167,14 @@ const messages: Record<Locale, Messages> = {
     "addition.insecure": "Accept an untrusted TLS certificate",
     "addition.confirm": "Verify and save",
     "addition.error": "We could not save this profile.",
+    "addition.discover": "Find Bambu printers on this network",
+    "addition.useDiscovery": "Use this printer",
+    "tls.title": "TLS certificate",
+    "tls.description": "Capture and review the printer certificate before replacing its local pin.",
+    "tls.refresh": "Capture new certificate",
+    "tls.confirmTitle": "Replace the TLS pin for {name}?",
+    "tls.confirmDescription": "Review this fingerprint before replacing the stored pin. The printer receives no command.",
+    "tls.confirm": "Capture and replace pin",
     "dashboard.emptyTitle": "Choose a printer to begin.",
     "dashboard.emptyDescription": "Add a local printer profile, then select it to inspect only the capabilities its driver can safely provide.",
     "dashboard.title": "Live workspace",
@@ -259,6 +275,14 @@ const messages: Record<Locale, Messages> = {
     "addition.insecure": "Aceitar um certificado TLS não confiável",
     "addition.confirm": "Verificar e salvar",
     "addition.error": "Não foi possível salvar este perfil.",
+    "addition.discover": "Encontrar impressoras Bambu nesta rede",
+    "addition.useDiscovery": "Usar esta impressora",
+    "tls.title": "Certificado TLS",
+    "tls.description": "Capture e revise o certificado da impressora antes de substituir a fixação local.",
+    "tls.refresh": "Capturar novo certificado",
+    "tls.confirmTitle": "Substituir a fixação TLS de {name}?",
+    "tls.confirmDescription": "Revise esta impressão digital antes de substituir a fixação armazenada. Nenhum comando é enviado à impressora.",
+    "tls.confirm": "Capturar e substituir fixação",
     "dashboard.emptyTitle": "Escolha uma impressora para começar.",
     "dashboard.emptyDescription": "Adicione um perfil local e selecione-o para inspecionar somente os recursos que o driver pode fornecer com segurança.",
     "dashboard.title": "Área ao vivo",
