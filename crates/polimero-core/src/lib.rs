@@ -4,6 +4,7 @@ pub mod bambu;
 pub mod config;
 pub mod drivers;
 pub mod keychain;
+pub mod moonraker;
 pub mod profiles;
 
 use serde::Serialize;
