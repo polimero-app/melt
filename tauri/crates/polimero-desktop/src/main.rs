@@ -1,4 +1,4 @@
-use polimero_core::{AppInfo, config::Config};
+use polimero_core::{AppInfo, config::Config, drivers};
 use serde::Serialize;
 
 #[tauri::command]
@@ -31,6 +31,11 @@ fn configured_printers() -> Result<Vec<PrinterSummary>, String> {
         .map_err(|_| "Unable to read printer configuration.".into())
 }
 
+#[tauri::command]
+fn registered_drivers() -> Vec<drivers::DriverInfo> {
+    drivers::registered().to_vec()
+}
+
 fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if !args.is_empty() {
@@ -42,7 +47,11 @@ fn main() {
     }
 
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![app_info, configured_printers])
+        .invoke_handler(tauri::generate_handler![
+            app_info,
+            configured_printers,
+            registered_drivers
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Polimero");
 }

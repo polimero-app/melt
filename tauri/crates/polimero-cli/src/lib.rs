@@ -5,6 +5,7 @@ use std::{collections::BTreeMap, io::Write};
 use polimero_core::{
     AppError, app_info,
     config::{Config, ConfigError, NamedProfile},
+    drivers,
 };
 use serde::Serialize;
 
@@ -69,6 +70,9 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                 ),
             }
         }
+        [printer, drivers] if printer.as_str() == "printer" && drivers.as_str() == "drivers" => {
+            write_drivers(invocation.format, out)
+        }
         _ => write_error(
             &command,
             invocation.format,
@@ -76,6 +80,30 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             out,
             err,
         ),
+    }
+}
+
+fn write_drivers(format: OutputFormat, out: &mut dyn Write) -> i32 {
+    let drivers = drivers::registered();
+    match format {
+        OutputFormat::Json => write_success(
+            "printer drivers",
+            format,
+            DriverList {
+                drivers: drivers.to_vec(),
+            },
+            |_| Ok(()),
+            out,
+        ),
+        OutputFormat::Human => {
+            let _ = writeln!(out, "DRIVER\tDESCRIPTION");
+            for driver in drivers {
+                if writeln!(out, "{}\t{}", driver.name, driver.description).is_err() {
+                    return 1;
+                }
+            }
+            0
+        }
     }
 }
 
@@ -154,6 +182,11 @@ struct PrinterProfile<'a> {
 #[derive(Serialize)]
 struct PrinterList<'a> {
     profiles: Vec<PrinterProfile<'a>>,
+}
+
+#[derive(Serialize)]
+struct DriverList {
+    drivers: Vec<drivers::DriverInfo>,
 }
 
 fn write_printer_list(
@@ -301,5 +334,17 @@ mod tests {
         assert!(output.contains(r#""profiles": ["#));
         assert!(output.contains(r#""name": "garage""#));
         assert!(!output.contains(r#""serial""#));
+    }
+
+    #[test]
+    fn printer_drivers_keeps_the_existing_json_data_shape() {
+        let mut out = Vec::new();
+
+        assert_eq!(write_drivers(OutputFormat::Json, &mut out), 0);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains(r#""command": "printer drivers""#));
+        assert!(output.contains(r#""drivers": ["#));
+        assert!(output.contains("bambu-lan"));
     }
 }

@@ -14,17 +14,24 @@ type Printer = {
   host: string;
 };
 
+type Driver = {
+  name: string;
+  description: string;
+};
+
 const info = ref<AppInfo>();
 const printers = ref<Printer[]>([]);
+const drivers = ref<Driver[]>([]);
 const error = ref<string>();
 const aboutOpen = ref(false);
 const status = computed(() => (error.value ? "offline" : info.value ? "ready" : "connecting"));
 
 onMounted(async () => {
   try {
-    [info.value, printers.value] = await Promise.all([
+    [info.value, printers.value, drivers.value] = await Promise.all([
       invoke<AppInfo>("app_info"),
-      invoke<Printer[]>("configured_printers")
+      invoke<Printer[]>("configured_printers"),
+      invoke<Driver[]>("registered_drivers")
     ]);
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : String(reason);
@@ -78,8 +85,14 @@ onMounted(async () => {
       <div class="backdrop" aria-hidden="true" />
       <div class="dialog-frame">
         <DialogPanel class="dialog-panel">
-          <DialogTitle>Polimero migration shell</DialogTitle>
+          <DialogTitle>Available printer drivers</DialogTitle>
           <p>This desktop process invokes the Rust core directly; it does not run a local server.</p>
+          <ul class="drivers">
+            <li v-for="driver in drivers" :key="driver.name">
+              <strong>{{ driver.name }}</strong>
+              <span>{{ driver.description }}</span>
+            </li>
+          </ul>
           <button type="button" @click="aboutOpen = false">Close</button>
         </DialogPanel>
       </div>

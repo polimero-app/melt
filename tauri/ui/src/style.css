@@ -96,6 +96,10 @@ dd { margin: .7rem 0 0; }
 .dialog-panel { width: min(30rem, 100%); border: 1px solid #d8a732; background: #1b211f; padding: 2rem; box-shadow: 12px 12px 0 #0d0f0e; }
 .dialog-panel p { color: #c6c9bc; line-height: 1.5; }
 .dialog-panel button { border: 1px solid #d8a732; background: transparent; padding: .5rem 1rem; cursor: pointer; }
+.drivers { display: grid; gap: .65rem; margin: 1.5rem 0; padding: 0; list-style: none; }
+.drivers li { display: grid; gap: .2rem; border-left: 1px solid #d8a732; padding-left: .75rem; }
+.drivers strong { font: .78rem "Courier New", monospace; color: #e4e2d7; }
+.drivers span { color: #b9bcb2; font-size: .85rem; }
 
 @media (max-width: 680px) {
   dl { grid-template-columns: 1fr; }
