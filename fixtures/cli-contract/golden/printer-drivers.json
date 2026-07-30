@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "data": {
+    "drivers": [
+      {
+        "name": "bambu-lan",
+        "description": "Bambu Lab printers over LAN mode"
+      },
+      {
+        "name": "moonraker",
+        "description": "Moonraker-compatible Klipper printers"
+      }
+    ]
+  },
+  "error": null,
+  "meta": {
+    "command": "printer drivers"
+  }
+}

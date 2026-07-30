@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "data": {
+    "commit": "unknown",
+    "goVersion": "go1.26.5-X:nodwarf5",
+    "modes": [
+      "gui",
+      "headless"
+    ],
+    "platform": "linux/amd64",
+    "version": "dev"
+  },
+  "error": null,
+  "meta": {
+    "command": "version"
+  }
+}

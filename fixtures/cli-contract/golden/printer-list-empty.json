@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "data": {
+    "profiles": []
+  },
+  "error": null,
+  "meta": {
+    "command": "printer list"
+  }
+}

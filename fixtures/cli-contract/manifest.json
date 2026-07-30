@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "id": "version-json",
+      "command": "version",
+      "args": ["version", "--output", "json"],
+      "exitCode": 0,
+      "stdout": "golden/version.json",
+      "stderr": "",
+      "ignoreJsonPointers": ["/data/version", "/data/commit", "/data/goVersion", "/data/platform"]
+    },
+    {
+      "id": "printer-drivers-json",
+      "command": "printer drivers",
+      "args": ["printer", "drivers", "--output", "json"],
+      "exitCode": 0,
+      "stdout": "golden/printer-drivers.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
+    },
+    {
+      "id": "printer-list-empty-json",
+      "command": "printer list",
+      "args": ["printer", "list", "--output", "json"],
+      "exitCode": 0,
+      "stdout": "golden/printer-list-empty.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
+    },
+    {
+      "id": "unknown-command-json",
+      "command": "polimero",
+      "args": ["bogus", "--output", "json"],
+      "exitCode": 2,
+      "stdout": "golden/unknown-command.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
+    }
+  ]
+}
