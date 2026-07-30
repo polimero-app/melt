@@ -11,6 +11,16 @@ pub struct DriverInfo {
     pub description: &'static str,
 }
 
+pub fn verify(profile: &Profile, access_code: Option<&str>) -> Result<(), DriverError> {
+    match profile {
+        Profile::Moonraker(_) => status(profile, access_code).map(|_| ()),
+        Profile::Bambu(_) => Err(DriverError::UnsupportedOperation(
+            Driver::BambuLan,
+            Operation::Verify,
+        )),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Driver {
     BambuLan,
@@ -34,7 +44,10 @@ impl Driver {
     }
 
     pub fn supports(self, operation: Operation) -> bool {
-        matches!((self, operation), (Self::Moonraker, Operation::Status))
+        matches!(
+            (self, operation),
+            (Self::Moonraker, Operation::Status | Operation::Verify)
+        )
     }
 }
 
@@ -47,6 +60,7 @@ impl fmt::Display for Driver {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Operation {
     Status,
+    Verify,
 }
 
 #[derive(Clone, Debug)]
@@ -197,6 +211,7 @@ mod tests {
         .unwrap();
         assert_eq!(moonraker.driver(), Driver::Moonraker);
         assert!(moonraker.driver().supports(Operation::Status));
+        assert!(moonraker.driver().supports(Operation::Verify));
     }
 
     #[test]

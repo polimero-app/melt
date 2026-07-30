@@ -1,6 +1,6 @@
 use polimero_core::{
     AppInfo,
-    config::{Config, config_dir},
+    config::{Config, ConfigError, config_dir},
     drivers::{self, DriverError},
     keychain::{SERVICE, SecretError, SecretStore, SystemKeychain, account},
     profiles,
@@ -40,6 +40,36 @@ fn configured_printers() -> Result<Vec<PrinterSummary>, String> {
 #[tauri::command]
 fn registered_drivers() -> Vec<drivers::DriverInfo> {
     drivers::registered().to_vec()
+}
+
+#[tauri::command]
+fn create_configured_printer(
+    request: profiles::CreateRequest,
+) -> Result<profiles::CreateResult, String> {
+    let dir = config_dir().map_err(|_| "Unable to read printer configuration.".to_string())?;
+    profiles::create(dir, &SystemKeychain, request).map_err(create_error)
+}
+
+fn create_error(error: profiles::ProfileError) -> String {
+    match error {
+        profiles::ProfileError::MissingName
+        | profiles::ProfileError::InvalidName
+        | profiles::ProfileError::InvalidHost
+        | profiles::ProfileError::InvalidAccessCode => error.to_string(),
+        profiles::ProfileError::Config(ConfigError::ProfileAlreadyExists) => {
+            "A printer profile with this name already exists.".into()
+        }
+        profiles::ProfileError::Driver(DriverError::UnsupportedOperation(
+            _,
+            drivers::Operation::Verify,
+        )) => "This driver cannot verify printer profiles yet.".into(),
+        profiles::ProfileError::Driver(error) => status_error(error),
+        profiles::ProfileError::Secret(_) | profiles::ProfileError::RollbackFailed => {
+            "Keychain operation failed.".into()
+        }
+        profiles::ProfileError::Config(_) => "Unable to save printer configuration.".into(),
+        profiles::ProfileError::NotFound(_) => "Printer profile not found.".into(),
+    }
 }
 
 #[tauri::command]
@@ -98,6 +128,7 @@ fn main() {
             app_info,
             configured_printers,
             registered_drivers,
+            create_configured_printer,
             printer_status,
             remove_configured_printer
         ])

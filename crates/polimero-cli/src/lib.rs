@@ -7,7 +7,7 @@ use std::{
 
 use polimero_core::{
     AppError, app_info,
-    config::{Config, ConfigError, NamedProfile},
+    config::{Config, ConfigError, NamedProfile, config_dir},
     drivers::{self, DriverError},
     keychain::{SERVICE, SecretError, SecretStore, SystemKeychain, account},
     profiles::{self, ProfileError},
@@ -78,6 +78,11 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         [printer, drivers] if printer.as_str() == "printer" && drivers.as_str() == "drivers" => {
             write_drivers(invocation.format, out)
         }
+        [printer, add, name, flags @ ..]
+            if printer.as_str() == "printer" && add.as_str() == "add" =>
+        {
+            add_profile(invocation.format, name, flags, out, err)
+        }
         [status, name] if status.as_str() == "status" => {
             printer_status(invocation.format, name, out, err)
         }
@@ -99,6 +104,113 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             err,
         ),
     }
+}
+
+fn add_profile(
+    format: OutputFormat,
+    name: &str,
+    flags: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let request = match parse_add_request(name, flags) {
+        Ok(request) => request,
+        Err(error) => return write_error("printer add", format, AppError::usage(error), out, err),
+    };
+    let dir = match config_dir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            return write_error(
+                "printer add",
+                format,
+                AppError {
+                    exit_code: 1,
+                    code: "internal-error",
+                    message: error.to_string(),
+                },
+                out,
+                err,
+            );
+        }
+    };
+    match profiles::create(dir, &SystemKeychain, request) {
+        Ok(profile) => {
+            let name = profile.name.clone();
+            write_success(
+                "printer add",
+                format,
+                AddData { profile },
+                |out| writeln!(out, "Printer profile added: {name}"),
+                out,
+            )
+        }
+        Err(error) => write_error("printer add", format, profile_error(error), out, err),
+    }
+}
+
+fn parse_add_request(name: &str, flags: &[&String]) -> Result<profiles::CreateRequest, String> {
+    let mut request = profiles::CreateRequest {
+        name: name.into(),
+        driver: String::new(),
+        host: String::new(),
+        serial: String::new(),
+        timeout: "10s".into(),
+        insecure: false,
+        access_code: String::new(),
+    };
+    let mut index = 0;
+    while index < flags.len() {
+        let flag = flags[index].as_str();
+        match flag {
+            "--insecure" => request.insecure = true,
+            "--driver" | "--host" | "--serial" | "--timeout" | "--access-code-file" => {
+                let value = flags
+                    .get(index + 1)
+                    .ok_or_else(|| format!("{flag} requires a value"))?;
+                match flag {
+                    "--driver" => request.driver = (*value).clone(),
+                    "--host" => request.host = (*value).clone(),
+                    "--serial" => request.serial = (*value).clone(),
+                    "--timeout" => request.timeout = (*value).clone(),
+                    "--access-code-file" => {
+                        request.access_code = read_access_code_file(value)?;
+                    }
+                    _ => unreachable!("recognized flags are exhaustive"),
+                }
+                index += 1;
+            }
+            _ => return Err(format!("unknown printer add option {flag:?}")),
+        }
+        index += 1;
+    }
+    if request.driver.is_empty() {
+        return Err("--driver is required".into());
+    }
+    if request.host.is_empty() {
+        return Err("--host is required".into());
+    }
+    Ok(request)
+}
+
+fn read_access_code_file(path: &str) -> Result<String, String> {
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("cannot read --access-code-file: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > 4096 {
+        return Err("--access-code-file must be a regular file no larger than 4 KiB".into());
+    }
+    #[cfg(unix)]
+    if std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()) & 0o077 != 0 {
+        return Err("--access-code-file must not grant group or other access".into());
+    }
+    let mut code = std::fs::read_to_string(path)
+        .map_err(|error| format!("cannot read --access-code-file: {error}"))?;
+    if let Some(stripped) = code
+        .strip_suffix("\r\n")
+        .or_else(|| code.strip_suffix('\n'))
+    {
+        code = stripped.into();
+    }
+    Ok(code)
 }
 
 fn printer_status(
@@ -274,17 +386,27 @@ struct RemoveData {
     removed: profiles::RemoveResult,
 }
 
+#[derive(Serialize)]
+struct AddData {
+    profile: profiles::CreateResult,
+}
+
 fn profile_error(error: ProfileError) -> AppError {
     match error {
         ProfileError::MissingName
         | ProfileError::InvalidName
         | ProfileError::InvalidHost
+        | ProfileError::InvalidAccessCode
         | ProfileError::NotFound(_) => AppError::usage(error.to_string()),
+        ProfileError::Driver(error) => driver_error(error),
         ProfileError::Secret(_) => AppError {
             exit_code: 3,
             code: "secret-store-failed",
             message: "keychain operation failed".into(),
         },
+        ProfileError::Config(ConfigError::ProfileAlreadyExists) => {
+            AppError::usage("profile already exists")
+        }
         ProfileError::Config(_) | ProfileError::RollbackFailed => AppError {
             exit_code: 1,
             code: "internal-error",
@@ -567,6 +689,30 @@ mod tests {
 
         assert_eq!(error.exit_code, 2);
         assert_eq!(error.code, "unsupported-operation");
+    }
+
+    #[test]
+    fn printer_add_parses_the_existing_profile_flags() {
+        let raw = [
+            "--driver".into(),
+            "moonraker".into(),
+            "--host".into(),
+            "printer.local".into(),
+            "--serial".into(),
+            "unused".into(),
+            "--timeout".into(),
+            "5s".into(),
+            "--insecure".into(),
+        ];
+        let flags = raw.iter().collect::<Vec<_>>();
+
+        let request = parse_add_request("Garage", &flags).unwrap();
+
+        assert_eq!(request.name, "Garage");
+        assert_eq!(request.driver, "moonraker");
+        assert_eq!(request.host, "printer.local");
+        assert_eq!(request.timeout, "5s");
+        assert!(request.insecure);
     }
 
     #[test]

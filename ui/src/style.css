@@ -72,7 +72,7 @@ h2 { font-size: clamp(2.2rem, 6vw, 5.8rem); line-height: .95; max-width: 11ch; }
   letter-spacing: .08em;
   text-transform: uppercase;
 }
-.status:focus-visible, .dialog-panel button:focus-visible, .printers button:focus-visible, .locale select:focus-visible, .notice button:focus-visible { outline: 2px solid #d8a732; outline-offset: 3px; }
+.status:focus-visible, .dialog-panel button:focus-visible, .dialog-panel input:focus-visible, .dialog-panel select:focus-visible, .printers button:focus-visible, .add-printer:focus-visible, .locale select:focus-visible, .notice button:focus-visible { outline: 2px solid #d8a732; outline-offset: 3px; }
 .signal { width: .55rem; height: .55rem; border-radius: 50%; background: #d8a732; }
 .signal.ready { background: #84b95a; box-shadow: 0 0 12px #84b95a; }
 .signal.offline { background: #c35a48; }
@@ -97,6 +97,8 @@ dd { margin: .7rem 0 0; }
 .printers p { margin: 0; font-size: 1.1rem; }
 .printers span, .empty { color: #b9bcb2; font: .72rem "Courier New", monospace; letter-spacing: .05em; }
 .printers button { border: 0; background: transparent; color: #e47967; cursor: pointer; font: .72rem "Courier New", monospace; text-transform: uppercase; }
+.add-printer { margin-top: 1px; border: 1px solid #d8a732; background: #1b211f; color: inherit; padding: .75rem 1rem; cursor: pointer; font: .72rem "Courier New", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.add-printer:disabled { cursor: wait; opacity: .55; }
 .empty { margin-top: 1px; padding: 1rem; background: #1b211f; line-height: 1.6; }
 .loading, .notice { margin-top: 1px; padding: 1rem; background: #1b211f; font: .72rem "Courier New", monospace; letter-spacing: .05em; line-height: 1.6; }
 .loading::before { display: inline-block; margin-right: .6rem; color: #d8a732; content: "◌"; animation: spin 1.1s linear infinite; }
@@ -115,6 +117,11 @@ dd { margin: .7rem 0 0; }
 .actions { display: flex; justify-content: flex-end; gap: .75rem; }
 .dialog-panel .danger { border-color: #e47967; color: #e47967; }
 .dialog-error { border-left: 2px solid #e47967; padding-left: .75rem; }
+.profile-form { display: grid; gap: .85rem; margin-top: 1.5rem; }
+.profile-form label { display: grid; gap: .35rem; color: #d8a732; font: .68rem "Courier New", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.profile-form input, .profile-form select { width: 100%; border: 1px solid #46524d; border-radius: 0; background: #141817; color: inherit; padding: .55rem .65rem; font: .9rem "Courier New", monospace; }
+.profile-form .checkbox { display: flex; align-items: center; gap: .6rem; color: #c6c9bc; text-transform: none; letter-spacing: normal; }
+.profile-form .checkbox input { width: auto; accent-color: #d8a732; }
 .drivers { display: grid; gap: .65rem; margin: 1.5rem 0; padding: 0; list-style: none; }
 .drivers li { display: grid; gap: .2rem; border-left: 1px solid #d8a732; padding-left: .75rem; }
 .drivers strong { font: .78rem "Courier New", monospace; color: #e4e2d7; }

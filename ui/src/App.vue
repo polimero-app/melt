@@ -20,6 +20,12 @@ type Driver = {
   description: string;
 };
 
+type NewPrinter = Printer & {
+  serial: string;
+  timeout: string;
+  insecure: boolean;
+};
+
 const info = ref<AppInfo>();
 const printers = ref<Printer[]>([]);
 const drivers = ref<Driver[]>([]);
@@ -27,6 +33,9 @@ const loading = ref(true);
 const loadError = ref<string>();
 const profileError = ref<string>();
 const aboutOpen = ref(false);
+const additionOpen = ref(false);
+const adding = ref(false);
+const additionError = ref<string>();
 const removalOpen = ref(false);
 const selectedPrinter = ref<Printer>();
 const removing = ref(false);
@@ -40,6 +49,15 @@ const statusKeys = {
 } as const;
 const statusLabel = computed(() => t(statusKeys[status.value]));
 const printerCount = computed(() => printers.value.length);
+const draft = ref({
+  name: "",
+  driver: "",
+  host: "",
+  serial: "",
+  timeout: "10s",
+  insecure: false,
+  accessCode: ""
+});
 
 function t(key: Parameters<typeof translate>[1], values?: Record<string, string | number>) {
   return translate(locale.value, key, values);
@@ -82,6 +100,41 @@ function openRemoval(printer: Printer) {
 
 function closeRemoval() {
   if (!removing.value) removalOpen.value = false;
+}
+
+function openAddition() {
+  draft.value = {
+    name: "",
+    driver: drivers.value.find((driver) => driver.name === "moonraker")?.name ?? drivers.value[0]?.name ?? "",
+    host: "",
+    serial: "",
+    timeout: "10s",
+    insecure: false,
+    accessCode: ""
+  };
+  additionError.value = undefined;
+  additionOpen.value = true;
+}
+
+function closeAddition() {
+  if (!adding.value) additionOpen.value = false;
+}
+
+async function addPrinter() {
+  if (adding.value) return;
+  adding.value = true;
+  additionError.value = undefined;
+
+  try {
+    const profile = await invoke<NewPrinter>("create_configured_printer", { request: draft.value });
+    printers.value.push({ name: profile.name, driver: profile.driver, host: profile.host });
+    additionOpen.value = false;
+    draft.value.accessCode = "";
+  } catch (reason) {
+    additionError.value = message(reason);
+  } finally {
+    adding.value = false;
+  }
 }
 
 async function removePrinter() {
@@ -152,6 +205,7 @@ async function removePrinter() {
           </article>
         </div>
         <p v-else class="empty">{{ t("profiles.empty") }}</p>
+        <button class="add-printer" type="button" :disabled="!drivers.length" @click="openAddition">{{ t("profiles.add") }}</button>
       </div>
     </section>
 
@@ -175,6 +229,30 @@ async function removePrinter() {
           </ul>
           <p v-if="!drivers.length" class="empty">{{ t("drivers.empty") }}</p>
           <button type="button" @click="aboutOpen = false">{{ t("common.close") }}</button>
+        </DialogPanel>
+      </div>
+    </Dialog>
+
+    <Dialog :open="additionOpen" @close="closeAddition" class="dialog">
+      <div class="backdrop" aria-hidden="true" />
+      <div class="dialog-frame">
+        <DialogPanel class="dialog-panel">
+          <DialogTitle>{{ t("addition.title") }}</DialogTitle>
+          <p>{{ t("addition.description") }}</p>
+          <form class="profile-form" @submit.prevent="addPrinter">
+            <label>{{ t("addition.name") }}<input v-model="draft.name" required maxlength="64" autocomplete="off" /></label>
+            <label>{{ t("addition.driver") }}<select v-model="draft.driver" required><option v-for="driver in drivers" :key="driver.name" :value="driver.name">{{ driver.name }}</option></select></label>
+            <label>{{ t("addition.host") }}<input v-model="draft.host" required autocomplete="off" /></label>
+            <label>{{ t("addition.serial") }}<input v-model="draft.serial" autocomplete="off" /></label>
+            <label>{{ t("addition.timeout") }}<input v-model="draft.timeout" required /></label>
+            <label>{{ t("addition.accessCode") }}<input v-model="draft.accessCode" type="password" autocomplete="new-password" /></label>
+            <label class="checkbox"><input v-model="draft.insecure" type="checkbox" />{{ t("addition.insecure") }}</label>
+            <p v-if="additionError" class="dialog-error" role="alert"><strong>{{ t("addition.error") }}</strong> {{ additionError }}</p>
+            <div class="actions">
+              <button type="button" :disabled="adding" @click="closeAddition">{{ t("common.cancel") }}</button>
+              <button type="submit" :disabled="adding">{{ adding ? t("common.adding") : t("addition.confirm") }}</button>
+            </div>
+          </form>
         </DialogPanel>
       </div>
     </Dialog>

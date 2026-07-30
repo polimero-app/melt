@@ -1,10 +1,12 @@
 use std::{net::IpAddr, path::Path};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{
     config::{Config, ConfigError},
+    drivers::{self, DriverError},
     keychain::{SERVICE, SecretError, SecretStore, account},
 };
 
@@ -16,6 +18,8 @@ pub enum ProfileError {
     InvalidName,
     #[error("invalid printer host")]
     InvalidHost,
+    #[error("access code must not contain control characters")]
+    InvalidAccessCode,
     #[error("printer profile {0:?} not found")]
     NotFound(String),
     #[error("keychain operation failed")]
@@ -24,6 +28,8 @@ pub enum ProfileError {
     Config(#[source] ConfigError),
     #[error("cannot save config and could not restore stored secrets")]
     RollbackFailed,
+    #[error("{0}")]
+    Driver(#[from] DriverError),
 }
 
 #[derive(Debug, Serialize)]
@@ -39,6 +45,92 @@ pub struct RemoveResult {
 pub struct RemoveWarning {
     pub code: &'static str,
     pub message: &'static str,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateRequest {
+    pub name: String,
+    pub driver: String,
+    pub host: String,
+    #[serde(default)]
+    pub serial: String,
+    #[serde(default = "default_timeout")]
+    pub timeout: String,
+    #[serde(default)]
+    pub insecure: bool,
+    #[serde(default)]
+    pub access_code: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateResult {
+    pub name: String,
+    #[serde(flatten)]
+    pub profile: crate::config::Profile,
+}
+
+pub fn create(
+    dir: impl AsRef<Path>,
+    store: &dyn SecretStore,
+    request: CreateRequest,
+) -> Result<CreateResult, ProfileError> {
+    let name = normalize_name(&request.name)?;
+    validate_host(&request.host)?;
+    validate_access_code(&request.access_code)?;
+
+    let now = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .expect("formatting an RFC 3339 timestamp cannot fail");
+    let profile = crate::config::Profile {
+        driver: request.driver,
+        host: request.host,
+        serial: request.serial,
+        timeout: request.timeout,
+        insecure: request.insecure,
+        created: now.clone(),
+        updated: now,
+    };
+    let driver_profile = drivers::profile(&profile)?;
+    let dir = dir.as_ref();
+    let mut config = Config::open(dir).map_err(ProfileError::Config)?;
+    if config.get_profile(&name).is_some() {
+        return Err(ProfileError::Config(ConfigError::ProfileAlreadyExists));
+    }
+
+    drivers::verify(
+        &driver_profile,
+        (!request.access_code.is_empty()).then_some(&request.access_code),
+    )?;
+
+    let mut secret = (!request.access_code.is_empty())
+        .then(|| {
+            StoredSecret::replace(
+                store,
+                account(&profile.driver, &name, "access-code"),
+                &request.access_code,
+            )
+        })
+        .transpose()?;
+    config
+        .add_profile(&name, profile.clone())
+        .map_err(ProfileError::Config)?;
+    if let Err(error) = config.save(dir) {
+        if secret
+            .as_mut()
+            .is_some_and(|secret| secret.restore(store).is_err())
+        {
+            return Err(ProfileError::RollbackFailed);
+        }
+        return Err(ProfileError::Config(error));
+    }
+
+    Ok(CreateResult { name, profile })
+}
+
+fn default_timeout() -> String {
+    "10s".into()
 }
 
 pub fn remove(
@@ -107,6 +199,13 @@ fn normalize_name(name: &str) -> Result<String, ProfileError> {
     Ok(name)
 }
 
+fn validate_access_code(access_code: &str) -> Result<(), ProfileError> {
+    if access_code.chars().any(|character| character.is_control()) {
+        return Err(ProfileError::InvalidAccessCode);
+    }
+    Ok(())
+}
+
 pub fn validate_host(host: &str) -> Result<(), ProfileError> {
     if host.is_empty() || host.trim() != host || host.chars().any(char::is_whitespace) {
         return Err(ProfileError::InvalidHost);
@@ -152,6 +251,19 @@ struct StoredSecret {
 }
 
 impl StoredSecret {
+    fn replace(
+        store: &dyn SecretStore,
+        account: String,
+        value: &str,
+    ) -> Result<Self, ProfileError> {
+        let mut secret = Self::load(store, account)?;
+        store
+            .set(SERVICE, &secret.account, value)
+            .map_err(ProfileError::Secret)?;
+        secret.deleted = true;
+        Ok(secret)
+    }
+
     fn load(store: &dyn SecretStore, account: String) -> Result<Self, ProfileError> {
         match store.get(SERVICE, &account) {
             Ok(value) => Ok(Self {
@@ -177,6 +289,18 @@ impl StoredSecret {
             store.delete(SERVICE, &self.account)?;
             self.deleted = true;
         }
+        Ok(())
+    }
+
+    fn restore(&mut self, store: &dyn SecretStore) -> Result<(), SecretError> {
+        if !self.deleted {
+            return Ok(());
+        }
+        match self.value.as_deref() {
+            Some(value) => store.set(SERVICE, &self.account, value)?,
+            None => store.delete(SERVICE, &self.account)?,
+        }
+        self.deleted = false;
         Ok(())
     }
 }
@@ -227,6 +351,20 @@ mod tests {
                 .remove(account)
                 .map(|_| ())
                 .ok_or(SecretError::NotFound)
+        }
+    }
+
+    struct UnavailableStore;
+
+    impl SecretStore for UnavailableStore {
+        fn get(&self, _: &str, _: &str) -> Result<String, SecretError> {
+            Err(SecretError::Unavailable("unavailable".into()))
+        }
+        fn set(&self, _: &str, _: &str, _: &str) -> Result<(), SecretError> {
+            Err(SecretError::Unavailable("unavailable".into()))
+        }
+        fn delete(&self, _: &str, _: &str) -> Result<(), SecretError> {
+            Err(SecretError::Unavailable("unavailable".into()))
         }
     }
 
@@ -289,5 +427,152 @@ mod tests {
         ] {
             assert!(validate_host(host).is_err(), "{host}");
         }
+    }
+
+    #[test]
+    fn rejects_access_codes_with_control_characters_before_connecting() {
+        assert!(matches!(
+            validate_access_code("bad\ncode"),
+            Err(ProfileError::InvalidAccessCode)
+        ));
+    }
+
+    #[test]
+    fn creates_a_verified_moonraker_profile_without_serializing_its_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::default();
+        let (host, server) = moonraker_server(None);
+
+        let result = create(
+            dir.path(),
+            &store,
+            CreateRequest {
+                name: "Garage".into(),
+                driver: "moonraker".into(),
+                host,
+                serial: String::new(),
+                timeout: "10s".into(),
+                insecure: false,
+                access_code: "key".into(),
+            },
+        )
+        .unwrap();
+        server.join().unwrap();
+
+        assert_eq!(result.name, "garage");
+        assert!(!result.profile.created.is_empty());
+        assert!(
+            Config::open(dir.path())
+                .unwrap()
+                .get_profile("garage")
+                .is_some()
+        );
+        assert_eq!(
+            store.get(SERVICE, "moonraker:garage:access-code").unwrap(),
+            "key"
+        );
+        assert!(
+            !std::fs::read_to_string(dir.path().join("polimero.yaml"))
+                .unwrap()
+                .contains("key")
+        );
+    }
+
+    #[test]
+    fn permits_a_verified_keyless_profile_when_the_keychain_is_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        let (host, server) = moonraker_server(None);
+
+        create(
+            dir.path(),
+            &UnavailableStore,
+            CreateRequest {
+                name: "garage".into(),
+                driver: "moonraker".into(),
+                host,
+                serial: String::new(),
+                timeout: "10s".into(),
+                insecure: false,
+                access_code: String::new(),
+            },
+        )
+        .unwrap();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn restores_the_previous_secret_when_config_changes_after_verification() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::open(dir.path()).unwrap();
+        config.save(dir.path()).unwrap();
+        let store = MemoryStore::default();
+        store
+            .set(SERVICE, "moonraker:garage:access-code", "old-key")
+            .unwrap();
+        let (host, server) = moonraker_server(Some(dir.path().join("polimero.yaml")));
+
+        let error = create(
+            dir.path(),
+            &store,
+            CreateRequest {
+                name: "garage".into(),
+                driver: "moonraker".into(),
+                host,
+                serial: String::new(),
+                timeout: "10s".into(),
+                insecure: false,
+                access_code: "new-key".into(),
+            },
+        )
+        .unwrap_err();
+        server.join().unwrap();
+
+        assert!(matches!(
+            error,
+            ProfileError::Config(ConfigError::ConcurrentUpdate)
+        ));
+        assert_eq!(
+            store.get(SERVICE, "moonraker:garage:access-code").unwrap(),
+            "old-key"
+        );
+        assert!(
+            Config::open(dir.path())
+                .unwrap()
+                .get_profile("garage")
+                .is_none()
+        );
+    }
+
+    fn moonraker_server(
+        mutate_config: Option<std::path::PathBuf>,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+            thread,
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let host = format!("http://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream.read(&mut chunk).unwrap();
+                request.extend_from_slice(&chunk[..read]);
+            }
+            if let Some(path) = mutate_config {
+                std::fs::write(path, "version: 1\nprofiles: {}\n# changed\n").unwrap();
+            }
+            let body = r#"{"result":{"status":{"print_stats":{"state":"ready"}}}}"#;
+            write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+        });
+        (host, server)
     }
 }

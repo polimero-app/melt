@@ -24,6 +24,7 @@ export type MessageKey =
   | "workspace.guiValue"
   | "profiles.label"
   | "profiles.remove"
+  | "profiles.add"
   | "profiles.empty"
   | "profiles.loading"
   | "profiles.error"
@@ -31,6 +32,7 @@ export type MessageKey =
   | "common.close"
   | "common.cancel"
   | "common.removing"
+  | "common.adding"
   | "footer.starting"
   | "footer.private"
   | "drivers.title"
@@ -39,7 +41,18 @@ export type MessageKey =
   | "removal.title"
   | "removal.description"
   | "removal.confirm"
-  | "removal.error";
+  | "removal.error"
+  | "addition.title"
+  | "addition.description"
+  | "addition.name"
+  | "addition.driver"
+  | "addition.host"
+  | "addition.serial"
+  | "addition.timeout"
+  | "addition.accessCode"
+  | "addition.insecure"
+  | "addition.confirm"
+  | "addition.error";
 
 type Messages = Record<MessageKey, string>;
 
@@ -66,6 +79,7 @@ const messages: Record<Locale, Messages> = {
     "workspace.guiValue": "Vue desktop surface",
     "profiles.label": "Configured printer profiles",
     "profiles.remove": "Remove",
+    "profiles.add": "Add printer",
     "profiles.empty": "No printers configured yet. Add one with the headless CLI while the setup flow is migrated.",
     "profiles.loading": "Loading local printer profiles…",
     "profiles.error": "We could not load your printer profiles.",
@@ -73,6 +87,7 @@ const messages: Record<Locale, Messages> = {
     "common.close": "Close",
     "common.cancel": "Cancel",
     "common.removing": "Removing…",
+    "common.adding": "Verifying…",
     "footer.starting": "Starting core…",
     "footer.private": "no cloud · no telemetry",
     "drivers.title": "Available printer drivers",
@@ -81,7 +96,18 @@ const messages: Record<Locale, Messages> = {
     "removal.title": "Remove {name}?",
     "removal.description": "This removes the local profile and its stored credentials. The printer itself is not changed.",
     "removal.confirm": "Remove profile",
-    "removal.error": "We could not remove this profile."
+    "removal.error": "We could not remove this profile.",
+    "addition.title": "Add a printer",
+    "addition.description": "The printer must respond before its local profile is saved.",
+    "addition.name": "Profile name",
+    "addition.driver": "Driver",
+    "addition.host": "Host or base URL",
+    "addition.serial": "Serial number",
+    "addition.timeout": "Connection timeout",
+    "addition.accessCode": "Access code",
+    "addition.insecure": "Accept an untrusted TLS certificate",
+    "addition.confirm": "Verify and save",
+    "addition.error": "We could not save this profile."
   },
   "pt-BR": {
     "app.eyebrow": "CONTROLE DE IMPRESSÃO LOCAL",
@@ -105,6 +131,7 @@ const messages: Record<Locale, Messages> = {
     "workspace.guiValue": "Superfície desktop em Vue",
     "profiles.label": "Perfis de impressora configurados",
     "profiles.remove": "Remover",
+    "profiles.add": "Adicionar impressora",
     "profiles.empty": "Nenhuma impressora foi configurada. Adicione uma pela CLI enquanto o fluxo de configuração é migrado.",
     "profiles.loading": "Carregando perfis de impressora locais…",
     "profiles.error": "Não foi possível carregar seus perfis de impressora.",
@@ -112,6 +139,7 @@ const messages: Record<Locale, Messages> = {
     "common.close": "Fechar",
     "common.cancel": "Cancelar",
     "common.removing": "Removendo…",
+    "common.adding": "Verificando…",
     "footer.starting": "Iniciando núcleo…",
     "footer.private": "sem nuvem · sem telemetria",
     "drivers.title": "Drivers de impressora disponíveis",
@@ -120,7 +148,18 @@ const messages: Record<Locale, Messages> = {
     "removal.title": "Remover {name}?",
     "removal.description": "Isso remove o perfil local e suas credenciais armazenadas. A impressora não é alterada.",
     "removal.confirm": "Remover perfil",
-    "removal.error": "Não foi possível remover este perfil."
+    "removal.error": "Não foi possível remover este perfil.",
+    "addition.title": "Adicionar uma impressora",
+    "addition.description": "A impressora deve responder antes que o perfil local seja salvo.",
+    "addition.name": "Nome do perfil",
+    "addition.driver": "Driver",
+    "addition.host": "Host ou URL base",
+    "addition.serial": "Número de série",
+    "addition.timeout": "Tempo limite de conexão",
+    "addition.accessCode": "Código de acesso",
+    "addition.insecure": "Aceitar um certificado TLS não confiável",
+    "addition.confirm": "Verificar e salvar",
+    "addition.error": "Não foi possível salvar este perfil."
   }
 };
 
