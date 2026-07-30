@@ -7,11 +7,12 @@ compatibility gates.
 ## Running on Linux Wayland
 
 Use `make run` during development. On a Wayland session that also provides
-XWayland, it starts GTK with `GDK_BACKEND=x11` before the process loads, which
-avoids compositor protocol failures. To run a built binary directly, use:
+XWayland, it starts GTK with `GDK_BACKEND=x11` and disables WebKit DMA-BUF
+rendering before the process loads, which avoids compositor protocol failures
+and GBM buffer warnings. To run a built binary directly, use:
 
 ```sh
-GDK_BACKEND=x11 ./target/debug/polimero
+GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 ./target/debug/polimero
 ```
 
 - `crates/polimero-core` contains UI-agnostic behavior.

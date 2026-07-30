@@ -14,7 +14,7 @@ contract:
 run:
 	@if test "$$XDG_SESSION_TYPE" = wayland && test -n "$$DISPLAY" && test -z "$$GDK_BACKEND"; then \
 		echo "Using X11 GTK fallback for this Wayland session"; \
-		GDK_BACKEND=x11 cargo run -p polimero-desktop --bin polimero; \
+		GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER="$${WEBKIT_DISABLE_DMABUF_RENDERER:-1}" cargo run -p polimero-desktop --bin polimero; \
 	else \
 		cargo run -p polimero-desktop --bin polimero; \
 	fi
