@@ -45,10 +45,10 @@ cargo-lint:
 	cargo clippy --workspace --all-targets --locked -- -D warnings
 
 ui-install:
-	npm --prefix ui ci
+	bun install --cwd ui --frozen-lockfile
 
 ui-build:
-	npm --prefix ui run build
+	bun run --cwd ui build
 
 ui-test:
-	npm --prefix ui test
+	bun test --cwd ui

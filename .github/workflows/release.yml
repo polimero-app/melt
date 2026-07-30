@@ -34,11 +34,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
+          bun-version: 1.3.14
       - name: Install Linux bundle dependencies
         if: runner.os == 'Linux'
         run: |
@@ -49,9 +47,9 @@ jobs:
       - name: Verify automated release qualification
         if: runner.os == 'Linux'
         run: make release-qualification
-      - run: npm --prefix ui ci
+      - run: bun install --cwd ui --frozen-lockfile
         if: runner.os != 'Linux'
-      - run: npm --prefix ui run build
+      - run: bun run --cwd ui build
       - name: Install Tauri CLI
         run: cargo install tauri-cli --locked
       - name: Build native installer
