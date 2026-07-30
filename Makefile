@@ -1,4 +1,4 @@
-.PHONY: build test lint ci contract release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test
+.PHONY: build test lint ci contract run release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test
 
 build: cargo-build ui-build
 
@@ -10,6 +10,14 @@ ci: ui-install lint test build contract
 
 contract:
 	cargo test -p polimero-cli --test contract_fixtures --locked
+
+run:
+	@if test "$$XDG_SESSION_TYPE" = wayland && test -n "$$DISPLAY" && test -z "$$GDK_BACKEND"; then \
+		echo "Using X11 GTK fallback for this Wayland session"; \
+		GDK_BACKEND=x11 cargo run -p polimero-desktop --bin polimero; \
+	else \
+		cargo run -p polimero-desktop --bin polimero; \
+	fi
 
 release-gate: contract cargo-build
 	$(MAKE) release-cli-check

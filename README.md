@@ -4,6 +4,16 @@ This directory is the parallel Rust/Tauri implementation. The Go application
 remains the released implementation until this workspace passes its CLI and GUI
 compatibility gates.
 
+## Running on Linux Wayland
+
+Use `make run` during development. On a Wayland session that also provides
+XWayland, it starts GTK with `GDK_BACKEND=x11` before the process loads, which
+avoids compositor protocol failures. To run a built binary directly, use:
+
+```sh
+GDK_BACKEND=x11 ./target/debug/polimero
+```
+
 - `crates/polimero-core` contains UI-agnostic behavior.
 - `crates/polimero-cli` adapts that behavior to the `polimero` CLI contract.
 - `crates/polimero-desktop` selects CLI mode for arguments and starts Tauri for
