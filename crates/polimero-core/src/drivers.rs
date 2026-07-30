@@ -97,6 +97,7 @@ impl Driver {
         match self {
             Self::BambuLan => Capabilities {
                 status: true,
+                discovery: true,
                 camera_stream: true,
                 camera_snapshot: true,
                 file_list: true,
@@ -110,6 +111,7 @@ impl Driver {
                 temperature_read: true,
                 temperature_write: true,
                 motion_control: true,
+                tls_refresh: true,
                 fan_control: true,
                 speed_control: true,
                 ..Capabilities::default()
@@ -243,6 +245,18 @@ pub fn status(
         Profile::Bambu(profile) => bambu::Client::new(profile.clone())
             .status(access_code, tls_fingerprint)
             .map_err(DriverError::Bambu),
+    }
+}
+
+pub fn capture_tls_fingerprint(profile: &Profile) -> Result<String, DriverError> {
+    match profile {
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .capture_fingerprint()
+            .map_err(DriverError::Bambu),
+        Profile::Moonraker(_) => Err(DriverError::UnsupportedOperation(
+            Driver::Moonraker,
+            Operation::TlsRefresh,
+        )),
     }
 }
 
@@ -504,7 +518,7 @@ pub fn speed_set(
     }
 }
 
-fn parse_timeout(value: &str) -> Result<Duration, DriverError> {
+pub fn parse_timeout(value: &str) -> Result<Duration, DriverError> {
     let (amount, unit) = value
         .trim()
         .strip_suffix("ms")
@@ -629,7 +643,7 @@ mod tests {
         assert!(capabilities.motion_control);
         assert!(capabilities.fan_control);
         assert!(capabilities.speed_control);
-        assert!(!capabilities.discovery);
-        assert!(!capabilities.tls_refresh);
+        assert!(capabilities.discovery);
+        assert!(capabilities.tls_refresh);
     }
 }

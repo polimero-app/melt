@@ -1,0 +1,12 @@
+{
+  "ok": false,
+  "data": null,
+  "error": {
+    "code": "capability-unsupported",
+    "message": "moonraker does not support Discovery",
+    "details": {}
+  },
+  "meta": {
+    "command": "printer discover"
+  }
+}

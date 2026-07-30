@@ -110,6 +110,14 @@ struct MotionHomeRequest {
     confirmed: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TlsRefreshRequest {
+    name: String,
+    fingerprint: String,
+    confirmed: bool,
+}
+
 #[tauri::command]
 fn configured_printers() -> Result<Vec<PrinterSummary>, String> {
     Config::load()
@@ -130,6 +138,12 @@ fn configured_printers() -> Result<Vec<PrinterSummary>, String> {
 #[tauri::command]
 fn registered_drivers() -> Vec<drivers::DriverInfo> {
     drivers::registered().to_vec()
+}
+
+#[tauri::command]
+fn discover_printers() -> Result<Vec<polimero_core::bambu::DiscoveredPrinter>, String> {
+    polimero_core::bambu::discover(Duration::from_secs(5))
+        .map_err(|_| "Printer discovery failed.".to_string())
 }
 
 #[tauri::command]
@@ -262,6 +276,7 @@ fn create_error(error: profiles::ProfileError) -> String {
         | profiles::ProfileError::InvalidName
         | profiles::ProfileError::InvalidHost
         | profiles::ProfileError::InvalidAccessCode
+        | profiles::ProfileError::InvalidTlsFingerprint
         | profiles::ProfileError::MissingAccessCode => error.to_string(),
         profiles::ProfileError::Config(ConfigError::ProfileAlreadyExists) => {
             "A printer profile with this name already exists.".into()
@@ -273,6 +288,25 @@ fn create_error(error: profiles::ProfileError) -> String {
         profiles::ProfileError::Config(_) => "Unable to save printer configuration.".into(),
         profiles::ProfileError::NotFound(_) => "Printer profile not found.".into(),
     }
+}
+
+#[tauri::command]
+fn refresh_printer_tls(request: TlsRefreshRequest) -> Result<profiles::TlsRefreshResult, String> {
+    if !request.confirmed {
+        return Err(
+            "Review and confirm the new TLS certificate before replacing the stored fingerprint."
+                .into(),
+        );
+    }
+    let dir = config_dir().map_err(|_| "Unable to read printer configuration.".to_string())?;
+    profiles::store_tls_fingerprint(dir, &SystemKeychain, &request.name, &request.fingerprint)
+        .map_err(create_error)
+}
+
+#[tauri::command]
+fn preview_printer_tls(name: String) -> Result<String, String> {
+    let dir = config_dir().map_err(|_| "Unable to read printer configuration.".to_string())?;
+    profiles::preview_tls(dir, &name, None).map_err(create_error)
 }
 
 #[tauri::command]
@@ -699,9 +733,12 @@ fn main() {
             app_info,
             configured_printers,
             registered_drivers,
+            discover_printers,
             printer_capabilities,
             monitored_printers,
             create_configured_printer,
+            preview_printer_tls,
+            refresh_printer_tls,
             printer_status,
             printer_files,
             printer_job_action,

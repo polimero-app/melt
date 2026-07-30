@@ -5,6 +5,7 @@ use thiserror::Error;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{
+    bambu::is_valid_tls_fingerprint,
     config::{Config, ConfigError},
     drivers::{self, DriverError},
     keychain::{SERVICE, SecretError, SecretStore, account},
@@ -22,6 +23,8 @@ pub enum ProfileError {
     InvalidAccessCode,
     #[error("an access code is required for this printer driver")]
     MissingAccessCode,
+    #[error("invalid TLS fingerprint")]
+    InvalidTlsFingerprint,
     #[error("printer profile {0:?} not found")]
     NotFound(String),
     #[error("keychain operation failed")]
@@ -36,11 +39,140 @@ pub enum ProfileError {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TlsRefreshResult {
+    pub name: String,
+    pub fingerprint: Option<String>,
+    pub insecure: bool,
+    pub warnings: Vec<RemoveWarning>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoveResult {
     pub name: String,
     pub access_code_removed: bool,
     pub tls_fingerprint_removed: bool,
     pub warnings: Vec<RemoveWarning>,
+}
+
+pub fn refresh_tls(
+    dir: impl AsRef<Path>,
+    store: &dyn SecretStore,
+    name: &str,
+    insecure: bool,
+    timeout: Option<String>,
+) -> Result<TlsRefreshResult, ProfileError> {
+    let name = normalize_name(name)?;
+    let dir = dir.as_ref();
+    let mut config = Config::open(dir).map_err(ProfileError::Config)?;
+    let mut profile = config
+        .get_profile(&name)
+        .cloned()
+        .ok_or_else(|| ProfileError::NotFound(name.clone()))?;
+    if let Some(timeout) = timeout {
+        profile.timeout = timeout;
+    }
+    let driver = drivers::profile(&profile)?;
+    if !driver.driver().supports(drivers::Operation::TlsRefresh) {
+        return Err(ProfileError::Driver(DriverError::UnsupportedOperation(
+            driver.driver(),
+            drivers::Operation::TlsRefresh,
+        )));
+    }
+    let fingerprint_account = account(&profile.driver, &name, "tls-fingerprint");
+    if insecure {
+        profile.insecure = true;
+        profile.updated = now();
+        config
+            .set_profile(&name, profile)
+            .map_err(ProfileError::Config)?;
+        config.save(dir).map_err(ProfileError::Config)?;
+        let mut warnings = Vec::new();
+        match store.delete(SERVICE, &fingerprint_account) {
+            Ok(()) | Err(SecretError::NotFound) => {}
+            Err(_) => warnings.push(RemoveWarning {
+                code: "tls-fingerprint-delete-failed",
+                message: "profile was switched to insecure, but the stored TLS fingerprint could not be deleted from keychain",
+            }),
+        }
+        return Ok(TlsRefreshResult {
+            name,
+            fingerprint: None,
+            insecure: true,
+            warnings,
+        });
+    }
+
+    let fingerprint = preview_tls(dir, &name, Some(profile.timeout.clone()))?;
+    store_tls_fingerprint(dir, store, &name, &fingerprint)
+}
+
+pub fn preview_tls(
+    dir: impl AsRef<Path>,
+    name: &str,
+    timeout: Option<String>,
+) -> Result<String, ProfileError> {
+    let name = normalize_name(name)?;
+    let config = Config::open(dir).map_err(ProfileError::Config)?;
+    let mut profile = config
+        .get_profile(&name)
+        .cloned()
+        .ok_or_else(|| ProfileError::NotFound(name.clone()))?;
+    if let Some(timeout) = timeout {
+        profile.timeout = timeout;
+    }
+    let driver = drivers::profile(&profile)?;
+    if !driver.driver().supports(drivers::Operation::TlsRefresh) {
+        return Err(ProfileError::Driver(DriverError::UnsupportedOperation(
+            driver.driver(),
+            drivers::Operation::TlsRefresh,
+        )));
+    }
+    drivers::capture_tls_fingerprint(&driver).map_err(ProfileError::Driver)
+}
+
+pub fn store_tls_fingerprint(
+    dir: impl AsRef<Path>,
+    store: &dyn SecretStore,
+    name: &str,
+    fingerprint: &str,
+) -> Result<TlsRefreshResult, ProfileError> {
+    if !is_valid_tls_fingerprint(fingerprint) {
+        return Err(ProfileError::InvalidTlsFingerprint);
+    }
+    let name = normalize_name(name)?;
+    let dir = dir.as_ref();
+    let mut config = Config::open(dir).map_err(ProfileError::Config)?;
+    let mut profile = config
+        .get_profile(&name)
+        .cloned()
+        .ok_or_else(|| ProfileError::NotFound(name.clone()))?;
+    let driver = drivers::profile(&profile)?;
+    if !driver.driver().supports(drivers::Operation::TlsRefresh) {
+        return Err(ProfileError::Driver(DriverError::UnsupportedOperation(
+            driver.driver(),
+            drivers::Operation::TlsRefresh,
+        )));
+    }
+    let fingerprint_account = account(&profile.driver, &name, "tls-fingerprint");
+    let mut stored = StoredSecret::replace(store, fingerprint_account, fingerprint)?;
+    profile.insecure = false;
+    profile.updated = now();
+    if let Err(error) = config
+        .set_profile(&name, profile)
+        .and_then(|_| config.save(dir))
+    {
+        if stored.restore(store).is_err() {
+            return Err(ProfileError::RollbackFailed);
+        }
+        return Err(ProfileError::Config(error));
+    }
+    Ok(TlsRefreshResult {
+        name,
+        fingerprint: Some(fingerprint.into()),
+        insecure: false,
+        warnings: Vec::new(),
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -150,6 +282,12 @@ pub fn create(
 
 fn default_timeout() -> String {
     "10s".into()
+}
+
+fn now() -> String {
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .expect("formatting an RFC 3339 timestamp cannot fail")
 }
 
 pub fn remove(
@@ -420,6 +558,54 @@ mod tests {
         );
         assert_eq!(
             store.get(SERVICE, "bambu-lan:garage:access-code"),
+            Err(SecretError::NotFound)
+        );
+    }
+
+    #[test]
+    fn switching_to_insecure_removes_only_the_tls_pin_after_saving_the_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::open(dir.path()).unwrap();
+        config
+            .add_profile(
+                "garage",
+                Profile {
+                    driver: "bambu-lan".into(),
+                    host: "printer.local".into(),
+                    serial: "SN001".into(),
+                    timeout: "10s".into(),
+                    insecure: false,
+                    created: String::new(),
+                    updated: String::new(),
+                },
+            )
+            .unwrap();
+        config.save(dir.path()).unwrap();
+        let store = MemoryStore::default();
+        store
+            .set(SERVICE, "bambu-lan:garage:access-code", "access-code")
+            .unwrap();
+        store
+            .set(SERVICE, "bambu-lan:garage:tls-fingerprint", "old-pin")
+            .unwrap();
+
+        let result = refresh_tls(dir.path(), &store, "garage", true, None).unwrap();
+
+        assert!(result.insecure);
+        assert_eq!(result.fingerprint, None);
+        assert!(
+            Config::open(dir.path())
+                .unwrap()
+                .get_profile("garage")
+                .unwrap()
+                .insecure
+        );
+        assert_eq!(
+            store.get(SERVICE, "bambu-lan:garage:access-code").unwrap(),
+            "access-code"
+        );
+        assert_eq!(
+            store.get(SERVICE, "bambu-lan:garage:tls-fingerprint"),
             Err(SecretError::NotFound)
         );
     }

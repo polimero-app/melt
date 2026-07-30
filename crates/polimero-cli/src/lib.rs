@@ -202,14 +202,14 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         [printer, discover, rest @ ..]
             if printer.as_str() == "printer" && discover.as_str() == "discover" =>
         {
-            unsupported_command("printer discover", invocation.format, out, err)
+            discover_printers(invocation.format, rest, out, err)
         }
         [printer, tls, refresh, rest @ ..]
             if printer.as_str() == "printer"
                 && tls.as_str() == "tls"
                 && refresh.as_str() == "refresh" =>
         {
-            unsupported_command("printer tls refresh", invocation.format, out, err)
+            refresh_tls(invocation.format, rest, out, err)
         }
         _ => write_error(
             "polimero",
@@ -635,6 +635,274 @@ fn unsupported_command(
         out,
         err,
     )
+}
+
+fn discover_printers(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) =
+        match parse_options(args, &[], &["driver", "timeout", "protocol-trace"]) {
+            Ok(value) => value,
+            Err(error) => {
+                return write_error("printer discover", format, AppError::usage(error), out, err);
+            }
+        };
+    if !positionals.is_empty() {
+        return write_error(
+            "printer discover",
+            format,
+            AppError::usage("printer discover does not accept positional arguments"),
+            out,
+            err,
+        );
+    }
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("printer discover", format, error, out, err),
+    };
+    let driver = match options.value("driver") {
+        Some(name) => match drivers::Driver::parse(name) {
+            Ok(driver) => driver,
+            Err(error) => {
+                return write_error("printer discover", format, driver_error(error), out, err);
+            }
+        },
+        None => drivers::Driver::BambuLan,
+    };
+    if !driver.supports(drivers::Operation::Discovery) {
+        return write_error(
+            "printer discover",
+            format,
+            driver_error(DriverError::UnsupportedOperation(
+                driver,
+                drivers::Operation::Discovery,
+            )),
+            out,
+            err,
+        );
+    }
+    let timeout = match drivers::parse_timeout(connection.timeout.as_deref().unwrap_or("5s")) {
+        Ok(timeout) => timeout,
+        Err(_) => {
+            return write_error(
+                "printer discover",
+                format,
+                AppError::usage("invalid --timeout: expected a positive duration such as 5s"),
+                out,
+                err,
+            );
+        }
+    };
+    let configured = match Config::load() {
+        Ok(config) => config
+            .sorted_profiles()
+            .into_iter()
+            .filter(|profile| !profile.profile.serial.is_empty())
+            .map(|profile| (profile.profile.serial, profile.name))
+            .collect::<BTreeMap<_, _>>(),
+        Err(error) => {
+            return write_error("printer discover", format, config_error(error), out, err);
+        }
+    };
+    match polimero_core::bambu::discover(timeout) {
+        Ok(printers) => {
+            let printers = printers
+                .into_iter()
+                .map(|printer| DiscoveryPrinter {
+                    configured_as: configured.get(&printer.serial).cloned(),
+                    driver: printer.driver,
+                    host: printer.host,
+                    serial: printer.serial,
+                    model: printer.model,
+                    name: printer.name,
+                })
+                .collect::<Vec<_>>();
+            let count = printers.len();
+            write_success(
+                "printer discover",
+                format,
+                DiscoveryData {
+                    printers: printers.clone(),
+                },
+                |out| {
+                    if count == 0 {
+                        writeln!(out, "No printers found on the local network.")
+                    } else {
+                        writeln!(out, "NAME\tSERIAL\tMODEL\tHOST\tCONFIGURED")?;
+                        for printer in &printers {
+                            writeln!(
+                                out,
+                                "{}\t{}\t{}\t{}\t{}",
+                                printer.name,
+                                printer.serial,
+                                printer.model,
+                                printer.host,
+                                printer.configured_as.as_deref().unwrap_or("-")
+                            )?;
+                        }
+                        Ok(())
+                    }
+                },
+                out,
+            )
+        }
+        Err(_) => write_error(
+            "printer discover",
+            format,
+            AppError {
+                exit_code: 4,
+                code: "connection-failed",
+                message: "printer discovery failed".into(),
+            },
+            out,
+            err,
+        ),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscoveryData {
+    printers: Vec<DiscoveryPrinter>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscoveryPrinter {
+    driver: &'static str,
+    host: String,
+    serial: String,
+    model: String,
+    name: String,
+    configured_as: Option<String>,
+}
+
+fn refresh_tls(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) =
+        match parse_options(args, &["yes", "insecure"], &["timeout", "protocol-trace"]) {
+            Ok(value) => value,
+            Err(error) => {
+                return write_error(
+                    "printer tls refresh",
+                    format,
+                    AppError::usage(error),
+                    out,
+                    err,
+                );
+            }
+        };
+    let name = match one_positional("printer tls refresh", &positionals) {
+        Ok(name) => name,
+        Err(error) => return write_error("printer tls refresh", format, error, out, err),
+    };
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("printer tls refresh", format, error, out, err),
+    };
+    let insecure = options.enabled("insecure");
+    if !options.enabled("yes") && !std::io::stdin().is_terminal() {
+        return write_error(
+            "printer tls refresh",
+            format,
+            AppError::usage("non-interactive mode requires --yes"),
+            out,
+            err,
+        );
+    }
+    let dir = match config_dir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            return write_error(
+                "printer tls refresh",
+                format,
+                AppError {
+                    exit_code: 1,
+                    code: "internal-error",
+                    message: error.to_string(),
+                },
+                out,
+                err,
+            );
+        }
+    };
+    let result = if insecure {
+        let prompt =
+            format!("Permanently disable TLS verification for {name}? Type 'yes' to continue: ");
+        if let Err(exit) = require_confirmation(
+            "printer tls refresh",
+            options.enabled("yes"),
+            &prompt,
+            format,
+            out,
+            err,
+        ) {
+            return exit;
+        }
+        profiles::refresh_tls(dir, &SystemKeychain, name, true, connection.timeout)
+    } else {
+        let fingerprint = match profiles::preview_tls(&dir, name, connection.timeout) {
+            Ok(fingerprint) => fingerprint,
+            Err(error) => {
+                return write_error(
+                    "printer tls refresh",
+                    format,
+                    profile_error(error),
+                    out,
+                    err,
+                );
+            }
+        };
+        let prompt = format!(
+            "Replace the TLS fingerprint for {name} with {fingerprint}? Type 'yes' to continue: "
+        );
+        if let Err(exit) = require_confirmation(
+            "printer tls refresh",
+            options.enabled("yes"),
+            &prompt,
+            format,
+            out,
+            err,
+        ) {
+            return exit;
+        }
+        profiles::store_tls_fingerprint(dir, &SystemKeychain, name, &fingerprint)
+    };
+    match result {
+        Ok(result) => {
+            let fingerprint = result.fingerprint.clone();
+            write_success(
+                "printer tls refresh",
+                format,
+                result,
+                |out| match fingerprint {
+                    Some(fingerprint) => writeln!(
+                        out,
+                        "TLS certificate re-pinned: {name}\nFingerprint: {fingerprint}"
+                    ),
+                    None => writeln!(
+                        out,
+                        "TLS certificate verification disabled: {name}\nWarning: TLS verification is disabled for this profile."
+                    ),
+                },
+                out,
+            )
+        }
+        Err(error) => write_error(
+            "printer tls refresh",
+            format,
+            profile_error(error),
+            out,
+            err,
+        ),
+    }
 }
 
 fn files_roots(
@@ -2163,6 +2431,7 @@ fn profile_error(error: ProfileError) -> AppError {
         | ProfileError::InvalidName
         | ProfileError::InvalidHost
         | ProfileError::InvalidAccessCode
+        | ProfileError::InvalidTlsFingerprint
         | ProfileError::MissingAccessCode
         | ProfileError::NotFound(_) => AppError::usage(error.to_string()),
         ProfileError::Driver(error) => driver_error(error),
@@ -2556,6 +2825,46 @@ mod tests {
         let output = String::from_utf8(out).unwrap();
         assert!(output.contains(r#""code": "capability-unsupported""#));
         assert!(output.contains("required driver transport is not implemented"));
+    }
+
+    #[test]
+    fn discovery_rejects_drivers_without_the_capability_without_scanning() {
+        let args = [
+            "printer".into(),
+            "discover".into(),
+            "--driver".into(),
+            "moonraker".into(),
+            "--output".into(),
+            "json".into(),
+        ];
+        let mut out = Vec::new();
+
+        assert_eq!(run(&args, &mut out, &mut Vec::new()), 5);
+        assert!(
+            String::from_utf8(out)
+                .unwrap()
+                .contains("capability-unsupported")
+        );
+    }
+
+    #[test]
+    fn tls_refresh_requires_explicit_confirmation_when_non_interactive() {
+        let args = [
+            "printer".into(),
+            "tls".into(),
+            "refresh".into(),
+            "garage".into(),
+            "--output".into(),
+            "json".into(),
+        ];
+        let mut out = Vec::new();
+
+        assert_eq!(run(&args, &mut out, &mut Vec::new()), 2);
+        assert!(
+            String::from_utf8(out)
+                .unwrap()
+                .contains("non-interactive mode requires --yes")
+        );
     }
 
     #[test]

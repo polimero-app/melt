@@ -120,6 +120,22 @@ impl Client {
         result.map(Some)
     }
 
+    /// Captures the printer's leaf certificate without authenticating or sending
+    /// a printer command. Callers must show and confirm the new pin before use.
+    pub fn capture_fingerprint(&self) -> Result<String, Error> {
+        let deadline = deadline_after(self.profile.timeout())?;
+        let connector = tls_connector()?;
+        let (_, fingerprint) = open_tls(
+            &connector,
+            &self.profile,
+            super::MQTT_PORT,
+            None,
+            false,
+            deadline,
+        )?;
+        Ok(fingerprint)
+    }
+
     pub fn status(
         &self,
         access_code: Option<&str>,

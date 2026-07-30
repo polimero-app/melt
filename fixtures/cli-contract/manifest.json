@@ -45,6 +45,24 @@
       "stdout": "golden/camera-snapshot-unavailable.json",
       "stderr": "",
       "ignoreJsonPointers": []
+    },
+    {
+      "id": "printer-discover-unsupported-driver-json",
+      "command": "printer discover",
+      "args": ["printer", "discover", "--driver", "moonraker", "--output", "json"],
+      "exitCode": 5,
+      "stdout": "golden/printer-discover-unsupported-driver.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
+    },
+    {
+      "id": "printer-tls-refresh-profile-not-found-json",
+      "command": "printer tls refresh",
+      "args": ["printer", "tls", "refresh", "garage", "--yes", "--output", "json"],
+      "exitCode": 2,
+      "stdout": "golden/printer-tls-refresh-profile-not-found.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
     }
   ]
 }

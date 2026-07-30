@@ -12,8 +12,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+mod discovery;
 mod transport;
 
+pub use discovery::{DiscoveredPrinter, DiscoveryError, discover};
 pub use transport::{Client, Error as TransportError, JobStartOptions};
 
 pub const MQTT_PORT: u16 = 8883;

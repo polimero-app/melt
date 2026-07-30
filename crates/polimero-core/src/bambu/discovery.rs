@@ -1,0 +1,238 @@
+use std::{
+    collections::BTreeMap,
+    io,
+    net::{IpAddr, Ipv4Addr, UdpSocket},
+    time::{Duration, Instant},
+};
+
+use serde::Deserialize;
+use thiserror::Error;
+use url::Url;
+
+use super::validate_host;
+
+const BAMBU_BROADCAST_PORT: u16 = 2021;
+const SSDP_MULTICAST: &str = "239.255.255.250:1900";
+const SSDP_TARGET: &str = "urn:bambulab-com:device:3dprinter:1";
+const POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredPrinter {
+    pub driver: &'static str,
+    pub host: String,
+    pub serial: String,
+    pub model: String,
+    pub name: String,
+}
+
+#[derive(Debug, Error)]
+pub enum DiscoveryError {
+    #[error("Bambu LAN discovery is unavailable")]
+    Unavailable,
+}
+
+/// Scans Bambu's SSDP and UDP-announcement channels for the requested duration.
+///
+/// Discovery is advisory: no profile or keychain entry is changed by this scan.
+pub fn discover(timeout: Duration) -> Result<Vec<DiscoveredPrinter>, DiscoveryError> {
+    let deadline = Instant::now() + timeout;
+    let ssdp = open_ssdp();
+    let announcements = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, BAMBU_BROADCAST_PORT));
+    if ssdp.is_err() && announcements.is_err() {
+        return Err(DiscoveryError::Unavailable);
+    }
+
+    let mut found = Vec::new();
+    let mut buffer = [0; 4096];
+    let mut sockets = Vec::new();
+    if let Ok(socket) = ssdp {
+        sockets.push((socket, false));
+    }
+    if let Ok(socket) = announcements {
+        sockets.push((socket, true));
+    }
+
+    while Instant::now() < deadline {
+        for (socket, udp_announcement) in &sockets {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let _ = socket.set_read_timeout(Some(remaining.min(POLL_INTERVAL)));
+            match socket.recv_from(&mut buffer) {
+                Ok((size, source)) => {
+                    let entry = if *udp_announcement {
+                        parse_udp_announcement(&buffer[..size], source.ip())
+                    } else {
+                        parse_ssdp_response(&buffer[..size], source.ip())
+                    };
+                    if let Some(entry) = entry {
+                        found.push(entry);
+                    }
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) => {}
+                Err(_) => {}
+            }
+        }
+    }
+    Ok(merge(found))
+}
+
+fn open_ssdp() -> io::Result<UdpSocket> {
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
+    socket.send_to(
+        format!(
+            "M-SEARCH * HTTP/1.1\r\nHOST: {SSDP_MULTICAST}\r\nMAN: \"ssdp:discover\"\r\nMX: 3\r\nST: {SSDP_TARGET}\r\n\r\n"
+        ).as_bytes(),
+        SSDP_MULTICAST,
+    )?;
+    Ok(socket)
+}
+
+#[derive(Deserialize)]
+struct Announcement {
+    #[serde(default)]
+    dev_name: String,
+    #[serde(default)]
+    sn: String,
+    #[serde(default)]
+    ip: String,
+    #[serde(default)]
+    dev_product_name: String,
+}
+
+fn parse_udp_announcement(payload: &[u8], source: IpAddr) -> Option<DiscoveredPrinter> {
+    let announcement: Announcement = serde_json::from_slice(payload).ok()?;
+    if announcement.sn.is_empty() && announcement.dev_product_name.is_empty() {
+        return None;
+    }
+    let source = source.to_string();
+    let host = if validate_host(&announcement.ip).is_ok() {
+        announcement.ip
+    } else {
+        source
+    };
+    Some(printer(
+        host,
+        announcement.sn,
+        announcement.dev_product_name,
+        announcement.dev_name,
+    ))
+}
+
+fn parse_ssdp_response(payload: &[u8], source: IpAddr) -> Option<DiscoveredPrinter> {
+    let text = std::str::from_utf8(payload).ok()?;
+    let headers = text
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .map(|(key, value)| (key.trim().to_ascii_uppercase(), value.trim()))
+        .collect::<BTreeMap<_, _>>();
+    let target = headers.get("ST").or_else(|| headers.get("NT"))?;
+    if !target.to_ascii_lowercase().contains(SSDP_TARGET) {
+        return None;
+    }
+    let source = source.to_string();
+    let host = headers
+        .get("LOCATION")
+        .and_then(|location| Url::parse(location).ok())
+        .and_then(|location| location.host_str().map(str::to_owned))
+        .filter(|host| validate_host(host).is_ok())
+        .unwrap_or(source);
+    let serial = headers
+        .get("USN")
+        .and_then(|usn| usn.strip_prefix("uuid:"))
+        .map(|value| value.split(':').next().unwrap_or_default().to_owned())
+        .unwrap_or_default();
+    Some(printer(
+        host,
+        serial,
+        headers
+            .get("DEVMODEL.BAMBU.COM")
+            .copied()
+            .unwrap_or_default()
+            .to_owned(),
+        headers
+            .get("DEVNAME.BAMBU.COM")
+            .copied()
+            .unwrap_or_default()
+            .to_owned(),
+    ))
+}
+
+fn printer(host: String, serial: String, model: String, name: String) -> DiscoveredPrinter {
+    DiscoveredPrinter {
+        driver: "bambu-lan",
+        host,
+        serial,
+        model,
+        name,
+    }
+}
+
+fn merge(entries: Vec<DiscoveredPrinter>) -> Vec<DiscoveredPrinter> {
+    let mut merged = Vec::<DiscoveredPrinter>::new();
+    for entry in entries {
+        if let Some(existing) = merged.iter_mut().find(|existing| {
+            existing.host == entry.host
+                || (!entry.serial.is_empty() && existing.serial == entry.serial)
+        }) {
+            if existing.serial.is_empty() {
+                existing.serial = entry.serial;
+            }
+            if existing.model.is_empty() {
+                existing.model = entry.model;
+            }
+            if existing.name.is_empty() {
+                existing.name = entry.name;
+            }
+        } else {
+            merged.push(entry);
+        }
+    }
+    merged
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn parses_bambu_udp_announcements_and_rejects_unrelated_json() {
+        let printer = parse_udp_announcement(
+            br#"{"dev_name":"My P1S","sn":"SN001","ip":"192.0.2.10","dev_product_name":"P1S"}"#,
+            IpAddr::from_str("192.0.2.20").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(printer.host, "192.0.2.10");
+        assert_eq!(printer.serial, "SN001");
+        assert!(parse_udp_announcement(b"{}", IpAddr::V4(Ipv4Addr::LOCALHOST)).is_none());
+    }
+
+    #[test]
+    fn parses_bambu_ssdp_and_merges_partial_results() {
+        let discovered = parse_ssdp_response(
+            b"HTTP/1.1 200 OK\r\nST: urn:bambulab-com:device:3dprinter:1\r\nLOCATION: http://192.0.2.10/\r\nUSN: uuid:SN001::urn:bambulab-com:device:3dprinter:1\r\nDevModel.bambu.com: P1S\r\n\r\n",
+            IpAddr::from_str("192.0.2.20").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(discovered.host, "192.0.2.10");
+        assert_eq!(discovered.serial, "SN001");
+        let entries = merge(vec![
+            printer("192.0.2.10".into(), "".into(), "P1S".into(), "".into()),
+            printer(
+                "192.0.2.10".into(),
+                "SN001".into(),
+                "".into(),
+                "My P1S".into(),
+            ),
+        ]);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].serial, "SN001");
+        assert_eq!(entries[0].model, "P1S");
+        assert_eq!(entries[0].name, "My P1S");
+    }
+}
