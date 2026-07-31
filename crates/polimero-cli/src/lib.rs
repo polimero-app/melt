@@ -3,8 +3,15 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    io::{IsTerminal, Write},
+    io::{IsTerminal, Read, Write},
+    net::{IpAddr, Shutdown, TcpListener, TcpStream},
     path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use polimero_core::{
@@ -21,6 +28,121 @@ enum OutputFormat {
     Human,
     Json,
 }
+
+struct CommandGroup {
+    path: &'static [&'static str],
+    short: &'static str,
+    commands: &'static [(&'static str, &'static str)],
+}
+
+const COMMAND_GROUPS: &[CommandGroup] = &[
+    CommandGroup {
+        path: &[],
+        short: "CLI for interacting with 3D printers",
+        commands: &[
+            ("camera", "Camera operations on a named printer"),
+            (
+                "completion",
+                "Generate the autocompletion script for the specified shell",
+            ),
+            ("fans", "Fan control operations on a named printer"),
+            ("files", "File operations on a named printer"),
+            ("help", "Help about any command"),
+            ("jobs", "Job control operations on a named printer"),
+            ("lights", "Light control operations on a named printer"),
+            ("motion", "Motion control operations on a named printer"),
+            ("printer", "Manage 3D printer profiles"),
+            ("speed", "Print speed control operations on a named printer"),
+            ("status", "Show the current status of a printer"),
+            (
+                "temperature",
+                "Temperature control operations on a named printer",
+            ),
+        ],
+    },
+    CommandGroup {
+        path: &["camera"],
+        short: "Camera operations on a named printer",
+        commands: &[
+            ("snapshot", "Capture one still image from a printer camera"),
+            (
+                "stream",
+                "Stream camera feed from a printer via a local HTTP server",
+            ),
+        ],
+    },
+    CommandGroup {
+        path: &["fans"],
+        short: "Fan control operations on a named printer",
+        commands: &[("set", "Set fan speed percentage on a printer")],
+    },
+    CommandGroup {
+        path: &["files"],
+        short: "File operations on a named printer",
+        commands: &[
+            ("download", "Download a file from printer storage"),
+            ("list", "List files on printer storage"),
+            ("roots", "List storage roots available on a printer"),
+            ("upload", "Upload a file to printer storage"),
+        ],
+    },
+    CommandGroup {
+        path: &["jobs"],
+        short: "Job control operations on a named printer",
+        commands: &[
+            ("cancel", "Cancel the active or paused print job"),
+            ("pause", "Pause the active print job"),
+            ("resume", "Resume a paused print job"),
+            ("start", "Start a print job from a file on printer storage"),
+        ],
+    },
+    CommandGroup {
+        path: &["lights"],
+        short: "Light control operations on a named printer",
+        commands: &[("set", "Set light state (on/off) on a printer")],
+    },
+    CommandGroup {
+        path: &["motion"],
+        short: "Motion control operations on a named printer",
+        commands: &[
+            ("home", "Home printer axes"),
+            ("jog", "Jog printer axes by a relative distance"),
+        ],
+    },
+    CommandGroup {
+        path: &["printer"],
+        short: "Manage 3D printer profiles",
+        commands: &[
+            ("add", "Add a printer profile"),
+            (
+                "discover",
+                "Scan the local network for printers (mDNS, SSDP, UDP broadcast)",
+            ),
+            ("drivers", "List available printer drivers"),
+            ("list", "List configured printer profiles"),
+            ("remove", "Remove a printer profile"),
+            ("tls", "Manage TLS settings for a printer profile"),
+        ],
+    },
+    CommandGroup {
+        path: &["printer", "tls"],
+        short: "Manage TLS settings for a printer profile",
+        commands: &[(
+            "refresh",
+            "Re-pin or disable TLS certificate for a printer profile",
+        )],
+    },
+    CommandGroup {
+        path: &["speed"],
+        short: "Print speed control operations on a named printer",
+        commands: &[("set", "Set active print speed profile on a printer")],
+    },
+    CommandGroup {
+        path: &["temperature"],
+        short: "Temperature control operations on a named printer",
+        commands: &[("set", "Set heater target temperatures on a printer")],
+    },
+];
 
 fn validate_known_file_root(value: &str) -> Result<(), AppError> {
     let (root, _) = value
@@ -65,6 +187,7 @@ struct ResolvedPrinter {
     driver_kind: drivers::Driver,
     access_code: Option<String>,
     tls_fingerprint: Option<String>,
+    timeout: Duration,
 }
 
 #[derive(Serialize)]
@@ -98,6 +221,9 @@ struct VersionData {
 }
 
 pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    if let Some(exit_code) = run_bare_group(args, out, err) {
+        return exit_code;
+    }
     let invocation = match Invocation::parse(args) {
         Ok(invocation) => invocation,
         Err(error) => return write_error("polimero", OutputFormat::Human, error, out, err),
@@ -194,10 +320,14 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         [camera, action, rest @ ..]
             if camera.as_str() == "camera" && matches!(action.as_str(), "snapshot" | "stream") =>
         {
-            unsupported_command(&format!("camera {}", action), invocation.format, out, err)
+            match action.as_str() {
+                "snapshot" => camera_snapshot(invocation.format, rest, out, err),
+                "stream" => camera_stream(invocation.format, rest, out, err),
+                _ => unreachable!("camera action is matched above"),
+            }
         }
         [lights, set, rest @ ..] if lights.as_str() == "lights" && set.as_str() == "set" => {
-            unsupported_command("lights set", invocation.format, out, err)
+            lights_set(invocation.format, rest, out, err)
         }
         [printer, discover, rest @ ..]
             if printer.as_str() == "printer" && discover.as_str() == "discover" =>
@@ -219,6 +349,93 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             err,
         ),
     }
+}
+
+fn run_bare_group(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Option<i32> {
+    let mut path = Vec::new();
+    let mut unknown_flag = None;
+    let mut json_requested = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--output" => {
+                let value = args.get(index + 1)?;
+                json_requested |= value == "json";
+                index += 2;
+            }
+            "--verbose" | "-v" | "--help" | "-h" => index += 1,
+            argument if let Some(value) = argument.strip_prefix("--output=") => {
+                json_requested |= value == "json";
+                index += 1;
+            }
+            argument if argument.starts_with('-') => {
+                unknown_flag.get_or_insert(argument);
+                index += 1;
+            }
+            _ => {
+                path.push(args[index].as_str());
+                index += 1;
+            }
+        }
+    }
+
+    let group = COMMAND_GROUPS
+        .iter()
+        .find(|group| group.path == path.as_slice())?;
+    if let Some(flag) = unknown_flag {
+        let command = group_command_name(group);
+        return Some(write_error(
+            &command,
+            if json_requested {
+                OutputFormat::Json
+            } else {
+                OutputFormat::Human
+            },
+            AppError::usage(format!("unknown flag: {flag}")),
+            out,
+            err,
+        ));
+    }
+    Some(write_group_help(group, out))
+}
+
+fn group_command_name(group: &CommandGroup) -> String {
+    match group.path {
+        [] => "polimero".into(),
+        path => path.join(" "),
+    }
+}
+
+fn write_group_help(group: &CommandGroup, out: &mut dyn Write) -> i32 {
+    let command = group_command_name(group);
+    let mut help = format!("{}\n\nUsage:\n  polimero", group.short);
+    if !group.path.is_empty() {
+        help.push(' ');
+        help.push_str(&command);
+    }
+    help.push_str(" [command]\n\nAvailable Commands:\n");
+    for (name, description) in group.commands {
+        help.push_str(&format!("  {name:<11} {description}\n"));
+    }
+    if group.path.is_empty() {
+        help.push_str(
+            "\nFlags:\n  -h, --help            help for polimero\n      --output string   output format: human or json (default \"human\")\n  -v, --verbose         show detailed progress output\n      --version         version for polimero\n",
+        );
+    } else {
+        help.push_str(&format!(
+            "\nFlags:\n  -h, --help   help for {}\n\nGlobal Flags:\n      --output string   output format: human or json (default \"human\")\n  -v, --verbose         show detailed progress output\n",
+            group.path.last().expect("non-root groups have a name")
+        ));
+    }
+    help.push_str(&format!(
+        "\nUse \"polimero{} [command] --help\" for more information about a command.\n",
+        if group.path.is_empty() {
+            String::new()
+        } else {
+            format!(" {command}")
+        }
+    ));
+    out.write_all(help.as_bytes()).map_or(1, |_| 0)
 }
 
 fn add_profile(
@@ -484,6 +701,7 @@ fn resolve_printer(
     if connection.insecure {
         profile.insecure = true;
     }
+    let timeout = drivers::parse_timeout(&profile.timeout).map_err(driver_error)?;
     let driver = drivers::profile(&profile).map_err(driver_error)?;
     let driver_kind = driver.driver();
     if !driver_kind.supports(operation) {
@@ -543,6 +761,7 @@ fn resolve_printer(
         driver_kind,
         access_code,
         tls_fingerprint,
+        timeout,
     })
 }
 
@@ -616,25 +835,693 @@ fn require_state(
     })
 }
 
-fn unsupported_command(
-    command: &str,
+fn camera_snapshot(
     format: OutputFormat,
+    args: &[&String],
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
-    write_error(
-        command,
+    let (positionals, options) = match parse_options(
+        args,
+        &["insecure", "overwrite"],
+        &["to", "timeout", "protocol-trace"],
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return write_error("camera snapshot", format, AppError::usage(error), out, err);
+        }
+    };
+    let name = match one_positional("camera snapshot", &positionals) {
+        Ok(name) => name,
+        Err(error) => return write_error("camera snapshot", format, error, out, err),
+    };
+    let destination = match snapshot_destination(options.value("to"), &name.to_ascii_lowercase()) {
+        Ok(path) => path,
+        Err(error) => return write_error("camera snapshot", format, error, out, err),
+    };
+    if let Err(error) = validate_snapshot_destination(&destination, options.enabled("overwrite")) {
+        return write_error("camera snapshot", format, error, out, err);
+    }
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("camera snapshot", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::CameraSnapshot) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("camera snapshot", format, error, out, err),
+    };
+    let image = match drivers::camera_snapshot(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+        printer.timeout,
+    ) {
+        Ok(image) => image,
+        Err(error) => return write_error("camera snapshot", format, driver_error(error), out, err),
+    };
+    let bytes = match write_snapshot_file(&destination, &image, options.enabled("overwrite")) {
+        Ok(bytes) => bytes,
+        Err(error) => return write_error("camera snapshot", format, error, out, err),
+    };
+    let path = destination.display().to_string();
+    write_success(
+        "camera snapshot",
         format,
-        AppError {
-            exit_code: 5,
-            code: "capability-unsupported",
-            message: format!(
-                "{command} is unavailable because its required driver transport is not implemented"
-            ),
+        CameraSnapshotData {
+            profile: printer.name,
+            driver: printer.driver_kind.name(),
+            path: path.clone(),
+            size_bytes: bytes,
+            protocol: "mjpeg",
+        },
+        |out| writeln!(out, "Snapshot saved to {path} ({bytes} bytes)."),
+        out,
+    )
+}
+
+fn snapshot_destination(requested: Option<&str>, profile: &str) -> Result<PathBuf, AppError> {
+    let generated = format!(
+        "{}-{}.jpg",
+        profile,
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| AppError::usage("system clock is before the Unix epoch"))?
+            .as_secs()
+    );
+    let destination = requested
+        .map(PathBuf::from)
+        .unwrap_or_else(|| generated.clone().into());
+    match fs::metadata(&destination) {
+        Ok(metadata) if metadata.is_dir() => Ok(destination.join(generated)),
+        Ok(_) => Ok(destination),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(destination),
+        Err(_) => Err(AppError::usage(format!(
+            "cannot inspect destination path: {}",
+            destination.display()
+        ))),
+    }
+}
+
+fn validate_snapshot_destination(destination: &Path, overwrite: bool) -> Result<(), AppError> {
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    match fs::metadata(parent) {
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => {
+            return Err(AppError::usage(format!(
+                "destination directory is not a directory: {}",
+                parent.display()
+            )));
+        }
+        Err(_) => {
+            return Err(AppError::usage(format!(
+                "destination directory does not exist: {}",
+                parent.display()
+            )));
+        }
+    }
+    match fs::symlink_metadata(destination) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(AppError::usage(format!(
+            "destination path is unsafe: {}",
+            destination.display()
+        ))),
+        Ok(metadata) if metadata.is_dir() => Err(AppError::usage(format!(
+            "destination path is a directory: {}",
+            destination.display()
+        ))),
+        Ok(_) if !overwrite => Err(AppError::usage(format!(
+            "destination file already exists: {} (use --overwrite to replace)",
+            destination.display()
+        ))),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(AppError::usage(format!(
+            "cannot inspect destination path: {}",
+            destination.display()
+        ))),
+    }
+}
+
+fn write_snapshot_file(destination: &Path, image: &[u8], overwrite: bool) -> Result<u64, AppError> {
+    if image.is_empty() {
+        return Err(AppError {
+            exit_code: 1,
+            code: "internal-error",
+            message: "camera snapshot returned empty image data".into(),
+        });
+    }
+    validate_snapshot_destination(destination, overwrite)?;
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|_| AppError {
+        exit_code: 1,
+        code: "internal-error",
+        message: "cannot create snapshot file".into(),
+    })?;
+    temporary.write_all(image).map_err(|_| AppError {
+        exit_code: 1,
+        code: "internal-error",
+        message: "cannot write snapshot file".into(),
+    })?;
+    temporary.as_file_mut().sync_all().map_err(|_| AppError {
+        exit_code: 1,
+        code: "internal-error",
+        message: "cannot finalize snapshot file".into(),
+    })?;
+    let committed = if overwrite {
+        temporary.persist(destination)
+    } else {
+        temporary.persist_noclobber(destination)
+    };
+    committed.map_err(|_| AppError {
+        exit_code: 1,
+        code: "internal-error",
+        message: "cannot move snapshot file into place".into(),
+    })?;
+    Ok(image.len() as u64)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CameraSnapshotData {
+    profile: String,
+    driver: &'static str,
+    path: String,
+    size_bytes: u64,
+    protocol: &'static str,
+}
+
+fn camera_stream(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) = match parse_options(
+        args,
+        &["insecure"],
+        &["port", "duration", "format", "timeout", "protocol-trace"],
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return write_error("camera stream", format, AppError::usage(error), out, err);
+        }
+    };
+    let name = match one_positional("camera stream", &positionals) {
+        Ok(name) => name,
+        Err(error) => return write_error("camera stream", format, error, out, err),
+    };
+    let port = match options.value("port").unwrap_or("8080").parse::<u16>() {
+        Ok(port) if port != 0 => port,
+        _ => {
+            return write_error(
+                "camera stream",
+                format,
+                AppError::usage("--port must be between 1 and 65535"),
+                out,
+                err,
+            );
+        }
+    };
+    let duration = match options.value("duration") {
+        Some(value) => match parse_stream_duration(value) {
+            Some(duration) => Some(duration),
+            None => {
+                return write_error(
+                    "camera stream",
+                    format,
+                    AppError::usage("--duration must be a positive duration such as 1m30s or 1.5s"),
+                    out,
+                    err,
+                );
+            }
+        },
+        None => None,
+    };
+    if let Some(value) = options.value("format").filter(|value| *value != "mjpeg") {
+        return write_error(
+            "camera stream",
+            format,
+            AppError::usage(format!(
+                "invalid --format {value:?}: must be \"mjpeg\" or omitted"
+            )),
+            out,
+            err,
+        );
+    }
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("camera stream", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::CameraStream) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("camera stream", format, error, out, err),
+    };
+    let stream = match drivers::camera_stream(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+        printer.timeout,
+    ) {
+        Ok(stream) => stream,
+        Err(error) => return write_error("camera stream", format, driver_error(error), out, err),
+    };
+    let upstream_shutdown = if duration.is_some() {
+        match stream.shutdown_handle() {
+            Ok(socket) => Some(socket),
+            Err(_) => {
+                return write_error(
+                    "camera stream",
+                    format,
+                    AppError {
+                        exit_code: 1,
+                        code: "internal-error",
+                        message: "cannot prepare camera stream shutdown".into(),
+                    },
+                    out,
+                    err,
+                );
+            }
+        }
+    } else {
+        None
+    };
+    let listener = match TcpListener::bind(("127.0.0.1", port)) {
+        Ok(listener) => listener,
+        Err(_) => {
+            return write_error(
+                "camera stream",
+                format,
+                AppError::usage(format!("port {port} is already in use or unavailable")),
+                out,
+                err,
+            );
+        }
+    };
+    if listener.set_nonblocking(true).is_err() {
+        return write_error(
+            "camera stream",
+            format,
+            AppError {
+                exit_code: 1,
+                code: "internal-error",
+                message: "cannot configure local camera server".into(),
+            },
+            out,
+            err,
+        );
+    }
+    let url = format!("http://127.0.0.1:{port}/stream");
+    let profile = printer.name.clone();
+    let result = write_success(
+        "camera stream",
+        format,
+        CameraStreamData {
+            profile: profile.clone(),
+            url: url.clone(),
+            format: "mjpeg",
+            port,
+        },
+        |out| {
+            writeln!(out, "Streaming camera from {profile}")?;
+            writeln!(out, "Format: MJPEG (open in browser)")?;
+            writeln!(out, "URL: {url}\n")?;
+            writeln!(out, "Press Ctrl+C to stop.")
         },
         out,
+    );
+    if result != 0 {
+        return result;
+    }
+    serve_camera_stream(listener, stream, duration, upstream_shutdown);
+    if matches!(format, OutputFormat::Human) {
+        writeln!(out, "Stream stopped.").map_or(1, |_| 0)
+    } else {
+        0
+    }
+}
+
+#[derive(Serialize)]
+struct CameraStreamData {
+    profile: String,
+    url: String,
+    format: &'static str,
+    port: u16,
+}
+
+fn serve_camera_stream(
+    listener: TcpListener,
+    stream: polimero_core::bambu::MjpegStream,
+    duration: Option<Duration>,
+    upstream_shutdown: Option<TcpStream>,
+) {
+    let deadline = duration.map(|duration| Instant::now() + duration);
+    let active = AtomicBool::new(false);
+    let (done_sender, done_receiver) = mpsc::channel();
+    let mut stream = Some(stream);
+    let mut worker: Option<thread::JoinHandle<()>> = None;
+    let mut active_socket = None;
+
+    loop {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            break;
+        }
+        if let Ok(returned_stream) = done_receiver.try_recv() {
+            if let Some(worker) = worker.take() {
+                let _ = worker.join();
+            }
+            stream = Some(returned_stream);
+            active.store(false, Ordering::Release);
+            active_socket = None;
+        }
+        match listener.accept() {
+            Ok((mut socket, _)) => {
+                if !camera_stream_request(&mut socket) {
+                    let _ = write_http_response(&mut socket, "403 Forbidden", &[]);
+                } else if !claim_stream_client(&active) {
+                    let _ = write_http_response(
+                        &mut socket,
+                        "503 Service Unavailable",
+                        &[("Retry-After", "1")],
+                    );
+                } else if let Some(reader) = stream.take() {
+                    active_socket = socket.try_clone().ok();
+                    let sender = done_sender.clone();
+                    worker = Some(thread::spawn(move || {
+                        let _ = write_http_response(
+                            &mut socket,
+                            "200 OK",
+                            &[
+                                ("Content-Type", "multipart/x-mixed-replace; boundary=frame"),
+                                ("Cache-Control", "no-cache"),
+                                ("Connection", "close"),
+                            ],
+                        );
+                        let mut reader = reader;
+                        let _ = std::io::copy(&mut reader, &mut socket);
+                        let _ = sender.send(reader);
+                    }));
+                } else {
+                    active.store(false, Ordering::Release);
+                    let _ = write_http_response(&mut socket, "503 Service Unavailable", &[]);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(25));
+            }
+            Err(_) => break,
+        }
+    }
+    drop(listener);
+    if let Some(socket) = active_socket {
+        let _ = socket.shutdown(Shutdown::Both);
+    }
+    if let Some(socket) = upstream_shutdown {
+        let _ = socket.shutdown(Shutdown::Both);
+    }
+    if let Some(worker) = worker {
+        let _ = worker.join();
+    }
+}
+
+fn camera_stream_request(socket: &mut TcpStream) -> bool {
+    let _ = socket.set_read_timeout(Some(Duration::from_secs(2)));
+    let request = read_camera_stream_header(socket);
+    let _ = socket.set_read_timeout(None);
+    let Some(request) = request else {
+        return false;
+    };
+    let Ok(request) = std::str::from_utf8(&request) else {
+        return false;
+    };
+    is_camera_stream_request(request)
+}
+
+const MAX_CAMERA_STREAM_HEADER: usize = 8192;
+
+fn read_camera_stream_header(reader: &mut dyn Read) -> Option<Vec<u8>> {
+    let mut request = Vec::with_capacity(1024);
+    let mut buffer = [0; 1024];
+    loop {
+        let remaining = MAX_CAMERA_STREAM_HEADER.checked_sub(request.len())?;
+        if remaining == 0 {
+            return None;
+        }
+        let read_size = remaining.min(buffer.len());
+        let read = reader.read(&mut buffer[..read_size]).ok()?;
+        if read == 0 {
+            return None;
+        }
+        request.extend_from_slice(&buffer[..read]);
+        if let Some(end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+            request.truncate(end + 4);
+            return Some(request);
+        }
+    }
+}
+
+fn is_camera_stream_request(request: &str) -> bool {
+    let mut lines = request.split("\r\n");
+    let Some(request_line) = lines.next() else {
+        return false;
+    };
+    let mut request_line = request_line.split_ascii_whitespace();
+    if !matches!(
+        (
+            request_line.next(),
+            request_line.next(),
+            request_line.next(),
+            request_line.next()
+        ),
+        (Some("GET"), Some("/stream"), Some(_), None)
+    ) {
+        return false;
+    }
+    lines
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("host").then_some(value.trim())
+        })
+        .is_some_and(is_loopback_host)
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    let (host, port) = if let Some(host) = host.strip_prefix('[') {
+        let Some((host, rest)) = host.split_once(']') else {
+            return false;
+        };
+        if rest.is_empty() {
+            (host, None)
+        } else if let Some(port) = rest.strip_prefix(':') {
+            (host, Some(port))
+        } else {
+            return false;
+        }
+    } else {
+        match host.split_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (host, None),
+        }
+    };
+    if port.is_some_and(|port| port.parse::<u16>().is_err()) {
+        return false;
+    }
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+}
+
+fn parse_stream_duration(value: &str) -> Option<Duration> {
+    let mut value = value.strip_prefix('+').unwrap_or(value);
+    if value.starts_with('-') {
+        return None;
+    }
+    let mut duration = Duration::ZERO;
+
+    while !value.is_empty() {
+        let number_end = value
+            .char_indices()
+            .take_while(|(_, character)| character.is_ascii_digit() || *character == '.')
+            .map(|(index, character)| index + character.len_utf8())
+            .last()?;
+        let number = value[..number_end].parse::<f64>().ok()?;
+        if !number.is_finite() || number < 0.0 {
+            return None;
+        }
+        value = &value[number_end..];
+
+        let (unit, seconds) = [
+            ("ns", 1e-9),
+            ("us", 1e-6),
+            ("µs", 1e-6),
+            ("ms", 1e-3),
+            ("s", 1.0),
+            ("m", 60.0),
+            ("h", 60.0 * 60.0),
+        ]
+        .into_iter()
+        .find_map(|(unit, seconds)| value.strip_prefix(unit).map(|rest| (rest, seconds)))?;
+        value = unit;
+        duration = duration.checked_add(Duration::try_from_secs_f64(number * seconds).ok()?)?;
+    }
+
+    (!duration.is_zero()).then_some(duration)
+}
+
+fn claim_stream_client(active: &AtomicBool) -> bool {
+    active
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+fn write_http_response(
+    socket: &mut TcpStream,
+    status: &str,
+    headers: &[(&str, &str)],
+) -> std::io::Result<()> {
+    write!(socket, "HTTP/1.1 {status}\r\n")?;
+    for (name, value) in headers {
+        write!(socket, "{name}: {value}\r\n")?;
+    }
+    if status == "200 OK" {
+        socket.write_all(b"\r\n")
+    } else {
+        socket.write_all(b"Content-Length: 0\r\n\r\n")
+    }
+}
+
+fn lights_set(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) =
+        match parse_options(args, &["yes", "insecure"], &["timeout", "protocol-trace"]) {
+            Ok(value) => value,
+            Err(error) => {
+                return write_error("lights set", format, AppError::usage(error), out, err);
+            }
+        };
+    let (name, light, state_name) = match positionals.as_slice() {
+        [name, light, state] => (name.as_str(), light.as_str(), state.as_str()),
+        _ => {
+            return write_error(
+                "lights set",
+                format,
+                AppError::usage("lights set requires a printer profile, light name, and state"),
+                out,
+                err,
+            );
+        }
+    };
+    let light = match normalize_light(light) {
+        Ok(light) => light,
+        Err(error) => return write_error("lights set", format, error, out, err),
+    };
+    let state = match polimero_core::moonraker::LightState::parse(state_name) {
+        Some(state) => state,
+        None => {
+            return write_error(
+                "lights set",
+                format,
+                AppError::usage("light state must be exactly \"on\" or \"off\""),
+                out,
+                err,
+            );
+        }
+    };
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("lights set", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::LightSet) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("lights set", format, error, out, err),
+    };
+    if let Err(error) = require_state(
+        "lights set",
+        &printer,
+        &[
+            polimero_core::moonraker::PrinterState::Idle,
+            polimero_core::moonraker::PrinterState::Printing,
+            polimero_core::moonraker::PrinterState::Paused,
+            polimero_core::moonraker::PrinterState::Error,
+        ],
+    ) {
+        return write_error("lights set", format, error, out, err);
+    }
+    if let Err(code) = require_confirmation(
+        "lights set",
+        options.enabled("yes"),
+        &format!(
+            "Set {light} light to {state_name} on {}? Type 'yes' to continue: ",
+            printer.name
+        ),
+        format,
+        out,
         err,
-    )
+    ) {
+        return code;
+    }
+    match drivers::light_set(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+        &light,
+        state,
+    ) {
+        Ok(result) => {
+            let display = if result.light == "chamber" {
+                "Chamber".into()
+            } else {
+                result.light.clone()
+            };
+            let state = match result.state {
+                polimero_core::moonraker::LightState::On => "on",
+                polimero_core::moonraker::LightState::Off => "off",
+            };
+            write_success(
+                "lights set",
+                format,
+                LightSetData {
+                    profile: printer.name,
+                    driver: printer.driver_kind.name(),
+                    light: result.light,
+                    state: result.state,
+                    warnings: Vec::new(),
+                    capabilities: printer.driver_kind.capabilities(),
+                },
+                |out| writeln!(out, "{display} light set to {state}."),
+                out,
+            )
+        }
+        Err(error) => write_error("lights set", format, driver_error(error), out, err),
+    }
+}
+
+fn normalize_light(light: &str) -> Result<String, AppError> {
+    if light.is_empty()
+        || !light
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(AppError::usage("invalid light name syntax"));
+    }
+    match light.to_ascii_lowercase().as_str() {
+        "chamber" | "chamber-light" | "chamber_light" => Ok("chamber".into()),
+        _ => Ok(light.into()),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LightSetData {
+    profile: String,
+    driver: &'static str,
+    light: String,
+    state: polimero_core::moonraker::LightState,
+    warnings: Vec<String>,
+    capabilities: drivers::Capabilities,
 }
 
 fn discover_printers(
@@ -2674,6 +3561,102 @@ mod tests {
     use polimero_core::config::Profile;
 
     #[test]
+    fn bare_commands_render_cobra_style_group_help() {
+        for group in COMMAND_GROUPS {
+            let args = group
+                .path
+                .iter()
+                .map(|part| (*part).into())
+                .collect::<Vec<String>>();
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+
+            assert_eq!(run(&args, &mut out, &mut err), 0, "{:?}", group.path);
+            assert!(err.is_empty(), "{:?}", group.path);
+            let output = String::from_utf8(out).unwrap();
+            let command = group_command_name(group);
+            assert!(output.starts_with(&format!("{}\n\nUsage:\n  polimero", group.short)));
+            assert!(
+                output.contains(&format!(
+                    "Use \"polimero{} [command] --help\"",
+                    if group.path.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" {command}")
+                    }
+                )),
+                "{:?}",
+                group.path
+            );
+        }
+    }
+
+    #[test]
+    fn bare_group_help_ignores_global_output_and_verbose_options() {
+        let args = [
+            "camera".into(),
+            "--output".into(),
+            "json".into(),
+            "--verbose".into(),
+        ];
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run(&args, &mut out, &mut err), 0);
+        assert!(err.is_empty());
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            concat!(
+                "Camera operations on a named printer\n\n",
+                "Usage:\n  polimero camera [command]\n\n",
+                "Available Commands:\n",
+                "  snapshot    Capture one still image from a printer camera\n",
+                "  stream      Stream camera feed from a printer via a local HTTP server\n\n",
+                "Flags:\n  -h, --help   help for camera\n\n",
+                "Global Flags:\n",
+                "      --output string   output format: human or json (default \"human\")\n",
+                "  -v, --verbose         show detailed progress output\n\n",
+                "Use \"polimero camera [command] --help\" for more information about a command.\n"
+            )
+        );
+    }
+
+    #[test]
+    fn nested_bare_group_help_accepts_invalid_output() {
+        let args = [
+            "printer".into(),
+            "tls".into(),
+            "--output=not-a-format".into(),
+        ];
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run(&args, &mut out, &mut err), 0);
+        assert!(err.is_empty());
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.starts_with("Manage TLS settings for a printer profile\n\n"));
+        assert!(output.contains("  refresh     Re-pin or disable TLS certificate"));
+    }
+
+    #[test]
+    fn unknown_bare_group_flag_uses_the_group_json_error_envelope() {
+        let args = [
+            "camera".into(),
+            "--unknown".into(),
+            "--output".into(),
+            "json".into(),
+        ];
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        assert_eq!(run(&args, &mut out, &mut err), 2);
+        assert!(err.is_empty());
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains(r#""code": "config-error""#));
+        assert!(output.contains(r#""command": "camera""#));
+    }
+
+    #[test]
     fn version_json_is_an_envelope() {
         let args = ["version".into(), "--output".into(), "json".into()];
         let mut out = Vec::new();
@@ -2811,20 +3794,22 @@ mod tests {
     }
 
     #[test]
-    fn unavailable_camera_commands_are_explicit_json_errors() {
+    fn camera_stream_rejects_non_mjpeg_format_before_loading_a_profile() {
         let args = [
             "camera".into(),
-            "snapshot".into(),
+            "stream".into(),
             "garage".into(),
+            "--format".into(),
+            "h264".into(),
             "--output".into(),
             "json".into(),
         ];
         let mut out = Vec::new();
 
-        assert_eq!(run(&args, &mut out, &mut Vec::new()), 5);
+        assert_eq!(run(&args, &mut out, &mut Vec::new()), 2);
         let output = String::from_utf8(out).unwrap();
-        assert!(output.contains(r#""code": "capability-unsupported""#));
-        assert!(output.contains("required driver transport is not implemented"));
+        assert!(output.contains(r#""command": "camera stream""#));
+        assert!(output.contains(r#"invalid --format \"h264\": must be \"mjpeg\" or omitted"#));
     }
 
     #[test]
@@ -2885,5 +3870,116 @@ mod tests {
                 .unwrap()
                 .contains("unsupported file root")
         );
+    }
+
+    #[test]
+    fn snapshot_writes_atomically_without_clobbering() {
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("snapshot.jpg");
+        fs::write(&destination, b"original").unwrap();
+
+        assert!(write_snapshot_file(&destination, b"replacement", false).is_err());
+        assert_eq!(fs::read(&destination).unwrap(), b"original");
+        assert_eq!(
+            write_snapshot_file(&destination, b"replacement", true).unwrap(),
+            11
+        );
+        assert_eq!(fs::read(&destination).unwrap(), b"replacement");
+        assert!(write_snapshot_file(&destination, &[], true).is_err());
+    }
+
+    #[test]
+    fn stream_requests_require_loopback_host_and_one_client() {
+        assert!(is_camera_stream_request(
+            "GET /stream HTTP/1.1\r\nHost: 127.0.0.1:8080\r\n\r\n"
+        ));
+        assert!(is_camera_stream_request(
+            "GET /stream HTTP/1.1\r\nHost: localhost:8080\r\n\r\n"
+        ));
+        assert!(is_camera_stream_request(
+            "GET /stream HTTP/1.1\r\nHost: [::1]:8080\r\n\r\n"
+        ));
+        assert!(!is_camera_stream_request(
+            "GET /stream HTTP/1.1\r\nHost: printer.example\r\n\r\n"
+        ));
+        assert!(!is_camera_stream_request(
+            "GET /other HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        ));
+        assert!(!is_camera_stream_request(
+            "POST /stream HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        ));
+
+        let active = AtomicBool::new(false);
+        assert!(claim_stream_client(&active));
+        assert!(!claim_stream_client(&active));
+        active.store(false, Ordering::Release);
+        assert!(claim_stream_client(&active));
+    }
+
+    #[test]
+    fn stream_duration_accepts_go_style_compound_and_fractional_values() {
+        assert_eq!(
+            parse_stream_duration("1m30s"),
+            Some(Duration::from_secs(90))
+        );
+        assert_eq!(
+            parse_stream_duration("1.5s"),
+            Some(Duration::from_millis(1500))
+        );
+        assert_eq!(
+            parse_stream_duration("+500ms"),
+            Some(Duration::from_millis(500))
+        );
+        assert_eq!(parse_stream_duration("0s"), None);
+        assert_eq!(parse_stream_duration("-1s"), None);
+        assert_eq!(parse_stream_duration("1m30"), None);
+    }
+
+    #[test]
+    fn stream_request_reader_accepts_fragmented_headers() {
+        struct FragmentedReader<'a> {
+            chunks: &'a [&'a [u8]],
+            index: usize,
+        }
+
+        impl Read for FragmentedReader<'_> {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                let Some(chunk) = self.chunks.get(self.index) else {
+                    return Ok(0);
+                };
+                self.index += 1;
+                buffer[..chunk.len()].copy_from_slice(chunk);
+                Ok(chunk.len())
+            }
+        }
+
+        let chunks = [
+            b"GET /stream HTTP/1.1\r\nHo".as_slice(),
+            b"st: [::1]:8080\r\n".as_slice(),
+            b"\r\n".as_slice(),
+        ];
+        let mut reader = FragmentedReader {
+            chunks: &chunks,
+            index: 0,
+        };
+        let header = read_camera_stream_header(&mut reader).unwrap();
+
+        assert!(is_camera_stream_request(
+            std::str::from_utf8(&header).unwrap()
+        ));
+    }
+
+    #[test]
+    fn lights_accept_chamber_aliases_and_exact_states() {
+        for alias in ["chamber", "chamber-light", "chamber_light", "CHAMBER"] {
+            assert_eq!(normalize_light(alias).unwrap(), "chamber");
+        }
+        assert_eq!(normalize_light("work-light").unwrap(), "work-light");
+        assert!(normalize_light("bad light").is_err());
+        assert_eq!(
+            polimero_core::moonraker::LightState::parse("on"),
+            Some(polimero_core::moonraker::LightState::On)
+        );
+        assert!(polimero_core::moonraker::LightState::parse("ON").is_none());
     }
 }

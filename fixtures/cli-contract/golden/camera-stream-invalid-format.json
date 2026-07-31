@@ -1,0 +1,12 @@
+{
+  "ok": false,
+  "data": null,
+  "error": {
+    "code": "config-error",
+    "message": "invalid --format \"h264\": must be \"mjpeg\" or omitted",
+    "details": {}
+  },
+  "meta": {
+    "command": "camera stream"
+  }
+}

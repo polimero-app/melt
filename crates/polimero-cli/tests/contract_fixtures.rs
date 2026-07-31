@@ -34,6 +34,12 @@ fn contract_fixtures_match_the_cli_envelope_and_exit_contract() {
     assert_eq!(inventory["schemaVersion"], 1);
     let commands = inventory["commands"].as_array().expect("commands array");
     assert_eq!(commands.len(), 36);
+    assert!(
+        commands
+            .iter()
+            .all(|command| command["implementation"] == "implemented"),
+        "every public command path must be implemented"
+    );
     let command_paths: HashSet<_> = commands
         .iter()
         .map(|command| command["path"].as_str().expect("command path"))

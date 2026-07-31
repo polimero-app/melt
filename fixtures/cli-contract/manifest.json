@@ -38,11 +38,11 @@
       "ignoreJsonPointers": []
     },
     {
-      "id": "camera-snapshot-unavailable-json",
-      "command": "camera snapshot",
-      "args": ["camera", "snapshot", "garage", "--output", "json"],
-      "exitCode": 5,
-      "stdout": "golden/camera-snapshot-unavailable.json",
+      "id": "camera-stream-invalid-format-json",
+      "command": "camera stream",
+      "args": ["camera", "stream", "garage", "--format", "h264", "--output", "json"],
+      "exitCode": 2,
+      "stdout": "golden/camera-stream-invalid-format.json",
       "stderr": "",
       "ignoreJsonPointers": []
     },
