@@ -13,9 +13,9 @@ use serde_json::{Map, Value, json};
 use thiserror::Error;
 
 use crate::moonraker::{
-    FanResult, FileEntry, FileEntryType, FileList, FileRoot, Job, JobResult, MotionResult,
-    MotionState, PrinterState, Progress, SpeedResult, Status, StatusError, StatusWarning,
-    Temperature, TemperatureResult, TemperatureTargets, Temperatures,
+    FanResult, FileEntry, FileEntryType, FileList, FileRoot, Job, JobResult, LightResult,
+    LightState, MotionResult, MotionState, PrinterState, Progress, SpeedResult, Status,
+    StatusError, StatusWarning, Temperature, TemperatureResult, TemperatureTargets, Temperatures,
 };
 
 use super::{
@@ -354,6 +354,30 @@ impl Client {
         Ok(FanResult {
             fan: fan.to_owned(),
             speed_percent,
+        })
+    }
+
+    pub fn light_set(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        light: &str,
+        state: LightState,
+    ) -> Result<LightResult, Error> {
+        if light != "chamber" {
+            return Err(Error::Unsupported("requested light"));
+        }
+        let report = self.exchange(access_code, fingerprint, ledctrl_payload(state), |report| {
+            light_state_is(report, "chamber_light", state)
+                || light_unsupported_on_model(report, "chamber_light")
+        })?;
+        let report: Value = serde_json::from_slice(&report).map_err(|_| Error::InvalidResponse)?;
+        if light_unsupported_on_model(&report, "chamber_light") {
+            return Err(Error::Unsupported("requested light on this printer model"));
+        }
+        Ok(LightResult {
+            light: light.to_owned(),
+            state,
         })
     }
 
@@ -972,6 +996,25 @@ fn gcode_payload(gcode: &str) -> String {
     .to_string()
 }
 
+fn ledctrl_payload(state: LightState) -> String {
+    json!({
+        "system": {
+            "sequence_id": next_sequence_id(),
+            "command": "ledctrl",
+            "led_node": "chamber_light",
+            "led_mode": match state {
+                LightState::On => "on",
+                LightState::Off => "off",
+            },
+            "led_on_time": 500,
+            "led_off_time": 500,
+            "loop_times": 1,
+            "interval_time": 1000,
+        }
+    })
+    .to_string()
+}
+
 fn job_start_payload(path: &str, options: JobStartOptions) -> Result<String, Error> {
     let filename = path
         .rsplit('/')
@@ -1041,6 +1084,40 @@ fn report_state_is(report: &Value, states: &[PrinterState]) -> bool {
     parse_status_value(report)
         .map(|status| states.contains(&status.state))
         .unwrap_or(false)
+}
+
+fn light_state_is(report: &Value, light: &str, state: LightState) -> bool {
+    lights_report(report).is_some_and(|lights| {
+        lights.iter().any(|entry| {
+            entry.get("node").and_then(Value::as_str) == Some(light)
+                && entry.get("mode").and_then(Value::as_str)
+                    == Some(match state {
+                        LightState::On => "on",
+                        LightState::Off => "off",
+                    })
+        })
+    })
+}
+
+fn light_unsupported_on_model(report: &Value, light: &str) -> bool {
+    is_full_report(report)
+        && lights_report(report).is_some_and(|lights| {
+            !lights.is_empty()
+                && !lights
+                    .iter()
+                    .any(|entry| entry.get("node").and_then(Value::as_str) == Some(light))
+        })
+}
+
+fn lights_report(report: &Value) -> Option<&Vec<Value>> {
+    report
+        .get("lights_report")
+        .or_else(|| {
+            report
+                .get("print")
+                .and_then(|print| print.get("lights_report"))
+        })
+        .and_then(Value::as_array)
 }
 
 pub(crate) fn parse_status(report: &[u8]) -> Result<Status, Error> {
@@ -1735,6 +1812,59 @@ mod tests {
             Err(Error::UnsignedCommand)
         ));
         assert!(!command_rejection(rejection, Some("other")).unwrap());
+    }
+
+    #[test]
+    fn builds_chamber_ledctrl_payload_and_acknowledges_reported_state() {
+        let payload: Value = serde_json::from_str(&ledctrl_payload(LightState::On)).unwrap();
+        let command = &payload["system"];
+        assert!(
+            command["sequence_id"]
+                .as_str()
+                .is_some_and(|value| !value.is_empty())
+        );
+        assert_eq!(command["command"], "ledctrl");
+        assert_eq!(command["led_node"], "chamber_light");
+        assert_eq!(command["led_mode"], "on");
+        assert_eq!(command["led_on_time"], 500);
+        assert_eq!(command["led_off_time"], 500);
+        assert_eq!(command["loop_times"], 1);
+        assert_eq!(command["interval_time"], 1000);
+
+        let top_level = serde_json::json!({
+            "lights_report": [{"node": "chamber_light", "mode": "on"}]
+        });
+        let nested = serde_json::json!({
+            "print": {"lights_report": [{"node": "chamber_light", "mode": "off"}]}
+        });
+        assert!(light_state_is(&top_level, "chamber_light", LightState::On));
+        assert!(light_state_is(&nested, "chamber_light", LightState::Off));
+        assert!(!light_state_is(&nested, "chamber_light", LightState::On));
+
+        let full_without_chamber = serde_json::json!({
+            "print": {"gcode_state": "IDLE"},
+            "lights_report": [{"node": "work_light", "mode": "on"}]
+        });
+        let delta_without_chamber = serde_json::json!({
+            "lights_report": [{"node": "work_light", "mode": "on"}]
+        });
+        assert!(light_unsupported_on_model(
+            &full_without_chamber,
+            "chamber_light"
+        ));
+        assert!(!light_unsupported_on_model(
+            &delta_without_chamber,
+            "chamber_light"
+        ));
+    }
+
+    #[test]
+    fn rejects_lights_other_than_the_chamber_before_connecting() {
+        let profile = Profile::new("printer.local", "SN001", false).unwrap();
+        assert!(matches!(
+            Client::new(profile).light_set(None, None, "work", LightState::On),
+            Err(Error::Unsupported("requested light"))
+        ));
     }
 
     #[test]

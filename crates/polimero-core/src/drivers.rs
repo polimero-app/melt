@@ -1,4 +1,4 @@
-use std::{fmt, io::Read, time::Duration};
+use std::{fmt, time::Duration};
 
 use serde::Serialize;
 use thiserror::Error;
@@ -113,8 +113,8 @@ impl Driver {
                 motion_control: true,
                 tls_refresh: true,
                 fan_control: true,
+                light_control: true,
                 speed_control: true,
-                ..Capabilities::default()
             },
             Self::Moonraker => Capabilities {
                 status: true,
@@ -281,11 +281,10 @@ pub fn camera_stream(
     access_code: Option<&str>,
     tls_fingerprint: Option<&str>,
     timeout: Duration,
-) -> Result<Box<dyn Read + Send>, DriverError> {
+) -> Result<bambu::MjpegStream, DriverError> {
     match profile {
         Profile::Bambu(profile) => {
             bambu::open_mjpeg_stream(profile, access_code, tls_fingerprint, timeout)
-                .map(|stream| Box::new(stream) as Box<dyn Read + Send>)
                 .map_err(DriverError::Camera)
         }
         Profile::Moonraker(_) => Err(DriverError::UnsupportedOperation(
@@ -502,6 +501,24 @@ pub fn fan_set(
     }
 }
 
+pub fn light_set(
+    profile: &Profile,
+    access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
+    light: &str,
+    state: moonraker::LightState,
+) -> Result<moonraker::LightResult, DriverError> {
+    match profile {
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .light_set(access_code, tls_fingerprint, light, state)
+            .map_err(DriverError::Bambu),
+        Profile::Moonraker(_) => Err(DriverError::UnsupportedOperation(
+            Driver::Moonraker,
+            Operation::LightSet,
+        )),
+    }
+}
+
 pub fn speed_set(
     profile: &Profile,
     access_code: Option<&str>,
@@ -642,8 +659,24 @@ mod tests {
         assert!(capabilities.temperature_write);
         assert!(capabilities.motion_control);
         assert!(capabilities.fan_control);
+        assert!(capabilities.light_control);
         assert!(capabilities.speed_control);
         assert!(capabilities.discovery);
         assert!(capabilities.tls_refresh);
+    }
+
+    #[test]
+    fn rejects_light_control_for_moonraker_without_connecting() {
+        let profile = Profile::Moonraker(
+            moonraker::Profile::new("printer.local", false, Duration::from_secs(1)).unwrap(),
+        );
+
+        assert!(matches!(
+            light_set(&profile, None, None, "chamber", moonraker::LightState::On),
+            Err(DriverError::UnsupportedOperation(
+                Driver::Moonraker,
+                Operation::LightSet
+            ))
+        ));
     }
 }

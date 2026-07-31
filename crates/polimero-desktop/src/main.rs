@@ -500,7 +500,7 @@ fn printer_camera_stream(name: String) -> Result<CameraStream, String> {
     start_camera_server(stream).map(|url| CameraStream { url })
 }
 
-fn start_camera_server(mut stream: Box<dyn Read + Send>) -> Result<String, String> {
+fn start_camera_server(mut stream: polimero_core::bambu::MjpegStream) -> Result<String, String> {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .map_err(|_| "Camera preview is unavailable.".to_string())?;
     let address = listener

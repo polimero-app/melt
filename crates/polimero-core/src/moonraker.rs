@@ -879,6 +879,29 @@ pub struct FanResult {
     pub speed_percent: u8,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LightState {
+    On,
+    Off,
+}
+
+impl LightState {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "on" => Some(Self::On),
+            "off" => Some(Self::Off),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct LightResult {
+    pub light: String,
+    pub state: LightState,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeedResult {

@@ -286,6 +286,13 @@ pub struct MjpegStream {
     pending: Vec<u8>,
 }
 
+impl MjpegStream {
+    /// Returns a socket handle that can interrupt a blocked stream read.
+    pub fn shutdown_handle(&self) -> io::Result<TcpStream> {
+        self.connection.get_ref().try_clone()
+    }
+}
+
 impl Read for MjpegStream {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         if self.pending.is_empty() {
