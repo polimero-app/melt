@@ -1,7 +1,7 @@
 <script setup lang="ts">
 type PrinterStatus = 'idle' | 'busy' | 'offline'
 
-const props = defineProps<{ status: PrinterStatus }>()
+const props = defineProps<{ status: PrinterStatus; label?: string }>()
 
 const styles: Record<PrinterStatus, string> = {
   idle: 'bg-green-100 text-green-700 dark:bg-green-400/10 dark:text-green-400',
@@ -30,6 +30,6 @@ const labels: Record<PrinterStatus, string> = {
     <svg class="size-1.5" :class="dotStyles[props.status]" viewBox="0 0 6 6" aria-hidden="true">
       <circle cx="3" cy="3" r="3" />
     </svg>
-    {{ labels[props.status] }}
+    {{ props.label ?? labels[props.status] }}
   </span>
 </template>

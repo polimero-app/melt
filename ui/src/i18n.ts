@@ -149,6 +149,9 @@ export type MessageKey =
   | "control.feedRate"
   | "control.homingStarted"
   | "control.moved"
+  | "control.jogUnsupported"
+  | "control.fanSet"
+  | "control.emergencyStopSent"
   | "camera.title"
   | "camera.live"
   | "camera.refresh"
@@ -159,6 +162,7 @@ export type MessageKey =
   | "camera.refreshFeed"
   | "camera.restored"
   | "camera.snapshotSaved"
+  | "camera.snapshotCaptured"
   | "materials.title"
   | "materials.externalSpool"
   | "materials.slotExternal"
@@ -188,6 +192,7 @@ export type MessageKey =
   | "printersView.discovered"
   | "printersView.removed"
   | "printersView.tlsRefreshRequested"
+  | "printersView.scanning"
   | "settingsView.description"
   | "settingsView.notifications"
   | "settingsView.notifyComplete"
@@ -202,6 +207,12 @@ export type MessageKey =
   | "settingsView.themeSystem"
   | "settingsView.themeLight"
   | "settingsView.themeDark"
+  | "settingsView.about"
+  | "settingsView.version"
+  | "settingsView.platform"
+  | "settingsView.profiles"
+  | "settingsView.monitor"
+  | "settingsView.monitorValue"
   | "filesView.title"
   | "filesView.description"
   | "filesView.upload"
@@ -236,6 +247,7 @@ export type MessageKey =
   | "filesView.uploadConfirm"
   | "filesView.uploadedTo"
   | "filesView.uploadedToPrinter"
+  | "filesView.notSupported"
   | "common.delete"
   | "common.enabled"
   | "common.disabled"
@@ -392,6 +404,9 @@ const messages: Record<Locale, Messages> = {
     "control.feedRate": "Feed rate",
     "control.homingStarted": "Axes homing started",
     "control.moved": "{axis} moved {distance}",
+    "control.jogUnsupported": "Jogging is not supported by this driver",
+    "control.fanSet": "{fan} fan set to {percent}%",
+    "control.emergencyStopSent": "Emergency stop sent",
     "camera.title": "Camera",
     "camera.live": "LIVE",
     "camera.refresh": "Refresh camera",
@@ -402,6 +417,7 @@ const messages: Record<Locale, Messages> = {
     "camera.refreshFeed": "Refresh feed",
     "camera.restored": "Camera connection restored",
     "camera.snapshotSaved": "Snapshot saved to file library",
+    "camera.snapshotCaptured": "Snapshot captured",
     "materials.title": "Filament Spools & Material Systems",
     "materials.externalSpool": "External spool",
     "materials.slotExternal": "EXT",
@@ -431,6 +447,7 @@ const messages: Record<Locale, Messages> = {
     "printersView.discovered": "1 printer discovered",
     "printersView.removed": "Printer removed",
     "printersView.tlsRefreshRequested": "TLS certificate refresh requested",
+    "printersView.scanning": "Scanning…",
     "settingsView.description": "Choose how Polimero keeps you informed and which tools are available to your team.",
     "settingsView.notifications": "Notifications",
     "settingsView.notifyComplete": "Print complete",
@@ -445,6 +462,12 @@ const messages: Record<Locale, Messages> = {
     "settingsView.themeSystem": "System",
     "settingsView.themeLight": "Light",
     "settingsView.themeDark": "Dark",
+    "settingsView.about": "About",
+    "settingsView.version": "Version",
+    "settingsView.platform": "Platform",
+    "settingsView.profiles": "Profiles",
+    "settingsView.monitor": "Monitor",
+    "settingsView.monitorValue": "{workers} workers / {seconds}s",
     "filesView.title": "File library",
     "filesView.description": "Browse models and directories ready to organize, slice, or print.",
     "filesView.upload": "Upload files",
@@ -479,6 +502,7 @@ const messages: Record<Locale, Messages> = {
     "filesView.uploadConfirm": "Upload",
     "filesView.uploadedTo": "Files uploaded to {directory}",
     "filesView.uploadedToPrinter": "Files uploaded to {name} · {directory}",
+    "filesView.notSupported": "File browsing is not supported by this printer.",
     "common.delete": "Delete",
     "common.enabled": "Enabled",
     "common.disabled": "Disabled",
@@ -632,6 +656,9 @@ const messages: Record<Locale, Messages> = {
     "control.feedRate": "Velocidade de avanço",
     "control.homingStarted": "Referenciamento dos eixos iniciado",
     "control.moved": "{axis} movido {distance}",
+    "control.jogUnsupported": "Este driver não suporta movimento manual",
+    "control.fanSet": "Ventoinha {fan} ajustada para {percent}%",
+    "control.emergencyStopSent": "Parada de emergência enviada",
     "camera.title": "Câmera",
     "camera.live": "AO VIVO",
     "camera.refresh": "Atualizar câmera",
@@ -642,6 +669,7 @@ const messages: Record<Locale, Messages> = {
     "camera.refreshFeed": "Atualizar transmissão",
     "camera.restored": "Conexão da câmera restabelecida",
     "camera.snapshotSaved": "Captura salva na biblioteca de arquivos",
+    "camera.snapshotCaptured": "Captura realizada",
     "materials.title": "Carretéis de filamento e sistemas de material",
     "materials.externalSpool": "Carretel externo",
     "materials.slotExternal": "EXT",
@@ -671,6 +699,7 @@ const messages: Record<Locale, Messages> = {
     "printersView.discovered": "1 impressora descoberta",
     "printersView.removed": "Impressora removida",
     "printersView.tlsRefreshRequested": "Atualização do certificado TLS solicitada",
+    "printersView.scanning": "Buscando…",
     "settingsView.description": "Escolha como o Polimero mantém você informado e quais ferramentas estão disponíveis para a sua equipe.",
     "settingsView.notifications": "Notificações",
     "settingsView.notifyComplete": "Impressão concluída",
@@ -685,6 +714,12 @@ const messages: Record<Locale, Messages> = {
     "settingsView.themeSystem": "Sistema",
     "settingsView.themeLight": "Claro",
     "settingsView.themeDark": "Escuro",
+    "settingsView.about": "Sobre",
+    "settingsView.version": "Versão",
+    "settingsView.platform": "Plataforma",
+    "settingsView.profiles": "Perfis",
+    "settingsView.monitor": "Monitor",
+    "settingsView.monitorValue": "{workers} workers / {seconds}s",
     "filesView.title": "Biblioteca de arquivos",
     "filesView.description": "Navegue por modelos e diretórios prontos para organizar, fatiar ou imprimir.",
     "filesView.upload": "Enviar arquivos",
@@ -719,6 +754,7 @@ const messages: Record<Locale, Messages> = {
     "filesView.uploadConfirm": "Enviar",
     "filesView.uploadedTo": "Arquivos enviados para {directory}",
     "filesView.uploadedToPrinter": "Arquivos enviados para {name} · {directory}",
+    "filesView.notSupported": "A navegação de arquivos não é suportada por esta impressora.",
     "common.delete": "Excluir",
     "common.enabled": "Ativada",
     "common.disabled": "Desativada",

@@ -2,7 +2,9 @@
 import { Dialog, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } from '@headlessui/vue'
 import { PhX } from '@phosphor-icons/vue'
 
-defineProps<{ open: boolean; title: string; description?: string }>()
+withDefaults(defineProps<{ open: boolean; title: string; description?: string; closeLabel?: string }>(), {
+  closeLabel: 'Close panel',
+})
 defineEmits<{ close: [] }>()
 </script>
 
@@ -36,7 +38,7 @@ defineEmits<{ close: [] }>()
                           @click="$emit('close')"
                         >
                           <span class="absolute -inset-2.5"></span>
-                          <span class="sr-only">Close panel</span>
+                          <span class="sr-only">{{ closeLabel }}</span>
                           <PhX class="size-6" aria-hidden="true" />
                         </button>
                       </div>
