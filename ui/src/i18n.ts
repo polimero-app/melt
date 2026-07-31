@@ -108,7 +108,139 @@ export type MessageKey =
   | "diagnostics.description"
   | "diagnostics.redacted"
   | "diagnostics.noReport"
-  | "diagnostics.open";
+  | "diagnostics.open"
+  | "nav.ariaLabel"
+  | "nav.printers"
+  | "nav.settings"
+  | "nav.files"
+  | "status.idle"
+  | "status.onlineIdle"
+  | "status.onlineBusy"
+  | "status.offlineLabel"
+  | "control.printerActions"
+  | "control.signalExcellent"
+  | "control.signalGood"
+  | "control.signalWeak"
+  | "control.signalNone"
+  | "control.unavailableTitle"
+  | "control.unavailableDescription"
+  | "control.refreshConnection"
+  | "control.reconnecting"
+  | "control.currentJob"
+  | "control.complete"
+  | "control.remaining"
+  | "control.timeUnavailable"
+  | "control.layer"
+  | "control.cancelRequested"
+  | "control.jobPaused"
+  | "control.jobResumed"
+  | "control.chamber"
+  | "control.decreaseTemp"
+  | "control.increaseTemp"
+  | "control.fans"
+  | "control.fanPartCooling"
+  | "control.fanAuxiliary"
+  | "control.fanHeatbreak"
+  | "control.fanPower"
+  | "control.lights"
+  | "control.chamberLight"
+  | "control.auxLight"
+  | "control.stepSize"
+  | "control.feedRate"
+  | "control.homingStarted"
+  | "control.moved"
+  | "camera.title"
+  | "camera.live"
+  | "camera.refresh"
+  | "camera.snapshot"
+  | "camera.maximize"
+  | "camera.unavailable"
+  | "camera.checkConnection"
+  | "camera.refreshFeed"
+  | "camera.restored"
+  | "camera.snapshotSaved"
+  | "materials.title"
+  | "materials.externalSpool"
+  | "materials.slotExternal"
+  | "materials.empty"
+  | "materials.inUse"
+  | "materials.active"
+  | "materials.ready"
+  | "printersView.title"
+  | "printersView.description"
+  | "printersView.discover"
+  | "printersView.totalPrinters"
+  | "printersView.online"
+  | "printersView.printingNow"
+  | "printersView.emptyTitle"
+  | "printersView.emptyDescription"
+  | "printersView.scan"
+  | "printersView.removePrinter"
+  | "printersView.removeNamed"
+  | "printersView.status"
+  | "printersView.host"
+  | "printersView.tlsVerification"
+  | "printersView.openControl"
+  | "printersView.refreshCertificate"
+  | "printersView.refreshCertificateNamed"
+  | "printersView.addAnother"
+  | "printersView.scanComplete"
+  | "printersView.discovered"
+  | "printersView.removed"
+  | "printersView.tlsRefreshRequested"
+  | "settingsView.description"
+  | "settingsView.notifications"
+  | "settingsView.notifyComplete"
+  | "settingsView.notifyCompleteDescription"
+  | "settingsView.notifyFailure"
+  | "settingsView.notifyFailureDescription"
+  | "settingsView.notifyDisconnected"
+  | "settingsView.notifyDisconnectedDescription"
+  | "settingsView.slicers"
+  | "settingsView.appearance"
+  | "settingsView.theme"
+  | "settingsView.themeSystem"
+  | "settingsView.themeLight"
+  | "settingsView.themeDark"
+  | "filesView.title"
+  | "filesView.description"
+  | "filesView.upload"
+  | "filesView.breadcrumb"
+  | "filesView.search"
+  | "filesView.folderModified"
+  | "filesView.moreActions"
+  | "filesView.openWith"
+  | "filesView.deleted"
+  | "filesView.openingIn"
+  | "filesView.sentToPrinter"
+  | "filesView.downloadStarted"
+  | "filesView.downloadFile"
+  | "filesView.downloadNamed"
+  | "filesView.printFile"
+  | "filesView.printNamed"
+  | "filesView.type"
+  | "filesView.size"
+  | "filesView.modified"
+  | "filesView.name"
+  | "filesView.actions"
+  | "filesView.emptyTitle"
+  | "filesView.emptyDescription"
+  | "filesView.uploadDescription"
+  | "filesView.uploadFile"
+  | "filesView.dragDrop"
+  | "filesView.uploadHint"
+  | "filesView.printer"
+  | "filesView.noPrinters"
+  | "filesView.printerOffline"
+  | "filesView.uploadingTo"
+  | "filesView.uploadConfirm"
+  | "filesView.uploadedTo"
+  | "filesView.uploadedToPrinter"
+  | "common.delete"
+  | "common.enabled"
+  | "common.disabled"
+  | "common.moreActions"
+  | "common.closePanel";
 
 type Messages = Record<MessageKey, string>;
 
@@ -219,7 +351,139 @@ const messages: Record<Locale, Messages> = {
     "diagnostics.description": "This report excludes printer names, hosts, serial numbers, credentials, local paths, and protocol content.",
     "diagnostics.redacted": "Identifiers are redacted by default.",
     "diagnostics.noReport": "No diagnostic report is available.",
-    "diagnostics.open": "Diagnostics"
+    "diagnostics.open": "Diagnostics",
+    "nav.ariaLabel": "Workspace navigation",
+    "nav.printers": "Manage printers",
+    "nav.settings": "Configuration",
+    "nav.files": "Files",
+    "status.idle": "Idle",
+    "status.onlineIdle": "Online · idle",
+    "status.onlineBusy": "Online · busy",
+    "status.offlineLabel": "Offline",
+    "control.printerActions": "Printer actions",
+    "control.signalExcellent": "Excellent signal",
+    "control.signalGood": "Good signal",
+    "control.signalWeak": "Weak signal",
+    "control.signalNone": "No signal",
+    "control.unavailableTitle": "Printer unavailable",
+    "control.unavailableDescription": "Polimero cannot reach this printer right now. Check the printer connection and try again.",
+    "control.refreshConnection": "Refresh connection",
+    "control.reconnecting": "Trying to reconnect to printer",
+    "control.currentJob": "Current job",
+    "control.complete": "{percent}% complete",
+    "control.remaining": "{minutes}m remaining",
+    "control.timeUnavailable": "Time estimate unavailable",
+    "control.layer": "Layer {current} / {total}",
+    "control.cancelRequested": "Cancel requested. Printer is finishing the current move.",
+    "control.jobPaused": "Job paused",
+    "control.jobResumed": "Job resumed",
+    "control.chamber": "Chamber",
+    "control.decreaseTemp": "Decrease {sensor} target temperature",
+    "control.increaseTemp": "Increase {sensor} target temperature",
+    "control.fans": "Fans",
+    "control.fanPartCooling": "Part cooling",
+    "control.fanAuxiliary": "Auxiliary",
+    "control.fanHeatbreak": "Heatbreak",
+    "control.fanPower": "{fan} fan power",
+    "control.lights": "Lights",
+    "control.chamberLight": "Chamber light",
+    "control.auxLight": "Aux light",
+    "control.stepSize": "Step size",
+    "control.feedRate": "Feed rate",
+    "control.homingStarted": "Axes homing started",
+    "control.moved": "{axis} moved {distance}",
+    "camera.title": "Camera",
+    "camera.live": "LIVE",
+    "camera.refresh": "Refresh camera",
+    "camera.snapshot": "Save snapshot",
+    "camera.maximize": "Maximize camera",
+    "camera.unavailable": "Camera unavailable",
+    "camera.checkConnection": "Check the printer connection and try again.",
+    "camera.refreshFeed": "Refresh feed",
+    "camera.restored": "Camera connection restored",
+    "camera.snapshotSaved": "Snapshot saved to file library",
+    "materials.title": "Filament Spools & Material Systems",
+    "materials.externalSpool": "External spool",
+    "materials.slotExternal": "EXT",
+    "materials.empty": "Empty",
+    "materials.inUse": "In use",
+    "materials.active": "Active",
+    "materials.ready": "Ready",
+    "printersView.title": "Printer management",
+    "printersView.description": "Discover and maintain the printers available on your local network.",
+    "printersView.discover": "Discover printers",
+    "printersView.totalPrinters": "Total printers",
+    "printersView.online": "Online",
+    "printersView.printingNow": "Printing now",
+    "printersView.emptyTitle": "No printers connected",
+    "printersView.emptyDescription": "Discover a printer on your local network to start monitoring jobs and materials.",
+    "printersView.scan": "Scan local network",
+    "printersView.removePrinter": "Remove printer",
+    "printersView.removeNamed": "Remove {name}",
+    "printersView.status": "Status",
+    "printersView.host": "Host",
+    "printersView.tlsVerification": "TLS verification",
+    "printersView.openControl": "Open control",
+    "printersView.refreshCertificate": "Refresh certificate",
+    "printersView.refreshCertificateNamed": "Refresh certificate for {name}",
+    "printersView.addAnother": "Add another printer",
+    "printersView.scanComplete": "Discovery scan complete",
+    "printersView.discovered": "1 printer discovered",
+    "printersView.removed": "Printer removed",
+    "printersView.tlsRefreshRequested": "TLS certificate refresh requested",
+    "settingsView.description": "Choose how Polimero keeps you informed and which tools are available to your team.",
+    "settingsView.notifications": "Notifications",
+    "settingsView.notifyComplete": "Print complete",
+    "settingsView.notifyCompleteDescription": "Show a notification when a print finishes.",
+    "settingsView.notifyFailure": "Print failure",
+    "settingsView.notifyFailureDescription": "Show a notification when a print fails or is aborted.",
+    "settingsView.notifyDisconnected": "Printer disconnected",
+    "settingsView.notifyDisconnectedDescription": "Show a notification when the connection is lost.",
+    "settingsView.slicers": "Slicer applications",
+    "settingsView.appearance": "Appearance",
+    "settingsView.theme": "Theme",
+    "settingsView.themeSystem": "System",
+    "settingsView.themeLight": "Light",
+    "settingsView.themeDark": "Dark",
+    "filesView.title": "File library",
+    "filesView.description": "Browse models and directories ready to organize, slice, or print.",
+    "filesView.upload": "Upload files",
+    "filesView.breadcrumb": "Breadcrumb",
+    "filesView.search": "Search files",
+    "filesView.folderModified": "Folder · {date}",
+    "filesView.moreActions": "More file actions",
+    "filesView.openWith": "Open with Bambu Studio",
+    "filesView.deleted": "{name} deleted",
+    "filesView.openingIn": "Opening {name} in Bambu Studio",
+    "filesView.sentToPrinter": "{name} sent to printer",
+    "filesView.downloadStarted": "{name} download started",
+    "filesView.downloadFile": "Download file",
+    "filesView.downloadNamed": "Download {name}",
+    "filesView.printFile": "Print file",
+    "filesView.printNamed": "Print {name}",
+    "filesView.type": "Type",
+    "filesView.size": "Size",
+    "filesView.modified": "Modified",
+    "filesView.name": "Name",
+    "filesView.actions": "Actions",
+    "filesView.emptyTitle": "Nothing here",
+    "filesView.emptyDescription": "This directory is empty.",
+    "filesView.uploadDescription": "Add new models to your local file library.",
+    "filesView.uploadFile": "Upload a file",
+    "filesView.dragDrop": "or drag and drop",
+    "filesView.uploadHint": "3MF, STL, OBJ up to 200 MB",
+    "filesView.printer": "Printer",
+    "filesView.noPrinters": "No printers available",
+    "filesView.printerOffline": "{name} — offline",
+    "filesView.uploadingTo": "Uploading to {directory}",
+    "filesView.uploadConfirm": "Upload",
+    "filesView.uploadedTo": "Files uploaded to {directory}",
+    "filesView.uploadedToPrinter": "Files uploaded to {name} · {directory}",
+    "common.delete": "Delete",
+    "common.enabled": "Enabled",
+    "common.disabled": "Disabled",
+    "common.moreActions": "More actions",
+    "common.closePanel": "Close panel"
   },
   "pt-BR": {
     "app.eyebrow": "CONTROLE DE IMPRESSÃO LOCAL",
@@ -327,7 +591,139 @@ const messages: Record<Locale, Messages> = {
     "diagnostics.description": "Este relatório exclui nomes de impressora, hosts, números de série, credenciais, caminhos locais e conteúdo de protocolo.",
     "diagnostics.redacted": "Identificadores são ocultados por padrão.",
     "diagnostics.noReport": "Nenhum relatório de diagnóstico está disponível.",
-    "diagnostics.open": "Diagnóstico"
+    "diagnostics.open": "Diagnóstico",
+    "nav.ariaLabel": "Navegação do espaço de trabalho",
+    "nav.printers": "Gerenciar impressoras",
+    "nav.settings": "Configuração",
+    "nav.files": "Arquivos",
+    "status.idle": "Ociosa",
+    "status.onlineIdle": "Online · ociosa",
+    "status.onlineBusy": "Online · ocupada",
+    "status.offlineLabel": "Offline",
+    "control.printerActions": "Ações da impressora",
+    "control.signalExcellent": "Sinal excelente",
+    "control.signalGood": "Sinal bom",
+    "control.signalWeak": "Sinal fraco",
+    "control.signalNone": "Sem sinal",
+    "control.unavailableTitle": "Impressora indisponível",
+    "control.unavailableDescription": "O Polimero não consegue alcançar esta impressora no momento. Verifique a conexão da impressora e tente novamente.",
+    "control.refreshConnection": "Atualizar conexão",
+    "control.reconnecting": "Tentando reconectar à impressora",
+    "control.currentJob": "Trabalho atual",
+    "control.complete": "{percent}% concluído",
+    "control.remaining": "{minutes}min restantes",
+    "control.timeUnavailable": "Estimativa de tempo indisponível",
+    "control.layer": "Camada {current} / {total}",
+    "control.cancelRequested": "Cancelamento solicitado. A impressora está concluindo o movimento atual.",
+    "control.jobPaused": "Trabalho pausado",
+    "control.jobResumed": "Trabalho retomado",
+    "control.chamber": "Câmara",
+    "control.decreaseTemp": "Diminuir a temperatura alvo de {sensor}",
+    "control.increaseTemp": "Aumentar a temperatura alvo de {sensor}",
+    "control.fans": "Ventoinhas",
+    "control.fanPartCooling": "Resfriamento da peça",
+    "control.fanAuxiliary": "Auxiliar",
+    "control.fanHeatbreak": "Heatbreak",
+    "control.fanPower": "Potência da ventoinha: {fan}",
+    "control.lights": "Luzes",
+    "control.chamberLight": "Luz da câmara",
+    "control.auxLight": "Luz auxiliar",
+    "control.stepSize": "Tamanho do passo",
+    "control.feedRate": "Velocidade de avanço",
+    "control.homingStarted": "Referenciamento dos eixos iniciado",
+    "control.moved": "{axis} movido {distance}",
+    "camera.title": "Câmera",
+    "camera.live": "AO VIVO",
+    "camera.refresh": "Atualizar câmera",
+    "camera.snapshot": "Salvar captura",
+    "camera.maximize": "Maximizar câmera",
+    "camera.unavailable": "Câmera indisponível",
+    "camera.checkConnection": "Verifique a conexão da impressora e tente novamente.",
+    "camera.refreshFeed": "Atualizar transmissão",
+    "camera.restored": "Conexão da câmera restabelecida",
+    "camera.snapshotSaved": "Captura salva na biblioteca de arquivos",
+    "materials.title": "Carretéis de filamento e sistemas de material",
+    "materials.externalSpool": "Carretel externo",
+    "materials.slotExternal": "EXT",
+    "materials.empty": "Vazio",
+    "materials.inUse": "Em uso",
+    "materials.active": "Ativo",
+    "materials.ready": "Pronto",
+    "printersView.title": "Gerenciamento de impressoras",
+    "printersView.description": "Descubra e mantenha as impressoras disponíveis na sua rede local.",
+    "printersView.discover": "Descobrir impressoras",
+    "printersView.totalPrinters": "Total de impressoras",
+    "printersView.online": "Online",
+    "printersView.printingNow": "Imprimindo agora",
+    "printersView.emptyTitle": "Nenhuma impressora conectada",
+    "printersView.emptyDescription": "Descubra uma impressora na sua rede local para começar a monitorar trabalhos e materiais.",
+    "printersView.scan": "Buscar na rede local",
+    "printersView.removePrinter": "Remover impressora",
+    "printersView.removeNamed": "Remover {name}",
+    "printersView.status": "Status",
+    "printersView.host": "Host",
+    "printersView.tlsVerification": "Verificação TLS",
+    "printersView.openControl": "Abrir controle",
+    "printersView.refreshCertificate": "Atualizar certificado",
+    "printersView.refreshCertificateNamed": "Atualizar certificado de {name}",
+    "printersView.addAnother": "Adicionar outra impressora",
+    "printersView.scanComplete": "Busca de descoberta concluída",
+    "printersView.discovered": "1 impressora descoberta",
+    "printersView.removed": "Impressora removida",
+    "printersView.tlsRefreshRequested": "Atualização do certificado TLS solicitada",
+    "settingsView.description": "Escolha como o Polimero mantém você informado e quais ferramentas estão disponíveis para a sua equipe.",
+    "settingsView.notifications": "Notificações",
+    "settingsView.notifyComplete": "Impressão concluída",
+    "settingsView.notifyCompleteDescription": "Mostrar uma notificação quando uma impressão terminar.",
+    "settingsView.notifyFailure": "Falha de impressão",
+    "settingsView.notifyFailureDescription": "Mostrar uma notificação quando uma impressão falhar ou for cancelada.",
+    "settingsView.notifyDisconnected": "Impressora desconectada",
+    "settingsView.notifyDisconnectedDescription": "Mostrar uma notificação quando a conexão for perdida.",
+    "settingsView.slicers": "Aplicativos de fatiamento",
+    "settingsView.appearance": "Aparência",
+    "settingsView.theme": "Tema",
+    "settingsView.themeSystem": "Sistema",
+    "settingsView.themeLight": "Claro",
+    "settingsView.themeDark": "Escuro",
+    "filesView.title": "Biblioteca de arquivos",
+    "filesView.description": "Navegue por modelos e diretórios prontos para organizar, fatiar ou imprimir.",
+    "filesView.upload": "Enviar arquivos",
+    "filesView.breadcrumb": "Trilha de navegação",
+    "filesView.search": "Buscar arquivos",
+    "filesView.folderModified": "Pasta · {date}",
+    "filesView.moreActions": "Mais ações do arquivo",
+    "filesView.openWith": "Abrir com o Bambu Studio",
+    "filesView.deleted": "{name} excluído",
+    "filesView.openingIn": "Abrindo {name} no Bambu Studio",
+    "filesView.sentToPrinter": "{name} enviado para a impressora",
+    "filesView.downloadStarted": "Download de {name} iniciado",
+    "filesView.downloadFile": "Baixar arquivo",
+    "filesView.downloadNamed": "Baixar {name}",
+    "filesView.printFile": "Imprimir arquivo",
+    "filesView.printNamed": "Imprimir {name}",
+    "filesView.type": "Tipo",
+    "filesView.size": "Tamanho",
+    "filesView.modified": "Modificado",
+    "filesView.name": "Nome",
+    "filesView.actions": "Ações",
+    "filesView.emptyTitle": "Nada por aqui",
+    "filesView.emptyDescription": "Este diretório está vazio.",
+    "filesView.uploadDescription": "Adicione novos modelos à sua biblioteca de arquivos local.",
+    "filesView.uploadFile": "Enviar um arquivo",
+    "filesView.dragDrop": "ou arraste e solte",
+    "filesView.uploadHint": "3MF, STL, OBJ de até 200 MB",
+    "filesView.printer": "Impressora",
+    "filesView.noPrinters": "Nenhuma impressora disponível",
+    "filesView.printerOffline": "{name} — offline",
+    "filesView.uploadingTo": "Enviando para {directory}",
+    "filesView.uploadConfirm": "Enviar",
+    "filesView.uploadedTo": "Arquivos enviados para {directory}",
+    "filesView.uploadedToPrinter": "Arquivos enviados para {name} · {directory}",
+    "common.delete": "Excluir",
+    "common.enabled": "Ativada",
+    "common.disabled": "Desativada",
+    "common.moreActions": "Mais ações",
+    "common.closePanel": "Fechar painel"
   }
 };
 
