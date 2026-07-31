@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watchEffect, type Component } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
 import SlideOver from './components/SlideOver.vue'
@@ -8,11 +9,7 @@ import IconButton from './components/IconButton.vue'
 import Switch from './components/Switch.vue'
 import Card from './components/Card.vue'
 import CardHeader from './components/CardHeader.vue'
-import alaska from './fixtures/alaska.json'
-import dakota from './fixtures/dakota.json'
-import georgia from './fixtures/georgia.json'
 import {
-  PhArrowSquareOut,
   PhArrowsClockwise,
   PhArrowsOutCardinal,
   PhBellRinging,
@@ -26,7 +23,6 @@ import {
   PhCornersOut,
   PhCube,
   PhDesktop,
-  PhDownloadSimple,
   PhDrop,
   PhFan,
   PhFile,
@@ -34,7 +30,7 @@ import {
   PhGearSix,
   PhHexagon,
   PhHouse,
-  PhLightbulb,
+  PhInfo,
   PhMagnifyingGlass,
   PhMinus,
   PhNetwork,
@@ -47,7 +43,6 @@ import {
   PhSun,
   PhThermometerSimple,
   PhTrash,
-  PhUploadSimple,
   PhVideoCamera,
   PhWarning,
   PhWifiHigh,
@@ -58,28 +53,111 @@ import {
 } from '@phosphor-icons/vue'
 
 type View = 'control' | 'printers' | 'settings' | 'files'
-type PrinterStatus = 'idle' | 'busy' | 'offline'
-type TemperatureKey = 'nozzle' | 'bed' | 'chamber'
-type MaterialSystem = 'external' | 'AMS' | 'CFS' | 'BMCU'
+type PrinterBadge = 'idle' | 'busy' | 'offline'
 type ModelTone = 'cyan' | 'amber' | 'rose' | 'violet'
 
-interface MaterialSetup {
-  system: MaterialSystem
-  units: number
-  slots: 1 | 4
+type AppInfo = {
+  version: string
+  modes: [string, string]
 }
 
-interface RawTray {
-  slot: number
-  filamentType?: string
-  color?: string
-  remainingPercent?: number
+type Printer = {
+  name: string
+  driver: string
+  host: string
 }
 
-interface RawMaterialUnit {
-  temperature?: number
-  humidityLevel?: string
-  trays?: RawTray[]
+type Driver = {
+  name: string
+  description: string
+}
+
+type NewPrinter = Printer & {
+  serial: string
+  timeout: string
+  insecure: boolean
+}
+
+type Capabilities = {
+  status: boolean
+  discovery: boolean
+  cameraStream: boolean
+  cameraSnapshot: boolean
+  fileList: boolean
+  fileDownload: boolean
+  fileUpload: boolean
+  jobStart: boolean
+  jobPause: boolean
+  jobResume: boolean
+  jobCancel: boolean
+  emergencyStop: boolean
+  temperatureWrite: boolean
+  motionControl: boolean
+  fanControl: boolean
+  tlsRefresh: boolean
+}
+
+type DiscoveredPrinter = {
+  driver: string
+  host: string
+  serial: string
+  model: string
+  name: string
+}
+
+type Temperature = {
+  currentCelsius: number
+  targetCelsius?: number
+}
+
+type PrinterStatus = {
+  state: 'idle' | 'printing' | 'paused' | 'error' | 'unknown'
+  temperatures?: { nozzle?: Temperature; bed?: Temperature; chamber?: Temperature }
+  job?: { name: string }
+  progress?: { percent: number; currentLayer?: number; totalLayers?: number }
+  errors: { code: string; message: string }[]
+  warnings: { code: string; message: string }[]
+  fans?: Record<string, number>
+}
+
+type MonitorEntry = {
+  name: string
+  driver: string
+  status?: PrinterStatus
+  error?: string
+}
+
+type FileEntry = {
+  name: string
+  root: string
+  path: string
+  devicePath: string
+  type: 'file' | 'directory'
+  sizeBytes?: number
+  modifiedAt?: string
+}
+
+type FileList = {
+  entries: FileEntry[]
+}
+
+type Diagnostics = {
+  version: string
+  platform: string
+  configuredProfiles: number
+  drivers: Record<string, number>
+  identifiersRedacted: boolean
+  monitorWorkers: number
+  monitorIntervalSeconds: number
+  protocolTracesIncluded: boolean
+}
+
+type CameraSnapshot = {
+  dataUrl: string
+}
+
+type CameraStream = {
+  url: string
 }
 
 interface MaterialSlot {
@@ -98,27 +176,7 @@ interface MaterialSystemView {
   slots: MaterialSlot[]
 }
 
-type PrinterData = Record<string, any>
-const printerSources: PrinterData[] = [alaska.data, dakota.data, georgia.data]
-
-interface Printer {
-  id: string
-  name: string
-  model: string
-  status: PrinterStatus
-  ip: string
-  host: string
-  serial: string
-  timeout: string
-  insecure: boolean
-  progress: number
-  materialSetup: MaterialSetup
-  data: PrinterData
-}
-
-const emptySlotColor = 'var(--color-gray-500)'
-
-const statusDotClasses: Record<PrinterStatus, string> = {
+const statusDotClasses: Record<PrinterBadge, string> = {
   idle: 'bg-green-500 ring-green-500/10',
   busy: 'bg-yellow-500 ring-yellow-500/10',
   offline: 'bg-red-500 ring-red-500/10',
@@ -142,173 +200,430 @@ const modelTones: Record<ModelTone, { preview: string; shape: string }> = {
     shape: 'h-16.5 w-27.5 rounded-lg bg-violet-400/75 shadow-[17px_17px_0_var(--color-violet-800)]',
   },
 }
+const fileTones: ModelTone[] = ['cyan', 'amber', 'rose', 'violet']
 
-function materialSetupFor(data: PrinterData): MaterialSetup {
-  const units = data.extensions?.['bambu-lan']?.ams?.units ?? []
-  const firstUnitSlots = units[0]?.trays?.length === 1 ? 1 : 4
-  return { system: units.length ? 'AMS' : 'external', units: units.length || 1, slots: firstUnitSlots }
-}
+const info = ref<AppInfo>()
+const printers = ref<Printer[]>([])
+const drivers = ref<Driver[]>([])
+const monitoring = ref<MonitorEntry[]>([])
+const capabilities = ref<Capabilities>()
+const files = ref<FileEntry[]>([])
+const loading = ref(true)
+const refreshing = ref(false)
+const filesLoading = ref(false)
+const filesError = ref<string>()
+const loadError = ref<string>()
+const profileError = ref<string>()
+const adding = ref(false)
+const additionOpen = ref(false)
+const additionError = ref<string>()
+const discovered = ref<DiscoveredPrinter[]>([])
+const discovering = ref(false)
+const discoveryError = ref<string>()
+const tlsOpen = ref(false)
+const tlsRefreshing = ref(false)
+const tlsError = ref<string>()
+const tlsFingerprint = ref<string>()
+const tlsPrinter = ref<string>()
+const diagnostics = ref<Diagnostics>()
+const diagnosticsError = ref<string>()
+const diagnosticsLoading = ref(false)
+const cameraUrl = ref<string>()
+const cameraLoading = ref(false)
+const cameraError = ref<string>()
+let monitorTimer: number | undefined
 
-const printers = ref<Printer[]>(printerSources.map((data) => ({
-  id: data.profile,
-  name: data.profile[0].toUpperCase() + data.profile.slice(1),
-  model: data.profile === 'alaska' || data.profile === 'georgia' ? 'Bambu Lab A1 Mini' : data.profile === 'dakota' ? 'Bambu Lab H2C' : data.driver,
-  status: data.profile === 'georgia' ? 'offline' : data.state === 'printing' ? 'busy' : 'idle',
-  ip: data.profile === 'alaska' ? '10.20.20.5' : data.profile === 'dakota' ? '10.20.20.10' : '10.20.20.6',
-  host: data.profile === 'alaska' ? '10.20.20.5' : data.profile === 'dakota' ? '10.20.20.10' : '10.20.20.6',
-  serial: data.profile === 'alaska' ? '0300HA622100768' : data.profile === 'dakota' ? '31B8AP5B1301209' : '0300HA5C1600431',
-  timeout: '10s',
-  insecure: false,
-  progress: data.progress.percent,
-  materialSetup: materialSetupFor(data),
-  data,
-})))
 const activeView = ref<View>('control')
 const sectionTabs: { view: View; label: string; icon: Component }[] = [
   { view: 'printers', label: 'Manage printers', icon: PhPrinter },
   { view: 'settings', label: 'Configuration', icon: PhGearSix },
   { view: 'files', label: 'Files', icon: PhFolder },
 ]
-const activePrinterId = ref(printers.value[0]?.id ?? '')
-const theme = ref<'light' | 'dark' | 'system'>('system')
+const activePrinterId = ref('')
+const theme = ref<'light' | 'dark' | 'system'>(
+  (['light', 'dark', 'system'] as const).find((value) => value === localStorage.getItem('theme')) ?? 'system',
+)
 const systemPrefersDark = ref(true)
 let systemThemeQuery: MediaQueryList | undefined
 function handleSystemThemeChange(event: MediaQueryListEvent) {
   systemPrefersDark.value = event.matches
 }
-onMounted(() => {
-  systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
-  systemPrefersDark.value = systemThemeQuery.matches
-  systemThemeQuery.addEventListener('change', handleSystemThemeChange)
-})
-onUnmounted(() => {
-  systemThemeQuery?.removeEventListener('change', handleSystemThemeChange)
-})
 const isLightTheme = computed(() => theme.value === 'light' || (theme.value === 'system' && !systemPrefersDark.value))
 watchEffect(() => {
   document.documentElement.classList.toggle('dark', !isLightTheme.value)
 })
+watchEffect(() => {
+  localStorage.setItem('theme', theme.value)
+})
 const language = ref('English')
-const cameraOnline = ref(true)
 const cameraStage = ref<HTMLElement>()
-const jobPaused = ref(false)
-const jobCancelled = ref(false)
 const toast = ref('')
-const selectedFile = ref('bracket-v4.3mf')
+const selectedFile = ref('')
 const currentDirectory = ref('/')
-const uploadOpen = ref(false)
-const uploadPrinterId = ref('')
-
-function openUpload() {
-  uploadPrinterId.value = activePrinter.value?.id ?? ''
-  uploadOpen.value = true
-}
-
-function confirmUpload() {
-  uploadOpen.value = false
-  const target = printers.value.find((printer) => printer.id === uploadPrinterId.value)
-  showToast(target ? `Files uploaded to ${target.name} · ${currentDirectory.value}` : `Files uploaded to ${currentDirectory.value}`)
-}
 const stepSize = ref('1 mm')
 const feedRate = ref(50)
-
-function temperaturesFor(data: PrinterData) {
-  return {
-    nozzle: { current: data.temperatures.nozzle.currentCelsius, target: data.temperatures.nozzle.targetCelsius },
-    bed: { current: data.temperatures.bed.currentCelsius, target: data.temperatures.bed.targetCelsius },
-    chamber: { current: data.temperatures.chamber.currentCelsius, target: data.temperatures.chamber.targetCelsius ?? 0 },
-  }
-}
-
-const temperature = ref(temperaturesFor(printerSources[0]))
-const fanPower = ref({ ...printerSources[0].fans })
-const fanLabel = (key: string) => (key === 'partCooling' ? 'Part cooling' : key)
-const lights = ref({ chamber: printerSources[0].lights.chamber_light === 'on', aux: false })
 const notifications = ref([
   { label: 'Print complete', description: 'Show a notification when a print finishes.', enabled: true },
   { label: 'Print failure', description: 'Show a notification when a print fails or is aborted.', enabled: true },
   { label: 'Printer disconnected', description: 'Show a notification when the connection is lost.', enabled: true },
 ])
-const slicers = ref([
-  { name: 'Bambu Studio', path: '/usr/bin/bambustudio', enabled: true },
-  { name: 'Orca Slicer', path: '/usr/bin/orcaslicer', enabled: true },
-  { name: 'PrusaSlicer', path: '/usr/bin/prusa-slicer', enabled: false },
-])
+const draft = ref({
+  name: '',
+  driver: '',
+  host: '',
+  serial: '',
+  timeout: '10s',
+  insecure: false,
+  accessCode: '',
+})
 
-const activePrinter = computed(() => printers.value.find((printer) => printer.id === activePrinterId.value) ?? printers.value[0])
+const activePrinter = computed(() => printers.value.find((printer) => printer.name === activePrinterId.value) ?? printers.value[0])
 const hasPrinters = computed(() => printers.value.length > 0)
+const selectedMonitor = computed(() => monitoring.value.find((entry) => entry.name === activePrinter.value?.name))
+const selectedStatus = computed(() => selectedMonitor.value?.status)
+
+function badgeFor(name: string): PrinterBadge {
+  const entry = monitoring.value.find((candidate) => candidate.name === name)
+  if (!entry) return 'idle'
+  if (entry.error || entry.status === undefined || ['error', 'unknown'].includes(entry.status.state)) return 'offline'
+  return ['printing', 'paused'].includes(entry.status.state) ? 'busy' : 'idle'
+}
+
+const activeBadge = computed(() => (activePrinter.value ? badgeFor(activePrinter.value.name) : 'offline'))
+const progressPercent = computed(() => selectedStatus.value?.progress?.percent ?? 0)
+const temperatureRows = computed(() => {
+  const temperatures = selectedStatus.value?.temperatures ?? {}
+  return (['nozzle', 'bed', 'chamber'] as const).flatMap((key) => {
+    const value = temperatures[key]
+    return value ? [{ key, value }] : []
+  })
+})
+const fanRows = computed(() => Object.entries(selectedStatus.value?.fans ?? {}))
+const fanLabel = (key: string) => (key === 'partCooling' ? 'Part cooling' : key)
+// The desktop backend does not report wifi signal or material trays yet; the
+// markup stays behind these guards for when a driver provides them.
+const wifiDbm = computed<number | undefined>(() => undefined)
+const materialSystems = computed<MaterialSystemView[]>(() => [])
+const cameraOnline = computed(() => Boolean(cameraUrl.value))
+const cameraSupported = computed(() => Boolean(capabilities.value?.cameraStream || capabilities.value?.cameraSnapshot))
+
 const fleetStats = computed(() => [
   { label: 'Total printers', value: printers.value.length, tone: 'text-gray-900 dark:text-white' },
-  { label: 'Online', value: printers.value.filter((printer) => printer.status !== 'offline').length, tone: 'text-green-600 dark:text-green-400' },
-  { label: 'Printing now', value: printers.value.filter((printer) => printer.status === 'busy').length, tone: 'text-yellow-600 dark:text-yellow-400' },
+  { label: 'Online', value: printers.value.filter((printer) => badgeFor(printer.name) !== 'offline').length, tone: 'text-green-600 dark:text-green-400' },
+  { label: 'Printing now', value: printers.value.filter((printer) => badgeFor(printer.name) === 'busy').length, tone: 'text-yellow-600 dark:text-yellow-400' },
 ])
-function showToast(message: string) {
-  toast.value = message
+
+function message(reason: unknown) {
+  return reason instanceof Error ? reason.message : String(reason)
+}
+
+function showToast(text: string) {
+  toast.value = text
   window.setTimeout(() => {
     toast.value = ''
   }, 2200)
 }
 
+async function load() {
+  loading.value = true
+  loadError.value = undefined
+  profileError.value = undefined
+
+  const [appInfo, profiles, availableDrivers] = await Promise.allSettled([
+    invoke<AppInfo>('app_info'),
+    invoke<Printer[]>('configured_printers'),
+    invoke<Driver[]>('registered_drivers'),
+  ])
+
+  if (appInfo.status === 'fulfilled') info.value = appInfo.value
+  else loadError.value = message(appInfo.reason)
+
+  if (profiles.status === 'fulfilled') {
+    printers.value = profiles.value
+    const retained = profiles.value.find((printer) => printer.name === activePrinterId.value)
+    const printer = retained ?? profiles.value[0]
+    if (printer) await selectPrinter(printer.name, false)
+    else clearSelection()
+  } else profileError.value = message(profiles.reason)
+
+  if (availableDrivers.status === 'fulfilled') drivers.value = availableDrivers.value
+  else loadError.value ??= message(availableDrivers.reason)
+
+  loading.value = false
+}
+
+function clearSelection() {
+  activePrinterId.value = ''
+  capabilities.value = undefined
+  monitoring.value = []
+  files.value = []
+  cameraUrl.value = undefined
+  cameraError.value = undefined
+}
+
+async function refreshMonitoring() {
+  if (refreshing.value || !printers.value.length) return
+  refreshing.value = true
+  try {
+    monitoring.value = await invoke<MonitorEntry[]>('monitored_printers')
+  } catch (reason) {
+    showToast(message(reason))
+  } finally {
+    refreshing.value = false
+  }
+}
+
+// focus defaults to refresh: user-initiated selections jump to the control
+// view, background re-selections (load, removal fallback) keep the current view.
+async function selectPrinter(name: string, refresh = true, focus = refresh) {
+  activePrinterId.value = name
+  if (focus) activeView.value = 'control'
+  capabilities.value = undefined
+  files.value = []
+  filesError.value = undefined
+  currentDirectory.value = '/'
+  cameraUrl.value = undefined
+  cameraError.value = undefined
+  try {
+    const result = await invoke<{ capabilities: Capabilities }>('printer_capabilities', { name })
+    capabilities.value = result.capabilities
+    if (result.capabilities.fileList) void loadFiles()
+  } catch (reason) {
+    showToast(message(reason))
+  }
+  if (refresh) await refreshMonitoring()
+}
+
 function goTo(view: View) {
   activeView.value = view
+  if (view === 'files') void loadFiles()
 }
 
-function selectPrinter(id: string) {
-  activePrinterId.value = id
-  const printer = printers.value.find((item) => item.id === id)
-  if (printer) {
-    temperature.value = temperaturesFor(printer.data)
-    if (printer.status === 'offline') {
-      temperature.value = { nozzle: { current: 0, target: 0 }, bed: { current: 0, target: 0 }, chamber: { current: 0, target: 0 } }
-      fanPower.value = { auxiliary: 0, chamber: 0, heatbreak: 0, partCooling: 0 }
-      lights.value = { chamber: false, aux: false }
-    } else {
-      fanPower.value = { ...printer.data.fans }
-      lights.value = { chamber: printer.data.lights.chamber_light === 'on', aux: printer.data.lights.work_light === 'on' }
+async function loadFiles() {
+  if (!activePrinter.value || filesLoading.value || !capabilities.value?.fileList) return
+  filesLoading.value = true
+  filesError.value = undefined
+  try {
+    files.value = (await invoke<FileList>('printer_files', { name: activePrinter.value.name })).entries
+  } catch (reason) {
+    filesError.value = message(reason)
+  } finally {
+    filesLoading.value = false
+  }
+}
+
+function openAddition() {
+  draft.value = {
+    name: '',
+    driver: drivers.value.find((driver) => driver.name === 'moonraker')?.name ?? drivers.value[0]?.name ?? '',
+    host: '',
+    serial: '',
+    timeout: '10s',
+    insecure: false,
+    accessCode: '',
+  }
+  additionError.value = undefined
+  discoveryError.value = undefined
+  discovered.value = []
+  additionOpen.value = true
+  void discoverPrinters()
+}
+
+function closeAddition() {
+  if (!adding.value) additionOpen.value = false
+}
+
+async function discoverPrinters() {
+  if (discovering.value) return
+  discovering.value = true
+  discoveryError.value = undefined
+  try {
+    discovered.value = await invoke<DiscoveredPrinter[]>('discover_printers')
+  } catch (reason) {
+    discoveryError.value = message(reason)
+  } finally {
+    discovering.value = false
+  }
+}
+
+function useDiscoveredPrinter(printer: DiscoveredPrinter) {
+  draft.value.driver = printer.driver
+  draft.value.host = printer.host
+  draft.value.serial = printer.serial
+  if (!draft.value.name) draft.value.name = printer.name || printer.model
+  discovered.value = []
+}
+
+async function addPrinter() {
+  if (adding.value) return
+  adding.value = true
+  additionError.value = undefined
+
+  try {
+    const profile = await invoke<NewPrinter>('create_configured_printer', { request: draft.value })
+    const printer = { name: profile.name, driver: profile.driver, host: profile.host }
+    printers.value.push(printer)
+    additionOpen.value = false
+    draft.value.accessCode = ''
+    await selectPrinter(printer.name)
+  } catch (reason) {
+    additionError.value = message(reason)
+  } finally {
+    adding.value = false
+  }
+}
+
+async function removePrinter(name: string) {
+  try {
+    await invoke('remove_configured_printer', { name })
+    printers.value = printers.value.filter((printer) => printer.name !== name)
+    monitoring.value = monitoring.value.filter((printer) => printer.name !== name)
+    showToast('Printer removed')
+    const next = printers.value[0]
+    if (next) await selectPrinter(next.name, false)
+    else {
+      clearSelection()
+      activeView.value = 'printers'
     }
-    cameraOnline.value = printer.status !== 'offline'
+  } catch (reason) {
+    showToast(message(reason))
   }
-  activeView.value = 'control'
 }
 
-function discoverPrinter() {
-  if (printers.value.some((printer) => printer.id === 'p3')) {
-    showToast('Discovery scan complete')
-    return
+async function openTlsRefresh(name: string) {
+  if (tlsRefreshing.value) return
+  tlsRefreshing.value = true
+  tlsError.value = undefined
+  tlsFingerprint.value = undefined
+  tlsPrinter.value = name
+  try {
+    tlsFingerprint.value = await invoke<string>('preview_printer_tls', { name })
+    tlsOpen.value = true
+  } catch (reason) {
+    showToast(message(reason))
+  } finally {
+    tlsRefreshing.value = false
   }
-  printers.value.push({ id: 'p3', name: 'Workshop MMU', model: 'Open-source BMCU', status: 'offline', ip: '10.20.20.44', host: '10.20.20.44', serial: 'Not reported', timeout: '10s', insecure: false, progress: 0, materialSetup: { system: 'BMCU', units: 1, slots: 4 }, data: alaska.data })
-  showToast('1 printer discovered')
 }
 
-function removePrinter(id: string) {
-  printers.value = printers.value.filter((printer) => printer.id !== id)
-  if (activePrinterId.value === id) {
-    activePrinterId.value = printers.value[0]?.id ?? ''
-    if (!printers.value.length) activeView.value = 'printers'
+async function refreshTls() {
+  if (!tlsPrinter.value || !tlsFingerprint.value || tlsRefreshing.value) return
+  tlsRefreshing.value = true
+  tlsError.value = undefined
+  try {
+    await invoke('refresh_printer_tls', {
+      request: { name: tlsPrinter.value, fingerprint: tlsFingerprint.value, confirmed: true },
+    })
+    tlsOpen.value = false
+    showToast('TLS certificate refreshed')
+    await refreshMonitoring()
+  } catch (reason) {
+    tlsError.value = message(reason)
+  } finally {
+    tlsRefreshing.value = false
   }
-  showToast('Printer removed')
 }
 
-const printerActionItems = computed<ActionMenuItem[]>(() => activePrinter.value ? [
-  { label: 'Refresh certificate', icon: PhArrowsClockwise, onSelect: () => showToast('TLS certificate refresh requested') },
-  { label: 'Remove printer', icon: PhTrash, danger: true, onSelect: () => removePrinter(activePrinter.value!.id) },
-] : [])
-
-function fileActionItems(file: { name: string }): ActionMenuItem[] {
-  return [
-    { label: 'Print', icon: PhPlay, onSelect: () => showToast(`${file.name} sent to printer`) },
-    { label: 'Open with Bambu Studio', icon: PhArrowSquareOut, onSelect: () => showToast(`Opening ${file.name} in Bambu Studio`) },
-    { label: 'Delete', icon: PhTrash, danger: true, onSelect: () => showToast(`${file.name} deleted`) },
-  ]
+async function sendJobAction(action: 'start' | 'pause' | 'resume' | 'cancel', devicePath?: string) {
+  if (!activePrinter.value) return
+  try {
+    await invoke('printer_job_action', {
+      request: { name: activePrinter.value.name, action, devicePath, confirmed: true },
+    })
+    showToast(action === 'start' ? 'Print started' : `Job ${action} requested`)
+    await refreshMonitoring()
+  } catch (reason) {
+    showToast(message(reason))
+  }
 }
 
-function refreshCamera() {
-  cameraOnline.value = true
-  showToast('Camera connection restored')
+async function adjustTemperature(kind: 'nozzle' | 'bed' | 'chamber', delta: number) {
+  if (!activePrinter.value || !selectedStatus.value || kind === 'chamber') return
+  const temperature = selectedStatus.value.temperatures?.[kind]
+  if (!temperature) return
+  const maximum = kind === 'nozzle' ? 300 : 120
+  const base = temperature.targetCelsius ?? temperature.currentCelsius
+  const next = Math.max(0, Math.min(maximum, Math.round((base + delta) / 5) * 5))
+  try {
+    await invoke('printer_temperature_set', {
+      request: { name: activePrinter.value.name, [`${kind}Celsius`]: next },
+    })
+    await refreshMonitoring()
+  } catch (reason) {
+    showToast(message(reason))
+  }
 }
 
-function saveSnapshot() {
-  showToast('Snapshot saved to file library')
+async function sendFan(fan: string, event: Event) {
+  if (!activePrinter.value) return
+  const speed = Number((event.target as HTMLInputElement).value)
+  if (!Number.isInteger(speed)) return
+  try {
+    await invoke('printer_fan_set', {
+      request: { name: activePrinter.value.name, fan, speedPercent: speed, confirmed: true },
+    })
+    showToast(`${fanLabel(fan)} fan set to ${speed}%`)
+    await refreshMonitoring()
+  } catch (reason) {
+    showToast(message(reason))
+    await refreshMonitoring()
+  }
+}
+
+async function homeAxes() {
+  if (!activePrinter.value) return
+  try {
+    await invoke('printer_motion_home', {
+      request: { name: activePrinter.value.name, confirmed: true },
+    })
+    showToast('Axes homing started')
+    await refreshMonitoring()
+  } catch (reason) {
+    showToast(message(reason))
+  }
+}
+
+async function emergencyStop() {
+  if (!activePrinter.value) return
+  try {
+    await invoke('printer_emergency_stop', { name: activePrinter.value.name })
+    showToast('Emergency stop sent')
+    await refreshMonitoring()
+  } catch (reason) {
+    showToast(message(reason))
+  }
+}
+
+async function refreshCamera() {
+  if (!activePrinter.value || cameraLoading.value || !cameraSupported.value) return
+  cameraLoading.value = true
+  cameraError.value = undefined
+  try {
+    if (capabilities.value?.cameraStream) {
+      cameraUrl.value = (await invoke<CameraStream>('printer_camera_stream', { name: activePrinter.value.name })).url
+    } else if (capabilities.value?.cameraSnapshot) {
+      cameraUrl.value = (await invoke<CameraSnapshot>('printer_camera_snapshot', { name: activePrinter.value.name })).dataUrl
+    }
+  } catch (reason) {
+    cameraUrl.value = undefined
+    cameraError.value = message(reason)
+  } finally {
+    cameraLoading.value = false
+  }
+}
+
+async function saveSnapshot() {
+  if (!activePrinter.value || cameraLoading.value || !capabilities.value?.cameraSnapshot) return
+  cameraLoading.value = true
+  cameraError.value = undefined
+  try {
+    cameraUrl.value = (await invoke<CameraSnapshot>('printer_camera_snapshot', { name: activePrinter.value.name })).dataUrl
+    showToast('Snapshot captured')
+  } catch (reason) {
+    cameraError.value = message(reason)
+  } finally {
+    cameraLoading.value = false
+  }
 }
 
 function toggleCameraFullscreen() {
@@ -316,64 +631,45 @@ function toggleCameraFullscreen() {
   else cameraStage.value?.requestFullscreen()
 }
 
-function move(axis: string, direction: string) {
-  showToast(`${axis}${direction} moved ${stepSize.value}`)
-}
-
-function updateTemperature(key: TemperatureKey, amount: number) {
-  temperature.value[key].target = Math.max(0, temperature.value[key].target + amount)
+async function runDiagnostics() {
+  diagnosticsLoading.value = true
+  diagnostics.value = undefined
+  diagnosticsError.value = undefined
+  try {
+    diagnostics.value = await invoke<Diagnostics>('diagnostics_report')
+  } catch (reason) {
+    diagnosticsError.value = message(reason)
+  } finally {
+    diagnosticsLoading.value = false
+  }
 }
 
 function formatTemperature(value: number) {
   return Math.round(value)
 }
 
-function wifiSignal(dbm: number | undefined) {
-  if (dbm === undefined) return { icon: PhWifiSlash, label: 'No signal' }
-  if (dbm >= -55) return { icon: PhWifiHigh, label: 'Excellent signal' }
-  if (dbm >= -70) return { icon: PhWifiMedium, label: 'Good signal' }
-  return { icon: PhWifiLow, label: 'Weak signal' }
+function formatSize(sizeBytes?: number) {
+  if (sizeBytes === undefined || sizeBytes < 0) return '—'
+  if (sizeBytes < 1024) return `${sizeBytes} B`
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function toggleJob() {
-  jobPaused.value = !jobPaused.value
-  showToast(jobPaused.value ? 'Job paused' : 'Job resumed')
+function fileTypeLabel(file: FileEntry) {
+  if (file.type === 'directory') return 'DIR'
+  const dot = file.name.lastIndexOf('.')
+  return dot > 0 ? file.name.slice(dot + 1).toUpperCase() : 'FILE'
 }
 
-const files: { name: string; type: string; size: string; modified: string; tone: ModelTone; directory: string }[] = [
-  { name: 'bracket-v4.3mf', type: '3MF', size: '18.4 MB', modified: 'Today, 09:42', tone: 'cyan', directory: '/' },
-  { name: 'gear-housing.stl', type: 'STL', size: '4.8 MB', modified: 'Yesterday', tone: 'amber', directory: '/' },
-  { name: 'mounting-arm.obj', type: 'OBJ', size: '2.1 MB', modified: 'Jun 18, 2026', tone: 'rose', directory: '/' },
-  { name: 'enclosure-panel.stl', type: 'STL', size: '12.6 MB', modified: 'Jun 15, 2026', tone: 'violet', directory: '/' },
-  { name: 'hinge-v2.3mf', type: '3MF', size: '8.7 MB', modified: 'Jun 12, 2026', tone: 'cyan', directory: '/Projects' },
-  { name: 'mounting-arm-final.obj', type: 'OBJ', size: '3.3 MB', modified: 'Jun 08, 2026', tone: 'rose', directory: '/Projects' },
-  { name: 'bed-level-test.stl', type: 'STL', size: '840 KB', modified: 'May 27, 2026', tone: 'amber', directory: '/Calibration' },
-]
-
-const directories = [
-  { name: 'Projects', path: '/Projects', parent: '/', modified: 'Today' },
-  { name: 'Calibration', path: '/Calibration', parent: '/', modified: 'Jun 20, 2026' },
-  { name: 'Archive', path: '/Archive', parent: '/', modified: 'May 04, 2026' },
-]
-
-const visibleDirectories = computed(() => directories.filter((directory) => directory.parent === currentDirectory.value))
-const visibleFiles = computed(() => files.filter((file) => file.directory === currentDirectory.value))
-const breadcrumbs = computed(() => {
-  const parts = currentDirectory.value.split('/').filter(Boolean)
-  return [{ name: 'File library', path: '/' }, ...parts.map((part, index) => ({ name: part, path: `/${parts.slice(0, index + 1).join('/')}` }))]
-})
-
-function navigateToDirectory(path: string) {
-  currentDirectory.value = path
+function fileToneFor(name: string) {
+  return modelTones[fileTones[Math.abs([...name].reduce((hash, char) => hash * 31 + char.charCodeAt(0), 0)) % fileTones.length]!]!
 }
 
-const materials = computed<MaterialSlot[]>(() => {
-  if (activePrinter.value?.status === 'offline') return [{ slot: 'EXT', status: 'Empty', type: '—', name: '', color: emptySlotColor }]
-  const units = (activePrinter.value?.data.extensions?.['bambu-lan']?.ams?.units ?? []) as RawMaterialUnit[]
-  const trays = units.flatMap((unit) => unit.trays ?? [])
-  if (!trays.length) return [{ slot: 'EXT', status: 'In use', type: 'PLA', name: 'PLA', color: '#58c49b' }]
-  return trays.map(materialFromTray)
-})
+function parentDirectory(path: string) {
+  const normalized = path.startsWith('/') ? path.slice(1) : path
+  const index = normalized.lastIndexOf('/')
+  return index < 0 ? '/' : `/${normalized.slice(0, index)}`
+}
 
 function textColorFor(color: string) {
   if (!color.startsWith('#')) return 'var(--color-white)'
@@ -384,38 +680,62 @@ function textColorFor(color: string) {
   return luminance > 0.55 ? 'var(--color-gray-900)' : 'var(--color-white)'
 }
 
-function materialFromTray(tray: RawTray): MaterialSlot {
-  const knownPercent = tray.remainingPercent !== undefined && tray.remainingPercent !== -1
-  return {
-    slot: String(tray.slot + 1).padStart(2, '0'),
-    status: knownPercent ? `${tray.remainingPercent}%` : tray.filamentType ? (activePrinter.value?.status === 'busy' ? 'Active' : 'Ready') : 'Empty',
-    type: tray.filamentType ?? '—',
-    name: tray.filamentType ?? '',
-    color: tray.color ? `#${tray.color.slice(0, 6)}` : emptySlotColor,
-    remainingPercent: knownPercent ? tray.remainingPercent : undefined,
-  }
+function wifiSignal(dbm: number | undefined) {
+  if (dbm === undefined) return { icon: PhWifiSlash, label: 'No signal' }
+  if (dbm >= -55) return { icon: PhWifiHigh, label: 'Excellent signal' }
+  if (dbm >= -70) return { icon: PhWifiMedium, label: 'Good signal' }
+  return { icon: PhWifiLow, label: 'Weak signal' }
 }
 
-const materialSystems = computed<MaterialSystemView[]>(() => {
-  if (!activePrinter.value || activePrinter.value.status === 'offline' || activePrinter.value.materialSetup.system === 'external') {
-    return [{ name: 'External spool', slots: materials.value }]
-  }
-  const setup = activePrinter.value.materialSetup
-  const units = (activePrinter.value.data.extensions?.['bambu-lan']?.ams?.units ?? []) as RawMaterialUnit[]
-  if (activePrinter.value.data.profile === 'alaska' || activePrinter.value.data.profile === 'georgia') {
-    return [
-      { name: 'AMS 1', temperature: units[0]?.temperature, humidity: units[0]?.humidityLevel, slots: (units[0]?.trays ?? []).map(materialFromTray) },
-      { name: 'External spool', slots: [{ slot: 'EXT', status: 'Empty', type: '—', name: '', color: emptySlotColor }] },
-    ]
-  }
-  return Array.from({ length: setup.units }, (_, index) => ({
-    name: setup.units > 1 ? `${setup.system} ${index + 1}` : setup.system,
-    temperature: units[index]?.temperature,
-    humidity: units[index]?.humidityLevel,
-    slots: (units[index]?.trays ?? []).map(materialFromTray),
-  }))
+const visibleDirectories = computed(() =>
+  files.value.filter((file) => file.type === 'directory' && parentDirectory(file.path) === currentDirectory.value),
+)
+const visibleFiles = computed(() =>
+  files.value.filter((file) => file.type === 'file' && parentDirectory(file.path) === currentDirectory.value),
+)
+const printerFiles = computed(() => files.value.filter((file) => file.type === 'file'))
+const breadcrumbs = computed(() => {
+  const parts = currentDirectory.value.split('/').filter(Boolean)
+  return [{ name: 'File library', path: '/' }, ...parts.map((part, index) => ({ name: part, path: `/${parts.slice(0, index + 1).join('/')}` }))]
 })
-const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? [] : files)
+
+function navigateToDirectory(path: string) {
+  currentDirectory.value = path
+}
+
+const printerActionItems = computed<ActionMenuItem[]>(() => {
+  if (!activePrinter.value) return []
+  const items: ActionMenuItem[] = []
+  if (capabilities.value?.tlsRefresh) {
+    items.push({ label: 'Refresh certificate', icon: PhArrowsClockwise, onSelect: () => void openTlsRefresh(activePrinter.value!.name) })
+  }
+  if (capabilities.value?.emergencyStop) {
+    items.push({ label: 'Emergency stop', icon: PhStop, danger: true, onSelect: () => void emergencyStop() })
+  }
+  items.push({ label: 'Remove printer', icon: PhTrash, danger: true, onSelect: () => void removePrinter(activePrinter.value!.name) })
+  return items
+})
+
+function fileActionItems(file: FileEntry): ActionMenuItem[] {
+  const items: ActionMenuItem[] = []
+  if (capabilities.value?.jobStart && selectedStatus.value?.state === 'idle') {
+    items.push({ label: 'Print', icon: PhPlay, onSelect: () => void sendJobAction('start', file.devicePath) })
+  }
+  return items
+}
+
+onMounted(() => {
+  systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
+  systemPrefersDark.value = systemThemeQuery.matches
+  systemThemeQuery.addEventListener('change', handleSystemThemeChange)
+  void load()
+  monitorTimer = window.setInterval(() => void refreshMonitoring(), 5000)
+})
+
+onUnmounted(() => {
+  systemThemeQuery?.removeEventListener('change', handleSystemThemeChange)
+  if (monitorTimer !== undefined) window.clearInterval(monitorTimer)
+})
 </script>
 
 <template>
@@ -427,16 +747,16 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
           <div v-if="printers.length" class="flex items-center space-x-8 pr-8">
             <button
               v-for="printer in printers"
-              :key="printer.id"
+              :key="printer.name"
               type="button"
               class="group inline-flex items-center gap-x-2 border-b-2 px-1 py-4 text-sm font-medium whitespace-nowrap transition"
-              :class="activeView === 'control' && activePrinterId === printer.id
+              :class="activeView === 'control' && activePrinter?.name === printer.name
                 ? 'border-cyan-500 text-cyan-600 dark:border-cyan-400 dark:text-cyan-400'
                 : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800 dark:text-gray-400 dark:hover:border-white/20 dark:hover:text-gray-200'"
-              :aria-current="activeView === 'control' && activePrinterId === printer.id ? 'page' : undefined"
-              @click="selectPrinter(printer.id)"
+              :aria-current="activeView === 'control' && activePrinter?.name === printer.name ? 'page' : undefined"
+              @click="selectPrinter(printer.name)"
             >
-              <span class="size-1.5 shrink-0 rounded-full ring-3" :class="statusDotClasses[printer.status]"></span>{{ printer.name }}
+              <span class="size-1.5 shrink-0 rounded-full ring-3" :class="statusDotClasses[badgeFor(printer.name)]"></span>{{ printer.name }}
             </button>
           </div>
           <span v-if="printers.length" class="my-3 w-px shrink-0 bg-gray-200 dark:bg-white/15" aria-hidden="true"></span>
@@ -514,22 +834,22 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
             <div class="mt-1 flex flex-col sm:mt-0 sm:flex-row sm:flex-wrap sm:space-x-6">
               <div class="mt-2 flex items-center font-mono text-sm text-gray-500 dark:text-gray-400">
                 <PhPrinter class="mr-1.5 size-5 shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
-                {{ activePrinter.model }}
+                {{ activePrinter.driver }}
               </div>
               <div class="mt-2 flex items-center font-mono text-sm text-gray-500 dark:text-gray-400">
                 <PhNetwork class="mr-1.5 size-5 shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
-                {{ activePrinter.ip }}
+                {{ activePrinter.host }}
               </div>
             </div>
           </div>
           <div class="mt-5 flex lg:mt-0 lg:ml-4 items-center gap-2">
-            <StatusBadge :status="activePrinter.status" />
+            <StatusBadge :status="activeBadge" />
             <span
-              v-if="activePrinter.status !== 'offline'"
+              v-if="wifiDbm !== undefined"
               class="inline-flex items-center gap-x-1.5 rounded-md bg-cyan-100 px-2 py-1 text-xs font-medium text-cyan-700 dark:bg-cyan-400/10 dark:text-cyan-400"
-              :title="wifiSignal(activePrinter.data.wifi?.signalDbm).label"
+              :title="wifiSignal(wifiDbm).label"
             >
-              <component :is="wifiSignal(activePrinter.data.wifi?.signalDbm).icon" class="size-3.5" />{{ activePrinter.data.wifi?.signalDbm }} dBm
+              <component :is="wifiSignal(wifiDbm).icon" class="size-3.5" />{{ wifiDbm }} dBm
             </span>
             <ActionMenu label="Printer actions" :items="printerActionItems" />
           </div>
@@ -537,16 +857,16 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
 
         <!-- Empty state -->
         <div
-          v-if="activePrinter.status === 'offline'"
+          v-if="activeBadge === 'offline'"
           class="mx-4 flex min-h-140 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-center sm:mx-0 dark:border-white/15"
         >
           <PhWarning class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />
           <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">Printer unavailable</h3>
-          <p class="mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">Polimero cannot reach this printer right now. Check the printer connection and try again.</p>
-          <Button class="mt-6" variant="primary" @click="showToast('Trying to reconnect to printer')"><PhArrowsClockwise class="size-4" /> Refresh connection</Button>
+          <p class="mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">{{ selectedMonitor?.error ?? 'Polimero cannot reach this printer right now. Check the printer connection and try again.' }}</p>
+          <Button class="mt-6" variant="primary" :disabled="refreshing" @click="refreshMonitoring"><PhArrowsClockwise class="size-4" /> Refresh connection</Button>
         </div>
 
-        <div v-show="activePrinter.status !== 'offline'">
+        <div v-show="activeBadge !== 'offline'">
           <section class="grid gap-5 xl:grid-cols-4">
             <Card class="overflow-hidden xl:col-span-3">
               <CardHeader title="Camera" :icon="PhVideoCamera">
@@ -560,136 +880,122 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
                     <svg class="size-1.5" viewBox="0 0 6 6" aria-hidden="true"><circle cx="3" cy="3" r="3" /></svg>{{ cameraOnline ? 'LIVE' : 'Offline' }}
                   </span>
                 </template>
-                <IconButton title="Refresh camera" aria-label="Refresh camera" @click="refreshCamera"><PhArrowsClockwise class="size-4" /></IconButton>
-                <IconButton title="Save snapshot" aria-label="Save snapshot" :disabled="!cameraOnline" @click="saveSnapshot"><PhCamera class="size-4" /></IconButton>
+                <IconButton title="Refresh camera" aria-label="Refresh camera" :disabled="cameraLoading || !cameraSupported" @click="refreshCamera"><PhArrowsClockwise class="size-4" /></IconButton>
+                <IconButton title="Save snapshot" aria-label="Save snapshot" :disabled="cameraLoading || !capabilities?.cameraSnapshot" @click="saveSnapshot"><PhCamera class="size-4" /></IconButton>
                 <IconButton title="Maximize camera" aria-label="Maximize camera" :disabled="!cameraOnline" @click="toggleCameraFullscreen"><PhCornersOut class="size-4" /></IconButton>
               </CardHeader>
               <div
                 ref="cameraStage"
                 class="relative min-h-60 overflow-hidden sm:min-h-77.5"
-                :class="cameraOnline
-                  ? 'bg-linear-145 from-slate-300 via-slate-400 to-slate-300 dark:from-slate-700 dark:via-slate-900 dark:to-slate-800'
-                  : 'grid place-items-center bg-gray-100 dark:bg-gray-800'"
+                :class="cameraOnline ? 'bg-black' : 'grid place-items-center bg-gray-100 dark:bg-gray-800'"
               >
-                <template v-if="cameraOnline">
-                  <div class="pointer-events-none absolute inset-x-[12%] inset-y-[15%] border border-slate-400/25 transform-[perspective(450px)_rotateX(52deg)]"></div>
-                  <div class="absolute inset-0 bg-[linear-gradient(rgb(148_163_184/10%)_1px,transparent_1px),linear-gradient(90deg,rgb(148_163_184/10%)_1px,transparent_1px)] bg-[size:48px_48px] opacity-35"></div>
-                  <div class="absolute bottom-[16%] left-[22%] h-[28%] w-[56%] bg-linear-135 from-slate-500/65 to-slate-800/85 shadow-[0_0_70px] shadow-cyan-400/10 transform-[perspective(450px)_rotateX(52deg)]">
-                    <div class="absolute bottom-[19%] left-[36%] flex h-[55%] w-[28%] items-end justify-center gap-1 -rotate-x-52">
-                      <span class="block h-[66%] w-[28%] bg-emerald-400 shadow-[0_0_18px] shadow-emerald-400/40"></span>
-                      <span class="block h-full w-[28%] bg-emerald-400 shadow-[0_0_18px] shadow-emerald-400/40"></span>
-                      <span class="block h-[78%] w-[28%] bg-emerald-400 shadow-[0_0_18px] shadow-emerald-400/40"></span>
-                    </div>
-                    <div class="absolute top-[22%] left-[46%] size-7 rounded-full border-3 border-amber-300 shadow-[0_0_16px] shadow-amber-400/35"></div>
-                  </div>
-                  <div class="absolute inset-x-3.5 bottom-3 flex justify-end">
-                    <span class="inline-flex items-center rounded-md bg-gray-50 px-2 py-1 text-xs font-medium text-gray-600 inset-ring inset-ring-gray-500/10 dark:bg-gray-400/10 dark:text-gray-400 dark:inset-ring-gray-400/20">11:26:04</span>
-                  </div>
-                </template>
+                <img v-if="cameraOnline" :src="cameraUrl" alt="Camera preview" class="absolute inset-0 size-full object-contain" />
                 <div v-else class="relative z-10 text-center">
                   <PhWarning class="mx-auto size-8 text-yellow-600 dark:text-yellow-400" />
                   <p class="mt-3 font-medium text-gray-900 dark:text-white">Camera unavailable</p>
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Check the printer connection and try again.</p>
-                  <Button class="mt-4" @click="refreshCamera"><PhArrowsClockwise class="size-4" /> Refresh feed</Button>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ cameraError ?? 'Check the printer connection and try again.' }}</p>
+                  <Button v-if="cameraSupported" class="mt-4" :disabled="cameraLoading" @click="refreshCamera"><PhArrowsClockwise class="size-4" /> Refresh feed</Button>
                 </div>
               </div>
             </Card>
 
             <Card>
               <CardHeader title="Current job" :icon="PhCheckSquareOffset">
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ activePrinter.progress }}% complete</span>
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ progressPercent }}% complete</span>
               </CardHeader>
               <div class="px-4 py-5 sm:p-6">
                 <div class="flex items-start gap-3">
                   <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-cyan-50 text-cyan-600 dark:bg-cyan-400/10 dark:text-cyan-400">
-                    <PhHexagon v-if="!activePrinter.data.job" class="size-5" />
+                    <PhHexagon v-if="!selectedStatus?.job" class="size-5" />
                     <PhCube v-else class="size-5" />
                   </div>
                   <div class="min-w-0">
-                    <p class="truncate font-mono text-sm font-semibold text-gray-900 dark:text-white">{{ activePrinter.data.job?.name ?? 'No active print' }}</p>
-                    <p v-if="activePrinter.status !== 'offline'" class="mt-1 font-mono text-xs text-gray-500 dark:text-gray-400">{{ activePrinter.status === 'busy' ? (activePrinter.data.timeEstimates.remainingSeconds ? `${Math.ceil(activePrinter.data.timeEstimates.remainingSeconds / 60)}m remaining` : 'Time estimate unavailable') : 'Idle' }}</p>
+                    <p class="truncate font-mono text-sm font-semibold text-gray-900 dark:text-white">{{ selectedStatus?.job?.name ?? 'No active print' }}</p>
+                    <p class="mt-1 font-mono text-xs text-gray-500 capitalize dark:text-gray-400">{{ selectedStatus?.state ?? 'unknown' }}</p>
                   </div>
                 </div>
                 <div class="mt-6">
                   <div class="mb-2 flex justify-between text-xs text-gray-500 dark:text-gray-400">
-                    <span>Layer {{ activePrinter.status === 'offline' ? 0 : activePrinter.data.progress.currentLayer }} / {{ activePrinter.status === 'offline' ? 0 : activePrinter.data.progress.totalLayers }}</span>
+                    <span>Layer {{ selectedStatus?.progress?.currentLayer ?? '—' }} / {{ selectedStatus?.progress?.totalLayers ?? '—' }}</span>
                   </div>
                   <div class="overflow-hidden rounded-full bg-gray-200 dark:bg-white/10">
-                    <div class="h-2 rounded-full bg-cyan-600 dark:bg-cyan-500" :style="{ width: `${activePrinter.status === 'offline' ? 0 : activePrinter.progress}%` }"></div>
+                    <div class="h-2 rounded-full bg-cyan-600 dark:bg-cyan-500" :style="{ width: `${progressPercent}%` }"></div>
                   </div>
                 </div>
                 <div class="mt-6 flex gap-2">
-                  <Button class="flex-1" :disabled="activePrinter.status !== 'busy'" @click="toggleJob">
-                    <PhPause v-if="!jobPaused" class="size-4" /><PhPlay v-else class="size-4" />{{ jobPaused ? 'Resume' : 'Pause' }}
-                  </Button>
-                  <Button variant="danger" :disabled="activePrinter.status !== 'busy'" @click="jobCancelled = true"><PhStop class="size-4" /> Cancel</Button>
+                  <Button
+                    v-if="selectedStatus?.state === 'paused'"
+                    class="flex-1"
+                    :disabled="!capabilities?.jobResume"
+                    @click="sendJobAction('resume')"
+                  ><PhPlay class="size-4" /> Resume</Button>
+                  <Button
+                    v-else
+                    class="flex-1"
+                    :disabled="!capabilities?.jobPause || selectedStatus?.state !== 'printing'"
+                    @click="sendJobAction('pause')"
+                  ><PhPause class="size-4" /> Pause</Button>
+                  <Button
+                    variant="danger"
+                    :disabled="!capabilities?.jobCancel || !['printing', 'paused'].includes(selectedStatus?.state ?? '')"
+                    @click="sendJobAction('cancel')"
+                  ><PhStop class="size-4" /> Cancel</Button>
                 </div>
-                <p v-if="jobCancelled && activePrinter.status === 'busy'" class="mt-3 text-xs text-red-600 dark:text-red-400">Cancel requested. Printer is finishing the current move.</p>
               </div>
             </Card>
           </section>
 
           <section class="mt-5 grid gap-5 lg:grid-cols-2 xl:grid-cols-4">
-            <Card>
+            <Card v-if="temperatureRows.length">
               <CardHeader title="Temperature" :icon="PhThermometerSimple" />
               <div class="font-light space-y-4 px-4 py-5 sm:p-6">
-                <div v-for="(value, key) in temperature" :key="key" class="flex items-center justify-between gap-3">
+                <div v-for="row in temperatureRows" :key="row.key" class="flex items-center justify-between gap-3">
                   <div>
-                    <p class="text-sm/6 font-light text-gray-900 capitalize dark:text-white">{{ key }}</p>
-                    <p class="font-mono text-sm text-gray-500 dark:text-gray-400"><span class="font-bold">{{ formatTemperature(value.current) }}</span> °C <span aria-hidden="true">/</span> <span class="font-bold">{{ formatTemperature(value.target) }}</span> °C</p>
+                    <p class="text-sm/6 font-light text-gray-900 capitalize dark:text-white">{{ row.key }}</p>
+                    <p class="font-mono text-sm text-gray-500 dark:text-gray-400"><span class="font-bold">{{ formatTemperature(row.value.currentCelsius) }}</span> °C <span aria-hidden="true">/</span> <span class="font-bold">{{ row.value.targetCelsius === undefined ? '—' : formatTemperature(row.value.targetCelsius) }}</span> °C</p>
                   </div>
-                  <div class="flex gap-1">
-                    <IconButton variant="outline" :aria-label="`Decrease ${key} target temperature`" @click="updateTemperature(key, -5)"><PhMinus class="size-3.5" /></IconButton>
-                    <IconButton variant="outline" :aria-label="`Increase ${key} target temperature`" @click="updateTemperature(key, 5)"><PhPlus class="size-3.5" /></IconButton>
+                  <div v-if="capabilities?.temperatureWrite && row.key !== 'chamber'" class="flex gap-1">
+                    <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="`Decrease ${row.key} target temperature`" @click="adjustTemperature(row.key, -5)"><PhMinus class="size-3.5" /></IconButton>
+                    <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="`Increase ${row.key} target temperature`" @click="adjustTemperature(row.key, 5)"><PhPlus class="size-3.5" /></IconButton>
                   </div>
                 </div>
               </div>
             </Card>
 
-            <Card>
+            <Card v-if="fanRows.length">
               <CardHeader title="Fans" :icon="PhFan" />
               <div class="font-light space-y-4 px-4 py-5 sm:p-6">
-                <label v-for="(value, key) in fanPower" :key="key" class="block">
+                <label v-for="[key, value] in fanRows" :key="key" class="block">
                   <span class="mb-2 flex justify-between">
-                    <span class="text-sm/6 font-light text-gray-900 capitalize dark:text-white">{{ fanLabel(String(key)) }}</span>
+                    <span class="text-sm/6 font-light text-gray-900 capitalize dark:text-white">{{ fanLabel(key) }}</span>
                     <span class="text-sm/6 text-gray-500 dark:text-gray-400">{{ value }}%</span>
                   </span>
-                  <input v-model="fanPower[key]" class="h-1 w-full cursor-pointer accent-cyan-600 dark:accent-cyan-400" type="range" min="0" max="100" :aria-label="`${fanLabel(String(key))} fan power`" />
+                  <input :value="value" :disabled="!capabilities?.fanControl" class="h-1 w-full cursor-pointer accent-cyan-600 disabled:cursor-not-allowed disabled:opacity-35 dark:accent-cyan-400" type="range" min="0" max="100" :aria-label="`${fanLabel(key)} fan power`" @change="sendFan(key, $event)" />
                 </label>
               </div>
             </Card>
 
-            <Card>
-              <CardHeader title="Lights" :icon="PhLightbulb" />
-              <div class="font-light space-y-3 px-4 py-5 sm:p-6">
-                <div v-for="(_, key) in lights" :key="key" class="flex items-center justify-between">
-                  <span class="text-sm/6 font-light text-gray-900 capitalize dark:text-white">{{ key }} light</span>
-                  <Switch v-model="lights[key]" :label="`${key} light`" />
-                </div>
-              </div>
-            </Card>
-
-            <Card>
+            <Card v-if="capabilities?.motionControl">
               <CardHeader title="Motion" :icon="PhArrowsOutCardinal" />
               <div class="font-light px-4 py-5 sm:p-6">
                 <div class="mb-4 flex min-h-27 items-center justify-center gap-8">
                   <div class="grid grid-cols-3 grid-rows-3 gap-1">
-                    <IconButton variant="outline" class="col-start-2 row-start-1" @click="move('Y', '+')">Y+</IconButton>
-                    <IconButton variant="outline" class="col-start-1 row-start-2" @click="move('X', '-')">X−</IconButton>
-                    <IconButton variant="outline" class="col-start-2 row-start-2" title="Home all axes" aria-label="Home all axes" @click="showToast('Axes homing started')"><PhHouse class="size-4" /></IconButton>
-                    <IconButton variant="outline" class="col-start-3 row-start-2" @click="move('X', '+')">X+</IconButton>
-                    <IconButton variant="outline" class="col-start-2 row-start-3" @click="move('Y', '-')">Y−</IconButton>
+                    <IconButton variant="outline" class="col-start-2 row-start-1" disabled title="Jogging is not supported by this driver">Y+</IconButton>
+                    <IconButton variant="outline" class="col-start-1 row-start-2" disabled title="Jogging is not supported by this driver">X−</IconButton>
+                    <IconButton variant="outline" class="col-start-2 row-start-2" title="Home all axes" aria-label="Home all axes" :disabled="selectedStatus?.state !== 'idle'" @click="homeAxes"><PhHouse class="size-4" /></IconButton>
+                    <IconButton variant="outline" class="col-start-3 row-start-2" disabled title="Jogging is not supported by this driver">X+</IconButton>
+                    <IconButton variant="outline" class="col-start-2 row-start-3" disabled title="Jogging is not supported by this driver">Y−</IconButton>
                   </div>
                   <div class="flex flex-col gap-1">
-                    <IconButton variant="outline" @click="move('Z', '+')">Z+</IconButton>
-                    <IconButton variant="outline" @click="move('Z', '-')">Z−</IconButton>
+                    <IconButton variant="outline" disabled title="Jogging is not supported by this driver">Z+</IconButton>
+                    <IconButton variant="outline" disabled title="Jogging is not supported by this driver">Z−</IconButton>
                   </div>
                 </div>
                 <div class="grid grid-cols-2 gap-2">
                   <div>
                     <label for="step-size" class="block text-sm/6 font-light text-gray-900 dark:text-white">Step size</label>
                     <div class="mt-2 grid grid-cols-1">
-                      <select id="step-size" v-model="stepSize" class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
+                      <select id="step-size" v-model="stepSize" disabled class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
                         <option>0.1 mm</option>
                         <option>1 mm</option>
                         <option>10 mm</option>
@@ -700,7 +1006,7 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
                   <div>
                     <label for="feed-rate" class="block text-sm/6 font-light text-gray-900 dark:text-white">Feed rate</label>
                     <div class="mt-2 grid grid-cols-1">
-                      <select id="feed-rate" v-model="feedRate" class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
+                      <select id="feed-rate" v-model="feedRate" disabled class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
                         <option :value="25">25 mm/s</option>
                         <option :value="50">50 mm/s</option>
                         <option :value="100">100 mm/s</option>
@@ -715,8 +1021,10 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
 
           <section class="mt-5 grid gap-5 xl:grid-cols-[1.35fr_1fr]">
             <!-- Table -->
-            <Card class="overflow-hidden">
-              <CardHeader title="Printer files" :icon="PhFolder" />
+            <Card v-if="capabilities?.fileList" class="overflow-hidden">
+              <CardHeader title="Printer files" :icon="PhFolder">
+                <IconButton title="Refresh files" aria-label="Refresh files" :disabled="filesLoading" @click="loadFiles"><PhArrowsClockwise class="size-4" /></IconButton>
+              </CardHeader>
               <div class="overflow-x-auto">
                 <table class="relative min-w-full divide-y divide-gray-300 text-left dark:divide-white/15">
                   <thead>
@@ -728,30 +1036,38 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
                   <tbody class="divide-y divide-gray-200 dark:divide-white/10">
                     <tr
                       v-for="file in printerFiles.slice(0, 3)"
-                      :key="file.name"
+                      :key="file.devicePath"
                       class="cursor-pointer"
-                      :class="selectedFile === file.name ? 'bg-cyan-50 dark:bg-cyan-400/5' : 'hover:bg-gray-50 dark:hover:bg-white/5'"
-                      @click="selectedFile = file.name"
+                      :class="selectedFile === file.devicePath ? 'bg-cyan-50 dark:bg-cyan-400/5' : 'hover:bg-gray-50 dark:hover:bg-white/5'"
+                      @click="selectedFile = file.devicePath"
                     >
                       <td class="px-4 py-4 text-sm whitespace-nowrap sm:px-6">
-                        <span class="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 dark:bg-gray-400/10 dark:text-gray-400">{{ file.type }}</span>
+                        <span class="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 dark:bg-gray-400/10 dark:text-gray-400">{{ fileTypeLabel(file) }}</span>
                       </td>
-                      <td class="px-4 py-4 font-mono text-sm whitespace-nowrap text-gray-500 sm:px-6 dark:text-gray-400">{{ file.size }}</td>
-                      <td class="px-4 py-4 font-mono text-sm whitespace-nowrap text-gray-500 sm:px-6 dark:text-gray-400">{{ file.modified }}</td>
+                      <td class="px-4 py-4 font-mono text-sm whitespace-nowrap text-gray-500 sm:px-6 dark:text-gray-400">{{ formatSize(file.sizeBytes) }}</td>
+                      <td class="px-4 py-4 font-mono text-sm whitespace-nowrap text-gray-500 sm:px-6 dark:text-gray-400">{{ file.modifiedAt ?? '—' }}</td>
                       <td class="px-4 py-4 font-mono text-sm font-medium whitespace-nowrap text-gray-900 sm:px-6 dark:text-white">{{ file.name }}</td>
                       <td class="px-4 py-4 text-sm whitespace-nowrap sm:px-6">
                         <div class="flex justify-end gap-1">
-                          <IconButton title="Download file" :aria-label="`Download ${file.name}`" @click.stop="showToast(`${file.name} download started`)"><PhDownloadSimple class="size-4" /></IconButton>
-                          <IconButton class="text-cyan-600 dark:text-cyan-400" title="Print file" :aria-label="`Print ${file.name}`" @click.stop="showToast(`${file.name} sent to printer`)"><PhPlay class="size-4" /></IconButton>
+                          <IconButton
+                            class="text-cyan-600 dark:text-cyan-400"
+                            title="Print file"
+                            :aria-label="`Print ${file.name}`"
+                            :disabled="!capabilities?.jobStart || selectedStatus?.state !== 'idle'"
+                            @click.stop="sendJobAction('start', file.devicePath)"
+                          ><PhPlay class="size-4" /></IconButton>
                         </div>
                       </td>
+                    </tr>
+                    <tr v-if="!printerFiles.length">
+                      <td colspan="5" class="px-4 py-4 text-sm text-gray-500 sm:px-6 dark:text-gray-400">{{ filesLoading ? 'Loading files…' : filesError ?? 'No files on this printer yet.' }}</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
             </Card>
 
-            <Card>
+            <Card v-if="materialSystems.length">
               <CardHeader title="Filament Spools &amp; Material Systems" :icon="PhStack" />
               <div class="divide-y divide-gray-200 dark:divide-white/10">
                 <div v-for="system in materialSystems" :key="system.name" class="px-4 py-5 sm:px-6">
@@ -789,7 +1105,7 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
             <p class="mt-2 max-w-4xl text-sm text-gray-500 dark:text-gray-400">Discover and maintain the printers available on your local network.</p>
           </div>
           <div class="mt-5 flex lg:mt-0 lg:ml-4 max-lg:w-full">
-            <Button variant="primary" class="max-lg:w-full" @click="discoverPrinter"><PhBroadcast class="size-4" /> Discover printers</Button>
+            <Button variant="primary" class="max-lg:w-full" :disabled="!drivers.length" @click="openAddition"><PhBroadcast class="size-4" /> Discover printers</Button>
           </div>
         </div>
 
@@ -801,35 +1117,47 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
           </Card>
         </dl>
 
+        <!-- Loading / error states -->
+        <div v-if="loading" class="mx-4 flex min-h-97.5 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-center sm:mx-0 dark:border-white/15" role="status" aria-live="polite">
+          <PhPrinter class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />
+          <p class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">Loading printers…</p>
+        </div>
+        <div v-else-if="profileError || loadError" class="mx-4 flex min-h-97.5 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-center sm:mx-0 dark:border-white/15" role="alert">
+          <PhWarning class="mx-auto size-12 text-red-400 dark:text-red-500" aria-hidden="true" />
+          <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">Unable to load printers</h3>
+          <p class="mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">{{ profileError ?? loadError }}</p>
+          <Button class="mt-6" variant="primary" @click="load"><PhArrowsClockwise class="size-4" /> Retry</Button>
+        </div>
+
         <!-- Empty state -->
-        <div v-if="!hasPrinters" class="mx-4 flex min-h-97.5 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-center sm:mx-0 dark:border-white/15">
+        <div v-else-if="!hasPrinters" class="mx-4 flex min-h-97.5 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-center sm:mx-0 dark:border-white/15">
           <PhPrinter class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />
           <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">No printers connected</h3>
           <p class="mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">Discover a printer on your local network to start monitoring jobs and materials.</p>
-          <Button class="mt-6" variant="primary" @click="discoverPrinter"><PhBroadcast class="size-4" /> Scan local network</Button>
+          <Button class="mt-6" variant="primary" :disabled="!drivers.length" @click="openAddition"><PhBroadcast class="size-4" /> Scan local network</Button>
         </div>
 
         <div v-else class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-          <Card v-for="printer in printers" :key="printer.id" as="article" class="px-4 py-5 sm:p-6">
+          <Card v-for="printer in printers" :key="printer.name" as="article" class="px-4 py-5 sm:p-6">
             <div class="flex items-start justify-between">
               <div class="flex items-center gap-3">
                 <span class="grid size-10 place-items-center rounded-lg bg-gray-100 text-cyan-600 dark:bg-white/10 dark:text-cyan-400"><PhPrinter class="size-5" /></span>
                 <div>
                   <h3 class="font-semibold text-gray-900 dark:text-white">{{ printer.name }}</h3>
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ printer.model }}</p>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ printer.driver }}</p>
                 </div>
               </div>
-              <IconButton class="hover:text-red-600 dark:hover:text-red-400" title="Remove printer" :aria-label="`Remove ${printer.name}`" @click="removePrinter(printer.id)"><PhTrash class="size-4" /></IconButton>
+              <IconButton class="hover:text-red-600 dark:hover:text-red-400" title="Remove printer" :aria-label="`Remove ${printer.name}`" @click="removePrinter(printer.name)"><PhTrash class="size-4" /></IconButton>
             </div>
             <div class="mt-6 flex items-center justify-between border-y border-gray-200 py-3 dark:border-white/10">
               <span class="text-xs text-gray-500 dark:text-gray-400">Status</span>
-              <StatusBadge :status="printer.status" />
+              <StatusBadge :status="badgeFor(printer.name)" />
             </div>
             <!-- Description list -->
             <dl class="mt-2 divide-y divide-gray-200 text-xs dark:divide-white/10">
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">Serial number</dt>
-                <dd class="text-gray-900 dark:text-gray-300">{{ printer.serial }}</dd>
+                <dd class="text-gray-900 dark:text-gray-300">—</dd>
               </div>
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">Host</dt>
@@ -837,22 +1165,22 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
               </div>
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">Connection timeout</dt>
-                <dd class="text-gray-900 dark:text-gray-300">{{ printer.timeout }}</dd>
+                <dd class="text-gray-900 dark:text-gray-300">—</dd>
               </div>
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">TLS verification</dt>
-                <dd :class="printer.insecure ? 'text-yellow-600 dark:text-yellow-400' : 'text-green-600 dark:text-green-400'">{{ printer.insecure ? 'Disabled' : 'Enabled' }}</dd>
+                <dd class="text-gray-900 dark:text-gray-300">—</dd>
               </div>
             </dl>
             <div class="mt-5 flex gap-2">
-              <Button class="flex-1" @click="selectPrinter(printer.id)"><PhCards class="size-4" /> Open control</Button>
-              <Button class="flex-1" :aria-label="`Refresh certificate for ${printer.name}`" @click="showToast('TLS certificate refresh requested')"><PhArrowsClockwise class="size-4" /> Refresh certificate</Button>
+              <Button class="flex-1" @click="selectPrinter(printer.name)"><PhCards class="size-4" /> Open control</Button>
+              <Button class="flex-1" :disabled="tlsRefreshing" :aria-label="`Refresh certificate for ${printer.name}`" @click="openTlsRefresh(printer.name)"><PhArrowsClockwise class="size-4" /> Refresh certificate</Button>
             </div>
           </Card>
           <button
             type="button"
             class="relative mx-4 flex min-h-55 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 p-12 text-center hover:border-gray-400 focus:outline-2 focus:outline-offset-2 focus:outline-cyan-600 sm:mx-0 dark:border-white/15 dark:hover:border-white/25 dark:focus:outline-cyan-500"
-            @click="discoverPrinter"
+            @click="openAddition"
           >
             <PhPlus class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />
             <span class="mt-2 block text-sm font-semibold text-gray-900 dark:text-white">Add another printer</span>
@@ -878,18 +1206,6 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
                   <span class="text-sm text-gray-500 dark:text-gray-400">{{ notification.description }}</span>
                 </span>
                 <Switch v-model="notification.enabled" :label="notification.label" />
-              </div>
-            </div>
-          </Card>
-          <Card as="section" class="overflow-hidden">
-            <CardHeader title="Slicer applications" :icon="PhDesktop" />
-            <div class="divide-y divide-gray-200 dark:divide-white/10">
-              <div v-for="slicer in slicers" :key="slicer.name" class="flex items-center justify-between gap-3 px-4 py-5 hover:bg-gray-50 sm:px-6 dark:hover:bg-white/5">
-                <span class="flex grow flex-col">
-                  <span class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ slicer.name }}</span>
-                  <span class="font-mono text-sm text-gray-500 dark:text-gray-400">{{ slicer.path }}</span>
-                </span>
-                <Switch v-model="slicer.enabled" :label="slicer.name" />
               </div>
             </div>
           </Card>
@@ -920,6 +1236,31 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
               </div>
             </div>
           </Card>
+          <Card as="section" class="overflow-hidden">
+            <CardHeader title="About" :icon="PhInfo" />
+            <div class="px-4 py-5 sm:p-6">
+              <dl class="divide-y divide-gray-200 text-sm dark:divide-white/10">
+                <div class="flex items-center justify-between py-2">
+                  <dt class="text-gray-500 dark:text-gray-400">Version</dt>
+                  <dd class="font-mono text-gray-900 dark:text-gray-300">{{ info ? `v${info.version}` : '—' }}</dd>
+                </div>
+                <div v-if="diagnostics" class="flex items-center justify-between py-2">
+                  <dt class="text-gray-500 dark:text-gray-400">Platform</dt>
+                  <dd class="font-mono text-gray-900 dark:text-gray-300">{{ diagnostics.platform }}</dd>
+                </div>
+                <div v-if="diagnostics" class="flex items-center justify-between py-2">
+                  <dt class="text-gray-500 dark:text-gray-400">Profiles</dt>
+                  <dd class="font-mono text-gray-900 dark:text-gray-300">{{ diagnostics.configuredProfiles }}</dd>
+                </div>
+                <div v-if="diagnostics" class="flex items-center justify-between py-2">
+                  <dt class="text-gray-500 dark:text-gray-400">Monitor</dt>
+                  <dd class="font-mono text-gray-900 dark:text-gray-300">{{ diagnostics.monitorWorkers }} workers / {{ diagnostics.monitorIntervalSeconds }}s</dd>
+                </div>
+              </dl>
+              <p v-if="diagnosticsError" class="mt-3 text-xs text-red-600 dark:text-red-400" role="alert">{{ diagnosticsError }}</p>
+              <Button class="mt-4 w-full" :disabled="diagnosticsLoading" @click="runDiagnostics"><PhDesktop class="size-4" /> {{ diagnosticsLoading ? 'Collecting…' : 'Diagnostics report' }}</Button>
+            </div>
+          </Card>
         </div>
       </template>
 
@@ -930,7 +1271,7 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
             <p class="mt-2 max-w-4xl text-sm text-gray-500 dark:text-gray-400">Browse models and directories ready to organize, slice, or print.</p>
           </div>
           <div class="mt-5 flex lg:mt-0 lg:ml-4 max-lg:w-full">
-            <Button variant="primary" class="max-lg:w-full" @click="openUpload"><PhUploadSimple class="size-4" /> Upload files</Button>
+            <Button class="max-lg:w-full" :disabled="filesLoading || !capabilities?.fileList" @click="loadFiles"><PhArrowsClockwise class="size-4" /> Refresh</Button>
           </div>
         </div>
 
@@ -965,14 +1306,14 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
         <div v-if="visibleDirectories.length" class="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <button
             v-for="directory in visibleDirectories"
-            :key="directory.path"
+            :key="directory.devicePath"
             type="button"
             class="min-h-28 bg-white px-4 py-5 text-left shadow-sm transition hover:bg-cyan-50 hover:shadow-md sm:rounded-lg sm:p-6 dark:bg-gray-800/50 dark:shadow-none dark:outline dark:-outline-offset-1 dark:outline-white/10 dark:hover:bg-cyan-400/5 dark:hover:outline-cyan-400/30"
-            @click="navigateToDirectory(directory.path)"
+            @click="navigateToDirectory(`/${directory.path.replace(/^\//, '')}`)"
           >
             <PhFolder class="size-7 text-cyan-600 dark:text-cyan-400" />
             <span class="mt-3 block truncate text-sm font-medium text-gray-900 dark:text-white">{{ directory.name }}</span>
-            <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">Folder · {{ directory.modified }}</span>
+            <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">Folder · {{ directory.modifiedAt ?? '—' }}</span>
           </button>
         </div>
 
@@ -980,61 +1321,91 @@ const printerFiles = computed(() => activePrinter.value?.status === 'offline' ? 
         <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Card
             v-for="file in visibleFiles"
-            :key="file.name"
+            :key="file.devicePath"
             as="article"
             class="transition hover:shadow-md dark:hover:outline-cyan-400/30"
           >
-            <div class="relative grid min-h-45 place-items-center overflow-hidden sm:rounded-t-lg" :class="modelTones[file.tone].preview">
-              <span class="block transform-[perspective(200px)_rotateX(10deg)_rotateZ(-8deg)]" :class="modelTones[file.tone].shape"></span>
-              <span class="absolute right-3 bottom-2.5 text-[10px] font-bold text-gray-500 uppercase dark:text-slate-300/45">.{{ file.type.toLowerCase() }}</span>
+            <div class="relative grid min-h-45 place-items-center overflow-hidden sm:rounded-t-lg" :class="fileToneFor(file.name).preview">
+              <span class="block transform-[perspective(200px)_rotateX(10deg)_rotateZ(-8deg)]" :class="fileToneFor(file.name).shape"></span>
+              <span class="absolute right-3 bottom-2.5 text-[10px] font-bold text-gray-500 uppercase dark:text-slate-300/45">.{{ fileTypeLabel(file).toLowerCase() }}</span>
             </div>
             <div class="flex items-start gap-3 px-4 py-5 sm:p-6">
               <PhFile class="mt-0.5 size-4 shrink-0 text-gray-400 dark:text-gray-500" />
               <div class="min-w-0 flex-1">
                 <h3 class="truncate text-sm font-medium text-gray-900 dark:text-white">{{ file.name }}</h3>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ file.size }} · {{ file.modified }}</p>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ formatSize(file.sizeBytes) }} · {{ file.modifiedAt ?? '—' }}</p>
               </div>
-              <ActionMenu class="-mt-2 -mr-2" label="More file actions" :items="fileActionItems(file)" />
+              <ActionMenu v-if="fileActionItems(file).length" class="-mt-2 -mr-2" label="More file actions" :items="fileActionItems(file)" />
             </div>
           </Card>
           <div v-if="!visibleDirectories.length && !visibleFiles.length" class="col-span-full mx-4 flex min-h-65 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-center sm:mx-0 dark:border-white/15">
             <PhFolder class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />
             <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">Nothing here</h3>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">This directory is empty.</p>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ filesLoading ? 'Loading files…' : filesError ?? (capabilities?.fileList ? 'This directory is empty.' : 'File browsing is not supported by this printer.') }}</p>
           </div>
         </div>
       </template>
     </main>
 
-    <SlideOver :open="uploadOpen" title="Upload files" description="Add new models to your local file library." @close="uploadOpen = false">
-      <!-- File upload -->
-      <div class="flex justify-center rounded-lg border border-dashed border-gray-900/25 px-6 py-10 dark:border-white/25">
-        <div class="text-center">
-          <PhUploadSimple class="mx-auto size-12 text-gray-300 dark:text-gray-600" aria-hidden="true" />
-          <div class="mt-4 flex text-sm/6 text-gray-600 dark:text-gray-400">
-            <label for="file-upload" class="relative cursor-pointer rounded-md bg-transparent font-semibold text-cyan-600 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-cyan-600 hover:text-cyan-500 dark:text-cyan-400 dark:focus-within:outline-cyan-500 dark:hover:text-cyan-300">
-              <span>Upload a file</span>
-              <input id="file-upload" name="file-upload" type="file" multiple accept=".3mf,.stl,.obj" class="sr-only" />
-            </label>
-            <p class="pl-1">or drag and drop</p>
+    <SlideOver :open="additionOpen" title="Add printer" description="Discover a printer on your local network or enter its connection details." @close="closeAddition">
+      <form id="add-printer-form" @submit.prevent="addPrinter">
+        <Button class="w-full" :disabled="discovering" @click="discoverPrinters"><PhBroadcast class="size-4" /> {{ discovering ? 'Scanning…' : 'Discover printers' }}</Button>
+        <p v-if="discoveryError" class="mt-2 text-xs text-red-600 dark:text-red-400" role="alert">{{ discoveryError }}</p>
+        <ul v-if="discovered.length" class="mt-3 divide-y divide-gray-200 rounded-md border border-gray-200 dark:divide-white/10 dark:border-white/10">
+          <li v-for="printer in discovered" :key="`${printer.serial}:${printer.host}`" class="flex items-center justify-between gap-2 px-3 py-2">
+            <span class="min-w-0 truncate text-sm text-gray-900 dark:text-white">{{ printer.name || printer.model || printer.host }} · <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ printer.host }}</span></span>
+            <Button @click="useDiscoveredPrinter(printer)">Use</Button>
+          </li>
+        </ul>
+        <div class="mt-6 space-y-4">
+          <div>
+            <label for="printer-name" class="block text-sm/6 font-medium text-gray-900 dark:text-white">Name</label>
+            <input id="printer-name" v-model="draft.name" required maxlength="64" autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
           </div>
-          <p class="text-xs/5 text-gray-600 dark:text-gray-400">3MF, STL, OBJ up to 200 MB</p>
+          <div>
+            <label for="printer-driver" class="block text-sm/6 font-medium text-gray-900 dark:text-white">Driver</label>
+            <div class="mt-2 grid grid-cols-1">
+              <select id="printer-driver" v-model="draft.driver" required class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
+                <option v-for="driver in drivers" :key="driver.name" :value="driver.name">{{ driver.name }}</option>
+              </select>
+              <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-2 size-5 self-center justify-self-end text-gray-500 sm:size-4 dark:text-gray-400" aria-hidden="true" />
+            </div>
+          </div>
+          <div>
+            <label for="printer-host" class="block text-sm/6 font-medium text-gray-900 dark:text-white">Host</label>
+            <input id="printer-host" v-model="draft.host" required autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+          </div>
+          <div>
+            <label for="printer-serial" class="block text-sm/6 font-medium text-gray-900 dark:text-white">Serial number</label>
+            <input id="printer-serial" v-model="draft.serial" autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+          </div>
+          <div>
+            <label for="printer-timeout" class="block text-sm/6 font-medium text-gray-900 dark:text-white">Connection timeout</label>
+            <input id="printer-timeout" v-model="draft.timeout" required class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+          </div>
+          <div>
+            <label for="printer-access-code" class="block text-sm/6 font-medium text-gray-900 dark:text-white">Access code</label>
+            <input id="printer-access-code" v-model="draft.accessCode" type="password" autocomplete="new-password" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm/6 font-medium text-gray-900 dark:text-white">Skip TLS verification</span>
+            <Switch v-model="draft.insecure" label="Skip TLS verification" />
+          </div>
         </div>
-      </div>
-      <div class="mt-6">
-        <label for="upload-printer" class="block text-sm/6 font-medium text-gray-900 dark:text-white">Printer</label>
-        <div class="mt-2 grid grid-cols-1">
-          <select id="upload-printer" v-model="uploadPrinterId" :disabled="!hasPrinters" class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
-            <option v-if="!hasPrinters" value="">No printers available</option>
-            <option v-for="printer in printers" :key="printer.id" :value="printer.id" :disabled="printer.status === 'offline'">{{ printer.name }}{{ printer.status === 'offline' ? ' — offline' : '' }}</option>
-          </select>
-          <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-2 size-5 self-center justify-self-end text-gray-500 sm:size-4 dark:text-gray-400" aria-hidden="true" />
-        </div>
-      </div>
-      <p class="mt-4 text-sm/6 text-gray-600 dark:text-gray-400">Uploading to <span class="font-mono font-medium text-gray-900 dark:text-white">{{ currentDirectory }}</span></p>
+        <p v-if="additionError" class="mt-4 text-sm text-red-600 dark:text-red-400" role="alert">{{ additionError }}</p>
+      </form>
       <template #footer>
-        <Button @click="uploadOpen = false">Cancel</Button>
-        <Button variant="primary" :disabled="!uploadPrinterId" @click="confirmUpload"><PhUploadSimple class="size-4" /> Upload</Button>
+        <Button :disabled="adding" @click="closeAddition">Cancel</Button>
+        <Button variant="primary" type="submit" form="add-printer-form" :disabled="adding">{{ adding ? 'Adding…' : 'Add printer' }}</Button>
+      </template>
+    </SlideOver>
+
+    <SlideOver :open="tlsOpen" title="Refresh certificate" description="Review and confirm the new TLS fingerprint before replacing the stored one." @close="!tlsRefreshing && (tlsOpen = false)">
+      <code v-if="tlsFingerprint" class="block rounded-md bg-gray-100 p-3 font-mono text-xs break-all text-gray-900 dark:bg-white/10 dark:text-white">{{ tlsFingerprint }}</code>
+      <p v-if="tlsError" class="mt-4 text-sm text-red-600 dark:text-red-400" role="alert">{{ tlsError }}</p>
+      <template #footer>
+        <Button :disabled="tlsRefreshing" @click="tlsOpen = false">Cancel</Button>
+        <Button variant="danger" :disabled="tlsRefreshing" @click="refreshTls">{{ tlsRefreshing ? 'Confirming…' : 'Trust certificate' }}</Button>
       </template>
     </SlideOver>
   </div>
