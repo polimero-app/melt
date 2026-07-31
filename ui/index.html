@@ -1,13 +1,16 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Polimero</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+<!DOCTYPE html>
+<html lang="en" class="h-full scroll-smooth bg-gray-50 dark:bg-gray-900">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polimero</title>
+  <script>
+    // Match the system theme before first paint; App.vue owns it from then on.
+    document.documentElement.classList.toggle('dark', matchMedia('(prefers-color-scheme: dark)').matches)
+  </script>
+</head>
+<body class="h-full text-gray-700 antialiased dark:text-gray-300">
+  <div id="app"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
 </html>
-

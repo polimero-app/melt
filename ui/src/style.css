@@ -1,235 +1,29 @@
+/* Self-hosted so the UI keeps its typography on an offline LAN.
+   Inter for sans (as tailwindcss.com/docs), Hack for mono. */
+@import "@fontsource-variable/inter";
+@import "hack-font/build/web/hack-subset.css";
 @import "tailwindcss";
 
+/* ponytail: reference library, not app source — keep it out of the utility scan. */
+
+/* Class-based dark mode: App.vue toggles `dark` on <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter Variable", system-ui;
+  --font-mono: Hack, monospace;
+}
+
+/* ponytail: no utility equivalent — font synthesis / text rendering hints, plus
+   one global focus ring so every focusable element is covered, including the
+   ones Headless UI renders for us. Drop these only if each control grows its
+   own focus-visible utilities. */
 :root {
-  color: #e4e2d7;
-  background: #141817;
-  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
 }
 
-* { box-sizing: border-box; }
-
-body { margin: 0; min-width: 320px; }
-
-button {
-  color: inherit;
-  font: inherit;
-}
-
-.shell {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  min-height: 100vh;
-  overflow: hidden;
-  background:
-    linear-gradient(90deg, transparent 49px, #25302d 50px, transparent 51px) 0 0 / 50px 50px,
-    linear-gradient(#25302d 1px, transparent 1px) 0 0 / 50px 50px,
-    #141817;
-}
-
-.masthead, footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 2rem clamp(1.5rem, 5vw, 5rem);
-  border-color: #46524d;
-}
-
-.masthead { border-bottom: 1px solid #46524d; }
-footer { border-top: 1px solid #46524d; color: #b9bcb2; font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; }
-.masthead-actions { display: flex; align-items: center; gap: .75rem; }
-.locale select {
-  border: 1px solid #46524d;
-  border-radius: 0;
-  background: #1b211f;
-  color: inherit;
-  padding: .62rem .4rem;
-  font: .72rem "Courier New", monospace;
-}
-
-.eyebrow {
-  margin: 0;
-  color: #d8a732;
-  font-family: "Courier New", monospace;
-  font-size: .72rem;
-  font-weight: 700;
-  letter-spacing: .16em;
-}
-
-h1, h2 { margin: .25rem 0 0; font-weight: 500; letter-spacing: .06em; }
-h1 { font-size: clamp(1.8rem, 4vw, 3.25rem); }
-h2 { font-size: clamp(2.2rem, 6vw, 5.8rem); line-height: .95; max-width: 11ch; }
-
-.status {
-  display: inline-flex;
-  gap: .6rem;
-  align-items: center;
-  border: 1px solid #46524d;
-  background: #1b211f;
-  padding: .65rem .85rem;
-  cursor: pointer;
-  font-family: "Courier New", monospace;
-  font-size: .75rem;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-.status:focus-visible, .diagnostics-button:focus-visible, .dialog-panel button:focus-visible, .dialog-panel input:focus-visible, .dialog-panel select:focus-visible, .printers button:focus-visible, .add-printer:focus-visible, .locale select:focus-visible, .notice button:focus-visible, .dashboard button:focus-visible { outline: 2px solid #d8a732; outline-offset: 3px; }
-.signal { width: .55rem; height: .55rem; border-radius: 50%; background: #d8a732; }
-.signal.ready { background: #84b95a; box-shadow: 0 0 12px #84b95a; }
-.signal.offline { background: #c35a48; }
-
-.workspace {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  width: min(1120px, 100%);
-  margin: auto;
-  padding: 3rem clamp(1.5rem, 5vw, 5rem);
-}
-.rail { display: flex; flex-direction: column; align-items: center; gap: .75rem; color: #d8a732; font: .7rem "Courier New", monospace; }
-.rail i { width: 1px; height: clamp(2rem, 8vw, 6rem); background: #d8a732; opacity: .65; }
-.panel { padding-left: clamp(2rem, 7vw, 8rem); }
-.lede { max-width: 44ch; color: #c6c9bc; font-size: clamp(1rem, 1.7vw, 1.3rem); line-height: 1.55; }
-dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin-top: 3rem; background: #46524d; }
-dl div { min-height: 6rem; padding: 1rem; background: #1b211f; }
-dt { color: #d8a732; font: .7rem "Courier New", monospace; letter-spacing: .12em; text-transform: uppercase; }
-dd { margin: .7rem 0 0; }
-.printers { display: grid; gap: 1px; margin-top: 1px; background: #46524d; }
-.printers article { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; gap: 1rem; padding: .9rem 1rem; background: #1b211f; }
-.printers article.selected { background: #242d29; box-shadow: inset 3px 0 #d8a732; }
-.printers p { margin: 0; font-size: 1.1rem; }
-.printers span, .empty { color: #b9bcb2; font: .72rem "Courier New", monospace; letter-spacing: .05em; }
-.printers button { border: 0; background: transparent; color: #e47967; cursor: pointer; font: .72rem "Courier New", monospace; text-transform: uppercase; }
-.printers .select-profile { color: #d8a732; }
-.add-printer { margin-top: 1px; border: 1px solid #d8a732; background: #1b211f; color: inherit; padding: .75rem 1rem; cursor: pointer; font: .72rem "Courier New", monospace; letter-spacing: .08em; text-transform: uppercase; }
-.add-printer:disabled { cursor: wait; opacity: .55; }
-.empty { margin-top: 1px; padding: 1rem; background: #1b211f; line-height: 1.6; }
-.loading, .notice { margin-top: 1px; padding: 1rem; background: #1b211f; font: .72rem "Courier New", monospace; letter-spacing: .05em; line-height: 1.6; }
-.loading::before { display: inline-block; margin-right: .6rem; color: #d8a732; content: "◌"; animation: spin 1.1s linear infinite; }
-.notice { display: grid; gap: .45rem; border-left: 2px solid #e47967; color: #c6c9bc; }
-.notice strong, .dialog-error strong { color: #e47967; }
-.notice button { justify-self: start; border: 1px solid #d8a732; background: transparent; color: inherit; padding: .4rem .65rem; cursor: pointer; }
-.error { color: #e47967; text-transform: none; letter-spacing: normal; }
-
-.dialog { position: relative; z-index: 10; }
-.backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / .65); }
-.dialog-frame { position: fixed; inset: 0; display: grid; place-items: center; padding: 1.5rem; }
-.dialog-panel { width: min(30rem, 100%); border: 1px solid #d8a732; background: #1b211f; padding: 2rem; box-shadow: 12px 12px 0 #0d0f0e; }
-.dialog-panel p { color: #c6c9bc; line-height: 1.5; }
-.dialog-panel button { border: 1px solid #d8a732; background: transparent; padding: .5rem 1rem; cursor: pointer; }
-.dialog-panel button:disabled { cursor: wait; opacity: .55; }
-.actions { display: flex; justify-content: flex-end; gap: .75rem; }
-.dialog-panel .danger { border-color: #e47967; color: #e47967; }
-.dialog-error { border-left: 2px solid #e47967; padding-left: .75rem; }
-.profile-form { display: grid; gap: .85rem; margin-top: 1.5rem; }
-.profile-form label { display: grid; gap: .35rem; color: #d8a732; font: .68rem "Courier New", monospace; letter-spacing: .08em; text-transform: uppercase; }
-.profile-form input, .profile-form select { width: 100%; border: 1px solid #46524d; border-radius: 0; background: #141817; color: inherit; padding: .55rem .65rem; font: .9rem "Courier New", monospace; }
-.profile-form .checkbox { display: flex; align-items: center; gap: .6rem; color: #c6c9bc; text-transform: none; letter-spacing: normal; }
-.profile-form .checkbox input { width: auto; accent-color: #d8a732; }
-.drivers { display: grid; gap: .65rem; margin: 1.5rem 0; padding: 0; list-style: none; }
-.drivers li { display: grid; gap: .2rem; border-left: 1px solid #d8a732; padding-left: .75rem; }
-.drivers strong { font: .78rem "Courier New", monospace; color: #e4e2d7; }
-.drivers span { color: #b9bcb2; font-size: .85rem; }
-.diagnostics-button, .refresh-button {
-  border: 1px solid #46524d;
-  background: #1b211f;
-  color: inherit;
-  cursor: pointer;
-  padding: .62rem .75rem;
-  font: .7rem "Courier New", monospace;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-}
-
-.dashboard {
-  display: grid;
-  gap: 1px;
-  margin-top: 3rem;
-  border: 1px solid #46524d;
-  background: #46524d;
-}
-.dashboard-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1rem;
-  background: #1b211f;
-}
-.dashboard-header .eyebrow { margin-bottom: .35rem; }
-.monitor-note, .cli-note { color: #b9bcb2; font: .68rem "Courier New", monospace; line-height: 1.45; letter-spacing: .04em; }
-.refresh-button:disabled, .capability-card button:disabled { cursor: wait; opacity: .55; }
-.dashboard-notice { margin: 0; }
-
-.telemetry-grid, .capability-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1px;
-  background: #46524d;
-}
-.telemetry-grid article, .capability-card {
-  display: grid;
-  align-content: start;
-  gap: .6rem;
-  min-height: 7rem;
-  padding: 1rem;
-  background: #1b211f;
-}
-.telemetry-grid span { color: #d8a732; font: .68rem "Courier New", monospace; letter-spacing: .1em; text-transform: uppercase; }
-.telemetry-grid strong { font-size: 1rem; overflow-wrap: anywhere; }
-.telemetry-state strong { color: #84b95a; text-transform: uppercase; }
-.capability-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.capability-card { min-height: 8.5rem; }
-.capability-card > span { color: #c6c9bc; font-size: .88rem; line-height: 1.45; }
-.capability-card.muted { border-left: 3px solid #46524d; }
-.camera-card img { width: 100%; max-height: 15rem; object-fit: contain; background: #121815; }
-.capability-card button, .control-actions button {
-  justify-self: start;
-  border: 1px solid #d8a732;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  padding: .48rem .7rem;
-  font: .7rem "Courier New", monospace;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-}
-.file-list { display: grid; gap: .35rem; margin: 0; padding: 0; list-style: none; color: #c6c9bc; font: .76rem "Courier New", monospace; }
-.file-list li { display: flex; align-items: center; gap: .35rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-list li span { display: inline-block; width: 1.25rem; color: #d8a732; }
-.file-list li button {
-  margin-left: auto;
-  border: 0;
-  background: transparent;
-  color: #d8a732;
-  cursor: pointer;
-  font: .66rem "Courier New", monospace;
-  text-transform: uppercase;
-}
-.stepper { display: grid; gap: .45rem; color: #c6c9bc; font: .75rem "Courier New", monospace; }
-.stepper > div { display: flex; gap: .4rem; }
-.fan-card label { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: .75rem; color: #d8a732; font: .75rem "Courier New", monospace; }
-.fan-card input { accent-color: #d8a732; }
-.controls-card { grid-column: span 1; }
-.control-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
-.control-actions .danger, .emergency-button { border-color: #e47967 !important; color: #e47967 !important; }
-.emergency-card { background: linear-gradient(135deg, #291c1b, #1b211f); }
-.emergency-button { justify-self: stretch !important; min-height: 3rem; font-weight: 700 !important; }
-.cli-note { margin: 0; padding: .9rem 1rem; background: #1b211f; }
-.diagnostics-panel { max-width: 38rem; }
-.diagnostics-redacted { border-left: 2px solid #84b95a; padding-left: .75rem; color: #c6c9bc; font: .78rem "Courier New", monospace; }
-.diagnostic-data { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 1.5rem 0; }
-.diagnostic-data div { min-height: 4.5rem; }
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-
-@keyframes spin { to { transform: rotate(1turn); } }
-
-@media (max-width: 680px) {
-  dl { grid-template-columns: 1fr; }
-  footer { align-items: flex-start; flex-direction: column; gap: .5rem; }
-  .masthead { align-items: flex-start; gap: 1rem; }
-  .masthead-actions { align-items: flex-end; flex-direction: column; }
-  .printers article { grid-template-columns: 1fr auto; }
-  .printers span { grid-column: 1 / -1; grid-row: 2; }
-  .telemetry-grid, .capability-grid { grid-template-columns: 1fr; }
-  .dashboard-header { align-items: flex-start; flex-direction: column; }
-  .diagnostic-data { grid-template-columns: 1fr; }
+:focus-visible {
+  outline: 2px solid var(--color-cyan-400);
+  outline-offset: 2px;
 }

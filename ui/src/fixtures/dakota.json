@@ -1,0 +1,156 @@
+{
+  "ok": true,
+  "data": {
+    "profile": "dakota",
+    "driver": "bambu-lan",
+    "state": "printing",
+    "temperatures": {
+      "nozzle": {
+        "currentCelsius": 37,
+        "targetCelsius": 0
+      },
+      "bed": {
+        "currentCelsius": 51,
+        "targetCelsius": 55
+      },
+      "chamber": {
+        "currentCelsius": 30
+      }
+    },
+    "job": {
+      "name": "Egg_cup_with_friends",
+      "id": "7603"
+    },
+    "progress": {
+      "percent": 1,
+      "currentLayer": 0,
+      "totalLayers": 136
+    },
+    "errors": [],
+    "warnings": [],
+    "capabilities": {
+      "status": true,
+      "discovery": false,
+      "cameraStream": false,
+      "cameraSnapshot": false,
+      "fileList": false,
+      "fileDownload": false,
+      "fileUpload": false,
+      "jobStart": false,
+      "jobPause": false,
+      "jobResume": false,
+      "jobCancel": false,
+      "temperatureRead": false,
+      "temperatureWrite": false,
+      "motionControl": false,
+      "tlsRefresh": false
+    },
+    "fans": {
+      "auxiliary": 0,
+      "chamber": 26,
+      "heatbreak": 93,
+      "partCooling": 100
+    },
+    "timeEstimates": {
+      "elapsedSeconds": 0,
+      "remainingSeconds": 2340
+    },
+    "speedLevel": "standard",
+    "wifi": {
+      "signalDbm": -76
+    },
+    "lights": {
+      "chamber_light": "on",
+      "chamber_light2": "on",
+      "work_light": "flashing"
+    },
+    "printMeta": {
+      "fileName": "/data/Metadata/plate_1.gcode",
+      "nozzleDiameter": 0.4
+    },
+    "stage": "cleaning_nozzle_tip",
+    "timelapse": {
+      "recording": false
+    },
+    "extensions": {
+      "bambu-lan": {
+        "ams": {
+          "units": [
+            {
+              "id": 0,
+              "humidityRange": "10-20%",
+              "humidityLevel": "dry",
+              "temperature": 29.9,
+              "trays": [
+                {
+                  "slot": 0
+                },
+                {
+                  "slot": 1
+                },
+                {
+                  "slot": 2,
+                  "filamentType": "PLA",
+                  "color": "161616FF",
+                  "remainingPercent": -1,
+                  "nozzleTempMin": 190,
+                  "nozzleTempMax": 240
+                },
+                {
+                  "slot": 3,
+                  "filamentType": "PLA",
+                  "color": "F98C36FF",
+                  "remainingPercent": -1,
+                  "nozzleTempMin": 190,
+                  "nozzleTempMax": 240
+                }
+              ]
+            },
+            {
+              "id": 1,
+              "humidityRange": "20-30%",
+              "humidityLevel": "moderate",
+              "temperature": 27.2,
+              "trays": [
+                {
+                  "slot": 0
+                },
+                {
+                  "slot": 1
+                },
+                {
+                  "slot": 2
+                },
+                {
+                  "slot": 3
+                }
+              ]
+            },
+            {
+              "id": 128,
+              "humidityRange": "\u003c 10%",
+              "humidityLevel": "very dry",
+              "temperature": 26.2,
+              "trays": [
+                {
+                  "slot": 0,
+                  "filamentType": "PLA",
+                  "color": "FFFFFFFF",
+                  "remainingPercent": -1,
+                  "nozzleTempMin": 190,
+                  "nozzleTempMax": 240
+                }
+              ]
+            }
+          ]
+        },
+        "sdCardState": "normal"
+      }
+    }
+  },
+  "error": null,
+  "meta": {
+    "command": "status",
+    "durationMs": 1179
+  }
+}
