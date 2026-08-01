@@ -905,21 +905,33 @@ const temperatureMaximums: Record<'nozzle' | 'bed' | 'chamber', number> = {
   chamber: 60,
 }
 
-async function adjustTemperature(kind: 'nozzle' | 'bed' | 'chamber', delta: number) {
+const temperatureTimers: Partial<Record<'nozzle' | 'bed' | 'chamber', number>> = {}
+const pendingTemperatures: Partial<Record<'nozzle' | 'bed' | 'chamber', number>> = {}
+
+function adjustTemperature(kind: 'nozzle' | 'bed' | 'chamber', delta: number) {
   if (!activePrinter.value || !selectedStatus.value) return
   const temperature = selectedStatus.value.temperatures?.[kind]
   if (!temperature) return
   const maximum = temperatureMaximums[kind]
-  const base = temperature.targetCelsius ?? temperature.currentCelsius
+  const base = pendingTemperatures[kind] ?? temperature.targetCelsius ?? temperature.currentCelsius
   const next = Math.max(0, Math.min(maximum, Math.round((base + delta) / 5) * 5))
-  try {
-    await invoke('printer_temperature_set', {
-      request: { name: activePrinter.value.name, [`${kind}Celsius`]: next },
-    })
-    await refreshMonitoring()
-  } catch (reason) {
-    showToast(message(reason))
-  }
+  pendingTemperatures[kind] = next
+  if (temperatureTimers[kind] !== undefined) window.clearTimeout(temperatureTimers[kind])
+  temperatureTimers[kind] = window.setTimeout(async () => {
+    const printerName = activePrinter.value?.name
+    const target = pendingTemperatures[kind]
+    delete pendingTemperatures[kind]
+    delete temperatureTimers[kind]
+    if (!printerName || target === undefined) return
+    try {
+      await invoke('printer_temperature_set', {
+        request: { name: printerName, [`${kind}Celsius`]: target },
+      })
+      void refreshMonitoring()
+    } catch (reason) {
+      showToast(message(reason))
+    }
+  }, 150)
 }
 
 async function sendFan(fan: string, event: Event) {
@@ -1299,6 +1311,9 @@ onUnmounted(() => {
   transferUnlisten?.()
   if (fileQueryTimer !== undefined) window.clearTimeout(fileQueryTimer)
   if (toastTimer !== undefined) window.clearTimeout(toastTimer)
+  Object.values(temperatureTimers).forEach((timer) => {
+    if (timer !== undefined) window.clearTimeout(timer)
+  })
 })
 </script>
 
