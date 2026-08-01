@@ -751,7 +751,19 @@ fn printer_status(
         .get_profile(&name.to_ascii_lowercase())
         .ok_or_else(|| CommandError::new("profileNotFound"))?
         .clone();
+    if let Some(entry) = cached_ui_monitor_entry(&state, &name) {
+        return Ok(entry);
+    }
     Ok(cached_monitor_entry(&state, name, profile))
+}
+
+/// Printer selection should repaint from the last known state immediately.
+/// The monitor worker remains responsible for refreshing this snapshot; a
+/// live probe is only needed when no recent entry exists.
+fn cached_ui_monitor_entry(state: &MonitorState, name: &str) -> Option<MonitorEntry> {
+    let entries = state.entries.lock().ok()?;
+    let cached = entries.get(&name.to_ascii_lowercase())?;
+    (cached.sampled_at.elapsed() <= MAX_UI_CACHE_AGE).then(|| cached.entry.clone())
 }
 
 fn collect_monitored_printers(state: &MonitorState) -> Result<Vec<MonitorEntry>, CommandError> {
@@ -781,6 +793,7 @@ fn collect_monitored_printers(state: &MonitorState) -> Result<Vec<MonitorEntry>,
 }
 
 const STATUS_CACHE_FILE: &str = "polimero-status-cache.json";
+const MAX_UI_CACHE_AGE: Duration = Duration::from_secs(30);
 
 /// Last known `monitoring-updated` payload, persisted as raw JSON so a
 /// restart can repaint it immediately instead of showing nothing until the
