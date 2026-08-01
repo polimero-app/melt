@@ -1122,7 +1122,9 @@ async function refreshCamera() {
       const printerName = activePrinter.value.name
       try {
         await stopCamera()
-        const peer = new RTCPeerConnection({ iceServers: [] })
+        const PeerConnection = window.RTCPeerConnection
+        if (!PeerConnection) throw new Error('WebRTC is disabled in the embedded webview')
+        const peer = new PeerConnection({ iceServers: [] })
         peer.addTransceiver('video', { direction: 'recvonly' })
         peer.ontrack = (event) => {
           cameraMediaStream.value = event.streams[0] ?? new MediaStream([event.track])

@@ -2312,6 +2312,16 @@ fn main() {
         .manage(TransferState::default())
         .manage(SlicerState::default())
         .setup(|app| {
+            #[cfg(target_os = "linux")]
+            if let Some(webview) = app.get_webview_window("main") {
+                let _ = webview.with_webview(|webview| {
+                    use webkit2gtk::{SettingsExt, WebViewExt};
+
+                    if let Some(settings) = webview.inner().settings() {
+                        settings.set_enable_webrtc(true);
+                    }
+                });
+            }
             let state = app.state::<MonitorState>().inner().clone();
             start_monitor_worker(app.handle().clone(), state);
             Ok(())
