@@ -1242,15 +1242,17 @@ fn print_library_file(
         &[moonraker::PrinterState::Idle],
         Operation::JobStart,
     )?;
-    let result = state.pool.job_start(
-        &request.printer,
-        &printer.driver,
-        printer.access_code.as_deref(),
-        printer.tls_fingerprint.as_deref(),
-        &device_path,
-        polimero_core::bambu::JobStartOptions::default(),
-    )
-    .map_err(|error| operation_error(error, Operation::JobStart));
+    let result = state
+        .pool
+        .job_start(
+            &request.printer,
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+            &device_path,
+            polimero_core::bambu::JobStartOptions::default(),
+        )
+        .map_err(|error| operation_error(error, Operation::JobStart));
     invalidate(&state, &request.printer);
     result
 }
@@ -1346,14 +1348,16 @@ fn printer_temperature_set(
         &[moonraker::PrinterState::Idle],
         Operation::TemperatureSet,
     )?;
-    let result = state.pool.temperature_set(
-        &request.name,
-        &printer.driver,
-        printer.access_code.as_deref(),
-        printer.tls_fingerprint.as_deref(),
-        targets,
-    )
-    .map_err(|error| operation_error(error, Operation::TemperatureSet));
+    let result = state
+        .pool
+        .temperature_set(
+            &request.name,
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+            targets,
+        )
+        .map_err(|error| operation_error(error, Operation::TemperatureSet));
     invalidate(&state, &request.name);
     result
 }
@@ -1375,15 +1379,17 @@ fn printer_fan_set(
         ],
         Operation::FanSet,
     )?;
-    let result = state.pool.fan_set(
-        &request.name,
-        &printer.driver,
-        printer.access_code.as_deref(),
-        printer.tls_fingerprint.as_deref(),
-        &request.fan,
-        request.speed_percent,
-    )
-    .map_err(|error| operation_error(error, Operation::FanSet));
+    let result = state
+        .pool
+        .fan_set(
+            &request.name,
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+            &request.fan,
+            request.speed_percent,
+        )
+        .map_err(|error| operation_error(error, Operation::FanSet));
     invalidate(&state, &request.name);
     result
 }
@@ -1400,14 +1406,16 @@ fn printer_motion_home(
         &[moonraker::PrinterState::Idle],
         Operation::MotionHome,
     )?;
-    let result = state.pool.motion_home(
-        &name,
-        &printer.driver,
-        printer.access_code.as_deref(),
-        printer.tls_fingerprint.as_deref(),
-        &[moonraker::Axis::X, moonraker::Axis::Y, moonraker::Axis::Z],
-    )
-    .map_err(|error| operation_error(error, Operation::MotionHome));
+    let result = state
+        .pool
+        .motion_home(
+            &name,
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+            &[moonraker::Axis::X, moonraker::Axis::Y, moonraker::Axis::Z],
+        )
+        .map_err(|error| operation_error(error, Operation::MotionHome));
     invalidate(&state, &name);
     result
 }
@@ -1430,19 +1438,21 @@ fn printer_motion_jog(
         &[moonraker::PrinterState::Idle],
         Operation::MotionJog,
     )?;
-    let result = state.pool.motion_jog(
-        &request.name,
-        &printer.driver,
-        printer.access_code.as_deref(),
-        printer.tls_fingerprint.as_deref(),
-        moonraker::JogDelta {
-            x_millimeters: request.x_millimeters,
-            y_millimeters: request.y_millimeters,
-            z_millimeters: request.z_millimeters,
-            feedrate_mm_per_min: request.feedrate_mm_per_min,
-        },
-    )
-    .map_err(|error| operation_error(error, Operation::MotionJog));
+    let result = state
+        .pool
+        .motion_jog(
+            &request.name,
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+            moonraker::JogDelta {
+                x_millimeters: request.x_millimeters,
+                y_millimeters: request.y_millimeters,
+                z_millimeters: request.z_millimeters,
+                feedrate_mm_per_min: request.feedrate_mm_per_min,
+            },
+        )
+        .map_err(|error| operation_error(error, Operation::MotionJog));
     invalidate(&state, &request.name);
     result
 }
@@ -1469,15 +1479,17 @@ fn printer_light_set(
     } else {
         moonraker::LightState::Off
     };
-    let result = state.pool.light_set(
-        &request.name,
-        &printer.driver,
-        printer.access_code.as_deref(),
-        printer.tls_fingerprint.as_deref(),
-        &request.light,
-        light_state,
-    )
-    .map_err(|error| operation_error(error, Operation::LightSet));
+    let result = state
+        .pool
+        .light_set(
+            &request.name,
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+            &request.light,
+            light_state,
+        )
+        .map_err(|error| operation_error(error, Operation::LightSet));
     invalidate(&state, &request.name);
     result
 }
@@ -1497,14 +1509,16 @@ fn printer_speed_set(
         ],
         Operation::SpeedSet,
     )?;
-    let result = state.pool.speed_set(
-        &request.name,
-        &printer.driver,
-        printer.access_code.as_deref(),
-        printer.tls_fingerprint.as_deref(),
-        &request.speed_profile,
-    )
-    .map_err(|error| operation_error(error, Operation::SpeedSet));
+    let result = state
+        .pool
+        .speed_set(
+            &request.name,
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+            &request.speed_profile,
+        )
+        .map_err(|error| operation_error(error, Operation::SpeedSet));
     invalidate(&state, &request.name);
     result
 }
@@ -1968,13 +1982,15 @@ fn printer_emergency_stop(
     state: tauri::State<'_, MonitorState>,
 ) -> Result<(), CommandError> {
     let printer = desktop_printer(&name, Operation::EmergencyStop)?;
-    let result = state.pool.emergency_stop(
-        &name,
-        &printer.driver,
-        printer.access_code.as_deref(),
-        printer.tls_fingerprint.as_deref(),
-    )
-    .map_err(|error| operation_error(error, Operation::EmergencyStop));
+    let result = state
+        .pool
+        .emergency_stop(
+            &name,
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+        )
+        .map_err(|error| operation_error(error, Operation::EmergencyStop));
     invalidate(&state, &name);
     result
 }
@@ -2036,7 +2052,10 @@ fn printer_camera_webrtc_offer(
             .with_detail("WebRTC request was superseded"));
     }
     active.replace(session);
-    Ok(CameraWebRtcAnswer { kind: "answer", sdp })
+    Ok(CameraWebRtcAnswer {
+        kind: "answer",
+        sdp,
+    })
 }
 
 #[tauri::command(async)]

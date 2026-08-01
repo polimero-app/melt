@@ -234,16 +234,16 @@ pub fn profile_for_status(config: &config::Profile) -> Result<Profile, DriverErr
     profile_with_timeout(config, timeout)
 }
 
-fn profile_with_timeout(config: &config::Profile, timeout: Duration) -> Result<Profile, DriverError> {
+fn profile_with_timeout(
+    config: &config::Profile,
+    timeout: Duration,
+) -> Result<Profile, DriverError> {
     match Driver::parse(&config.driver)? {
-        Driver::BambuLan => bambu::Profile::with_timeout(
-            &config.host,
-            &config.serial,
-            config.insecure,
-            timeout,
-        )
-        .map(Profile::Bambu)
-        .map_err(|_| DriverError::InvalidProfile(Driver::BambuLan)),
+        Driver::BambuLan => {
+            bambu::Profile::with_timeout(&config.host, &config.serial, config.insecure, timeout)
+                .map(Profile::Bambu)
+                .map_err(|_| DriverError::InvalidProfile(Driver::BambuLan))
+        }
         Driver::Moonraker => moonraker::Profile::new(&config.host, config.insecure, timeout)
             .map(Profile::Moonraker)
             .map_err(|_| DriverError::InvalidProfile(Driver::Moonraker)),
@@ -328,13 +328,10 @@ pub fn camera_h264_stream(
     timeout: Duration,
 ) -> Result<bambu::H264Stream, DriverError> {
     match profile {
-        Profile::Bambu(profile) => bambu::open_h264_stream(
-            profile,
-            access_code,
-            tls_fingerprint,
-            timeout,
-        )
-        .map_err(DriverError::Camera),
+        Profile::Bambu(profile) => {
+            bambu::open_h264_stream(profile, access_code, tls_fingerprint, timeout)
+                .map_err(DriverError::Camera)
+        }
         Profile::Moonraker(_) => Err(DriverError::UnsupportedOperation(
             Driver::Moonraker,
             Operation::CameraStream,
@@ -736,7 +733,13 @@ mod tests {
         );
 
         assert!(matches!(
-            light_set(&profile, None, None, "chamber_light", moonraker::LightState::On),
+            light_set(
+                &profile,
+                None,
+                None,
+                "chamber_light",
+                moonraker::LightState::On
+            ),
             Err(DriverError::UnsupportedOperation(
                 Driver::Moonraker,
                 Operation::LightSet

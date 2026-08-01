@@ -1,8 +1,9 @@
 use std::{
     net::{Shutdown, TcpStream},
     sync::{
+        Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        mpsc,
     },
     thread,
     time::Duration,
@@ -14,9 +15,9 @@ use tokio::runtime::Builder;
 use tokio::sync::mpsc as async_mpsc;
 use webrtc::{
     api::{
-        interceptor_registry::register_default_interceptors,
-        media_engine::{MediaEngine, MIME_TYPE_H264},
         APIBuilder,
+        interceptor_registry::register_default_interceptors,
+        media_engine::{MIME_TYPE_H264, MediaEngine},
     },
     interceptor::registry::Registry,
     peer_connection::{
@@ -25,7 +26,7 @@ use webrtc::{
     rtp::packet::Packet,
     rtp_transceiver::rtp_codec::{RTCRtpCodecCapability, RTCRtpCodecParameters},
     track::track_local::{
-        track_local_static_rtp::TrackLocalStaticRTP, TrackLocal, TrackLocalWriter,
+        TrackLocal, TrackLocalWriter, track_local_static_rtp::TrackLocalStaticRTP,
     },
     util::Unmarshal,
 };
@@ -221,7 +222,8 @@ async fn serve(
         }
         for raw in access_unit {
             let mut raw = &raw[..];
-            let packet = Packet::unmarshal(&mut raw).map_err(|error| format!("RTP packet: {error}"))?;
+            let packet =
+                Packet::unmarshal(&mut raw).map_err(|error| format!("RTP packet: {error}"))?;
             if !started {
                 if !is_idr_start(&packet.payload) {
                     continue;
@@ -229,10 +231,8 @@ async fn serve(
                 for (sequence_offset, parameter_set) in [(2, &sps), (1, &pps)] {
                     let mut configuration = packet.clone();
                     configuration.header.marker = false;
-                    configuration.header.sequence_number = packet
-                        .header
-                        .sequence_number
-                        .wrapping_sub(sequence_offset);
+                    configuration.header.sequence_number =
+                        packet.header.sequence_number.wrapping_sub(sequence_offset);
                     configuration.payload = parameter_set.clone().into();
                     track
                         .write_rtp(&configuration)
@@ -349,7 +349,11 @@ fn decode_profile(value: &str) -> Option<[u8; 3]> {
 #[cfg(test)]
 mod tests {
     use std::{
-        sync::{Arc, atomic::{AtomicBool, Ordering}, mpsc},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+            mpsc,
+        },
         thread,
         time::Duration,
     };

@@ -52,7 +52,9 @@ impl FramedConnection {
     }
 
     fn write_all(&mut self, bytes: &[u8]) -> Result<(), CameraError> {
-        self.connection.write_all(bytes).map_err(CameraError::Stream)
+        self.connection
+            .write_all(bytes)
+            .map_err(CameraError::Stream)
     }
 
     /// Reads and returns the next complete RTSP message, buffering any bytes
@@ -69,7 +71,10 @@ impl FramedConnection {
                     if self.buffer.len() > MAX_BUFFERED {
                         return Err(stream_error("RTSP stream exceeded the buffering limit"));
                     }
-                    let read = self.connection.read(&mut chunk).map_err(CameraError::Stream)?;
+                    let read = self
+                        .connection
+                        .read(&mut chunk)
+                        .map_err(CameraError::Stream)?;
                     if read == 0 {
                         return Err(stream_error("RTSP connection closed unexpectedly"));
                     }
@@ -89,7 +94,9 @@ impl FramedConnection {
                 rtsp_types::Message::Response(response) => return Ok(response),
                 rtsp_types::Message::Data(_) => continue,
                 rtsp_types::Message::Request(_) => {
-                    return Err(stream_error("RTSP server sent a request, expected a response"));
+                    return Err(stream_error(
+                        "RTSP server sent a request, expected a response",
+                    ));
                 }
             }
         }
@@ -100,10 +107,14 @@ impl FramedConnection {
     fn next_rtp_packet(&mut self) -> Result<Vec<u8>, CameraError> {
         loop {
             match self.next_message()? {
-                rtsp_types::Message::Data(data) if data.channel_id() == 0 => return Ok(data.into_body()),
+                rtsp_types::Message::Data(data) if data.channel_id() == 0 => {
+                    return Ok(data.into_body());
+                }
                 rtsp_types::Message::Data(_) | rtsp_types::Message::Response(_) => continue,
                 rtsp_types::Message::Request(_) => {
-                    return Err(stream_error("RTSP server sent an unexpected request mid-stream"));
+                    return Err(stream_error(
+                        "RTSP server sent an unexpected request mid-stream",
+                    ));
                 }
             }
         }
@@ -170,12 +181,14 @@ fn open_h264_stream_with_decoder(
         .checked_add(timeout)
         .ok_or_else(|| CameraError::Connect(io::Error::from(io::ErrorKind::TimedOut)))?;
     let connector = transport::tls_connector().map_err(|_| CameraError::Tls)?;
-    let (connection, _) = transport::open_tls(&connector, profile, RTSP_PORT, fingerprint, true, deadline)
-        .map_err(map_transport_error)?;
+    let (connection, _) =
+        transport::open_tls(&connector, profile, RTSP_PORT, fingerprint, true, deadline)
+            .map_err(map_transport_error)?;
     let mut connection = FramedConnection::new(connection);
 
     let uri_string = format!("rtsps://{}:{RTSP_PORT}{RTSP_PATH}", profile.host());
-    let uri = rtsp_types::Url::parse(&uri_string).map_err(|_| stream_error("invalid RTSP camera URL"))?;
+    let uri =
+        rtsp_types::Url::parse(&uri_string).map_err(|_| stream_error("invalid RTSP camera URL"))?;
 
     let mut cseq = 1u32;
     let describe = authorized_request(
@@ -197,9 +210,11 @@ fn open_h264_stream_with_decoder(
         .map(|value| value.as_str().to_owned())
         .unwrap_or(uri_string);
     let sdp = String::from_utf8_lossy(describe.body());
-    let (control, sps, pps) = parse_sdp(&sdp).ok_or_else(|| stream_error("no usable H.264 track in SDP"))?;
-    let setup_uri = rtsp_types::Url::parse(&format!("{}/{control}", content_base.trim_end_matches('/')))
-        .map_err(|_| stream_error("invalid RTSP track URL"))?;
+    let (control, sps, pps) =
+        parse_sdp(&sdp).ok_or_else(|| stream_error("no usable H.264 track in SDP"))?;
+    let setup_uri =
+        rtsp_types::Url::parse(&format!("{}/{control}", content_base.trim_end_matches('/')))
+            .map_err(|_| stream_error("invalid RTSP track URL"))?;
 
     let setup = authorized_request(
         &mut connection,
@@ -213,11 +228,21 @@ fn open_h264_stream_with_decoder(
         )],
     )?;
     if setup.status() != rtsp_types::StatusCode::Ok {
-        return Err(stream_error(&format!("RTSP SETUP failed: {}", setup.reason_phrase())));
+        return Err(stream_error(&format!(
+            "RTSP SETUP failed: {}",
+            setup.reason_phrase()
+        )));
     }
     let session = setup
         .header(&rtsp_types::headers::SESSION)
-        .map(|value| value.as_str().split(';').next().unwrap_or_default().to_owned())
+        .map(|value| {
+            value
+                .as_str()
+                .split(';')
+                .next()
+                .unwrap_or_default()
+                .to_owned()
+        })
         .ok_or_else(|| stream_error("RTSP SETUP response missing Session"))?;
 
     let play = authorized_request(
@@ -232,11 +257,17 @@ fn open_h264_stream_with_decoder(
         ],
     )?;
     if play.status() != rtsp_types::StatusCode::Ok {
-        return Err(stream_error(&format!("RTSP PLAY failed: {}", play.reason_phrase())));
+        return Err(stream_error(&format!(
+            "RTSP PLAY failed: {}",
+            play.reason_phrase()
+        )));
     }
 
     let decoder = decode
-        .then(|| Decoder::new().map_err(|error| stream_error(&format!("H.264 decoder init failed: {error}"))))
+        .then(|| {
+            Decoder::new()
+                .map_err(|error| stream_error(&format!("H.264 decoder init failed: {error}")))
+        })
         .transpose()?;
 
     Ok(H264Stream {
@@ -289,7 +320,14 @@ fn authorized_request(
         .ok_or_else(|| stream_error("RTSP server did not provide a digest nonce"))?;
     let method_name: &str = (&method).into();
     let authorization = digest_header(access_code, method_name, uri.as_str(), &nonce);
-    let response = send_request(connection, method, uri, *cseq, extra_headers, Some(&authorization))?;
+    let response = send_request(
+        connection,
+        method,
+        uri,
+        *cseq,
+        extra_headers,
+        Some(&authorization),
+    )?;
     *cseq += 1;
     Ok(response)
 }
@@ -405,7 +443,10 @@ impl H264Stream {
                 Ok(Some(yuv)) => return encode_jpeg(&yuv),
                 Ok(None) => continue,
                 Err(error) => {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, format!("H.264 decode failed: {error}")));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("H.264 decode failed: {error}"),
+                    ));
                 }
             }
         }
@@ -552,7 +593,12 @@ fn encode_jpeg(yuv: &openh264::decoder::DecodedYUV) -> io::Result<Vec<u8>> {
     let mut jpeg = Vec::new();
     let encoder = jpeg_encoder::Encoder::new(&mut jpeg, 80);
     encoder
-        .encode(&rgb, width as u16, height as u16, jpeg_encoder::ColorType::Rgb)
+        .encode(
+            &rgb,
+            width as u16,
+            height as u16,
+            jpeg_encoder::ColorType::Rgb,
+        )
         .map_err(|error| io::Error::other(format!("JPEG encode failed: {error}")))?;
     Ok(jpeg)
 }

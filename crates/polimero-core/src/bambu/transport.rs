@@ -465,7 +465,9 @@ impl Client {
             access_code,
             fingerprint,
             ledctrl_payload(light, state),
-            |report| light_state_is(report, light, state) || light_unsupported_on_model(report, light),
+            |report| {
+                light_state_is(report, light, state) || light_unsupported_on_model(report, light)
+            },
         )?;
         let report: Value = serde_json::from_slice(&report).map_err(|_| Error::InvalidResponse)?;
         if light_unsupported_on_model(&report, light) {
