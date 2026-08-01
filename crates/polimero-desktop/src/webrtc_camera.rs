@@ -1,6 +1,9 @@
 use std::{
     net::{Shutdown, TcpStream},
-    sync::{Arc, atomic::{AtomicBool, Ordering}, mpsc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    },
     thread,
     time::Duration,
 };
@@ -10,12 +13,20 @@ use polimero_core::{bambu::H264Stream, drivers};
 use tokio::runtime::Builder;
 use tokio::sync::mpsc as async_mpsc;
 use webrtc::{
-    api::{APIBuilder, interceptor_registry::register_default_interceptors, media_engine::{MIME_TYPE_H264, MediaEngine}},
+    api::{
+        interceptor_registry::register_default_interceptors,
+        media_engine::{MediaEngine, MIME_TYPE_H264},
+        APIBuilder,
+    },
     interceptor::registry::Registry,
-    peer_connection::{configuration::RTCConfiguration, sdp::session_description::RTCSessionDescription},
+    peer_connection::{
+        configuration::RTCConfiguration, sdp::session_description::RTCSessionDescription,
+    },
     rtp::packet::Packet,
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
-    track::track_local::{TrackLocal, TrackLocalWriter, track_local_static_rtp::TrackLocalStaticRTP},
+    track::track_local::{
+        track_local_static_rtp::TrackLocalStaticRTP, TrackLocal, TrackLocalWriter,
+    },
     util::Unmarshal,
 };
 
@@ -113,7 +124,7 @@ async fn serve(
             .map_err(|error| format!("WebRTC peer: {error}"))?,
     );
     let track = Arc::new(TrackLocalStaticRTP::new(
-        codec_capability(&stream),
+        codec_capability(&stream, &offer_sdp),
         "video".to_owned(),
         "bambu-camera".to_owned(),
     ));
@@ -164,8 +175,7 @@ async fn serve(
             break;
         }
         let mut raw = &raw[..];
-        let packet = Packet::unmarshal(&mut raw)
-            .map_err(|error| format!("RTP packet: {error}"))?;
+        let packet = Packet::unmarshal(&mut raw).map_err(|error| format!("RTP packet: {error}"))?;
         track
             .write_rtp(&packet)
             .await
@@ -177,14 +187,15 @@ async fn serve(
     Ok(())
 }
 
-fn codec_capability(stream: &H264Stream) -> RTCRtpCodecCapability {
+fn codec_capability(stream: &H264Stream, offer_sdp: &str) -> RTCRtpCodecCapability {
     let (sps, pps) = stream.parameter_sets();
-    let fmtp = match (sps.get(1..4), (!sps.is_empty() && !pps.is_empty())) {
+    let profile = sps
+        .get(1..3)
+        .and_then(|profile| compatible_offer_profile(offer_sdp, profile));
+    let fmtp = match (profile.or_else(|| sps.get(1..4).map(hex_profile)), (!sps.is_empty() && !pps.is_empty())) {
         (Some(profile), true) => format!(
             "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id={:02x}{:02x}{:02x};sprop-parameter-sets={},{}",
-            profile[0],
-            profile[1],
-            profile[2],
+            profile[0], profile[1], profile[2],
             base64::engine::general_purpose::STANDARD.encode(sps),
             base64::engine::general_purpose::STANDARD.encode(pps),
         ),
@@ -195,5 +206,66 @@ fn codec_capability(stream: &H264Stream) -> RTCRtpCodecCapability {
         clock_rate: 90_000,
         sdp_fmtp_line: fmtp,
         ..Default::default()
+    }
+}
+
+fn hex_profile(profile: &[u8]) -> [u8; 3] {
+    [profile[0], profile[1], profile[2]]
+}
+
+fn compatible_offer_profile(offer_sdp: &str, camera_profile: &[u8]) -> Option<[u8; 3]> {
+    offer_sdp.lines().find_map(|line| {
+        let params = line.strip_prefix("a=fmtp:")?.split_once(' ')?.1;
+        let packetization_mode = params.split(';').find_map(|param| {
+            let (key, value) = param.trim().split_once('=')?;
+            (key == "packetization-mode").then_some(value)
+        })?;
+        if packetization_mode != "1" {
+            return None;
+        }
+        let profile = params.split(';').find_map(|param| {
+            let (key, value) = param.trim().split_once('=')?;
+            (key == "profile-level-id").then_some(value)
+        })?;
+        let bytes = decode_profile(profile)?;
+        (bytes.len() == 3 && bytes[0] == camera_profile[0] && bytes[1] == camera_profile[1])
+            .then_some([bytes[0], bytes[1], bytes[2]])
+    })
+}
+
+fn decode_profile(value: &str) -> Option<[u8; 3]> {
+    if value.len() != 6 {
+        return None;
+    }
+    let mut bytes = [0; 3];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16).ok()?;
+    }
+    Some(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compatible_offer_profile, decode_profile};
+
+    #[test]
+    fn selects_browser_profile_compatible_with_camera() {
+        let offer = "a=fmtp:126 profile-level-id=640c1f;packetization-mode=1\r\na=fmtp:127 profile-level-id=42e01f;packetization-mode=1\r\n";
+        assert_eq!(
+            compatible_offer_profile(offer, &[0x64, 0x0c]),
+            Some([0x64, 0x0c, 0x1f])
+        );
+        assert_eq!(
+            compatible_offer_profile(offer, &[0x42, 0xe0]),
+            Some([0x42, 0xe0, 0x1f])
+        );
+        assert_eq!(compatible_offer_profile(offer, &[0x4d, 0x40]), None);
+    }
+
+    #[test]
+    fn rejects_malformed_profile_ids() {
+        assert_eq!(decode_profile("640c"), None);
+        assert_eq!(decode_profile("zz0c1f"), None);
+        assert_eq!(decode_profile("640c1f"), Some([0x64, 0x0c, 0x1f]));
     }
 }
