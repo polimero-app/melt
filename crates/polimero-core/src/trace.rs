@@ -43,6 +43,7 @@ pub struct TraceEvent {
     pub label: String,
     pub outcome: Option<String>,
     pub bytes: Option<u64>,
+    pub elapsed_ms: Option<u64>,
 }
 
 impl TraceEvent {
@@ -73,6 +74,11 @@ impl TraceEvent {
         self.bytes = Some(bytes);
         self
     }
+
+    pub fn with_elapsed_ms(mut self, elapsed_ms: u64) -> Self {
+        self.elapsed_ms = Some(elapsed_ms);
+        self
+    }
 }
 
 #[derive(Serialize)]
@@ -86,6 +92,8 @@ struct TraceLine<'a> {
     outcome: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    elapsed_ms: Option<u64>,
 }
 
 /// Writes one JSON object per line to a file.
@@ -117,6 +125,7 @@ impl ProtocolTracer for JsonlTracer {
             label: &event.label,
             outcome: event.outcome.as_deref(),
             bytes: event.bytes,
+            elapsed_ms: event.elapsed_ms,
         };
         let Ok(mut json) = serde_json::to_vec(&line) else {
             return;

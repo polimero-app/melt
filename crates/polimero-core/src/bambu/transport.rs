@@ -162,6 +162,7 @@ impl Client {
         access_code: Option<&str>,
         fingerprint: Option<&str>,
     ) -> Result<Status, Error> {
+        let started = Instant::now();
         let access_code = valid_access_code(access_code)?;
         validate_pin(&self.profile, fingerprint)?;
         let payload = pushall_payload(next_sequence());
@@ -174,7 +175,8 @@ impl Client {
                     self.trace(
                         TraceEvent::response("mqtt", label.as_str())
                             .with_outcome("ok")
-                            .with_bytes(report.len() as u64),
+                            .with_bytes(report.len() as u64)
+                            .with_elapsed_ms(started.elapsed().as_millis() as u64),
                     );
                     return parse_status(&report);
                 }
@@ -196,7 +198,9 @@ impl Client {
         let mut mqtt = MqttConnection::new(stream, self.profile.mqtt_topics(), deadline);
         if let Err(error) = mqtt.connect(access_code).and_then(|_| mqtt.subscribe()) {
             self.trace(
-                TraceEvent::response("mqtt", label.as_str()).with_outcome(error.to_string()),
+                TraceEvent::response("mqtt", label.as_str())
+                    .with_outcome(error.to_string())
+                    .with_elapsed_ms(started.elapsed().as_millis() as u64),
             );
             return Err(error);
         }
@@ -204,7 +208,9 @@ impl Client {
             Ok(report) => report,
             Err(error) => {
                 self.trace(
-                    TraceEvent::response("mqtt", label.as_str()).with_outcome(error.to_string()),
+                    TraceEvent::response("mqtt", label.as_str())
+                        .with_outcome(error.to_string())
+                        .with_elapsed_ms(started.elapsed().as_millis() as u64),
                 );
                 return Err(error);
             }
@@ -212,7 +218,8 @@ impl Client {
         self.trace(
             TraceEvent::response("mqtt", label.as_str())
                 .with_outcome("ok")
-                .with_bytes(report.len() as u64),
+                .with_bytes(report.len() as u64)
+                .with_elapsed_ms(started.elapsed().as_millis() as u64),
         );
         let status = parse_status(&report)?;
         *cached = Some(PersistentConnection(mqtt));
@@ -658,6 +665,7 @@ impl Client {
         payload: String,
         predicate: impl Fn(&Value) -> bool,
     ) -> Result<Vec<u8>, Error> {
+        let started = Instant::now();
         let label = format!("publish {}", self.profile.mqtt_topics().request);
         self.trace(TraceEvent::request("mqtt", label.as_str()).with_bytes(payload.len() as u64));
         let result = self.with_mqtt(access_code, fingerprint, |mqtt| {
@@ -667,10 +675,13 @@ impl Client {
             Ok(report) => self.trace(
                 TraceEvent::response("mqtt", label.as_str())
                     .with_outcome("ok")
-                    .with_bytes(report.len() as u64),
+                    .with_bytes(report.len() as u64)
+                    .with_elapsed_ms(started.elapsed().as_millis() as u64),
             ),
             Err(error) => self.trace(
-                TraceEvent::response("mqtt", label.as_str()).with_outcome(error.to_string()),
+                TraceEvent::response("mqtt", label.as_str())
+                    .with_outcome(error.to_string())
+                    .with_elapsed_ms(started.elapsed().as_millis() as u64),
             ),
         }
         result
