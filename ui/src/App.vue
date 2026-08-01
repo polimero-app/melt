@@ -328,6 +328,7 @@ let notificationUnlisten: UnlistenFn | undefined
 let transferUnlisten: UnlistenFn | undefined
 let fileQueryTimer: number | undefined
 let selectionRequest = 0
+let cameraRequest = 0
 let fileRequest = 0
 let libraryRequest = 0
 let toastTimer: number | undefined
@@ -1113,22 +1114,22 @@ async function uploadFile() {
 }
 
 async function refreshCamera() {
-  if (!activePrinter.value || cameraLoading.value || !cameraSupported.value) return
+  if (!activePrinter.value || !cameraSupported.value) return
+  const printerName = activePrinter.value.name
+  await stopCamera()
+  const request = ++cameraRequest
   cameraLoading.value = true
   cameraError.value = undefined
   cameraTransportDetail.value = undefined
   try {
     if (capabilities.value?.cameraStream) {
-      const printerName = activePrinter.value.name
+      let peer: RTCPeerConnection | undefined
       try {
-        await stopCamera()
         const PeerConnection = window.RTCPeerConnection
         if (!PeerConnection) throw new Error('WebRTC is disabled in the embedded webview')
-        const peer = new PeerConnection({ iceServers: [] })
+        peer = new PeerConnection({ iceServers: [] })
         peer.addTransceiver('video', { direction: 'recvonly' })
-        peer.ontrack = (event) => {
-          cameraMediaStream.value = event.streams[0] ?? new MediaStream([event.track])
-        }
+        const track = waitForVideoTrack(peer)
         const offer = await peer.createOffer()
         await peer.setLocalDescription(offer)
         await waitForIceGathering(peer)
@@ -1137,22 +1138,85 @@ async function refreshCamera() {
           offer: peer.localDescription?.sdp ?? offer.sdp,
         })
         await peer.setRemoteDescription(answer)
+        const mediaStream = await waitForPeerReady(peer, track)
+        if (request !== cameraRequest || activePrinter.value?.name !== printerName) {
+          peer.close()
+          return
+        }
+        peer.onconnectionstatechange = () => {
+          if (peer?.connectionState === 'failed' && cameraPeer.value === peer) {
+            void fallbackCamera(printerName, request, 'WebRTC connection failed')
+          }
+        }
+        cameraMediaStream.value = mediaStream
         cameraPeer.value = peer
         cameraTransport.value = 'webrtc'
       } catch (reason) {
-        cameraTransportDetail.value = commandDetail(reason) ?? message(reason)
-        await stopCamera()
-        cameraUrl.value = (await invoke<CameraStream>('printer_camera_stream', { name: printerName })).url
-        cameraTransport.value = 'mjpeg'
+        peer?.close()
+        if (request === cameraRequest) {
+          await fallbackCamera(printerName, request, commandDetail(reason) ?? message(reason))
+        }
       }
     } else if (capabilities.value?.cameraSnapshot) {
-      cameraUrl.value = (await invoke<CameraSnapshot>('printer_camera_snapshot', { name: activePrinter.value.name })).dataUrl
+      const snapshot = await invoke<CameraSnapshot>('printer_camera_snapshot', { name: printerName })
+      if (request === cameraRequest) cameraUrl.value = snapshot.dataUrl
     }
   } catch (reason) {
-    cameraUrl.value = undefined
-    cameraError.value = message(reason)
+    if (request === cameraRequest) {
+      cameraUrl.value = undefined
+      cameraError.value = message(reason)
+    }
   } finally {
-    cameraLoading.value = false
+    if (request === cameraRequest) cameraLoading.value = false
+  }
+}
+
+function waitForVideoTrack(peer: RTCPeerConnection) {
+  return new Promise<MediaStream>((resolve) => {
+    peer.ontrack = (event) => resolve(event.streams[0] ?? new MediaStream([event.track]))
+  })
+}
+
+async function waitForPeerReady(peer: RTCPeerConnection, track: Promise<MediaStream>) {
+  const connection = new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      peer.removeEventListener('connectionstatechange', onStateChange)
+      if (peer.connectionState === 'connected') resolve()
+      else reject(new Error(`WebRTC connection ${peer.connectionState}`))
+    }
+    const onStateChange = () => {
+      if (peer.connectionState === 'connected' || peer.connectionState === 'failed' || peer.connectionState === 'closed') finish()
+    }
+    if (peer.connectionState === 'connected') resolve()
+    else peer.addEventListener('connectionstatechange', onStateChange)
+  })
+  return await withTimeout(Promise.all([connection, track]).then(([, stream]) => stream), 10_000, 'WebRTC media timed out')
+}
+
+async function fallbackCamera(printerName: string, request: number, reason: string) {
+  if (request !== cameraRequest || activePrinter.value?.name !== printerName) return
+  cameraTransportDetail.value = reason
+  cameraPeer.value?.close()
+  cameraPeer.value = undefined
+  cameraMediaStream.value?.getTracks().forEach((track) => track.stop())
+  cameraMediaStream.value = undefined
+  const stream = await invoke<CameraStream>('printer_camera_stream', { name: printerName })
+  if (request !== cameraRequest || activePrinter.value?.name !== printerName) return
+  cameraUrl.value = stream.url
+  cameraTransport.value = 'mjpeg'
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeout: number, reason: string) {
+  let timer: number | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error(reason)), timeout)
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) window.clearTimeout(timer)
   }
 }
 
@@ -1171,12 +1235,14 @@ async function waitForIceGathering(peer: RTCPeerConnection) {
 }
 
 async function stopCamera() {
+  cameraRequest += 1
   cameraPeer.value?.close()
   cameraPeer.value = undefined
   cameraMediaStream.value?.getTracks().forEach((track) => track.stop())
   cameraMediaStream.value = undefined
   cameraUrl.value = undefined
   cameraTransport.value = undefined
+  cameraLoading.value = false
 }
 
 async function saveSnapshot() {
