@@ -138,7 +138,7 @@ async fn serve(
         "video".to_owned(),
         "bambu-camera".to_owned(),
     ));
-    let _sender = peer
+    let sender = peer
         .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
         .await
         .map_err(|error| format!("WebRTC track: {error}"))?;
@@ -156,6 +156,15 @@ async fn serve(
         }])
         .await
         .map_err(|error| format!("WebRTC H.264 profile: {error}"))?;
+    let rtcp_stop = Arc::clone(&stop);
+    let rtcp_task = tokio::spawn(async move {
+        while !rtcp_stop.load(Ordering::Acquire) {
+            match tokio::time::timeout(Duration::from_secs(1), sender.read_rtcp()).await {
+                Ok(Ok(_)) | Err(_) => {}
+                Ok(Err(_)) => break,
+            }
+        }
+    });
 
     let offer = RTCSessionDescription::offer(offer_sdp)
         .map_err(|error| format!("WebRTC offer: {error}"))?;
@@ -183,52 +192,62 @@ async fn serve(
         .send(Ok(answer.sdp))
         .map_err(|_| "WebRTC signaling request canceled".to_owned())?;
 
-    let (packet_tx, mut packet_rx) = async_mpsc::channel(4);
+    let (access_unit_tx, mut access_unit_rx) = async_mpsc::channel(2);
     let reader_stop = Arc::clone(&stop);
     tokio::task::spawn_blocking(move || {
         let mut stream = stream;
+        let mut access_unit = Vec::new();
         while !reader_stop.load(Ordering::Acquire) {
             let packet = match stream.next_rtp_packet() {
                 Ok(packet) => packet,
                 Err(_) => break,
             };
-            if packet_tx.blocking_send(packet).is_err() {
-                break;
+            let marker = packet.get(1).is_some_and(|byte| byte & 0x80 != 0);
+            access_unit.push(packet);
+            if marker {
+                let complete = std::mem::take(&mut access_unit);
+                match access_unit_tx.try_send(complete) {
+                    Ok(()) | Err(async_mpsc::error::TrySendError::Full(_)) => {}
+                    Err(async_mpsc::error::TrySendError::Closed(_)) => break,
+                }
             }
         }
     });
 
     let mut started = false;
-    while let Some(raw) = packet_rx.recv().await {
+    while let Some(access_unit) = access_unit_rx.recv().await {
         if stop.load(Ordering::Acquire) {
             break;
         }
-        let mut raw = &raw[..];
-        let packet = Packet::unmarshal(&mut raw).map_err(|error| format!("RTP packet: {error}"))?;
-        if !started {
-            if !is_idr_start(&packet.payload) {
-                continue;
+        for raw in access_unit {
+            let mut raw = &raw[..];
+            let packet = Packet::unmarshal(&mut raw).map_err(|error| format!("RTP packet: {error}"))?;
+            if !started {
+                if !is_idr_start(&packet.payload) {
+                    continue;
+                }
+                for (sequence_offset, parameter_set) in [(2, &sps), (1, &pps)] {
+                    let mut configuration = packet.clone();
+                    configuration.header.marker = false;
+                    configuration.header.sequence_number = packet
+                        .header
+                        .sequence_number
+                        .wrapping_sub(sequence_offset);
+                    configuration.payload = parameter_set.clone().into();
+                    track
+                        .write_rtp(&configuration)
+                        .await
+                        .map_err(|error| format!("WebRTC H.264 configuration: {error}"))?;
+                }
+                started = true;
             }
-            for (sequence_offset, parameter_set) in [(2, &sps), (1, &pps)] {
-                let mut configuration = packet.clone();
-                configuration.header.marker = false;
-                configuration.header.sequence_number = packet
-                    .header
-                    .sequence_number
-                    .wrapping_sub(sequence_offset);
-                configuration.payload = parameter_set.clone().into();
-                track
-                    .write_rtp(&configuration)
-                    .await
-                    .map_err(|error| format!("WebRTC H.264 configuration: {error}"))?;
-            }
-            started = true;
+            track
+                .write_rtp(&packet)
+                .await
+                .map_err(|error| format!("WebRTC RTP: {error}"))?;
         }
-        track
-            .write_rtp(&packet)
-            .await
-            .map_err(|error| format!("WebRTC RTP: {error}"))?;
     }
+    rtcp_task.abort();
     peer.close()
         .await
         .map_err(|error| format!("WebRTC close: {error}"))?;
