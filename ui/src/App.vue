@@ -215,6 +215,8 @@ type CameraWebRtcAnswer = {
   sdp: string
 }
 
+type CameraTransport = 'webrtc' | 'mjpeg'
+
 interface MaterialSlot {
   slot: string
   status: string
@@ -315,6 +317,8 @@ const confirming = ref(false)
 const cameraUrl = ref<string>()
 const cameraPeer = shallowRef<RTCPeerConnection>()
 const cameraMediaStream = shallowRef<MediaStream>()
+const cameraVideo = ref<HTMLVideoElement>()
+const cameraTransport = ref<CameraTransport>()
 const cameraLoading = ref(false)
 const cameraError = ref<string>()
 let monitorUnlisten: UnlistenFn | undefined
@@ -467,6 +471,10 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
 })
 const cameraOnline = computed(() => Boolean(cameraPeer.value || cameraUrl.value))
 const cameraSupported = computed(() => Boolean(capabilities.value?.cameraStream || capabilities.value?.cameraSnapshot))
+
+watchEffect(() => {
+  if (cameraVideo.value) cameraVideo.value.srcObject = cameraMediaStream.value ?? null
+})
 
 const fleetStats = computed(() => [
   { label: t('printersView.totalPrinters'), value: printers.value.length, tone: 'text-gray-900 dark:text-white' },
@@ -1120,9 +1128,11 @@ async function refreshCamera() {
         })
         await peer.setRemoteDescription(answer)
         cameraPeer.value = peer
+        cameraTransport.value = 'webrtc'
       } catch {
         await stopCamera()
         cameraUrl.value = (await invoke<CameraStream>('printer_camera_stream', { name: printerName })).url
+        cameraTransport.value = 'mjpeg'
       }
     } else if (capabilities.value?.cameraSnapshot) {
       cameraUrl.value = (await invoke<CameraSnapshot>('printer_camera_snapshot', { name: activePrinter.value.name })).dataUrl
@@ -1155,6 +1165,7 @@ async function stopCamera() {
   cameraMediaStream.value?.getTracks().forEach((track) => track.stop())
   cameraMediaStream.value = undefined
   cameraUrl.value = undefined
+  cameraTransport.value = undefined
 }
 
 async function saveSnapshot() {
@@ -1510,7 +1521,7 @@ onUnmounted(() => {
                       ? 'bg-green-100 fill-green-500 text-green-700 dark:bg-green-400/10 dark:fill-green-400 dark:text-green-400'
                       : 'bg-yellow-100 fill-yellow-500 text-yellow-800 dark:bg-yellow-400/10 dark:fill-yellow-400 dark:text-yellow-500'"
                   >
-                    <svg class="size-1.5" viewBox="0 0 6 6" aria-hidden="true"><circle cx="3" cy="3" r="3" /></svg>{{ cameraOnline ? t('camera.live') : t('status.offlineLabel') }}
+                    <svg class="size-1.5" viewBox="0 0 6 6" aria-hidden="true"><circle cx="3" cy="3" r="3" /></svg>{{ cameraOnline ? t('camera.live') : t('status.offlineLabel') }}<span v-if="cameraOnline && cameraTransport" class="ml-1 opacity-75">({{ cameraTransport.toUpperCase() }})</span>
                   </span>
                 </template>
                 <IconButton :title="t('camera.refresh')" :aria-label="t('camera.refresh')" :disabled="cameraLoading || !cameraSupported" @click="refreshCamera"><PhArrowsClockwise class="size-4" /></IconButton>
@@ -1522,7 +1533,7 @@ onUnmounted(() => {
                 class="relative min-h-60 overflow-hidden sm:min-h-77.5"
                 :class="cameraOnline ? 'bg-black' : 'grid place-items-center bg-gray-100 dark:bg-gray-800'"
               >
-                <video v-if="cameraPeer" :srcObject="cameraMediaStream" :aria-label="t('camera.title')" class="absolute inset-0 size-full object-contain" autoplay muted playsinline />
+                <video v-if="cameraPeer" ref="cameraVideo" :aria-label="t('camera.title')" class="absolute inset-0 size-full object-contain" autoplay muted playsinline />
                 <img v-else-if="cameraUrl" :src="cameraUrl" :alt="t('camera.title')" width="1280" height="720" class="absolute inset-0 size-full object-contain" @error="cameraUrl = undefined" />
                 <div v-else class="relative z-10 text-center">
                   <PhWarning class="mx-auto size-8 text-yellow-600 dark:text-yellow-400" />
