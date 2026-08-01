@@ -66,13 +66,16 @@ pub fn start(
                 return;
             }
         };
+        let failure_tx = answer_tx.clone();
         let result = runtime.block_on(serve(
             stream,
             offer_sdp,
             Arc::clone(&thread_stop),
             answer_tx,
         ));
-        let _ = result;
+        if let Err(error) = result {
+            let _ = failure_tx.send(Err(error));
+        }
     });
 
     let answer = answer_rx
