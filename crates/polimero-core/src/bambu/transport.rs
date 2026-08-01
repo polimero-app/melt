@@ -1,10 +1,10 @@
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     fs::{self, File},
     io::{self, Read, Write},
     net::{SocketAddr, TcpStream, ToSocketAddrs},
     path::Path,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{Arc, LazyLock, Mutex, atomic::{AtomicU64, Ordering}},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -20,6 +20,7 @@ use openssl::ssl::{
     SslConnector, SslMethod, SslSession, SslSessionRef, SslStream, SslVerifyMode, SslVersion,
 };
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rfc3339};
 
@@ -38,6 +39,8 @@ const MAX_LIST_ENTRIES: usize = 50_000;
 const PUSHALL_INTERVAL: Duration = Duration::from_secs(3);
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static MQTT_SESSIONS: LazyLock<Mutex<HashMap<String, Arc<Mutex<Option<PersistentConnection>>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -701,6 +704,19 @@ impl Client {
     ) -> Result<T, Error> {
         let access_code = valid_access_code(access_code)?;
         validate_pin(&self.profile, fingerprint)?;
+        let session = shared_mqtt_session(&self.profile, access_code, fingerprint);
+        let mut cached = session.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(PersistentConnection(mqtt)) = cached.as_mut() {
+            mqtt.deadline = deadline_after(self.profile.timeout())?;
+            return match operation(mqtt) {
+                Ok(result) => Ok(result),
+                Err(error) => {
+                    *cached = None;
+                    Err(error)
+                }
+            };
+        }
+
         let deadline = deadline_after(self.profile.timeout())?;
         let connector = tls_connector()?;
         let (stream, _) = open_tls(
@@ -717,9 +733,39 @@ impl Client {
             return Err(error);
         }
         let result = operation(&mut mqtt);
-        mqtt.disconnect();
-        result
+        match result {
+            Ok(result) => {
+                *cached = Some(PersistentConnection(mqtt));
+                Ok(result)
+            }
+            Err(error) => {
+                mqtt.disconnect();
+                Err(error)
+            }
+        }
     }
+}
+
+fn shared_mqtt_session(
+    profile: &Profile,
+    access_code: &str,
+    fingerprint: Option<&str>,
+) -> Arc<Mutex<Option<PersistentConnection>>> {
+    let access_digest = Sha256::digest(access_code.as_bytes());
+    let key = format!(
+        "{}|{}|{}|{:x}",
+        profile.host(),
+        profile.serial(),
+        fingerprint.unwrap_or("insecure"),
+        access_digest,
+    );
+    let mut sessions = MQTT_SESSIONS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    sessions
+        .entry(key)
+        .or_insert_with(|| Arc::new(Mutex::new(None)))
+        .clone()
 }
 
 fn validate_pin(profile: &Profile, fingerprint: Option<&str>) -> Result<(), Error> {
