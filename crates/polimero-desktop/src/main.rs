@@ -34,7 +34,7 @@ fn app_info() -> AppInfo {
 
 /// Errors cross the IPC boundary as stable codes so the interface can render
 /// them in the user's language instead of English strings built in Rust.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CommandError {
     code: &'static str,
@@ -251,7 +251,7 @@ struct CameraStream {
     url: String,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MonitorEntry {
     name: String,
@@ -810,14 +810,19 @@ fn load_status_cache_from(dir: &std::path::Path) -> Option<serde_json::Value> {
 
 fn start_monitor_worker(app: tauri::AppHandle, state: MonitorState) {
     thread::spawn(move || {
+        let mut previous_entries: Option<Vec<MonitorEntry>> = None;
         loop {
+            let cycle_started = Instant::now();
             if let Ok(entries) = collect_monitored_printers(&state) {
-                use tauri::Emitter;
-                save_status_cache(&entries);
-                let _ = app.emit("monitoring-updated", entries);
-                emit_status_notifications(&app, &state);
+                if previous_entries.as_ref() != Some(&entries) {
+                    use tauri::Emitter;
+                    save_status_cache(&entries);
+                    let _ = app.emit("monitoring-updated", entries.clone());
+                    emit_status_notifications(&app, &state);
+                    previous_entries = Some(entries);
+                }
             }
-            thread::sleep(Duration::from_secs(5));
+            thread::sleep(Duration::from_secs(5).saturating_sub(cycle_started.elapsed()));
         }
     });
 }
