@@ -32,6 +32,3 @@ png.workspace = true
 euc = "0.5"
 vek = "0.14"
 sha2.workspace = true
-
-[target.'cfg(target_os = "linux")'.dependencies]
-webkit2gtk = { version = "2", features = ["v2_40"] }

@@ -4,7 +4,7 @@ use std::{
     net::{TcpListener, TcpStream},
     sync::{
         Arc, Condvar, LazyLock, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -30,9 +30,6 @@ use tauri_plugin_notification::NotificationExt;
 
 mod preview;
 mod webrtc_camera;
-
-#[cfg(target_os = "linux")]
-static WEBRTC_SETTINGS_APPLIED: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command(async)]
 fn app_info() -> AppInfo {
@@ -2331,22 +2328,6 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .on_page_load(|webview, payload| {
-            #[cfg(target_os = "linux")]
-            if payload.event() == tauri::webview::PageLoadEvent::Finished
-                && !WEBRTC_SETTINGS_APPLIED.swap(true, Ordering::AcqRel)
-            {
-                let _ = webview.with_webview(|webview| {
-                    use webkit2gtk::{SettingsExt, WebViewExt};
-
-                    if let Some(settings) = webview.inner().settings() {
-                        settings.set_enable_webrtc(true);
-                        settings.set_enable_media_stream(true);
-                        webview.inner().reload();
-                    }
-                });
-            }
-        })
         .manage(MonitorState::default())
         .manage(CameraWebRtcState::default())
         .manage(PreviewState::default())

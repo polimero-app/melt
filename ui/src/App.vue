@@ -1126,7 +1126,7 @@ async function refreshCamera() {
       let peer: RTCPeerConnection | undefined
       try {
         const PeerConnection = window.RTCPeerConnection
-        if (!PeerConnection) throw new Error('WebRTC is disabled in the embedded webview')
+        if (!PeerConnection) throw new Error('WebRTC is unavailable in the embedded webview')
         peer = new PeerConnection({ iceServers: [] })
         peer.addTransceiver('video', { direction: 'recvonly' })
         const track = waitForVideoTrack(peer)

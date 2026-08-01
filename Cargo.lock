@@ -3524,7 +3524,6 @@ dependencies = [
  "time",
  "tokio",
  "vek",
- "webkit2gtk",
  "webrtc",
  "zip",
 ]
