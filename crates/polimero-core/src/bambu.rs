@@ -20,7 +20,7 @@ mod transport;
 
 pub use discovery::{DiscoveredPrinter, DiscoveryError, discover};
 pub use rtsp::H264Stream;
-pub use transport::{Client, Error as TransportError, JobStartOptions, PersistentConnection};
+pub use transport::{Client, Error as TransportError, JobStartOptions};
 
 pub const MQTT_PORT: u16 = 8883;
 pub const MQTT_USERNAME: &str = "bblp";

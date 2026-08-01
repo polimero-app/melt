@@ -50,3 +50,9 @@ diagnostics report. Release tags run native installer builds for the required
 OS/architecture matrix and require frozen release evidence. See
 [`docs/release-qualification.md`](docs/release-qualification.md) for the
 automated gate and the external/manual evidence that it cannot replace.
+
+The desktop reuses one profile-aware connection session per printer for status
+and controls. Moonraker shares its HTTP connection pool; Bambu serializes status
+and commands over one authenticated MQTT session. Endpoint, TLS, credential, or
+timeout changes replace the session immediately, and removing a profile evicts
+it. One-shot CLI operations keep their short-lived connection behavior.

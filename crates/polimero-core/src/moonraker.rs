@@ -79,6 +79,10 @@ impl Profile {
         &self.base_url
     }
 
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
     pub fn with_tracer(mut self, tracer: SharedTracer) -> Self {
         self.tracer = Some(tracer);
         self
@@ -173,6 +177,14 @@ impl Client {
     }
 
     pub fn status(&self, access_code: Option<&str>) -> Result<Status, Error> {
+        self.status_with_timeout(access_code, self.profile.timeout)
+    }
+
+    pub fn status_with_timeout(
+        &self,
+        access_code: Option<&str>,
+        timeout: Duration,
+    ) -> Result<Status, Error> {
         let query = [
             ("webhooks", String::new()),
             ("print_stats", String::new()),
@@ -181,12 +193,13 @@ impl Client {
             ("heater_bed", String::new()),
             ("fan", String::new()),
         ];
-        let response = self.response(
+        let response = self.response_with_timeout(
             &self.http,
             Method::GET,
             "printer/objects/query",
             &query,
             access_code,
+            Some(timeout),
         )?;
         let body = read_response(response)?;
         let envelope: Envelope =
@@ -704,6 +717,18 @@ impl Client {
         query: &[(&str, String)],
         access_code: Option<&str>,
     ) -> Result<reqwest::blocking::Response, Error> {
+        self.response_with_timeout(http, method, endpoint, query, access_code, None)
+    }
+
+    fn response_with_timeout(
+        &self,
+        http: &HttpClient,
+        method: Method,
+        endpoint: &str,
+        query: &[(&str, String)],
+        access_code: Option<&str>,
+        timeout: Option<Duration>,
+    ) -> Result<reqwest::blocking::Response, Error> {
         let mut url = self.endpoint(endpoint);
         {
             let mut pairs = url.query_pairs_mut();
@@ -713,6 +738,9 @@ impl Client {
         }
         let label = format!("{method} {endpoint}");
         let mut request = http.request(method, url).header(ACCEPT, "application/json");
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
         if let Some(access_code) = access_code.filter(|value| !value.is_empty()) {
             let value = HeaderValue::from_str(access_code).map_err(|_| Error::InvalidAccessCode)?;
             request = request.header("X-Api-Key", value);

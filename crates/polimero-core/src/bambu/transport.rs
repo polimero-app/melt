@@ -1,10 +1,13 @@
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, VecDeque},
     fs::{self, File},
     io::{self, Read, Write},
     net::{SocketAddr, TcpStream, ToSocketAddrs},
     path::Path,
-    sync::{Arc, LazyLock, Mutex, atomic::{AtomicU64, Ordering}},
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -20,7 +23,6 @@ use openssl::ssl::{
     SslConnector, SslMethod, SslSession, SslSessionRef, SslStream, SslVerifyMode, SslVersion,
 };
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rfc3339};
 
@@ -39,9 +41,6 @@ const MAX_LIST_ENTRIES: usize = 50_000;
 const PUSHALL_INTERVAL: Duration = Duration::from_secs(3);
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-static MQTT_SESSIONS: LazyLock<Mutex<HashMap<String, Arc<Mutex<Option<PersistentConnection>>>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Bambu access code is required")]
@@ -93,14 +92,17 @@ pub struct JobStartOptions {
 }
 
 /// Authenticated Bambu LAN operations for one validated profile.
-#[derive(Clone, Debug)]
 pub struct Client {
     profile: Profile,
+    mqtt: Mutex<Option<PersistentConnection>>,
 }
 
 impl Client {
     pub fn new(profile: Profile) -> Self {
-        Self { profile }
+        Self {
+            profile,
+            mqtt: Mutex::new(None),
+        }
     }
 
     /// Performs a TLS and MQTT authentication exchange before a profile is saved.
@@ -161,18 +163,20 @@ impl Client {
     /// its next poll.
     pub fn poll_status(
         &self,
-        cached: &mut Option<PersistentConnection>,
         access_code: Option<&str>,
         fingerprint: Option<&str>,
+        timeout: Duration,
     ) -> Result<Status, Error> {
         let started = Instant::now();
         let access_code = valid_access_code(access_code)?;
         validate_pin(&self.profile, fingerprint)?;
         let payload = pushall_payload(next_sequence());
         let label = format!("poll {}", self.profile.mqtt_topics().request);
+        let mut cached = self.mqtt.lock().unwrap_or_else(|error| error.into_inner());
+        self.trace(TraceEvent::request("mqtt", label.as_str()).with_bytes(payload.len() as u64));
 
-        if let Some(PersistentConnection(mqtt)) = cached {
-            mqtt.deadline = deadline_after(self.profile.timeout())?;
+        if let Some(PersistentConnection(mqtt)) = cached.as_mut() {
+            mqtt.deadline = deadline_after(timeout)?;
             match mqtt.exchange(payload.clone(), is_full_report) {
                 Ok(report) => {
                     self.trace(
@@ -187,8 +191,7 @@ impl Client {
             }
         }
 
-        self.trace(TraceEvent::request("mqtt", label.as_str()).with_bytes(payload.len() as u64));
-        let deadline = deadline_after(self.profile.timeout())?;
+        let deadline = deadline_after(timeout)?;
         let connector = tls_connector()?;
         let (stream, _) = open_tls(
             &connector,
@@ -704,8 +707,7 @@ impl Client {
     ) -> Result<T, Error> {
         let access_code = valid_access_code(access_code)?;
         validate_pin(&self.profile, fingerprint)?;
-        let session = shared_mqtt_session(&self.profile, access_code, fingerprint);
-        let mut cached = session.lock().unwrap_or_else(|error| error.into_inner());
+        let mut cached = self.mqtt.lock().unwrap_or_else(|error| error.into_inner());
         if let Some(PersistentConnection(mqtt)) = cached.as_mut() {
             mqtt.deadline = deadline_after(self.profile.timeout())?;
             return match operation(mqtt) {
@@ -744,28 +746,6 @@ impl Client {
             }
         }
     }
-}
-
-fn shared_mqtt_session(
-    profile: &Profile,
-    access_code: &str,
-    fingerprint: Option<&str>,
-) -> Arc<Mutex<Option<PersistentConnection>>> {
-    let access_digest = Sha256::digest(access_code.as_bytes());
-    let key = format!(
-        "{}|{}|{}|{:x}",
-        profile.host(),
-        profile.serial(),
-        fingerprint.unwrap_or("insecure"),
-        access_digest,
-    );
-    let mut sessions = MQTT_SESSIONS
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    sessions
-        .entry(key)
-        .or_insert_with(|| Arc::new(Mutex::new(None)))
-        .clone()
 }
 
 fn validate_pin(profile: &Profile, fingerprint: Option<&str>) -> Result<(), Error> {
@@ -937,7 +917,7 @@ fn is_timeout(error: &io::Error) -> bool {
 /// An authenticated, subscribed MQTT session kept alive across polls by a
 /// caller (see [`Client::poll_status`]) instead of reconnecting each time.
 /// Opaque outside this module: callers only ever pass it back in unchanged.
-pub struct PersistentConnection(MqttConnection);
+struct PersistentConnection(MqttConnection);
 
 struct MqttConnection {
     stream: SslStream<TcpStream>,
@@ -2683,20 +2663,82 @@ mod tests {
         let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
         mqtt.connect("access-code").unwrap();
         mqtt.subscribe().unwrap();
-        let mut cached = Some(PersistentConnection(mqtt));
-
         let client = Client::new(profile);
+        *client.mqtt.lock().unwrap() = Some(PersistentConnection(mqtt));
         let first = client
-            .poll_status(&mut cached, Some("access-code"), None)
+            .poll_status(Some("access-code"), None, Duration::from_secs(2))
             .unwrap();
-        assert!(cached.is_some(), "a successful poll keeps the session cached");
+        assert!(
+            client.mqtt.lock().unwrap().is_some(),
+            "a successful poll keeps the session cached"
+        );
         let second = client
-            .poll_status(&mut cached, Some("access-code"), None)
+            .poll_status(Some("access-code"), None, Duration::from_secs(2))
             .unwrap();
 
         server.join().unwrap();
         assert_eq!(first.state, PrinterState::Idle);
         assert_eq!(second.state, PrinterState::Idle);
+    }
+
+    #[test]
+    fn commands_reuse_a_cached_session_with_sequence_correlated_reports() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let host = address.ip().to_string();
+        let port = address.port();
+        let acceptor = test_acceptor();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            let connect = read_test_packet(&mut stream);
+            assert_eq!(connect.kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+
+            for _ in 0..2 {
+                let command = read_test_packet(&mut stream);
+                let command = mqtt_publish_payload(command.kind, &command.payload).unwrap();
+                let sequence = payload_sequence_id(&command).unwrap();
+                let refresh = read_test_packet(&mut stream);
+                assert!(is_pushall_payload(
+                    &mqtt_publish_payload(refresh.kind, &refresh.payload).unwrap()
+                ));
+
+                for report in [
+                    json!({"print": {"sequence_id": sequence, "result": "success"}}),
+                    json!({"print": {"gcode_state": "IDLE", "mc_percent": 0}}),
+                ] {
+                    let mut payload = Vec::new();
+                    mqtt_string(&mut payload, "device/SN001/report").unwrap();
+                    payload.extend_from_slice(report.to_string().as_bytes());
+                    let mut packet = vec![0x30];
+                    mqtt_remaining_length(&mut packet, payload.len()).unwrap();
+                    packet.extend_from_slice(&payload);
+                    stream.write_all(&packet).unwrap();
+                }
+                stream.flush().unwrap();
+            }
+        });
+
+        let profile = Profile::with_timeout(host, "SN001", true, Duration::from_secs(2)).unwrap();
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) = open_tls(&connector, &profile, port, None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+        mqtt.subscribe().unwrap();
+        let client = Client::new(profile);
+        *client.mqtt.lock().unwrap() = Some(PersistentConnection(mqtt));
+
+        client.emergency_stop(Some("access-code"), None).unwrap();
+        client.emergency_stop(Some("access-code"), None).unwrap();
+
+        server.join().unwrap();
+        assert!(client.mqtt.lock().unwrap().is_some());
     }
 
     fn mqtt_server() -> (String, u16, mpsc::Receiver<String>, thread::JoinHandle<()>) {

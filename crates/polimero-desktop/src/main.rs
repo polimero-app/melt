@@ -964,7 +964,7 @@ fn cached_monitor_entry(state: &MonitorState, name: String, profile: Profile) ->
 
 fn monitor_printer(pool: &ConnectionPool, name: String, profile: Profile) -> MonitorEntry {
     let driver = profile.driver.clone();
-    let driver_profile = match drivers::profile_for_status(&profile) {
+    let driver_profile = match drivers::profile(&profile) {
         Ok(profile) => profile,
         Err(_) => {
             return MonitorEntry {
@@ -1242,7 +1242,8 @@ fn print_library_file(
         &[moonraker::PrinterState::Idle],
         Operation::JobStart,
     )?;
-    let result = drivers::job_start(
+    let result = state.pool.job_start(
+        &request.printer,
         &printer.driver,
         printer.access_code.as_deref(),
         printer.tls_fingerprint.as_deref(),
@@ -1288,7 +1289,8 @@ fn printer_job_action(
                 .as_deref()
                 .filter(|path| !path.is_empty())
                 .ok_or_else(|| CommandError::new("jobFileMissing"))?;
-            drivers::job_start(
+            state.pool.job_start(
+                &request.name,
                 &printer.driver,
                 printer.access_code.as_deref(),
                 printer.tls_fingerprint.as_deref(),
@@ -1296,17 +1298,20 @@ fn printer_job_action(
                 polimero_core::bambu::JobStartOptions::default(),
             )
         }
-        "pause" => drivers::job_pause(
+        "pause" => state.pool.job_pause(
+            &request.name,
             &printer.driver,
             printer.access_code.as_deref(),
             printer.tls_fingerprint.as_deref(),
         ),
-        "resume" => drivers::job_resume(
+        "resume" => state.pool.job_resume(
+            &request.name,
             &printer.driver,
             printer.access_code.as_deref(),
             printer.tls_fingerprint.as_deref(),
         ),
-        "cancel" => drivers::job_cancel(
+        "cancel" => state.pool.job_cancel(
+            &request.name,
             &printer.driver,
             printer.access_code.as_deref(),
             printer.tls_fingerprint.as_deref(),
@@ -1341,7 +1346,8 @@ fn printer_temperature_set(
         &[moonraker::PrinterState::Idle],
         Operation::TemperatureSet,
     )?;
-    let result = drivers::temperature_set(
+    let result = state.pool.temperature_set(
+        &request.name,
         &printer.driver,
         printer.access_code.as_deref(),
         printer.tls_fingerprint.as_deref(),
@@ -1369,7 +1375,8 @@ fn printer_fan_set(
         ],
         Operation::FanSet,
     )?;
-    let result = drivers::fan_set(
+    let result = state.pool.fan_set(
+        &request.name,
         &printer.driver,
         printer.access_code.as_deref(),
         printer.tls_fingerprint.as_deref(),
@@ -1393,7 +1400,8 @@ fn printer_motion_home(
         &[moonraker::PrinterState::Idle],
         Operation::MotionHome,
     )?;
-    let result = drivers::motion_home(
+    let result = state.pool.motion_home(
+        &name,
         &printer.driver,
         printer.access_code.as_deref(),
         printer.tls_fingerprint.as_deref(),
@@ -1422,7 +1430,8 @@ fn printer_motion_jog(
         &[moonraker::PrinterState::Idle],
         Operation::MotionJog,
     )?;
-    let result = drivers::motion_jog(
+    let result = state.pool.motion_jog(
+        &request.name,
         &printer.driver,
         printer.access_code.as_deref(),
         printer.tls_fingerprint.as_deref(),
@@ -1460,7 +1469,8 @@ fn printer_light_set(
     } else {
         moonraker::LightState::Off
     };
-    let result = drivers::light_set(
+    let result = state.pool.light_set(
+        &request.name,
         &printer.driver,
         printer.access_code.as_deref(),
         printer.tls_fingerprint.as_deref(),
@@ -1487,7 +1497,8 @@ fn printer_speed_set(
         ],
         Operation::SpeedSet,
     )?;
-    let result = drivers::speed_set(
+    let result = state.pool.speed_set(
+        &request.name,
         &printer.driver,
         printer.access_code.as_deref(),
         printer.tls_fingerprint.as_deref(),
@@ -1957,7 +1968,8 @@ fn printer_emergency_stop(
     state: tauri::State<'_, MonitorState>,
 ) -> Result<(), CommandError> {
     let printer = desktop_printer(&name, Operation::EmergencyStop)?;
-    let result = drivers::emergency_stop(
+    let result = state.pool.emergency_stop(
+        &name,
         &printer.driver,
         printer.access_code.as_deref(),
         printer.tls_fingerprint.as_deref(),
