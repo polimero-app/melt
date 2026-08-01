@@ -2,7 +2,7 @@
   "ok": false,
   "data": null,
   "error": {
-    "code": "config-error",
+    "code": "config_error",
     "message": "invalid --format \"h264\": must be \"mjpeg\" or omitted",
     "details": {}
   },

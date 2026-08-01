@@ -91,7 +91,7 @@ pub fn refresh_tls(
         match store.delete(SERVICE, &fingerprint_account) {
             Ok(()) | Err(SecretError::NotFound) => {}
             Err(_) => warnings.push(RemoveWarning {
-                code: "tls-fingerprint-delete-failed",
+                code: "tls_fingerprint_delete_failed",
                 message: "profile was switched to insecure, but the stored TLS fingerprint could not be deleted from keychain",
             }),
         }
@@ -309,13 +309,13 @@ pub fn remove(
     let mut warnings = Vec::new();
     if !secrets[0].present() {
         warnings.push(RemoveWarning {
-            code: "access-code-not-found",
+            code: "access_code_not_found",
             message: "profile was removed, but no stored access code was found",
         });
     }
     if !profile.insecure && profile.driver == "bambu-lan" && !secrets[1].present() {
         warnings.push(RemoveWarning {
-            code: "tls-fingerprint-not-found",
+            code: "tls_fingerprint_not_found",
             message: "profile was removed, but no stored TLS fingerprint was found",
         });
     }

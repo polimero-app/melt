@@ -8,7 +8,9 @@ pub mod keychain;
 pub mod monitor;
 pub mod moonraker;
 pub mod pool;
+pub mod preferences;
 pub mod profiles;
+pub mod trace;
 
 use serde::Serialize;
 use thiserror::Error;
@@ -27,7 +29,7 @@ impl AppError {
     pub fn usage(message: impl Into<String>) -> Self {
         Self {
             exit_code: 2,
-            code: "config-error",
+            code: "config_error",
             message: message.into(),
         }
     }
@@ -58,6 +60,6 @@ mod tests {
 
     #[test]
     fn usage_errors_keep_the_cli_contract_code() {
-        assert_eq!(AppError::usage("bad input").code, "config-error");
+        assert_eq!(AppError::usage("bad input").code, "config_error");
     }
 }

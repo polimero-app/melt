@@ -69,6 +69,25 @@ mod tests {
         );
     }
 
+    // `keyring` silently compiles an in-memory mock store when no platform
+    // backend feature is enabled: every write appears to succeed and every
+    // secret is lost when the process exits. Guard the manifest so a dropped
+    // feature cannot quietly take the credential store away again.
+    #[test]
+    fn keyring_enables_a_real_platform_backend_on_every_target() {
+        let manifest = include_str!("../../../Cargo.toml");
+        let entry = manifest
+            .lines()
+            .find(|line| line.starts_with("keyring "))
+            .expect("workspace manifest pins keyring");
+        for feature in ["apple-native", "windows-native", "sync-secret-service"] {
+            assert!(
+                entry.contains(feature),
+                "keyring must enable {feature:?} or secrets fall back to the mock store: {entry}"
+            );
+        }
+    }
+
     #[test]
     fn missing_secret_has_a_distinct_recovery_error() {
         assert_eq!(

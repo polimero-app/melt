@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watchEffect, type Component } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, watchEffect, type Component } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog'
 import { locales, preferredLocale, translate, type Locale, type MessageKey } from './i18n'
 import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
@@ -10,10 +12,11 @@ import IconButton from './components/IconButton.vue'
 import Switch from './components/Switch.vue'
 import Card from './components/Card.vue'
 import CardHeader from './components/CardHeader.vue'
+import ModelThumbnail from './components/ModelThumbnail.vue'
 import {
   PhArrowsClockwise,
   PhArrowsOutCardinal,
-  PhBellRinging,
+  PhArrowUp,
   PhBroadcast,
   PhCamera,
   PhCards,
@@ -24,10 +27,13 @@ import {
   PhCornersOut,
   PhCube,
   PhDesktop,
+  PhDownloadSimple,
   PhDrop,
   PhFan,
   PhFile,
   PhFolder,
+  PhFolderOpen,
+  PhBellRinging,
   PhGearSix,
   PhHexagon,
   PhHouse,
@@ -44,6 +50,7 @@ import {
   PhSun,
   PhThermometerSimple,
   PhTrash,
+  PhUploadSimple,
   PhVideoCamera,
   PhWarning,
   PhWifiHigh,
@@ -54,7 +61,7 @@ import {
 } from '@phosphor-icons/vue'
 
 type View = 'control' | 'printers' | 'settings' | 'files'
-type PrinterBadge = 'idle' | 'busy' | 'offline'
+type PrinterBadge = 'idle' | 'busy' | 'offline' | 'unknown'
 type ModelTone = 'cyan' | 'amber' | 'rose' | 'violet'
 
 type AppInfo = {
@@ -66,6 +73,17 @@ type Printer = {
   name: string
   driver: string
   host: string
+  serial: string
+  timeout: string
+  insecure: boolean
+}
+
+// Commands reject with a stable code so the message can be localized here
+// instead of arriving as English prose from the backend.
+type CommandError = {
+  code: string
+  operation?: string
+  state?: string
 }
 
 type Driver = {
@@ -73,20 +91,18 @@ type Driver = {
   description: string
 }
 
-type NewPrinter = Printer & {
-  serial: string
-  timeout: string
-  insecure: boolean
-}
-
 type Capabilities = {
   status: boolean
+  temperatureRead: boolean
+  lightControl: boolean
+  speedControl: boolean
   discovery: boolean
   cameraStream: boolean
   cameraSnapshot: boolean
   fileList: boolean
   fileDownload: boolean
   fileUpload: boolean
+  fileDelete: boolean
   jobStart: boolean
   jobPause: boolean
   jobResume: boolean
@@ -111,6 +127,21 @@ type Temperature = {
   targetCelsius?: number
 }
 
+type AmsTrayStatus = {
+  slot: number
+  filamentType?: string
+  color?: string
+  remainingPercent?: number
+}
+
+type AmsUnitStatus = {
+  id: number
+  humidityRange?: string
+  humidityLevel?: string
+  temperature?: number
+  trays: AmsTrayStatus[]
+}
+
 type PrinterStatus = {
   state: 'idle' | 'printing' | 'paused' | 'error' | 'unknown'
   temperatures?: { nozzle?: Temperature; bed?: Temperature; chamber?: Temperature }
@@ -119,14 +150,20 @@ type PrinterStatus = {
   errors: { code: string; message: string }[]
   warnings: { code: string; message: string }[]
   fans?: Record<string, number>
+  wifi?: { signalDbm: number }
+  lights?: Record<string, string>
+  extensions?: { 'bambu-lan'?: { ams?: { units: AmsUnitStatus[] } } }
 }
 
 type MonitorEntry = {
   name: string
   driver: string
   status?: PrinterStatus
-  error?: string
+  error?: CommandError
 }
+
+type NotificationEvent = { kind: 'completion' | 'failure' | 'disconnection'; printer: string }
+type TransferProgress = { transferId: string; bytesTransferred: number; totalBytes?: number; complete: boolean }
 
 type FileEntry = {
   name: string
@@ -139,6 +176,18 @@ type FileEntry = {
 }
 
 type FileList = {
+  entries: FileEntry[]
+}
+
+type LibraryBreadcrumb = {
+  name: string
+  path: string
+}
+
+type LibraryListResponse = {
+  path: string
+  parent?: string
+  breadcrumbs: LibraryBreadcrumb[]
   entries: FileEntry[]
 }
 
@@ -177,10 +226,29 @@ interface MaterialSystemView {
   slots: MaterialSlot[]
 }
 
+type NotificationSetting = {
+  id: 'completion' | 'failure' | 'disconnection'
+  label: MessageKey
+  description: MessageKey
+  enabled: boolean
+}
+
+type SlicerSetting = {
+  name: string
+  path: string
+  enabled: boolean
+}
+
+type BackendPreferences = {
+  notifications: Record<NotificationSetting['id'], boolean>
+  slicers: SlicerSetting[]
+}
+
 const statusDotClasses: Record<PrinterBadge, string> = {
   idle: 'bg-green-500 ring-green-500/10',
   busy: 'bg-yellow-500 ring-yellow-500/10',
   offline: 'bg-red-500 ring-red-500/10',
+  unknown: 'bg-gray-400 ring-gray-400/10',
 }
 
 const modelTones: Record<ModelTone, { preview: string; shape: string }> = {
@@ -213,6 +281,14 @@ const loading = ref(true)
 const refreshing = ref(false)
 const filesLoading = ref(false)
 const filesError = ref<string>()
+const libraryFiles = ref<FileEntry[]>([])
+const libraryFilesLoading = ref(false)
+const libraryFilesError = ref<string>()
+const libraryPath = ref<string>()
+const libraryParent = ref<string>()
+const libraryBreadcrumbs = ref<LibraryBreadcrumb[]>([])
+const printTarget = ref<FileEntry>()
+const printBusy = ref(false)
 const loadError = ref<string>()
 const profileError = ref<string>()
 const adding = ref(false)
@@ -229,10 +305,19 @@ const tlsPrinter = ref<string>()
 const diagnostics = ref<Diagnostics>()
 const diagnosticsError = ref<string>()
 const diagnosticsLoading = ref(false)
+const pendingConfirm = ref<{ title: string; description: string; confirm: string; run: () => Promise<void> }>()
+const confirming = ref(false)
 const cameraUrl = ref<string>()
 const cameraLoading = ref(false)
 const cameraError = ref<string>()
-let monitorTimer: number | undefined
+let monitorUnlisten: UnlistenFn | undefined
+let notificationUnlisten: UnlistenFn | undefined
+let transferUnlisten: UnlistenFn | undefined
+let fileQueryTimer: number | undefined
+let selectionRequest = 0
+let fileRequest = 0
+let libraryRequest = 0
+let toastTimer: number | undefined
 
 const activeView = ref<View>('control')
 const sectionTabs = computed<{ view: View; label: string; icon: Component }[]>(() => [
@@ -252,6 +337,7 @@ function handleSystemThemeChange(event: MediaQueryListEvent) {
 const isLightTheme = computed(() => theme.value === 'light' || (theme.value === 'system' && !systemPrefersDark.value))
 watchEffect(() => {
   document.documentElement.classList.toggle('dark', !isLightTheme.value)
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', isLightTheme.value ? '#f9fafb' : '#111827')
 })
 watchEffect(() => {
   localStorage.setItem('theme', theme.value)
@@ -265,15 +351,30 @@ function t(key: MessageKey, values?: Record<string, string | number>) {
 }
 const cameraStage = ref<HTMLElement>()
 const toast = ref('')
-const selectedFile = ref('')
-const currentDirectory = ref('/')
+const searchTerm = ref('')
 const stepSize = ref('1 mm')
 const feedRate = ref(50)
-const notifications = ref<{ label: MessageKey; description: MessageKey; enabled: boolean }[]>([
-  { label: 'settingsView.notifyComplete', description: 'settingsView.notifyCompleteDescription', enabled: true },
-  { label: 'settingsView.notifyFailure', description: 'settingsView.notifyFailureDescription', enabled: true },
-  { label: 'settingsView.notifyDisconnected', description: 'settingsView.notifyDisconnectedDescription', enabled: true },
-])
+const jogBusy = ref(false)
+const speedProfile = ref<'silent' | 'standard' | 'sport' | 'ludicrous'>('standard')
+const speedBusy = ref(false)
+const uploadBusy = ref(false)
+const downloadingPath = ref<string>()
+const downloadProgress = ref<number>()
+const defaultNotifications: NotificationSetting[] = [
+  { id: 'completion', label: 'settingsView.notifyComplete', description: 'settingsView.notifyCompleteDescription', enabled: true },
+  { id: 'failure', label: 'settingsView.notifyFailure', description: 'settingsView.notifyFailureDescription', enabled: true },
+  { id: 'disconnection', label: 'settingsView.notifyDisconnected', description: 'settingsView.notifyDisconnectedDescription', enabled: true },
+]
+const defaultSlicers: SlicerSetting[] = [
+  { name: 'Bambu Studio', path: '/usr/bin/bambustudio', enabled: true },
+  { name: 'Orca Slicer', path: '/usr/bin/orcaslicer', enabled: true },
+  { name: 'PrusaSlicer', path: '/usr/bin/prusa-slicer', enabled: false },
+]
+const notifications = ref<NotificationSetting[]>(defaultNotifications)
+const slicers = ref<SlicerSetting[]>(defaultSlicers)
+const slicerDraft = ref({ name: '', path: '' })
+const slicerBusy = ref(false)
+const slicerError = ref<string>()
 const draft = ref({
   name: '',
   driver: '',
@@ -291,16 +392,19 @@ const selectedStatus = computed(() => selectedMonitor.value?.status)
 
 function badgeFor(name: string): PrinterBadge {
   const entry = monitoring.value.find((candidate) => candidate.name === name)
-  if (!entry) return 'idle'
+  if (!entry) return 'unknown'
   if (entry.error || entry.status === undefined || ['error', 'unknown'].includes(entry.status.state)) return 'offline'
   return ['printing', 'paused'].includes(entry.status.state) ? 'busy' : 'idle'
 }
 
-const activeBadge = computed(() => (activePrinter.value ? badgeFor(activePrinter.value.name) : 'offline'))
+const activeBadge = computed<PrinterBadge>(() => (activePrinter.value ? badgeFor(activePrinter.value.name) : 'offline'))
+const isReachable = (badge: PrinterBadge) => badge === 'idle' || badge === 'busy'
+const activeReachable = computed(() => isReachable(activeBadge.value))
 const badgeMessageKeys: Record<PrinterBadge, MessageKey> = {
   idle: 'status.onlineIdle',
   busy: 'status.onlineBusy',
   offline: 'status.offlineLabel',
+  unknown: 'status.unknownLabel',
 }
 const statusLabel = (badge: PrinterBadge) => t(badgeMessageKeys[badge])
 const progressPercent = computed(() => selectedStatus.value?.progress?.percent ?? 0)
@@ -326,34 +430,167 @@ const temperatureKeys: Record<'nozzle' | 'bed' | 'chamber', MessageKey> = {
   bed: 'dashboard.bed',
   chamber: 'control.chamber',
 }
-// The desktop backend does not report wifi signal or material trays yet; the
-// markup stays behind these guards for when a driver provides them.
-const wifiDbm = computed<number | undefined>(() => undefined)
-const materialSystems = computed<MaterialSystemView[]>(() => [])
+const wifiDbm = computed(() => selectedStatus.value?.wifi?.signalDbm)
+const lightRows = computed(() => Object.entries(selectedStatus.value?.lights ?? {}))
+const lightMessageKeys: Record<string, MessageKey> = {
+  chamber_light: 'control.chamberLight',
+  aux_light: 'control.auxLight',
+}
+const lightLabel = (key: string) => {
+  const messageKey = lightMessageKeys[key]
+  return messageKey ? t(messageKey) : key
+}
+// Only Bambu LAN reports AMS/external-spool data today; other drivers simply
+// omit `extensions['bambu-lan']`, so this stays empty for them.
+const materialSystems = computed<MaterialSystemView[]>(() => {
+  const units = selectedStatus.value?.extensions?.['bambu-lan']?.ams?.units ?? []
+  return units.map((unit) => ({
+    name: unit.id >= 254 ? t('materials.externalSpool') : `AMS ${unit.id}`,
+    temperature: unit.temperature,
+    humidity: unit.humidityLevel,
+    slots: unit.trays.map((tray) => ({
+      slot: unit.id >= 254 ? t('materials.slotExternal') : String(tray.slot + 1),
+      status: tray.filamentType ? t('materials.inUse') : t('materials.empty'),
+      type: tray.filamentType ?? '—',
+      name: tray.filamentType ?? '—',
+      color: tray.color ? `#${tray.color}` : '#9ca3af',
+      remainingPercent: tray.remainingPercent,
+    })),
+  }))
+})
 const cameraOnline = computed(() => Boolean(cameraUrl.value))
 const cameraSupported = computed(() => Boolean(capabilities.value?.cameraStream || capabilities.value?.cameraSnapshot))
 
 const fleetStats = computed(() => [
   { label: t('printersView.totalPrinters'), value: printers.value.length, tone: 'text-gray-900 dark:text-white' },
-  { label: t('printersView.online'), value: printers.value.filter((printer) => badgeFor(printer.name) !== 'offline').length, tone: 'text-green-600 dark:text-green-400' },
+  { label: t('printersView.online'), value: printers.value.filter((printer) => isReachable(badgeFor(printer.name))).length, tone: 'text-green-600 dark:text-green-400' },
   { label: t('printersView.printingNow'), value: printers.value.filter((printer) => badgeFor(printer.name) === 'busy').length, tone: 'text-yellow-600 dark:text-yellow-400' },
 ])
 
 function message(reason: unknown) {
-  return reason instanceof Error ? reason.message : String(reason)
+  const error = reason as CommandError | null
+  if (!error || typeof error !== 'object' || typeof error.code !== 'string') {
+    return reason instanceof Error ? reason.message : String(reason)
+  }
+  return t(`errors.${error.code}` as MessageKey, {
+    operation: t(`operations.${error.operation ?? 'operation'}` as MessageKey),
+    state: t(`printerState.${error.state ?? 'unknown'}` as MessageKey),
+  })
+}
+
+function askConfirmation(
+  keys: { title: MessageKey; description: MessageKey; confirm: MessageKey },
+  values: Record<string, string>,
+  run: () => Promise<void>,
+) {
+  pendingConfirm.value = {
+    title: t(keys.title, values),
+    description: t(keys.description, values),
+    confirm: t(keys.confirm),
+    run,
+  }
+}
+
+async function runConfirmation() {
+  const pending = pendingConfirm.value
+  if (!pending || confirming.value) return
+  confirming.value = true
+  try {
+    await pending.run()
+    pendingConfirm.value = undefined
+  } finally {
+    confirming.value = false
+  }
 }
 
 function showToast(text: string) {
   toast.value = text
-  window.setTimeout(() => {
+  if (toastTimer !== undefined) window.clearTimeout(toastTimer)
+  toastTimer = window.setTimeout(() => {
     toast.value = ''
+    toastTimer = undefined
   }, 2200)
+}
+
+function applyPreferences(preferences: BackendPreferences) {
+  notifications.value = defaultNotifications.map((notification) => ({
+    ...notification,
+    enabled: preferences.notifications[notification.id],
+  }))
+  slicers.value = preferences.slicers
+}
+
+async function loadPreferences() {
+  try {
+    applyPreferences(await invoke<BackendPreferences>('get_preferences'))
+  } catch (reason) {
+    showToast(message(reason))
+  }
+}
+
+async function updateNotification(id: NotificationSetting['id'], enabled: boolean) {
+  const previous = notifications.value.map((notification) => ({ ...notification }))
+  const next = notifications.value.map((notification) => (notification.id === id ? { ...notification, enabled } : notification))
+  notifications.value = next
+  try {
+    const saved = await invoke<BackendPreferences['notifications']>('update_notification_preferences', {
+      request: Object.fromEntries(next.map((notification) => [notification.id, notification.enabled])),
+    })
+    notifications.value = notifications.value.map((notification) => ({ ...notification, enabled: saved[notification.id] }))
+  } catch (reason) {
+    notifications.value = previous
+    showToast(message(reason))
+  }
+}
+
+async function updateSlicerEnabled(name: string, enabled: boolean) {
+  const previous = slicers.value
+  slicers.value = slicers.value.map((slicer) => (slicer.name === name ? { ...slicer, enabled } : slicer))
+  try {
+    slicers.value = await invoke<SlicerSetting[]>('set_slicer_enabled', { request: { name, enabled } })
+  } catch (reason) {
+    slicers.value = previous
+    showToast(message(reason))
+  }
+}
+
+async function addSlicer() {
+  if (slicerBusy.value) return
+  slicerBusy.value = true
+  slicerError.value = undefined
+  try {
+    slicers.value = await invoke<SlicerSetting[]>('save_slicer', {
+      request: { name: slicerDraft.value.name.trim(), path: slicerDraft.value.path.trim(), enabled: true },
+    })
+    slicerDraft.value = { name: '', path: '' }
+  } catch (reason) {
+    slicerError.value = message(reason)
+  } finally {
+    slicerBusy.value = false
+  }
+}
+
+function removeSlicer(name: string) {
+  askConfirmation(
+    { title: 'settingsView.slicerRemoveTitle', description: 'settingsView.slicerRemoveDescription', confirm: 'settingsView.slicerRemoveConfirm' },
+    { name },
+    () => confirmRemoveSlicer(name),
+  )
+}
+
+async function confirmRemoveSlicer(name: string) {
+  try {
+    slicers.value = await invoke<SlicerSetting[]>('remove_slicer', { name })
+  } catch (reason) {
+    showToast(message(reason))
+  }
 }
 
 async function load() {
   loading.value = true
   loadError.value = undefined
   profileError.value = undefined
+  void loadPreferences()
 
   const [appInfo, profiles, availableDrivers] = await Promise.allSettled([
     invoke<AppInfo>('app_info'),
@@ -368,7 +605,10 @@ async function load() {
     printers.value = profiles.value
     const retained = profiles.value.find((printer) => printer.name === activePrinterId.value)
     const printer = retained ?? profiles.value[0]
-    if (printer) await selectPrinter(printer.name, false)
+    // Skip the blocking status refresh here: the background monitor worker
+    // (started with the app) polls all printers and emits `monitoring-updated`
+    // on its own, so we don't need to await the same slow probe twice.
+    if (printer) await selectPrinter(printer.name, false, false)
     else clearSelection()
   } else profileError.value = message(profiles.reason)
 
@@ -387,11 +627,17 @@ function clearSelection() {
   cameraError.value = undefined
 }
 
+// Refreshes only the active printer (every caller acts on it specifically),
+// not a full re-probe of every configured printer. Other printers' badges
+// stay fed by the periodic `monitoring-updated` broadcast.
 async function refreshMonitoring() {
-  if (refreshing.value || !printers.value.length) return
+  if (refreshing.value || !activePrinterId.value) return
   refreshing.value = true
   try {
-    monitoring.value = await invoke<MonitorEntry[]>('monitored_printers')
+    const entry = await invoke<MonitorEntry>('printer_status', { name: activePrinterId.value })
+    const index = monitoring.value.findIndex((candidate) => candidate.name === entry.name)
+    if (index === -1) monitoring.value.push(entry)
+    else monitoring.value.splice(index, 1, entry)
   } catch (reason) {
     showToast(message(reason))
   } finally {
@@ -402,18 +648,20 @@ async function refreshMonitoring() {
 // focus defaults to refresh: user-initiated selections jump to the control
 // view, background re-selections (load, removal fallback) keep the current view.
 async function selectPrinter(name: string, refresh = true, focus = refresh) {
+  const request = ++selectionRequest
   activePrinterId.value = name
   if (focus) activeView.value = 'control'
   capabilities.value = undefined
   files.value = []
   filesError.value = undefined
-  currentDirectory.value = '/'
   cameraUrl.value = undefined
   cameraError.value = undefined
   try {
     const result = await invoke<{ capabilities: Capabilities }>('printer_capabilities', { name })
+    if (request !== selectionRequest || activePrinterId.value !== name) return
     capabilities.value = result.capabilities
     if (result.capabilities.fileList) void loadFiles()
+    if (result.capabilities.cameraStream || result.capabilities.cameraSnapshot) void refreshCamera()
   } catch (reason) {
     showToast(message(reason))
   }
@@ -422,21 +670,74 @@ async function selectPrinter(name: string, refresh = true, focus = refresh) {
 
 function goTo(view: View) {
   activeView.value = view
-  if (view === 'files') void loadFiles()
+  if (view === 'files') void loadLibraryFiles(libraryPath.value)
 }
 
+// The Control tab's file table always shows the printer's storage root; it
+// has no breadcrumb navigation, unlike the local file library below.
 async function loadFiles() {
-  if (!activePrinter.value || filesLoading.value || !capabilities.value?.fileList) return
+  if (!activePrinter.value || !capabilities.value?.fileList) return
+  const request = ++fileRequest
+  const printerName = activePrinter.value.name
   filesLoading.value = true
   filesError.value = undefined
   try {
-    files.value = (await invoke<FileList>('printer_files', { name: activePrinter.value.name })).entries
+    const result = await invoke<FileList>('printer_files', {
+      request: { name: printerName, path: '/', search: '' },
+    })
+    if (request === fileRequest && activePrinter.value?.name === printerName) files.value = result.entries
   } catch (reason) {
     filesError.value = message(reason)
   } finally {
     filesLoading.value = false
   }
 }
+
+// The file library lives on the local machine, independent of any printer,
+// so this never touches printer capabilities or connectivity.
+// `path` is an absolute filesystem path; omitted, the backend resolves the
+// last-browsed folder (persisted in preferences) or a sensible default.
+async function loadLibraryFiles(path?: string) {
+  const request = ++libraryRequest
+  libraryFilesLoading.value = true
+  libraryFilesError.value = undefined
+  try {
+    const result = await invoke<LibraryListResponse>('library_files', {
+      request: { path: path ?? '', search: searchTerm.value },
+    })
+    if (request !== libraryRequest) return
+    libraryFiles.value = result.entries
+    libraryParent.value = result.parent
+    libraryBreadcrumbs.value = result.breadcrumbs
+    if (result.path !== libraryPath.value) {
+      libraryPath.value = result.path
+      // Best-effort: losing the last-visited folder across restarts isn't
+      // worth surfacing an error for.
+      void invoke('set_library_path', { path: result.path }).catch(() => {})
+    }
+  } catch (reason) {
+    libraryFilesError.value = message(reason)
+  } finally {
+    libraryFilesLoading.value = false
+  }
+}
+
+function navigateToDirectory(path: string) {
+  void loadLibraryFiles(path)
+}
+
+async function chooseLibraryFolder() {
+  const selected = await openFileDialog({ directory: true })
+  if (!selected || Array.isArray(selected)) return
+  await loadLibraryFiles(selected)
+}
+
+watch(searchTerm, () => {
+  if (fileQueryTimer !== undefined) window.clearTimeout(fileQueryTimer)
+  if (activeView.value === 'files') {
+    fileQueryTimer = window.setTimeout(() => void loadLibraryFiles(libraryPath.value), 220)
+  }
+})
 
 function openAddition() {
   draft.value = {
@@ -486,9 +787,16 @@ async function addPrinter() {
   additionError.value = undefined
 
   try {
-    const profile = await invoke<NewPrinter>('create_configured_printer', { request: draft.value })
-    const printer = { name: profile.name, driver: profile.driver, host: profile.host }
-    printers.value.push(printer)
+    const profile = await invoke<Printer>('create_configured_printer', { request: draft.value })
+    const printer = {
+      name: profile.name,
+      driver: profile.driver,
+      host: profile.host,
+      serial: profile.serial,
+      timeout: profile.timeout,
+      insecure: profile.insecure,
+    }
+    printers.value = [...printers.value, printer].sort((left, right) => left.name.localeCompare(right.name))
     additionOpen.value = false
     draft.value.accessCode = ''
     await selectPrinter(printer.name)
@@ -499,7 +807,15 @@ async function addPrinter() {
   }
 }
 
-async function removePrinter(name: string) {
+function removePrinter(name: string) {
+  askConfirmation(
+    { title: 'removal.title', description: 'removal.description', confirm: 'removal.confirm' },
+    { name },
+    () => confirmRemovePrinter(name),
+  )
+}
+
+async function confirmRemovePrinter(name: string) {
   try {
     await invoke('remove_configured_printer', { name })
     printers.value = printers.value.filter((printer) => printer.name !== name)
@@ -556,7 +872,17 @@ const jobToastKeys: Record<'pause' | 'resume' | 'cancel', MessageKey> = {
   cancel: 'control.cancelRequested',
 }
 
-async function sendJobAction(action: 'start' | 'pause' | 'resume' | 'cancel', devicePath?: string) {
+function sendJobAction(action: 'start' | 'pause' | 'resume' | 'cancel', devicePath?: string) {
+  if (!activePrinter.value) return
+  if (action !== 'cancel') return void runJobAction(action, devicePath)
+  askConfirmation(
+    { title: 'confirm.cancelTitle', description: 'confirm.cancelDescription', confirm: 'confirm.cancelConfirm' },
+    { name: activePrinter.value.name },
+    () => runJobAction(action, devicePath),
+  )
+}
+
+async function runJobAction(action: 'start' | 'pause' | 'resume' | 'cancel', devicePath?: string) {
   if (!activePrinter.value) return
   try {
     await invoke('printer_job_action', {
@@ -573,11 +899,17 @@ async function sendJobAction(action: 'start' | 'pause' | 'resume' | 'cancel', de
   }
 }
 
+const temperatureMaximums: Record<'nozzle' | 'bed' | 'chamber', number> = {
+  nozzle: 300,
+  bed: 120,
+  chamber: 60,
+}
+
 async function adjustTemperature(kind: 'nozzle' | 'bed' | 'chamber', delta: number) {
-  if (!activePrinter.value || !selectedStatus.value || kind === 'chamber') return
+  if (!activePrinter.value || !selectedStatus.value) return
   const temperature = selectedStatus.value.temperatures?.[kind]
   if (!temperature) return
-  const maximum = kind === 'nozzle' ? 300 : 120
+  const maximum = temperatureMaximums[kind]
   const base = temperature.targetCelsius ?? temperature.currentCelsius
   const next = Math.max(0, Math.min(maximum, Math.round((base + delta) / 5) * 5))
   try {
@@ -596,7 +928,7 @@ async function sendFan(fan: string, event: Event) {
   if (!Number.isInteger(speed)) return
   try {
     await invoke('printer_fan_set', {
-      request: { name: activePrinter.value.name, fan, speedPercent: speed, confirmed: true },
+      request: { name: activePrinter.value.name, fan, speedPercent: speed },
     })
     showToast(t('control.fanSet', { fan: fanLabel(fan), percent: speed }))
     await refreshMonitoring()
@@ -609,9 +941,7 @@ async function sendFan(fan: string, event: Event) {
 async function homeAxes() {
   if (!activePrinter.value) return
   try {
-    await invoke('printer_motion_home', {
-      request: { name: activePrinter.value.name, confirmed: true },
-    })
+    await invoke('printer_motion_home', { name: activePrinter.value.name })
     showToast(t('control.homingStarted'))
     await refreshMonitoring()
   } catch (reason) {
@@ -619,7 +949,60 @@ async function homeAxes() {
   }
 }
 
-async function emergencyStop() {
+const jogDisabled = computed(() => jogBusy.value || selectedStatus.value?.state !== 'idle')
+
+function jogDistance() {
+  const parsed = Number.parseFloat(stepSize.value)
+  return Number.isFinite(parsed) ? parsed : 1
+}
+
+async function jog(axis: 'x' | 'y' | 'z', direction: 1 | -1) {
+  if (!activePrinter.value || jogDisabled.value) return
+  jogBusy.value = true
+  const distance = jogDistance() * direction
+  try {
+    await invoke('printer_motion_jog', {
+      request: {
+        name: activePrinter.value.name,
+        xMillimeters: axis === 'x' ? distance : undefined,
+        yMillimeters: axis === 'y' ? distance : undefined,
+        zMillimeters: axis === 'z' ? distance : undefined,
+        feedrateMmPerMin: feedRate.value * 60,
+      },
+    })
+    showToast(t('control.moved', { axis: axis.toUpperCase(), distance: `${distance} mm` }))
+    await refreshMonitoring()
+  } catch (reason) {
+    showToast(message(reason))
+  } finally {
+    jogBusy.value = false
+  }
+}
+
+async function toggleLight(light: string, on: boolean) {
+  if (!activePrinter.value) return
+  try {
+    await invoke('printer_light_set', {
+      request: { name: activePrinter.value.name, light, on },
+    })
+    showToast(t('control.lightSet', { light: lightLabel(light), state: t(on ? 'common.enabled' : 'common.disabled') }))
+    await refreshMonitoring()
+  } catch (reason) {
+    showToast(message(reason))
+    await refreshMonitoring()
+  }
+}
+
+function emergencyStop() {
+  if (!activePrinter.value) return
+  askConfirmation(
+    { title: 'confirm.stopTitle', description: 'confirm.stopDescription', confirm: 'confirm.stopConfirm' },
+    { name: activePrinter.value.name },
+    () => runEmergencyStop(),
+  )
+}
+
+async function runEmergencyStop() {
   if (!activePrinter.value) return
   try {
     await invoke('printer_emergency_stop', { name: activePrinter.value.name })
@@ -627,6 +1010,69 @@ async function emergencyStop() {
     await refreshMonitoring()
   } catch (reason) {
     showToast(message(reason))
+  }
+}
+
+const speedProfileKeys: Record<typeof speedProfile.value, MessageKey> = {
+  silent: 'control.speedSilent',
+  standard: 'control.speedStandard',
+  sport: 'control.speedSport',
+  ludicrous: 'control.speedLudicrous',
+}
+
+async function setSpeedProfile(event: Event) {
+  if (!activePrinter.value) return
+  const value = (event.target as HTMLSelectElement).value as typeof speedProfile.value
+  speedProfile.value = value
+  if (speedBusy.value) return
+  speedBusy.value = true
+  try {
+    await invoke('printer_speed_set', {
+      request: { name: activePrinter.value.name, speedProfile: value },
+    })
+    showToast(t('control.speedSet', { profile: t(speedProfileKeys[value]) }))
+    await refreshMonitoring()
+  } catch (reason) {
+    showToast(message(reason))
+  } finally {
+    speedBusy.value = false
+  }
+}
+
+async function downloadFile(file: FileEntry) {
+  if (!activePrinter.value || downloadingPath.value) return
+  const destination = await saveFileDialog({ defaultPath: file.name })
+  if (!destination) return
+  downloadingPath.value = file.devicePath
+  const transferId = crypto.randomUUID()
+  try {
+    await invoke('printer_file_download', {
+      request: { name: activePrinter.value.name, devicePath: file.devicePath, destination, transferId, totalBytes: file.sizeBytes },
+    })
+    showToast(t('filesView.downloadStarted', { name: file.name }))
+  } catch (reason) {
+    showToast(message(reason))
+  } finally {
+    downloadingPath.value = undefined
+    downloadProgress.value = undefined
+  }
+}
+
+async function uploadFile() {
+  if (uploadBusy.value || !libraryPath.value) return
+  const source = await openFileDialog({ multiple: false })
+  if (!source || Array.isArray(source)) return
+  uploadBusy.value = true
+  try {
+    const result = await invoke<LibraryListResponse>('library_add_file', {
+      request: { source, directory: libraryPath.value },
+    })
+    libraryFiles.value = result.entries
+    showToast(t('filesView.uploadedTo', { directory: result.path }))
+  } catch (reason) {
+    showToast(message(reason))
+  } finally {
+    uploadBusy.value = false
   }
 }
 
@@ -686,9 +1132,21 @@ function formatTemperature(value: number) {
 
 function formatSize(sizeBytes?: number) {
   if (sizeBytes === undefined || sizeBytes < 0) return '—'
-  if (sizeBytes < 1024) return `${sizeBytes} B`
-  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`
-  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`
+  const unit = sizeBytes < 1024 ? 'byte' : sizeBytes < 1024 * 1024 ? 'kilobyte' : 'megabyte'
+  const divisor = unit === 'byte' ? 1 : unit === 'kilobyte' ? 1024 : 1024 * 1024
+  return new Intl.NumberFormat(locale.value, {
+    style: 'unit',
+    unit,
+    unitDisplay: 'short',
+    maximumFractionDigits: unit === 'byte' ? 0 : 1,
+  }).format(sizeBytes / divisor)
+}
+
+function formatDate(value?: string) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }
 
 function fileTypeLabel(file: FileEntry) {
@@ -699,12 +1157,6 @@ function fileTypeLabel(file: FileEntry) {
 
 function fileToneFor(name: string) {
   return modelTones[fileTones[Math.abs([...name].reduce((hash, char) => hash * 31 + char.charCodeAt(0), 0)) % fileTones.length]!]!
-}
-
-function parentDirectory(path: string) {
-  const normalized = path.startsWith('/') ? path.slice(1) : path
-  const index = normalized.lastIndexOf('/')
-  return index < 0 ? '/' : `/${normalized.slice(0, index)}`
 }
 
 function textColorFor(color: string) {
@@ -723,21 +1175,15 @@ function wifiSignal(dbm: number | undefined) {
   return { icon: PhWifiLow, label: t('control.signalWeak') }
 }
 
-const visibleDirectories = computed(() =>
-  files.value.filter((file) => file.type === 'directory' && parentDirectory(file.path) === currentDirectory.value),
-)
-const visibleFiles = computed(() =>
-  files.value.filter((file) => file.type === 'file' && parentDirectory(file.path) === currentDirectory.value),
-)
+const normalizedSearchTerm = computed(() => searchTerm.value.trim().toLocaleLowerCase(locale.value))
+const matchesSearch = (file: FileEntry) => !normalizedSearchTerm.value || file.name.toLocaleLowerCase(locale.value).includes(normalizedSearchTerm.value)
+// The backend already scopes entries to the requested directory, so this
+// only needs to split by type and apply the client-side search echo.
+const visibleDirectories = computed(() => libraryFiles.value.filter((file) => file.type === 'directory' && matchesSearch(file)))
+const visibleFiles = computed(() => libraryFiles.value.filter((file) => file.type === 'file' && matchesSearch(file)))
 const printerFiles = computed(() => files.value.filter((file) => file.type === 'file'))
-const breadcrumbs = computed(() => {
-  const parts = currentDirectory.value.split('/').filter(Boolean)
-  return [{ name: t('filesView.title'), path: '/' }, ...parts.map((part, index) => ({ name: part, path: `/${parts.slice(0, index + 1).join('/')}` }))]
-})
-
-function navigateToDirectory(path: string) {
-  currentDirectory.value = path
-}
+const enabledSlicers = computed(() => slicers.value.filter((slicer) => slicer.enabled))
+const isModelFile = (file: FileEntry) => /\.(3mf|stl|obj)$/i.test(file.name)
 
 const printerActionItems = computed<ActionMenuItem[]>(() => {
   if (!activePrinter.value) return []
@@ -753,11 +1199,66 @@ const printerActionItems = computed<ActionMenuItem[]>(() => {
 })
 
 function fileActionItems(file: FileEntry): ActionMenuItem[] {
-  const items: ActionMenuItem[] = []
-  if (capabilities.value?.jobStart && selectedStatus.value?.state === 'idle') {
-    items.push({ label: t('dashboard.print'), icon: PhPlay, onSelect: () => void sendJobAction('start', file.devicePath) })
-  }
+  const items: ActionMenuItem[] = [
+    {
+      label: t('dashboard.print'),
+      icon: PhPlay,
+      disabled: !printers.value.length,
+      onSelect: () => requestPrint(file),
+    },
+    ...enabledSlicers.value.map((slicer) => ({
+      label: t('filesView.openWith', { name: slicer.name }),
+      icon: PhDesktop,
+      onSelect: () => void openWithSlicer(file, slicer.name),
+    })),
+    {
+      label: t('common.delete'),
+      icon: PhTrash,
+      danger: true,
+      onSelect: () => deleteFile(file),
+    },
+  ]
   return items
+}
+
+function deleteFile(file: FileEntry) {
+  askConfirmation(
+    { title: 'filesView.deleteTitle', description: 'filesView.deleteDescription', confirm: 'filesView.deleteConfirm' },
+    { name: file.name },
+    async () => {
+      await invoke('library_delete_file', { request: { path: file.devicePath } })
+      showToast(t('filesView.deleted', { name: file.name }))
+      await loadLibraryFiles(libraryPath.value)
+    },
+  )
+}
+
+async function openWithSlicer(file: FileEntry, slicer: string) {
+  try {
+    await invoke('open_file_with_slicer', { request: { path: file.devicePath, slicer } })
+    showToast(t('filesView.openingIn', { name: file.name, slicer }))
+  } catch (reason) {
+    showToast(message(reason))
+  }
+}
+
+function requestPrint(file: FileEntry) {
+  printTarget.value = file
+}
+
+async function printToPrinter(name: string) {
+  const file = printTarget.value
+  if (!file || printBusy.value) return
+  printBusy.value = true
+  try {
+    await invoke('print_library_file', { request: { printer: name, path: file.devicePath } })
+    printTarget.value = undefined
+    showToast(t('filesView.sentToPrinter', { name: file.name }))
+  } catch (reason) {
+    showToast(message(reason))
+  } finally {
+    printBusy.value = false
+  }
 }
 
 onMounted(() => {
@@ -765,21 +1266,46 @@ onMounted(() => {
   systemPrefersDark.value = systemThemeQuery.matches
   systemThemeQuery.addEventListener('change', handleSystemThemeChange)
   void load()
-  monitorTimer = window.setInterval(() => void refreshMonitoring(), 5000)
+  void listen<MonitorEntry[]>('monitoring-updated', (event) => {
+    monitoring.value = event.payload
+  }).then((unlisten) => {
+    monitorUnlisten = unlisten
+  })
+  void listen<NotificationEvent>('printer-notification', (event) => {
+    const labels: Record<NotificationEvent['kind'], MessageKey> = {
+      completion: 'settingsView.notifyComplete',
+      failure: 'settingsView.notifyFailure',
+      disconnection: 'settingsView.notifyDisconnected',
+    }
+    showToast(`${event.payload.printer}: ${t(labels[event.payload.kind])}`)
+  }).then((unlisten) => {
+    notificationUnlisten = unlisten
+  })
+  void listen<TransferProgress>('transfer-progress', (event) => {
+    if (event.payload.totalBytes) downloadProgress.value = Math.min(100, event.payload.bytesTransferred / event.payload.totalBytes * 100)
+    if (event.payload.complete) downloadProgress.value = 100
+  }).then((unlisten) => {
+    transferUnlisten = unlisten
+  })
 })
 
 onUnmounted(() => {
   systemThemeQuery?.removeEventListener('change', handleSystemThemeChange)
-  if (monitorTimer !== undefined) window.clearInterval(monitorTimer)
+  monitorUnlisten?.()
+  notificationUnlisten?.()
+  transferUnlisten?.()
+  if (fileQueryTimer !== undefined) window.clearTimeout(fileQueryTimer)
+  if (toastTimer !== undefined) window.clearTimeout(toastTimer)
 })
 </script>
 
 <template>
-  <div class="min-w-80 scheme-light dark:scheme-dark">
+  <div class="min-h-full min-w-0 overflow-x-hidden scheme-light dark:scheme-dark">
+    <a href="#main-content" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-gray-900 dark:focus:bg-gray-800 dark:focus:text-white">Skip to content</a>
     <!-- Tabs with underline -->
-    <header class="sticky top-0 z-20 bg-white/95 backdrop-blur dark:bg-gray-900/95">
+    <header class="sticky top-0 z-20 bg-white/95 pt-[env(safe-area-inset-top)] backdrop-blur dark:bg-gray-900/95">
       <div class="mx-auto max-w-[1500px] overflow-x-auto px-4 sm:px-8 lg:px-10">
-        <nav class="-mb-px flex min-w-max items-stretch border-b border-gray-200 dark:border-white/10" :aria-label="t('nav.ariaLabel')">
+        <nav class="flex min-w-max items-stretch border-b border-gray-200 dark:border-white/10" :aria-label="t('nav.ariaLabel')">
           <div v-if="printers.length" class="flex items-center space-x-8 pr-8">
             <button
               v-for="printer in printers"
@@ -823,9 +1349,10 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <main class="mx-auto max-w-[1500px] py-7 sm:px-8 lg:px-10">
+    <main id="main-content" tabindex="-1" class="mx-auto max-w-[1500px] py-7 outline-none sm:px-8 lg:px-10">
+      <h1 class="sr-only">{{ t('app.title') }}</h1>
       <!-- Notification -->
-      <div aria-live="assertive" class="pointer-events-none fixed inset-0 z-50 flex items-end px-4 py-6 sm:items-start sm:p-6">
+      <div aria-live="polite" class="pointer-events-none fixed inset-0 z-50 flex items-end px-4 py-6 sm:items-start sm:p-6">
         <div class="flex w-full flex-col items-center space-y-4 sm:items-end">
           <transition
             enter-active-class="transform ease-out duration-300 transition"
@@ -893,16 +1420,16 @@ onUnmounted(() => {
 
         <!-- Empty state -->
         <div
-          v-if="activeBadge === 'offline'"
+          v-if="!activeReachable"
           class="mx-4 flex min-h-140 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-center sm:mx-0 dark:border-white/15"
         >
           <PhWarning class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />
           <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{{ t('control.unavailableTitle') }}</h3>
-          <p class="mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">{{ selectedMonitor?.error ?? t('control.unavailableDescription') }}</p>
+          <p class="mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">{{ selectedMonitor?.error ? message(selectedMonitor.error) : t('control.unavailableDescription') }}</p>
           <Button class="mt-6" variant="primary" :disabled="refreshing" @click="refreshMonitoring"><PhArrowsClockwise class="size-4" /> {{ t('control.refreshConnection') }}</Button>
         </div>
 
-        <div v-show="activeBadge !== 'offline'">
+        <div v-show="activeReachable">
           <section class="grid gap-5 xl:grid-cols-4">
             <Card class="overflow-hidden xl:col-span-3">
               <CardHeader :title="t('camera.title')" :icon="PhVideoCamera">
@@ -925,7 +1452,7 @@ onUnmounted(() => {
                 class="relative min-h-60 overflow-hidden sm:min-h-77.5"
                 :class="cameraOnline ? 'bg-black' : 'grid place-items-center bg-gray-100 dark:bg-gray-800'"
               >
-                <img v-if="cameraOnline" :src="cameraUrl" :alt="t('camera.title')" class="absolute inset-0 size-full object-contain" />
+                <img v-if="cameraOnline" :src="cameraUrl" :alt="t('camera.title')" width="1280" height="720" class="absolute inset-0 size-full object-contain" @error="cameraUrl = undefined" />
                 <div v-else class="relative z-10 text-center">
                   <PhWarning class="mx-auto size-8 text-yellow-600 dark:text-yellow-400" />
                   <p class="mt-3 font-medium text-gray-900 dark:text-white">{{ t('camera.unavailable') }}</p>
@@ -977,6 +1504,25 @@ onUnmounted(() => {
                     @click="sendJobAction('cancel')"
                   ><PhStop class="size-4" /> {{ t('common.cancel') }}</Button>
                 </div>
+                <div v-if="capabilities?.speedControl" class="mt-4">
+                  <label for="speed-profile" class="block text-sm/6 font-light text-gray-900 dark:text-white">{{ t('control.speedProfile') }}</label>
+                  <div class="mt-2 grid grid-cols-1">
+                    <select
+                      id="speed-profile"
+                      name="speed-profile"
+                      :value="speedProfile"
+                      :disabled="speedBusy || !['printing', 'paused'].includes(selectedStatus?.state ?? '')"
+                      class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800"
+                      @change="setSpeedProfile"
+                    >
+                      <option value="silent">{{ t('control.speedSilent') }}</option>
+                      <option value="standard">{{ t('control.speedStandard') }}</option>
+                      <option value="sport">{{ t('control.speedSport') }}</option>
+                      <option value="ludicrous">{{ t('control.speedLudicrous') }}</option>
+                    </select>
+                    <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-2 size-5 self-center justify-self-end text-gray-500 sm:size-4 dark:text-gray-400" aria-hidden="true" />
+                  </div>
+                </div>
               </div>
             </Card>
           </section>
@@ -990,7 +1536,7 @@ onUnmounted(() => {
                     <p class="text-sm/6 font-light text-gray-900 dark:text-white">{{ t(temperatureKeys[row.key]) }}</p>
                     <p class="font-mono text-sm text-gray-500 dark:text-gray-400"><span class="font-bold">{{ formatTemperature(row.value.currentCelsius) }}</span> °C <span aria-hidden="true">/</span> <span class="font-bold">{{ row.value.targetCelsius === undefined ? '—' : formatTemperature(row.value.targetCelsius) }}</span> °C</p>
                   </div>
-                  <div v-if="capabilities?.temperatureWrite && row.key !== 'chamber'" class="flex gap-1">
+                  <div v-if="capabilities?.temperatureWrite" class="flex gap-1">
                     <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.decreaseTemp', { sensor: t(temperatureKeys[row.key]) })" @click="adjustTemperature(row.key, -5)"><PhMinus class="size-3.5" /></IconButton>
                     <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.increaseTemp', { sensor: t(temperatureKeys[row.key]) })" @click="adjustTemperature(row.key, 5)"><PhPlus class="size-3.5" /></IconButton>
                   </div>
@@ -1006,8 +1552,22 @@ onUnmounted(() => {
                     <span class="text-sm/6 font-light text-gray-900 dark:text-white">{{ fanLabel(key) }}</span>
                     <span class="text-sm/6 text-gray-500 dark:text-gray-400">{{ value }}%</span>
                   </span>
-                  <input :value="value" :disabled="!capabilities?.fanControl" class="h-1 w-full cursor-pointer accent-cyan-600 disabled:cursor-not-allowed disabled:opacity-35 dark:accent-cyan-400" type="range" min="0" max="100" :aria-label="t('control.fanPower', { fan: fanLabel(key) })" @change="sendFan(key, $event)" />
+                      <input :key="`${key}-${value}`" :value="value" :disabled="!capabilities?.fanControl" :name="`fan-${key}`" class="h-1 w-full cursor-pointer accent-cyan-600 disabled:cursor-not-allowed disabled:opacity-35 dark:accent-cyan-400" type="range" min="0" max="100" :aria-label="t('control.fanPower', { fan: fanLabel(key) })" @change="sendFan(key, $event)" />
                 </label>
+              </div>
+            </Card>
+
+            <Card v-if="lightRows.length">
+              <CardHeader :title="t('control.lights')" :icon="PhSun" />
+              <div class="font-light space-y-4 px-4 py-5 sm:p-6">
+                <div v-for="[key, value] in lightRows" :key="key" class="flex items-center justify-between gap-3">
+                  <span class="text-sm/6 font-light text-gray-900 dark:text-white">{{ lightLabel(key) }}</span>
+                  <Switch
+                    :model-value="value === 'on'"
+                    :label="lightLabel(key)"
+                    @update:model-value="toggleLight(key, $event)"
+                  />
+                </div>
               </div>
             </Card>
 
@@ -1016,22 +1576,22 @@ onUnmounted(() => {
               <div class="font-light px-4 py-5 sm:p-6">
                 <div class="mb-4 flex min-h-27 items-center justify-center gap-8">
                   <div class="grid grid-cols-3 grid-rows-3 gap-1">
-                    <IconButton variant="outline" class="col-start-2 row-start-1" disabled :title="t('control.jogUnsupported')">Y+</IconButton>
-                    <IconButton variant="outline" class="col-start-1 row-start-2" disabled :title="t('control.jogUnsupported')">X−</IconButton>
+                    <IconButton variant="outline" class="col-start-2 row-start-1" :disabled="jogDisabled" :aria-label="t('control.jogAxis', { axis: 'Y+' })" @click="jog('y', 1)">Y+</IconButton>
+                    <IconButton variant="outline" class="col-start-1 row-start-2" :disabled="jogDisabled" :aria-label="t('control.jogAxis', { axis: 'X−' })" @click="jog('x', -1)">X−</IconButton>
                     <IconButton variant="outline" class="col-start-2 row-start-2" :title="t('dashboard.home')" :aria-label="t('dashboard.home')" :disabled="selectedStatus?.state !== 'idle'" @click="homeAxes"><PhHouse class="size-4" /></IconButton>
-                    <IconButton variant="outline" class="col-start-3 row-start-2" disabled :title="t('control.jogUnsupported')">X+</IconButton>
-                    <IconButton variant="outline" class="col-start-2 row-start-3" disabled :title="t('control.jogUnsupported')">Y−</IconButton>
+                    <IconButton variant="outline" class="col-start-3 row-start-2" :disabled="jogDisabled" :aria-label="t('control.jogAxis', { axis: 'X+' })" @click="jog('x', 1)">X+</IconButton>
+                    <IconButton variant="outline" class="col-start-2 row-start-3" :disabled="jogDisabled" :aria-label="t('control.jogAxis', { axis: 'Y−' })" @click="jog('y', -1)">Y−</IconButton>
                   </div>
                   <div class="flex flex-col gap-1">
-                    <IconButton variant="outline" disabled :title="t('control.jogUnsupported')">Z+</IconButton>
-                    <IconButton variant="outline" disabled :title="t('control.jogUnsupported')">Z−</IconButton>
+                    <IconButton variant="outline" :disabled="jogDisabled" :aria-label="t('control.jogAxis', { axis: 'Z+' })" @click="jog('z', 1)">Z+</IconButton>
+                    <IconButton variant="outline" :disabled="jogDisabled" :aria-label="t('control.jogAxis', { axis: 'Z−' })" @click="jog('z', -1)">Z−</IconButton>
                   </div>
                 </div>
                 <div class="grid grid-cols-2 gap-2">
                   <div>
                     <label for="step-size" class="block text-sm/6 font-light text-gray-900 dark:text-white">{{ t('control.stepSize') }}</label>
                     <div class="mt-2 grid grid-cols-1">
-                      <select id="step-size" v-model="stepSize" disabled class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
+                      <select id="step-size" name="step-size" v-model="stepSize" class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
                         <option>0.1 mm</option>
                         <option>1 mm</option>
                         <option>10 mm</option>
@@ -1042,7 +1602,7 @@ onUnmounted(() => {
                   <div>
                     <label for="feed-rate" class="block text-sm/6 font-light text-gray-900 dark:text-white">{{ t('control.feedRate') }}</label>
                     <div class="mt-2 grid grid-cols-1">
-                      <select id="feed-rate" v-model="feedRate" disabled class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
+                      <select id="feed-rate" name="feed-rate" v-model="feedRate" class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
                         <option :value="25">25 mm/s</option>
                         <option :value="50">50 mm/s</option>
                         <option :value="100">100 mm/s</option>
@@ -1073,15 +1633,13 @@ onUnmounted(() => {
                     <tr
                       v-for="file in printerFiles.slice(0, 3)"
                       :key="file.devicePath"
-                      class="cursor-pointer"
-                      :class="selectedFile === file.devicePath ? 'bg-cyan-50 dark:bg-cyan-400/5' : 'hover:bg-gray-50 dark:hover:bg-white/5'"
-                      @click="selectedFile = file.devicePath"
+                      class="hover:bg-gray-50 dark:hover:bg-white/5"
                     >
                       <td class="px-4 py-4 text-sm whitespace-nowrap sm:px-6">
                         <span class="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 dark:bg-gray-400/10 dark:text-gray-400">{{ fileTypeLabel(file) }}</span>
                       </td>
                       <td class="px-4 py-4 font-mono text-sm whitespace-nowrap text-gray-500 sm:px-6 dark:text-gray-400">{{ formatSize(file.sizeBytes) }}</td>
-                      <td class="px-4 py-4 font-mono text-sm whitespace-nowrap text-gray-500 sm:px-6 dark:text-gray-400">{{ file.modifiedAt ?? '—' }}</td>
+                      <td class="px-4 py-4 font-mono text-sm whitespace-nowrap text-gray-500 sm:px-6 dark:text-gray-400">{{ formatDate(file.modifiedAt) }}</td>
                       <td class="px-4 py-4 font-mono text-sm font-medium whitespace-nowrap text-gray-900 sm:px-6 dark:text-white">{{ file.name }}</td>
                       <td class="px-4 py-4 text-sm whitespace-nowrap sm:px-6">
                         <div class="flex justify-end gap-1">
@@ -1092,6 +1650,13 @@ onUnmounted(() => {
                             :disabled="!capabilities?.jobStart || selectedStatus?.state !== 'idle'"
                             @click.stop="sendJobAction('start', file.devicePath)"
                           ><PhPlay class="size-4" /></IconButton>
+                          <IconButton
+                            v-if="capabilities?.fileDownload"
+                            :title="t('filesView.downloadFile')"
+                            :aria-label="t('filesView.downloadNamed', { name: file.name })"
+                            :disabled="downloadingPath === file.devicePath"
+                            @click.stop="downloadFile(file)"
+                          ><PhDownloadSimple class="size-4" /></IconButton>
                         </div>
                       </td>
                     </tr>
@@ -1134,7 +1699,7 @@ onUnmounted(() => {
         </div>
       </template>
 
-      <template v-else-if="activeView === 'printers' || !hasPrinters">
+      <template v-else-if="activeView === 'printers' || (!hasPrinters && activeView === 'control')">
         <div class="mb-7 px-4 sm:px-0 lg:flex lg:items-center lg:justify-between">
           <div class="min-w-0 flex-1">
             <h2 class="text-2xl/7 font-bold text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight dark:text-white">{{ t('printersView.title') }}</h2>
@@ -1193,7 +1758,7 @@ onUnmounted(() => {
             <dl class="mt-2 divide-y divide-gray-200 text-xs dark:divide-white/10">
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t('addition.serial') }}</dt>
-                <dd class="text-gray-900 dark:text-gray-300">—</dd>
+                <dd class="font-mono text-gray-900 dark:text-gray-300">{{ printer.serial || '—' }}</dd>
               </div>
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t('printersView.host') }}</dt>
@@ -1201,11 +1766,11 @@ onUnmounted(() => {
               </div>
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t('addition.timeout') }}</dt>
-                <dd class="text-gray-900 dark:text-gray-300">—</dd>
+                <dd class="font-mono text-gray-900 dark:text-gray-300">{{ printer.timeout }}</dd>
               </div>
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t('printersView.tlsVerification') }}</dt>
-                <dd class="text-gray-900 dark:text-gray-300">—</dd>
+                <dd :class="printer.insecure ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-300'">{{ printer.insecure ? t('printersView.tlsDisabled') : t('printersView.tlsVerified') }}</dd>
               </div>
             </dl>
             <div class="mt-5 flex gap-2">
@@ -1232,18 +1797,60 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="grid max-w-[1500px] gap-5 lg:grid-cols-2 xl:grid-cols-3">
-          <!-- Toggle lists -->
           <Card as="section" class="overflow-hidden">
             <CardHeader :title="t('settingsView.notifications')" :icon="PhBellRinging" />
             <div class="divide-y divide-gray-200 dark:divide-white/10">
-              <div v-for="notification in notifications" :key="notification.label" class="flex items-center justify-between gap-3 px-4 py-5 hover:bg-gray-50 sm:px-6 dark:hover:bg-white/5">
+              <div v-for="notification in notifications" :key="notification.id" class="flex items-center justify-between gap-3 px-4 py-5 hover:bg-gray-50 sm:px-6 dark:hover:bg-white/5">
                 <span class="flex grow flex-col">
                   <span class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ t(notification.label) }}</span>
                   <span class="text-sm text-gray-500 dark:text-gray-400">{{ t(notification.description) }}</span>
                 </span>
-                <Switch v-model="notification.enabled" :label="t(notification.label)" />
+                <Switch v-model="notification.enabled" :label="t(notification.label)" @update:model-value="updateNotification(notification.id, $event)" />
               </div>
             </div>
+          </Card>
+          <Card as="section" class="overflow-hidden">
+            <CardHeader :title="t('settingsView.slicers')" :icon="PhDesktop" />
+            <div class="divide-y divide-gray-200 dark:divide-white/10">
+              <div v-for="slicer in slicers" :key="slicer.name" class="flex items-center justify-between gap-3 px-4 py-5 hover:bg-gray-50 sm:px-6 dark:hover:bg-white/5">
+                <span class="flex min-w-0 grow flex-col">
+                  <span class="truncate text-sm/6 font-medium text-gray-900 dark:text-white" translate="no">{{ slicer.name }}</span>
+                  <span class="truncate font-mono text-sm text-gray-500 dark:text-gray-400" translate="no">{{ slicer.path }}</span>
+                </span>
+                <div class="flex items-center gap-2">
+                  <Switch v-model="slicer.enabled" :label="slicer.name" @update:model-value="updateSlicerEnabled(slicer.name, $event)" />
+                  <IconButton
+                    class="hover:text-red-600 dark:hover:text-red-400"
+                    :title="t('settingsView.removeSlicer')"
+                    :aria-label="t('settingsView.removeNamedSlicer', { name: slicer.name })"
+                    @click="removeSlicer(slicer.name)"
+                  ><PhTrash class="size-4" /></IconButton>
+                </div>
+              </div>
+              <p v-if="!slicers.length" class="px-4 py-5 text-sm text-gray-500 sm:px-6 dark:text-gray-400">{{ t('settingsView.noSlicers') }}</p>
+            </div>
+            <form class="flex flex-wrap items-end gap-2 border-t border-gray-200 px-4 py-4 sm:px-6 dark:border-white/10" @submit.prevent="addSlicer">
+              <div class="min-w-0 flex-1">
+                <label for="slicer-name" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.slicerName') }}</label>
+                <input
+                  id="slicer-name"
+                  v-model="slicerDraft.name"
+                  type="text"
+                  class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+                />
+              </div>
+              <div class="min-w-0 flex-[2]">
+                <label for="slicer-path" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.slicerPath') }}</label>
+                <input
+                  id="slicer-path"
+                  v-model="slicerDraft.path"
+                  type="text"
+                  class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+                />
+              </div>
+              <Button type="submit" :disabled="slicerBusy || !slicerDraft.name.trim() || !slicerDraft.path.trim()">{{ t('settingsView.addSlicer') }}</Button>
+            </form>
+            <p v-if="slicerError" class="px-4 pb-4 text-xs text-red-600 sm:px-6 dark:text-red-400" role="alert">{{ slicerError }}</p>
           </Card>
           <Card as="section">
             <CardHeader :title="t('settingsView.appearance')" :icon="PhSun" />
@@ -1251,7 +1858,7 @@ onUnmounted(() => {
               <div>
                 <label for="theme" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('settingsView.theme') }}</label>
                 <div class="mt-2 grid grid-cols-1">
-                  <select id="theme" v-model="theme" class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
+                  <select id="theme" name="theme" v-model="theme" class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
                     <option value="system">{{ t('settingsView.themeSystem') }}</option>
                     <option value="light">{{ t('settingsView.themeLight') }}</option>
                     <option value="dark">{{ t('settingsView.themeDark') }}</option>
@@ -1262,7 +1869,7 @@ onUnmounted(() => {
               <div class="mt-6">
                 <label for="language" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('app.locale') }}</label>
                 <div class="mt-2 grid grid-cols-1">
-                  <select id="language" v-model="locale" class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
+                  <select id="language" name="language" v-model="locale" class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
                     <option value="en">{{ t('app.english') }}</option>
                     <option value="pt-BR">{{ t('app.portuguese') }}</option>
                   </select>
@@ -1305,22 +1912,25 @@ onUnmounted(() => {
             <h2 class="text-2xl/7 font-bold text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight dark:text-white">{{ t('filesView.title') }}</h2>
             <p class="mt-2 max-w-4xl text-sm text-gray-500 dark:text-gray-400">{{ t('filesView.description') }}</p>
           </div>
-          <div class="mt-5 flex lg:mt-0 lg:ml-4 max-lg:w-full">
-            <Button class="max-lg:w-full" :disabled="filesLoading || !capabilities?.fileList" @click="loadFiles"><PhArrowsClockwise class="size-4" /> {{ t('dashboard.refresh') }}</Button>
+          <div class="mt-5 flex gap-2 lg:mt-0 lg:ml-4 max-lg:w-full">
+            <Button class="max-lg:flex-1" :disabled="libraryFilesLoading" @click="chooseLibraryFolder"><PhFolderOpen class="size-4" /> {{ t('filesView.changeFolder') }}</Button>
+            <Button class="max-lg:flex-1" :disabled="uploadBusy || !libraryPath" @click="uploadFile"><PhUploadSimple class="size-4" /> {{ t('filesView.upload') }}</Button>
+            <Button class="max-lg:flex-1" :disabled="libraryFilesLoading" @click="loadLibraryFiles(libraryPath)"><PhArrowsClockwise class="size-4" /> {{ t('dashboard.refresh') }}</Button>
           </div>
         </div>
 
         <div class="mb-5 flex flex-wrap items-center gap-2 px-4 sm:px-0">
           <!-- Breadcrumbs -->
-          <nav class="flex" :aria-label="t('filesView.breadcrumb')">
+          <IconButton :title="t('filesView.up')" :aria-label="t('filesView.up')" :disabled="!libraryParent || libraryFilesLoading" @click="navigateToDirectory(libraryParent!)"><PhArrowUp class="size-4" /></IconButton>
+          <nav class="flex overflow-x-auto" :aria-label="t('filesView.breadcrumb')">
             <ol role="list" class="flex items-center space-x-4">
-              <li v-for="(breadcrumb, index) in breadcrumbs" :key="breadcrumb.path" class="flex items-center">
+              <li v-for="(breadcrumb, index) in libraryBreadcrumbs" :key="breadcrumb.path" class="flex items-center">
                 <PhCaretRight v-if="index > 0" class="mr-4 size-5 shrink-0 text-gray-400 dark:text-gray-500" />
                 <button
                   type="button"
-                  class="text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                  :class="breadcrumb.path === currentDirectory ? 'text-gray-900 dark:text-white' : ''"
-                  :aria-current="breadcrumb.path === currentDirectory ? 'page' : undefined"
+                  class="text-sm font-medium whitespace-nowrap text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                  :class="breadcrumb.path === libraryPath ? 'text-gray-900 dark:text-white' : ''"
+                  :aria-current="breadcrumb.path === libraryPath ? 'page' : undefined"
                   @click="navigateToDirectory(breadcrumb.path)"
                 >{{ breadcrumb.name }}</button>
               </li>
@@ -1329,9 +1939,11 @@ onUnmounted(() => {
           <!-- Input with leading icon -->
           <div class="ml-auto grid grid-cols-1">
             <input
+              name="file-search"
+              v-model="searchTerm"
               class="col-start-1 row-start-1 block w-40 rounded-md bg-white py-1.5 pr-3 pl-10 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-cyan-600 sm:w-64 sm:pl-9 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:placeholder:text-gray-500"
               :aria-label="t('filesView.search')"
-              :placeholder="t('filesView.search')"
+              :placeholder="t('filesView.search') + '…'"
               type="search"
             />
             <PhMagnifyingGlass class="pointer-events-none col-start-1 row-start-1 ml-3 size-5 self-center text-gray-400 sm:size-4 dark:text-gray-500" aria-hidden="true" />
@@ -1344,11 +1956,11 @@ onUnmounted(() => {
             :key="directory.devicePath"
             type="button"
             class="min-h-28 bg-white px-4 py-5 text-left shadow-sm transition hover:bg-cyan-50 hover:shadow-md sm:rounded-lg sm:p-6 dark:bg-gray-800/50 dark:shadow-none dark:outline dark:-outline-offset-1 dark:outline-white/10 dark:hover:bg-cyan-400/5 dark:hover:outline-cyan-400/30"
-            @click="navigateToDirectory(`/${directory.path.replace(/^\//, '')}`)"
+            @click="navigateToDirectory(directory.devicePath)"
           >
             <PhFolder class="size-7 text-cyan-600 dark:text-cyan-400" />
             <span class="mt-3 block truncate text-sm font-medium text-gray-900 dark:text-white">{{ directory.name }}</span>
-            <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('filesView.folderModified', { date: directory.modifiedAt ?? '—' }) }}</span>
+                    <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('filesView.folderModified', { date: formatDate(directory.modifiedAt) }) }}</span>
           </button>
         </div>
 
@@ -1360,15 +1972,25 @@ onUnmounted(() => {
             as="article"
             class="transition hover:shadow-md dark:hover:outline-cyan-400/30"
           >
-            <div class="relative grid min-h-45 place-items-center overflow-hidden sm:rounded-t-lg" :class="fileToneFor(file.name).preview">
-              <span class="block transform-[perspective(200px)_rotateX(10deg)_rotateZ(-8deg)]" :class="fileToneFor(file.name).shape"></span>
+            <div class="relative min-h-45 overflow-hidden sm:rounded-t-lg" :class="fileToneFor(file.name).preview">
+              <ModelThumbnail
+                v-if="isModelFile(file)"
+                :path="file.devicePath"
+                :size-bytes="file.sizeBytes"
+                :modified-at="file.modifiedAt"
+                :alt="file.name"
+                class="size-full min-h-45"
+              />
+              <div v-else class="grid min-h-45 place-items-center">
+                <span class="block transform-[perspective(200px)_rotateX(10deg)_rotateZ(-8deg)]" :class="fileToneFor(file.name).shape"></span>
+              </div>
               <span class="absolute right-3 bottom-2.5 text-[10px] font-bold text-gray-500 uppercase dark:text-slate-300/45">.{{ fileTypeLabel(file).toLowerCase() }}</span>
             </div>
             <div class="flex items-start gap-3 px-4 py-5 sm:p-6">
               <PhFile class="mt-0.5 size-4 shrink-0 text-gray-400 dark:text-gray-500" />
               <div class="min-w-0 flex-1">
                 <h3 class="truncate text-sm font-medium text-gray-900 dark:text-white">{{ file.name }}</h3>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ formatSize(file.sizeBytes) }} · {{ file.modifiedAt ?? '—' }}</p>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ formatSize(file.sizeBytes) }} · {{ formatDate(file.modifiedAt) }}</p>
               </div>
               <ActionMenu v-if="fileActionItems(file).length" class="-mt-2 -mr-2" :label="t('filesView.moreActions')" :items="fileActionItems(file)" />
             </div>
@@ -1376,7 +1998,7 @@ onUnmounted(() => {
           <div v-if="!visibleDirectories.length && !visibleFiles.length" class="col-span-full mx-4 flex min-h-65 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-center sm:mx-0 dark:border-white/15">
             <PhFolder class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />
             <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{{ t('filesView.emptyTitle') }}</h3>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ filesLoading ? t('common.loading') : filesError ?? (capabilities?.fileList ? t('filesView.emptyDescription') : t('filesView.notSupported')) }}</p>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ libraryFilesLoading ? t('common.loading') : libraryFilesError ?? t('filesView.emptyDescription') }}</p>
           </div>
         </div>
       </template>
@@ -1395,12 +2017,12 @@ onUnmounted(() => {
         <div class="mt-6 space-y-4">
           <div>
             <label for="printer-name" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.name') }}</label>
-            <input id="printer-name" v-model="draft.name" required maxlength="64" autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+            <input id="printer-name" name="printer-name" v-model="draft.name" required maxlength="64" autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
           </div>
           <div>
             <label for="printer-driver" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.driver') }}</label>
             <div class="mt-2 grid grid-cols-1">
-              <select id="printer-driver" v-model="draft.driver" required class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
+              <select id="printer-driver" name="printer-driver" v-model="draft.driver" required class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
                 <option v-for="driver in drivers" :key="driver.name" :value="driver.name">{{ driver.name }}</option>
               </select>
               <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-2 size-5 self-center justify-self-end text-gray-500 sm:size-4 dark:text-gray-400" aria-hidden="true" />
@@ -1408,19 +2030,19 @@ onUnmounted(() => {
           </div>
           <div>
             <label for="printer-host" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.host') }}</label>
-            <input id="printer-host" v-model="draft.host" required autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+            <input id="printer-host" name="printer-host" v-model="draft.host" required autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
           </div>
           <div>
             <label for="printer-serial" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.serial') }}</label>
-            <input id="printer-serial" v-model="draft.serial" autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+            <input id="printer-serial" name="printer-serial" v-model="draft.serial" autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
           </div>
           <div>
             <label for="printer-timeout" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.timeout') }}</label>
-            <input id="printer-timeout" v-model="draft.timeout" required class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+            <input id="printer-timeout" name="printer-timeout" v-model="draft.timeout" required class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
           </div>
           <div>
             <label for="printer-access-code" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.accessCode') }}</label>
-            <input id="printer-access-code" v-model="draft.accessCode" type="password" autocomplete="new-password" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+            <input id="printer-access-code" name="printer-access-code" v-model="draft.accessCode" type="password" autocomplete="new-password" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
           </div>
           <div class="flex items-center justify-between">
             <span class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.insecure') }}</span>
@@ -1441,6 +2063,45 @@ onUnmounted(() => {
       <template #footer>
         <Button :disabled="tlsRefreshing" @click="tlsOpen = false">{{ t('common.cancel') }}</Button>
         <Button variant="danger" :disabled="tlsRefreshing" @click="refreshTls">{{ tlsRefreshing ? t('common.sending') : t('tls.confirm') }}</Button>
+      </template>
+    </SlideOver>
+
+    <SlideOver
+      :open="printTarget !== undefined"
+      :title="t('filesView.printer')"
+      :description="printTarget?.name"
+      :close-label="t('common.closePanel')"
+      @close="!printBusy && (printTarget = undefined)"
+    >
+      <ul v-if="printers.length" class="divide-y divide-gray-200 dark:divide-white/10">
+        <li v-for="printer in printers" :key="printer.name" class="flex items-center justify-between gap-3 py-3">
+          <span class="flex min-w-0 items-center gap-2">
+            <span class="size-1.5 shrink-0 rounded-full ring-3" :class="statusDotClasses[badgeFor(printer.name)]"></span>
+            <span class="truncate text-sm text-gray-900 dark:text-white">{{ printer.name }}</span>
+          </span>
+          <Button
+            :disabled="printBusy || !isReachable(badgeFor(printer.name))"
+            :title="!isReachable(badgeFor(printer.name)) ? t('filesView.printerOffline', { name: printer.name }) : undefined"
+            @click="printToPrinter(printer.name)"
+          >{{ t('dashboard.print') }}</Button>
+        </li>
+      </ul>
+      <p v-else class="text-sm text-gray-500 dark:text-gray-400">{{ t('filesView.noPrinters') }}</p>
+      <template #footer>
+        <Button :disabled="printBusy" @click="printTarget = undefined">{{ t('common.cancel') }}</Button>
+      </template>
+    </SlideOver>
+
+    <SlideOver
+      :open="pendingConfirm !== undefined"
+      :title="pendingConfirm?.title ?? ''"
+      :description="pendingConfirm?.description"
+      :close-label="t('common.closePanel')"
+      @close="!confirming && (pendingConfirm = undefined)"
+    >
+      <template #footer>
+        <Button :disabled="confirming" @click="pendingConfirm = undefined">{{ t('common.cancel') }}</Button>
+        <Button variant="danger" :disabled="confirming" @click="runConfirmation">{{ confirming ? t('common.sending') : pendingConfirm?.confirm }}</Button>
       </template>
     </SlideOver>
   </div>

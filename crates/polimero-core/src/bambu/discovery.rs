@@ -56,7 +56,9 @@ pub fn discover(timeout: Duration) -> Result<Vec<DiscoveredPrinter>, DiscoveryEr
     while Instant::now() < deadline {
         for (socket, udp_announcement) in &sockets {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            let _ = socket.set_read_timeout(Some(remaining.min(POLL_INTERVAL)));
+            let _ = socket.set_read_timeout(Some(
+                remaining.min(POLL_INTERVAL).max(Duration::from_millis(1)),
+            ));
             match socket.recv_from(&mut buffer) {
                 Ok((size, source)) => {
                     let entry = if *udp_announcement {

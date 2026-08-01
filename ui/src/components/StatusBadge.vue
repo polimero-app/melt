@@ -1,5 +1,5 @@
 <script setup lang="ts">
-type PrinterStatus = 'idle' | 'busy' | 'offline'
+type PrinterStatus = 'idle' | 'busy' | 'offline' | 'unknown'
 
 const props = defineProps<{ status: PrinterStatus; label?: string }>()
 
@@ -7,18 +7,21 @@ const styles: Record<PrinterStatus, string> = {
   idle: 'bg-green-100 text-green-700 dark:bg-green-400/10 dark:text-green-400',
   busy: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-400/10 dark:text-yellow-500',
   offline: 'bg-red-100 text-red-700 dark:bg-red-400/10 dark:text-red-400',
+  unknown: 'bg-gray-100 text-gray-600 dark:bg-gray-400/10 dark:text-gray-400',
 }
 
 const dotStyles: Record<PrinterStatus, string> = {
   idle: 'fill-green-500 dark:fill-green-400',
   busy: 'fill-yellow-500 dark:fill-yellow-400',
   offline: 'fill-red-500 dark:fill-red-400',
+  unknown: 'fill-gray-400 dark:fill-gray-500',
 }
 
 const labels: Record<PrinterStatus, string> = {
   idle: 'Online · idle',
   busy: 'Online · busy',
   offline: 'Offline',
+  unknown: 'Unknown',
 }
 </script>
 

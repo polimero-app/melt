@@ -21,9 +21,33 @@
 :root {
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  color-scheme: light;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+button,
+a,
+input,
+select {
+  touch-action: manipulation;
 }
 
 :focus-visible {
   outline: 2px solid var(--color-cyan-400);
   outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -5,7 +5,7 @@
   "identifier": "app.polimero",
   "build": {
     "frontendDist": "../../ui/dist",
-    "devUrl": "http://localhost:1420"
+    "devUrl": "http://127.0.0.1:1420"
   },
   "app": {
     "windows": [
@@ -18,7 +18,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data: http://127.0.0.1"
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data: http://127.0.0.1:*"
     }
   },
   "bundle": {

@@ -14,7 +14,7 @@ defineEmits<{ close: [] }>()
       <TransitionChild as="template" enter="ease-in-out duration-500" enter-from="opacity-0" enter-to="opacity-100" leave="ease-in-out duration-500" leave-from="opacity-100" leave-to="opacity-0">
         <div class="fixed inset-0 bg-gray-500/75 transition-opacity dark:bg-gray-900/50" />
       </TransitionChild>
-      <div class="fixed inset-0 overflow-hidden">
+      <div class="fixed inset-0 overflow-hidden overscroll-contain">
         <div class="absolute inset-0 overflow-hidden">
           <div class="pointer-events-none fixed inset-y-0 right-0 flex max-w-full pl-10 sm:pl-16">
             <TransitionChild
@@ -27,7 +27,7 @@ defineEmits<{ close: [] }>()
               leave-to="translate-x-full"
             >
               <DialogPanel class="pointer-events-auto w-screen max-w-md">
-                <div class="relative flex h-full flex-col overflow-y-auto bg-white py-6 shadow-xl dark:bg-gray-800 dark:after:absolute dark:after:inset-y-0 dark:after:left-0 dark:after:w-px dark:after:bg-white/10">
+                <div class="relative flex h-full flex-col overflow-y-auto overscroll-contain bg-white py-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] shadow-xl dark:bg-gray-800 dark:after:absolute dark:after:inset-y-0 dark:after:left-0 dark:after:w-px dark:after:bg-white/10">
                   <div class="px-4 sm:px-6">
                     <div class="flex items-start justify-between">
                       <DialogTitle class="text-base font-semibold text-gray-900 dark:text-white">{{ title }}</DialogTitle>

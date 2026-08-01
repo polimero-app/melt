@@ -150,7 +150,15 @@ export type MessageKey =
   | "control.homingStarted"
   | "control.moved"
   | "control.jogUnsupported"
+  | "control.jogAxis"
   | "control.fanSet"
+  | "control.lightSet"
+  | "control.speedProfile"
+  | "control.speedSilent"
+  | "control.speedStandard"
+  | "control.speedSport"
+  | "control.speedLudicrous"
+  | "control.speedSet"
   | "control.emergencyStopSent"
   | "camera.title"
   | "camera.live"
@@ -202,6 +210,15 @@ export type MessageKey =
   | "settingsView.notifyDisconnected"
   | "settingsView.notifyDisconnectedDescription"
   | "settingsView.slicers"
+  | "settingsView.noSlicers"
+  | "settingsView.slicerName"
+  | "settingsView.slicerPath"
+  | "settingsView.addSlicer"
+  | "settingsView.removeSlicer"
+  | "settingsView.removeNamedSlicer"
+  | "settingsView.slicerRemoveTitle"
+  | "settingsView.slicerRemoveDescription"
+  | "settingsView.slicerRemoveConfirm"
   | "settingsView.appearance"
   | "settingsView.theme"
   | "settingsView.themeSystem"
@@ -216,11 +233,16 @@ export type MessageKey =
   | "filesView.title"
   | "filesView.description"
   | "filesView.upload"
+  | "filesView.up"
+  | "filesView.changeFolder"
   | "filesView.breadcrumb"
   | "filesView.search"
   | "filesView.folderModified"
   | "filesView.moreActions"
   | "filesView.openWith"
+  | "filesView.deleteTitle"
+  | "filesView.deleteDescription"
+  | "filesView.deleteConfirm"
   | "filesView.deleted"
   | "filesView.openingIn"
   | "filesView.sentToPrinter"
@@ -252,7 +274,84 @@ export type MessageKey =
   | "common.enabled"
   | "common.disabled"
   | "common.moreActions"
-  | "common.closePanel";
+  | "common.closePanel"
+  | "confirm.cancelTitle"
+  | "confirm.cancelDescription"
+  | "confirm.cancelConfirm"
+  | "confirm.stopTitle"
+  | "confirm.stopDescription"
+  | "confirm.stopConfirm"
+  | "errors.unknown"
+  | "errors.configUnreadable"
+  | "errors.configUnwritable"
+  | "errors.discoveryFailed"
+  | "errors.monitorUnavailable"
+  | "errors.profileNotFound"
+  | "errors.profileInvalid"
+  | "errors.profileExists"
+  | "errors.profileMissingName"
+  | "errors.profileInvalidName"
+  | "errors.profileInvalidHost"
+  | "errors.profileInvalidAccessCode"
+  | "errors.profileInvalidFingerprint"
+  | "errors.profileMissingAccessCode"
+  | "errors.accessCodeUnavailable"
+  | "errors.keychainFailed"
+  | "errors.tlsCredentialsUnavailable"
+  | "errors.tlsUnconfirmed"
+  | "errors.actionUnconfirmed"
+  | "errors.actionUnsupported"
+  | "errors.jobFileMissing"
+  | "errors.temperatureTargetMissing"
+  | "errors.driverUnsupported"
+  | "errors.printerAuthFailed"
+  | "errors.printerTimeout"
+  | "errors.printerOperationFailed"
+  | "errors.printerWrongState"
+  | "errors.cameraAccessCodeUnavailable"
+  | "errors.cameraTlsFailed"
+  | "errors.cameraPreviewUnavailable"
+  | "errors.preferencesUnreadable"
+  | "errors.preferencesUnwritable"
+  | "errors.slicerNameMissing"
+  | "errors.slicerPathMissing"
+  | "errors.slicerAlreadyExists"
+  | "errors.slicerNotFound"
+  | "errors.thumbnailUnsupported"
+  | "errors.thumbnailTooLarge"
+  | "errors.thumbnailInvalid"
+  | "errors.slicerLaunchFailed"
+  | "errors.jogTargetMissing"
+  | "errors.fileDestinationUnwritable"
+  | "errors.libraryUnavailable"
+  | "errors.libraryPathInvalid"
+  | "operations.operation"
+  | "operations.status"
+  | "operations.fileList"
+  | "operations.jobStart"
+  | "operations.jobPause"
+  | "operations.jobResume"
+  | "operations.jobCancel"
+  | "operations.emergencyStop"
+  | "operations.cameraSnapshot"
+  | "operations.cameraStream"
+  | "operations.temperatureSet"
+  | "operations.fanSet"
+  | "operations.motionHome"
+  | "operations.motionJog"
+  | "operations.lightSet"
+  | "operations.speedSet"
+  | "operations.fileDownload"
+  | "operations.fileUpload"
+  | "operations.verification"
+  | "printerState.idle"
+  | "printerState.printing"
+  | "printerState.paused"
+  | "printerState.error"
+  | "printerState.unknown"
+  | "status.unknownLabel"
+  | "printersView.tlsVerified"
+  | "printersView.tlsDisabled";
 
 type Messages = Record<MessageKey, string>;
 
@@ -405,7 +504,15 @@ const messages: Record<Locale, Messages> = {
     "control.homingStarted": "Axes homing started",
     "control.moved": "{axis} moved {distance}",
     "control.jogUnsupported": "Jogging is not supported by this driver",
+    "control.jogAxis": "Jog {axis}",
     "control.fanSet": "{fan} fan set to {percent}%",
+    "control.lightSet": "{light} {state}",
+    "control.speedProfile": "Speed profile",
+    "control.speedSilent": "Silent",
+    "control.speedStandard": "Standard",
+    "control.speedSport": "Sport",
+    "control.speedLudicrous": "Ludicrous",
+    "control.speedSet": "Speed profile set to {profile}",
     "control.emergencyStopSent": "Emergency stop sent",
     "camera.title": "Camera",
     "camera.live": "LIVE",
@@ -457,6 +564,15 @@ const messages: Record<Locale, Messages> = {
     "settingsView.notifyDisconnected": "Printer disconnected",
     "settingsView.notifyDisconnectedDescription": "Show a notification when the connection is lost.",
     "settingsView.slicers": "Slicer applications",
+    "settingsView.noSlicers": "No slicers configured.",
+    "settingsView.slicerName": "Name",
+    "settingsView.slicerPath": "Executable path",
+    "settingsView.addSlicer": "Add slicer",
+    "settingsView.removeSlicer": "Remove slicer",
+    "settingsView.removeNamedSlicer": "Remove {name}",
+    "settingsView.slicerRemoveTitle": "Remove {name}?",
+    "settingsView.slicerRemoveDescription": "This removes the slicer from Polimero. The application itself is not affected.",
+    "settingsView.slicerRemoveConfirm": "Remove slicer",
     "settingsView.appearance": "Appearance",
     "settingsView.theme": "Theme",
     "settingsView.themeSystem": "System",
@@ -471,11 +587,16 @@ const messages: Record<Locale, Messages> = {
     "filesView.title": "File library",
     "filesView.description": "Browse models and directories ready to organize, slice, or print.",
     "filesView.upload": "Upload files",
+    "filesView.up": "Up one level",
+    "filesView.changeFolder": "Change folder",
     "filesView.breadcrumb": "Breadcrumb",
     "filesView.search": "Search files",
     "filesView.folderModified": "Folder · {date}",
     "filesView.moreActions": "More file actions",
-    "filesView.openWith": "Open with Bambu Studio",
+    "filesView.openWith": "Open with {name}",
+    "filesView.deleteTitle": "Delete {name}?",
+    "filesView.deleteDescription": "This permanently removes the file from printer storage.",
+    "filesView.deleteConfirm": "Delete file",
     "filesView.deleted": "{name} deleted",
     "filesView.openingIn": "Opening {name} in Bambu Studio",
     "filesView.sentToPrinter": "{name} sent to printer",
@@ -507,8 +628,85 @@ const messages: Record<Locale, Messages> = {
     "common.enabled": "Enabled",
     "common.disabled": "Disabled",
     "common.moreActions": "More actions",
-    "common.closePanel": "Close panel"
-  },
+    "common.closePanel": "Close panel",
+    "confirm.cancelTitle": "Cancel the print on {name}?",
+    "confirm.cancelDescription": "The print stops where it is and cannot be resumed. Filament already used is lost.",
+    "confirm.cancelConfirm": "Cancel print",
+    "confirm.stopTitle": "Emergency stop on {name}?",
+    "confirm.stopDescription": "Motors and heaters are cut immediately. The printer may need a firmware restart before it accepts commands again.",
+    "confirm.stopConfirm": "Stop now",
+    "errors.unknown": "Something went wrong.",
+    "errors.configUnreadable": "Unable to read printer configuration.",
+    "errors.configUnwritable": "Unable to save printer configuration.",
+    "errors.discoveryFailed": "Printer discovery failed.",
+    "errors.monitorUnavailable": "Monitoring is unavailable.",
+    "errors.profileNotFound": "Printer profile not found.",
+    "errors.profileInvalid": "Invalid printer profile.",
+    "errors.profileExists": "A printer profile with this name already exists.",
+    "errors.profileMissingName": "Enter a printer name.",
+    "errors.profileInvalidName": "That printer name is not valid.",
+    "errors.profileInvalidHost": "That host is not valid.",
+    "errors.profileInvalidAccessCode": "That access code is not valid.",
+    "errors.profileInvalidFingerprint": "That TLS fingerprint is not valid.",
+    "errors.profileMissingAccessCode": "This driver requires an access code.",
+    "errors.accessCodeUnavailable": "Printer authentication is unavailable.",
+    "errors.keychainFailed": "Keychain operation failed.",
+    "errors.tlsCredentialsUnavailable": "Printer TLS credentials are unavailable.",
+    "errors.tlsUnconfirmed": "Review and confirm the new TLS certificate before replacing the stored fingerprint.",
+    "errors.actionUnconfirmed": "Confirm this printer action before sending it.",
+    "errors.actionUnsupported": "Unsupported printer action.",
+    "errors.jobFileMissing": "Choose a printer file before starting a job.",
+    "errors.temperatureTargetMissing": "Choose a temperature target first.",
+    "errors.driverUnsupported": "This driver does not support {operation}.",
+    "errors.printerAuthFailed": "Printer authentication failed.",
+    "errors.printerTimeout": "The printer timed out while {operation}.",
+    "errors.printerOperationFailed": "The printer failed while {operation}.",
+    "errors.printerWrongState": "The printer is {state}; it does not support {operation} right now.",
+    "errors.cameraAccessCodeUnavailable": "Camera authentication is unavailable.",
+    "errors.cameraTlsFailed": "Camera TLS verification failed.",
+    "errors.cameraPreviewUnavailable": "Camera preview is unavailable.",
+    "errors.preferencesUnreadable": "Unable to read application preferences.",
+    "errors.preferencesUnwritable": "Unable to save application preferences.",
+    "errors.slicerNameMissing": "Enter a slicer name.",
+    "errors.slicerPathMissing": "Enter a slicer path.",
+    "errors.slicerAlreadyExists": "A slicer with this name already exists.",
+    "errors.slicerNotFound": "Slicer not found.",
+    "errors.thumbnailUnsupported": "This file type cannot be previewed.",
+    "errors.thumbnailTooLarge": "This file is too large to preview.",
+    "errors.thumbnailInvalid": "This model could not be rendered.",
+    "errors.slicerLaunchFailed": "Unable to open the file with that slicer.",
+    "errors.jogTargetMissing": "Choose at least one axis to move first.",
+    "errors.fileDestinationUnwritable": "Cannot write to the chosen destination.",
+    "errors.libraryUnavailable": "Unable to access your local file library.",
+    "errors.libraryPathInvalid": "That file library path is not valid.",
+    "operations.operation": "running this operation",
+    "operations.status": "reading status",
+    "operations.fileList": "listing files",
+    "operations.jobStart": "starting jobs",
+    "operations.jobPause": "pausing jobs",
+    "operations.jobResume": "resuming jobs",
+    "operations.jobCancel": "cancelling jobs",
+    "operations.emergencyStop": "stopping the printer",
+    "operations.cameraSnapshot": "capturing a snapshot",
+    "operations.cameraStream": "streaming the camera",
+    "operations.temperatureSet": "setting the temperature",
+    "operations.fanSet": "setting the fan speed",
+    "operations.motionHome": "homing the printer",
+    "operations.motionJog": "jogging the printer",
+    "operations.lightSet": "setting the light",
+    "operations.speedSet": "setting the speed profile",
+    "operations.fileDownload": "downloading the file",
+    "operations.fileUpload": "uploading the file",
+    "operations.verification": "verifying the profile",
+    "printerState.idle": "idle",
+    "printerState.printing": "printing",
+    "printerState.paused": "paused",
+    "printerState.error": "in error",
+    "printerState.unknown": "in an unknown state",
+    "status.unknownLabel": "Unknown",
+    "printersView.tlsVerified": "Verified",
+    "printersView.tlsDisabled": "Disabled"
+ },
   "pt-BR": {
     "app.eyebrow": "CONTROLE DE IMPRESSÃO LOCAL",
     "app.title": "POLIMERO",
@@ -657,7 +855,15 @@ const messages: Record<Locale, Messages> = {
     "control.homingStarted": "Referenciamento dos eixos iniciado",
     "control.moved": "{axis} movido {distance}",
     "control.jogUnsupported": "Este driver não suporta movimento manual",
+    "control.jogAxis": "Mover {axis}",
     "control.fanSet": "Ventoinha {fan} ajustada para {percent}%",
+    "control.lightSet": "{light} {state}",
+    "control.speedProfile": "Perfil de velocidade",
+    "control.speedSilent": "Silencioso",
+    "control.speedStandard": "Padrão",
+    "control.speedSport": "Esportivo",
+    "control.speedLudicrous": "Absurdo",
+    "control.speedSet": "Perfil de velocidade definido como {profile}",
     "control.emergencyStopSent": "Parada de emergência enviada",
     "camera.title": "Câmera",
     "camera.live": "AO VIVO",
@@ -709,6 +915,15 @@ const messages: Record<Locale, Messages> = {
     "settingsView.notifyDisconnected": "Impressora desconectada",
     "settingsView.notifyDisconnectedDescription": "Mostrar uma notificação quando a conexão for perdida.",
     "settingsView.slicers": "Aplicativos de fatiamento",
+    "settingsView.noSlicers": "Nenhum fatiador configurado.",
+    "settingsView.slicerName": "Nome",
+    "settingsView.slicerPath": "Caminho do executável",
+    "settingsView.addSlicer": "Adicionar fatiador",
+    "settingsView.removeSlicer": "Remover fatiador",
+    "settingsView.removeNamedSlicer": "Remover {name}",
+    "settingsView.slicerRemoveTitle": "Remover {name}?",
+    "settingsView.slicerRemoveDescription": "Isso remove o fatiador do Polimero. O aplicativo em si não é afetado.",
+    "settingsView.slicerRemoveConfirm": "Remover fatiador",
     "settingsView.appearance": "Aparência",
     "settingsView.theme": "Tema",
     "settingsView.themeSystem": "Sistema",
@@ -723,11 +938,16 @@ const messages: Record<Locale, Messages> = {
     "filesView.title": "Biblioteca de arquivos",
     "filesView.description": "Navegue por modelos e diretórios prontos para organizar, fatiar ou imprimir.",
     "filesView.upload": "Enviar arquivos",
+    "filesView.up": "Subir um nível",
+    "filesView.changeFolder": "Trocar pasta",
     "filesView.breadcrumb": "Trilha de navegação",
     "filesView.search": "Buscar arquivos",
     "filesView.folderModified": "Pasta · {date}",
     "filesView.moreActions": "Mais ações do arquivo",
-    "filesView.openWith": "Abrir com o Bambu Studio",
+    "filesView.openWith": "Abrir com {name}",
+    "filesView.deleteTitle": "Excluir {name}?",
+    "filesView.deleteDescription": "Isso remove permanentemente o arquivo do armazenamento da impressora.",
+    "filesView.deleteConfirm": "Excluir arquivo",
     "filesView.deleted": "{name} excluído",
     "filesView.openingIn": "Abrindo {name} no Bambu Studio",
     "filesView.sentToPrinter": "{name} enviado para a impressora",
@@ -759,8 +979,85 @@ const messages: Record<Locale, Messages> = {
     "common.enabled": "Ativada",
     "common.disabled": "Desativada",
     "common.moreActions": "Mais ações",
-    "common.closePanel": "Fechar painel"
-  }
+    "common.closePanel": "Fechar painel",
+    "confirm.cancelTitle": "Cancelar a impressão em {name}?",
+    "confirm.cancelDescription": "A impressão para onde está e não pode ser retomada. O filamento já usado é perdido.",
+    "confirm.cancelConfirm": "Cancelar impressão",
+    "confirm.stopTitle": "Parada de emergência em {name}?",
+    "confirm.stopDescription": "Os motores e aquecedores são cortados imediatamente. A impressora pode precisar reiniciar o firmware antes de aceitar comandos novamente.",
+    "confirm.stopConfirm": "Parar agora",
+    "errors.unknown": "Algo deu errado.",
+    "errors.configUnreadable": "Não foi possível ler a configuração da impressora.",
+    "errors.configUnwritable": "Não foi possível salvar a configuração da impressora.",
+    "errors.discoveryFailed": "A busca por impressoras falhou.",
+    "errors.monitorUnavailable": "O monitoramento está indisponível.",
+    "errors.profileNotFound": "Perfil de impressora não encontrado.",
+    "errors.profileInvalid": "Perfil de impressora inválido.",
+    "errors.profileExists": "Já existe um perfil de impressora com este nome.",
+    "errors.profileMissingName": "Informe um nome para a impressora.",
+    "errors.profileInvalidName": "Esse nome de impressora não é válido.",
+    "errors.profileInvalidHost": "Esse host não é válido.",
+    "errors.profileInvalidAccessCode": "Esse código de acesso não é válido.",
+    "errors.profileInvalidFingerprint": "Essa impressão digital TLS não é válida.",
+    "errors.profileMissingAccessCode": "Este driver exige um código de acesso.",
+    "errors.accessCodeUnavailable": "A autenticação da impressora está indisponível.",
+    "errors.keychainFailed": "A operação no chaveiro falhou.",
+    "errors.tlsCredentialsUnavailable": "As credenciais TLS da impressora estão indisponíveis.",
+    "errors.tlsUnconfirmed": "Revise e confirme o novo certificado TLS antes de substituir a impressão digital armazenada.",
+    "errors.actionUnconfirmed": "Confirme esta ação antes de enviá-la à impressora.",
+    "errors.actionUnsupported": "Ação de impressora não suportada.",
+    "errors.jobFileMissing": "Escolha um arquivo antes de iniciar uma impressão.",
+    "errors.temperatureTargetMissing": "Escolha primeiro uma temperatura alvo.",
+    "errors.driverUnsupported": "Este driver não suporta {operation}.",
+    "errors.printerAuthFailed": "A autenticação da impressora falhou.",
+    "errors.printerTimeout": "A impressora expirou durante {operation}.",
+    "errors.printerOperationFailed": "A impressora falhou durante {operation}.",
+    "errors.printerWrongState": "A impressora está {state} e não suporta {operation} agora.",
+    "errors.cameraAccessCodeUnavailable": "A autenticação da câmera está indisponível.",
+    "errors.cameraTlsFailed": "A verificação TLS da câmera falhou.",
+    "errors.cameraPreviewUnavailable": "A pré-visualização da câmera está indisponível.",
+    "errors.preferencesUnreadable": "Não foi possível ler as preferências do aplicativo.",
+    "errors.preferencesUnwritable": "Não foi possível salvar as preferências do aplicativo.",
+    "errors.slicerNameMissing": "Informe o nome do fatiador.",
+    "errors.slicerPathMissing": "Informe o caminho do fatiador.",
+    "errors.slicerAlreadyExists": "Já existe um fatiador com este nome.",
+    "errors.slicerNotFound": "Fatiador não encontrado.",
+    "errors.thumbnailUnsupported": "Este tipo de arquivo não pode ser pré-visualizado.",
+    "errors.thumbnailTooLarge": "Este arquivo é grande demais para pré-visualizar.",
+    "errors.thumbnailInvalid": "Não foi possível renderizar este modelo.",
+    "errors.slicerLaunchFailed": "Não foi possível abrir o arquivo com este fatiador.",
+    "errors.jogTargetMissing": "Escolha ao menos um eixo para mover.",
+    "errors.fileDestinationUnwritable": "Não é possível gravar no destino escolhido.",
+    "errors.libraryUnavailable": "Não foi possível acessar sua biblioteca de arquivos local.",
+    "errors.libraryPathInvalid": "Este caminho da biblioteca de arquivos não é válido.",
+    "operations.operation": "esta operação",
+    "operations.status": "o status",
+    "operations.fileList": "a listagem de arquivos",
+    "operations.jobStart": "o início de impressões",
+    "operations.jobPause": "a pausa de impressões",
+    "operations.jobResume": "a retomada de impressões",
+    "operations.jobCancel": "o cancelamento de impressões",
+    "operations.emergencyStop": "a parada de emergência",
+    "operations.cameraSnapshot": "as fotos da câmera",
+    "operations.cameraStream": "a transmissão da câmera",
+    "operations.temperatureSet": "o controle de temperatura",
+    "operations.fanSet": "o controle de ventoinhas",
+    "operations.motionHome": "o controle de movimento",
+    "operations.motionJog": "o movimento manual",
+    "operations.lightSet": "o controle de iluminação",
+    "operations.speedSet": "o controle de velocidade",
+    "operations.fileDownload": "o download do arquivo",
+    "operations.fileUpload": "o envio do arquivo",
+    "operations.verification": "a verificação do perfil",
+    "printerState.idle": "ociosa",
+    "printerState.printing": "imprimindo",
+    "printerState.paused": "pausada",
+    "printerState.error": "com erro",
+    "printerState.unknown": "em estado desconhecido",
+    "status.unknownLabel": "Desconhecido",
+    "printersView.tlsVerified": "Verificado",
+    "printersView.tlsDisabled": "Desativado"
+ }
 };
 
 export function preferredLocale(language = navigator.language): Locale {
@@ -768,5 +1065,8 @@ export function preferredLocale(language = navigator.language): Locale {
 }
 
 export function translate(locale: Locale, key: MessageKey, values: Record<string, string | number> = {}): string {
-  return messages[locale][key].replace(/\{(\w+)\}/g, (_, name: string) => String(values[name] ?? `{${name}}`));
+  // Codes can arrive from the backend, so an unknown key degrades to the code
+  // itself rather than throwing inside a render.
+  const template = messages[locale][key] ?? messages.en[key] ?? key;
+  return template.replace(/\{(\w+)\}/g, (_, name: string) => String(values[name] ?? `{${name}}`));
 }

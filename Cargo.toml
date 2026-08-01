@@ -18,11 +18,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "multipart", "default-tls"] }
 url = "2"
-keyring = "3"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-openssl"] }
 serde_yaml = "0.9"
 sha2 = "0.10"
 tempfile = "3"
 thiserror = "2"
 time = { version = "0.3", features = ["formatting"] }
-native-tls = "0.2"
+openssl = "0.10"
 base64 = "0.22"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+png = "0.17"

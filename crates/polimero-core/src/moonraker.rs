@@ -21,15 +21,18 @@ use thiserror::Error;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use url::Url;
 
+use crate::trace::{SharedTracer, TraceEvent};
+
 pub const DEFAULT_PORT: u16 = 7125;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_JSON_RESPONSE_BYTES: u64 = 8 << 20;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Profile {
     base_url: Url,
     insecure: bool,
     timeout: Duration,
+    tracer: Option<SharedTracer>,
 }
 
 impl Profile {
@@ -68,11 +71,17 @@ impl Profile {
             base_url,
             insecure,
             timeout,
+            tracer: None,
         })
     }
 
     pub fn base_url(&self) -> &Url {
         &self.base_url
+    }
+
+    pub fn with_tracer(mut self, tracer: SharedTracer) -> Self {
+        self.tracer = Some(tracer);
+        self
     }
 }
 
@@ -155,20 +164,21 @@ impl Client {
     }
 
     pub fn status(&self, access_code: Option<&str>) -> Result<Status, Error> {
-        let url = self.status_url();
-        let mut request = self.http.get(url).header(ACCEPT, "application/json");
-        if let Some(access_code) = access_code.filter(|value| !value.is_empty()) {
-            let value = HeaderValue::from_str(access_code).map_err(|_| Error::InvalidAccessCode)?;
-            request = request.header("X-Api-Key", value);
-        }
-
-        let response = request.send().map_err(Error::Transport)?;
-        match response.status() {
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => return Err(Error::Authentication),
-            status if !status.is_success() => return Err(Error::HttpStatus(status)),
-            _ => {}
-        }
-
+        let query = [
+            ("webhooks", String::new()),
+            ("print_stats", String::new()),
+            ("virtual_sdcard", String::new()),
+            ("extruder", String::new()),
+            ("heater_bed", String::new()),
+            ("fan", String::new()),
+        ];
+        let response = self.response(
+            &self.http,
+            Method::GET,
+            "printer/objects/query",
+            &query,
+            access_code,
+        )?;
         let body = read_response(response)?;
         let envelope: Envelope =
             serde_json::from_slice(&body).map_err(|_| Error::InvalidResponse)?;
@@ -188,25 +198,13 @@ impl Client {
         Ok(Status::from_objects(payload.status))
     }
 
-    fn status_url(&self) -> Url {
-        let mut url = self.profile.base_url.clone();
-        let path = format!("{}/printer/objects/query", url.path().trim_end_matches('/'));
-        url.set_path(&path);
-        url.query_pairs_mut()
-            .append_pair("webhooks", "")
-            .append_pair("print_stats", "")
-            .append_pair("virtual_sdcard", "")
-            .append_pair("extruder", "")
-            .append_pair("heater_bed", "")
-            .append_pair("fan", "");
-        url
-    }
-
     pub fn file_roots() -> Vec<FileRoot> {
         vec![FileRoot {
             name: "gcodes",
             description: "Moonraker gcode storage",
             writable: true,
+            capacity_bytes: None,
+            free_bytes: None,
             metadata: BTreeMap::new(),
         }]
     }
@@ -318,7 +316,16 @@ impl Client {
             let value = HeaderValue::from_str(access_code).map_err(|_| Error::InvalidAccessCode)?;
             request = request.header("X-Api-Key", value);
         }
-        let response = request.send().map_err(Error::Transport)?;
+        let label = "POST server/files/upload";
+        self.trace(TraceEvent::request("http", label).with_bytes(metadata.len()));
+        let response = match request.send() {
+            Ok(response) => response,
+            Err(error) => {
+                self.trace(TraceEvent::response("http", label).with_outcome("transport_error"));
+                return Err(Error::Transport(error));
+            }
+        };
+        self.trace(TraceEvent::response("http", label).with_outcome(response.status().as_str()));
         match response.status() {
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => return Err(Error::Authentication),
             status if !status.is_success() => return Err(Error::HttpStatus(status)),
@@ -339,6 +346,23 @@ impl Client {
         }
         envelope.result.ok_or(Error::MissingResult)?;
         Ok(metadata.len())
+    }
+
+    pub fn delete_file(&self, access_code: Option<&str>, device_path: &str) -> Result<(), Error> {
+        let device_path = normalize_device_path(device_path)?;
+        let relative = device_path.trim_start_matches('/');
+        if relative.is_empty() {
+            return Err(Error::InvalidDevicePath);
+        }
+        let response = self.response(
+            &self.http,
+            Method::DELETE,
+            &format!("server/files/gcodes/{relative}"),
+            &[],
+            access_code,
+        )?;
+        let _ = read_response(response)?;
+        Ok(())
     }
 
     pub fn job_start(
@@ -678,16 +702,38 @@ impl Client {
                 pairs.append_pair(key, value);
             }
         }
+        let label = format!("{method} {endpoint}");
         let mut request = http.request(method, url).header(ACCEPT, "application/json");
         if let Some(access_code) = access_code.filter(|value| !value.is_empty()) {
             let value = HeaderValue::from_str(access_code).map_err(|_| Error::InvalidAccessCode)?;
             request = request.header("X-Api-Key", value);
         }
-        let response = request.send().map_err(Error::Transport)?;
-        match response.status() {
+        self.trace(TraceEvent::request("http", label.as_str()));
+        let response = match request.send() {
+            Ok(response) => response,
+            Err(error) => {
+                self.trace(
+                    TraceEvent::response("http", label.as_str()).with_outcome("transport_error"),
+                );
+                return Err(Error::Transport(error));
+            }
+        };
+        let status = response.status();
+        self.trace(
+            TraceEvent::response("http", label.as_str())
+                .with_outcome(status.as_str())
+                .with_bytes(response.content_length().unwrap_or_default()),
+        );
+        match status {
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(Error::Authentication),
             status if !status.is_success() => Err(Error::HttpStatus(status)),
             _ => Ok(response),
+        }
+    }
+
+    fn trace(&self, event: TraceEvent) {
+        if let Some(tracer) = &self.profile.tracer {
+            tracer.record(event);
         }
     }
 
@@ -748,6 +794,19 @@ pub enum PrinterState {
     Unknown,
 }
 
+impl PrinterState {
+    /// Matches the lowercase wire form used by the JSON envelope.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Printing => "printing",
+            Self::Paused => "paused",
+            Self::Error => "error",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Temperature {
@@ -763,6 +822,9 @@ pub struct Temperatures {
     pub nozzle: Option<Temperature>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bed: Option<Temperature>,
+    // Read-only: no portable target is reported by either backend.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chamber: Option<Temperature>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -793,27 +855,185 @@ pub struct StatusWarning {
     pub message: &'static str,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeEstimates {
+    pub elapsed_seconds: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_seconds: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_seconds: Option<u32>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Wifi {
+    pub signal_dbm: i32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrintMeta {
+    pub file_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nozzle_diameter: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bed_type: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Timelapse {
+    pub recording: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ready: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GcodePosition {
+    pub z_mm: f64,
+    pub current_line: i64,
+    pub total_lines: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AmsTray {
+    pub slot: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filament_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_percent: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nozzle_temp_min: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nozzle_temp_max: Option<i32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AmsUnit {
+    pub id: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub humidity_range: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub humidity_level: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    pub trays: Vec<AmsTray>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AmsData {
+    pub units: Vec<AmsUnit>,
+}
+
+/// Driver-specific status payload. Mirrors the Go `extensions["bambu-lan"]`
+/// object so JSON consumers see the same shape.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BambuExtension {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ams: Option<AmsData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sd_card_state: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emmc_storage: Option<bool>,
+    #[serde(rename = "reportedIP", skip_serializing_if = "Option::is_none")]
+    pub reported_ip: Option<String>,
+}
+
+impl BambuExtension {
+    pub fn is_empty(&self) -> bool {
+        self.ams.is_none()
+            && self.sd_card_state.is_none()
+            && self.emmc_storage.is_none()
+            && self.reported_ip.is_none()
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Extensions {
+    #[serde(rename = "bambu-lan", skip_serializing_if = "Option::is_none")]
+    pub bambu_lan: Option<BambuExtension>,
+}
+
+impl Extensions {
+    pub fn is_empty(&self) -> bool {
+        self.bambu_lan.is_none()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     pub state: PrinterState,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub temperatures: Option<Temperatures>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub job: Option<Job>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<Progress>,
     pub errors: Vec<StatusError>,
     pub warnings: Vec<StatusWarning>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub fans: BTreeMap<String, u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_estimates: Option<TimeEstimates>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speed_level: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wifi: Option<Wifi>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub lights: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub print_meta: Option<PrintMeta>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timelapse: Option<Timelapse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gcode_position: Option<GcodePosition>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub firmware_version: Option<String>,
+    #[serde(skip_serializing_if = "Extensions::is_empty")]
+    pub extensions: Extensions,
+}
+
+impl Status {
+    /// Drops the fields Go only emits for `--detailed`, so the default
+    /// envelope keeps the same shape as the reference implementation.
+    pub fn without_extended(mut self) -> Self {
+        self.fans.clear();
+        self.lights.clear();
+        self.time_estimates = None;
+        self.speed_level = None;
+        self.wifi = None;
+        self.print_meta = None;
+        self.stage = None;
+        self.timelapse = None;
+        self.gcode_position = None;
+        self.firmware_version = None;
+        self.extensions = Extensions::default();
+        self
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileRoot {
     pub name: &'static str,
     pub description: &'static str,
     pub writable: bool,
+    // Always emitted, matching the reference envelope: neither backend reports
+    // storage sizes, so the keys are present and null rather than absent.
+    pub capacity_bytes: Option<u64>,
+    pub free_bytes: Option<u64>,
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
@@ -822,6 +1042,16 @@ pub struct FileRoot {
 pub enum FileEntryType {
     File,
     Directory,
+}
+
+impl FileEntryType {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Directory => "directory",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -833,9 +1063,7 @@ pub struct FileEntry {
     pub device_path: String,
     #[serde(rename = "type")]
     pub entry_type: FileEntryType,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub modified_at: Option<String>,
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
@@ -965,6 +1193,18 @@ impl Status {
             errors: map_errors(&status, state),
             warnings,
             fans: map_fans(&status),
+            // Klipper exposes no portable equivalent for the extended Bambu
+            // telemetry, matching the reference implementation.
+            time_estimates: None,
+            speed_level: None,
+            wifi: None,
+            lights: BTreeMap::new(),
+            print_meta: None,
+            stage: None,
+            timelapse: None,
+            gcode_position: None,
+            firmware_version: None,
+            extensions: Extensions::default(),
         }
     }
 }
@@ -1149,7 +1389,7 @@ fn map_temperatures(
         return (
             None,
             vec![StatusWarning {
-                code: "temperature-data-unavailable",
+                code: "temperature_data_unavailable",
                 message: "temperature data unavailable",
             }],
         );
@@ -1158,17 +1398,24 @@ fn map_temperatures(
     let mut warnings = Vec::new();
     if nozzle_incomplete {
         warnings.push(StatusWarning {
-            code: "temperature-data-unavailable",
+            code: "temperature_data_unavailable",
             message: "nozzle temperature reading unavailable",
         });
     }
     if bed_incomplete {
         warnings.push(StatusWarning {
-            code: "temperature-data-unavailable",
+            code: "temperature_data_unavailable",
             message: "bed temperature reading unavailable",
         });
     }
-    (Some(Temperatures { nozzle, bed }), warnings)
+    (
+        Some(Temperatures {
+            nozzle,
+            bed,
+            chamber: None,
+        }),
+        warnings,
+    )
 }
 
 fn heater(status: &BTreeMap<String, Value>, name: &str) -> (Option<Temperature>, bool) {
@@ -1193,7 +1440,7 @@ fn map_progress(status: &BTreeMap<String, Value>) -> (Option<Progress>, Option<S
         return (
             None,
             Some(StatusWarning {
-                code: "progress-unavailable",
+                code: "progress_unavailable",
                 message: "progress unavailable",
             }),
         );
@@ -1242,7 +1489,7 @@ fn map_errors(status: &BTreeMap<String, Value>, state: PrinterState) -> Vec<Stat
         })
         .unwrap_or_else(|| "printer reported an error state".to_owned());
     vec![StatusError {
-        code: "printer-error",
+        code: "printer_error",
         message,
     }]
 }
@@ -1318,6 +1565,34 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Default)]
+    struct RecordingTracer(std::sync::Mutex<Vec<crate::trace::TraceEvent>>);
+
+    impl crate::trace::ProtocolTracer for RecordingTracer {
+        fn record(&self, event: crate::trace::TraceEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
+    #[test]
+    fn a_tracer_attached_to_the_profile_records_the_status_request_and_response() {
+        let (host, _request, server) = server(r#"{"result":{"status":{}}}"#);
+        let tracer = std::sync::Arc::new(RecordingTracer::default());
+        let profile = Profile::new(&host, false, DEFAULT_TIMEOUT)
+            .unwrap()
+            .with_tracer(tracer.clone());
+        let client = Client::new(profile).unwrap();
+
+        client.status(None).unwrap();
+        server.join().unwrap();
+
+        let events = tracer.0.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].transport, "http");
+        assert!(events[0].label.starts_with("GET printer/objects/query"));
+        assert_eq!(events[1].outcome.as_deref(), Some("200"));
+    }
+
     #[test]
     fn status_queries_moonraker_with_the_api_key_and_maps_typed_fields() {
         let (host, request, server) = server(
@@ -1362,7 +1637,7 @@ mod tests {
         assert_eq!(
             status.warnings,
             vec![StatusWarning {
-                code: "temperature-data-unavailable",
+                code: "temperature_data_unavailable",
                 message: "temperature data unavailable",
             },]
         );
@@ -1381,7 +1656,7 @@ mod tests {
         assert_eq!(
             status.errors,
             vec![StatusError {
-                code: "printer-error",
+                code: "printer_error",
                 message: "Move out of range".into(),
             }]
         );
@@ -1582,6 +1857,12 @@ mod tests {
                     body.len()
                 )
                 .unwrap();
+                // Chunked uploads keep sending after the response is written.
+                // Half-closing and draining lets the peer finish, so the socket
+                // shuts down with a FIN instead of resetting away the response.
+                stream.flush().unwrap();
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+                let _ = std::io::copy(&mut stream, &mut std::io::sink());
             }
         });
         (host, requests, server)

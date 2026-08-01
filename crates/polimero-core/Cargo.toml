@@ -11,12 +11,13 @@ serde_json.workspace = true
 reqwest.workspace = true
 url.workspace = true
 keyring.workspace = true
-native-tls.workspace = true
+openssl.workspace = true
 serde_yaml.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 time.workspace = true
-
-[dev-dependencies]
-openssl = "0.10"
+rtsp-types = "0.1.3"
+base64.workspace = true
+jpeg-encoder = "0.6.1"
+openh264 = "0.9.7"

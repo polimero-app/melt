@@ -5,7 +5,7 @@ const model = defineModel<boolean>({ required: true })
 
 <template>
   <div
-    class="group relative inline-flex h-5 w-10 shrink-0 items-center justify-center rounded-full outline-offset-2 outline-cyan-600 has-focus-visible:outline-2 dark:outline-cyan-500"
+    class="group relative inline-flex size-11 shrink-0 items-center justify-center rounded-full outline-offset-2 outline-cyan-600 has-focus-visible:outline-2 dark:outline-cyan-500"
   >
     <span
       class="absolute mx-auto h-4 w-9 rounded-full bg-gray-200 inset-ring inset-ring-gray-900/5 transition-colors duration-200 ease-in-out group-has-checked:bg-cyan-600 dark:bg-gray-800/50 dark:inset-ring-white/10 dark:group-has-checked:bg-cyan-500"

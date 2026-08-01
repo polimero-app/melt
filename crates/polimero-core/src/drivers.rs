@@ -3,7 +3,7 @@ use std::{fmt, time::Duration};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::{bambu, config, moonraker};
+use crate::{bambu, config, moonraker, trace::SharedTracer};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct DriverInfo {
@@ -36,6 +36,7 @@ pub struct Capabilities {
     pub file_list: bool,
     pub file_download: bool,
     pub file_upload: bool,
+    pub file_delete: bool,
     pub job_start: bool,
     pub job_pause: bool,
     pub job_resume: bool,
@@ -79,6 +80,7 @@ impl Driver {
             Operation::FileList => self.capabilities().file_list,
             Operation::FileDownload => self.capabilities().file_download,
             Operation::FileUpload => self.capabilities().file_upload,
+            Operation::FileDelete => self.capabilities().file_delete,
             Operation::JobStart => self.capabilities().job_start,
             Operation::JobPause => self.capabilities().job_pause,
             Operation::JobResume => self.capabilities().job_resume,
@@ -103,6 +105,7 @@ impl Driver {
                 file_list: true,
                 file_download: true,
                 file_upload: true,
+                file_delete: true,
                 job_start: true,
                 job_pause: true,
                 job_resume: true,
@@ -121,6 +124,7 @@ impl Driver {
                 file_list: true,
                 file_download: true,
                 file_upload: true,
+                file_delete: true,
                 job_start: true,
                 job_pause: true,
                 job_resume: true,
@@ -153,6 +157,7 @@ pub enum Operation {
     FileList,
     FileDownload,
     FileUpload,
+    FileDelete,
     JobStart,
     JobPause,
     JobResume,
@@ -242,6 +247,15 @@ fn profile_with_timeout(config: &config::Profile, timeout: Duration) -> Result<P
         Driver::Moonraker => moonraker::Profile::new(&config.host, config.insecure, timeout)
             .map(Profile::Moonraker)
             .map_err(|_| DriverError::InvalidProfile(Driver::Moonraker)),
+    }
+}
+
+/// Attaches a protocol tracer to an already-resolved driver profile, so every
+/// subsequent request made through it is recorded.
+pub fn attach_tracer(profile: Profile, tracer: SharedTracer) -> Profile {
+    match profile {
+        Profile::Bambu(profile) => Profile::Bambu(profile.with_tracer(tracer)),
+        Profile::Moonraker(profile) => Profile::Moonraker(profile.with_tracer(tracer)),
     }
 }
 
@@ -367,6 +381,22 @@ pub fn upload_file(
             .map_err(DriverError::Moonraker),
         Profile::Bambu(profile) => bambu::Client::new(profile.clone())
             .upload_file(access_code, tls_fingerprint, source, device_path, overwrite)
+            .map_err(DriverError::Bambu),
+    }
+}
+
+pub fn delete_file(
+    profile: &Profile,
+    access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
+    device_path: &str,
+) -> Result<(), DriverError> {
+    match profile {
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.delete_file(access_code, device_path))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .delete_file(access_code, tls_fingerprint, device_path)
             .map_err(DriverError::Bambu),
     }
 }
@@ -684,7 +714,7 @@ mod tests {
         );
 
         assert!(matches!(
-            light_set(&profile, None, None, "chamber", moonraker::LightState::On),
+            light_set(&profile, None, None, "chamber_light", moonraker::LightState::On),
             Err(DriverError::UnsupportedOperation(
                 Driver::Moonraker,
                 Operation::LightSet

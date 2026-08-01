@@ -19,7 +19,9 @@ use polimero_core::{
     config::{Config, ConfigError, NamedProfile, config_dir},
     drivers::{self, DriverError},
     keychain::{SERVICE, SecretError, SecretStore, SystemKeychain, account},
+    moonraker,
     profiles::{self, ProfileError},
+    trace::JsonlTracer,
 };
 use serde::Serialize;
 
@@ -35,6 +37,160 @@ struct CommandGroup {
     commands: &'static [(&'static str, &'static str)],
 }
 
+struct LeafCommand {
+    path: &'static [&'static str],
+    short: &'static str,
+    args: &'static str,
+    flags: &'static str,
+}
+
+const LEAF_COMMANDS: &[LeafCommand] = &[
+    LeafCommand {
+        path: &["camera", "snapshot"],
+        short: "Capture one still image from a printer camera",
+        args: "<name> [flags]",
+        flags: "  -h, --help                    help for snapshot\n      --insecure                skip TLS fingerprint verification for this invocation\n      --overwrite               replace an existing destination file\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --to string               destination file path or directory",
+    },
+    LeafCommand {
+        path: &["camera", "stream"],
+        short: "Stream camera feed from a printer via a local HTTP server",
+        args: "<name> [flags]",
+        flags: "      --format string           output format for stream: mjpeg (transcode H.264 to MJPEG for browser viewing)\n  -h, --help                    help for stream\n      --insecure                skip TLS fingerprint verification for this invocation\n      --port int                local HTTP server port (default 8080)\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          auto-stop after this duration (e.g. 30m)",
+    },
+    LeafCommand {
+        path: &["emergency-stop"],
+        short: "Immediately halt all printer motion and heating",
+        args: "<printer> [flags]",
+        flags: "  -h, --help                    help for emergency-stop\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)",
+    },
+    LeafCommand {
+        path: &["fans", "set"],
+        short: "Set fan speed percentage on a printer",
+        args: "<printer> <fan> <percent> [flags]",
+        flags: "  -h, --help                    help for set\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["files", "download"],
+        short: "Download a file from printer storage",
+        args: "<printer> <device-path> [flags]",
+        flags: "  -h, --help                    help for download\n      --insecure                skip TLS fingerprint verification for this invocation\n      --overwrite               allow overwriting existing destination file\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --to string               destination file or directory path",
+    },
+    LeafCommand {
+        path: &["files", "list"],
+        short: "List files on printer storage",
+        args: "<printer> [<device-path>...] [flags]",
+        flags: "  -h, --help                    help for list\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --recursive               recursively list directory contents\n      --timeout string          override the profile connection timeout (e.g. 10s)",
+    },
+    LeafCommand {
+        path: &["files", "roots"],
+        short: "List storage roots available on a printer",
+        args: "<printer> [flags]",
+        flags: "  -h, --help                    help for roots\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)",
+    },
+    LeafCommand {
+        path: &["files", "upload"],
+        short: "Upload a file to printer storage",
+        args: "<printer> <local-path> <device-path> [flags]",
+        flags: "  -h, --help                    help for upload\n      --insecure                skip TLS fingerprint verification for this invocation\n      --overwrite               allow overwriting existing device file\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)",
+    },
+    LeafCommand {
+        path: &["jobs", "cancel"],
+        short: "Cancel the active or paused print job",
+        args: "<printer> [flags]",
+        flags: "  -h, --help                    help for cancel\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["jobs", "pause"],
+        short: "Pause the active print job",
+        args: "<printer> [flags]",
+        flags: "  -h, --help                    help for pause\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["jobs", "resume"],
+        short: "Resume a paused print job",
+        args: "<printer> [flags]",
+        flags: "  -h, --help                    help for resume\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["jobs", "start"],
+        short: "Start a print job from a file on printer storage",
+        args: "<printer> <device-path> [flags]",
+        flags: "  -h, --help                    help for start\n      --insecure                skip TLS fingerprint verification for this invocation\n      --plate int               plate/sub-file index within a multi-plate file\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --skip-leveling           skip automatic bed leveling\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["lights", "set"],
+        short: "Set light state (on/off) on a printer",
+        args: "<printer> <light> <state> [flags]",
+        flags: "  -h, --help                    help for set\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["motion", "home"],
+        short: "Home printer axes",
+        args: "<printer> [flags]",
+        flags: "      --axis string             comma-separated axes to home: x,y,z (default: all)\n  -h, --help                    help for home\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["motion", "jog"],
+        short: "Jog printer axes by a relative distance",
+        args: "<printer> [flags]",
+        flags: "      --feedrate int            move speed in mm/min (default 1500)\n  -h, --help                    help for jog\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --x float                 relative X-axis move in mm (range: -10 to 10)\n      --y float                 relative Y-axis move in mm (range: -10 to 10)\n      --yes                     skip interactive confirmation\n      --z float                 relative Z-axis move in mm (range: -10 to 10)",
+    },
+    LeafCommand {
+        path: &["printer", "add"],
+        short: "Add a printer profile",
+        args: "<name> [flags]",
+        flags: "      --access-code-file string   file containing the access code\n      --driver string             driver name (e.g. bambu-lan)\n  -h, --help                      help for add\n      --host string               printer IP or hostname\n      --insecure                  skip TLS verification and auth check\n      --protocol-trace string     write protocol diagnostics to this file (JSON Lines)\n      --serial string             printer serial number (required by some drivers)\n      --timeout string            connection timeout (default \"10s\")",
+    },
+    LeafCommand {
+        path: &["printer", "discover"],
+        short: "Scan the local network for printers (mDNS, SSDP, UDP broadcast)",
+        args: "[flags]",
+        flags: "      --driver string           restrict discovery to a specific driver\n  -h, --help                    help for discover\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          scan duration (default 5s) (default \"5s\")",
+    },
+    LeafCommand {
+        path: &["printer", "drivers"],
+        short: "List available printer drivers",
+        args: "[flags]",
+        flags: "  -h, --help   help for drivers",
+    },
+    LeafCommand {
+        path: &["printer", "list"],
+        short: "List configured printer profiles",
+        args: "[flags]",
+        flags: "  -h, --help   help for list",
+    },
+    LeafCommand {
+        path: &["printer", "remove"],
+        short: "Remove a printer profile",
+        args: "<name> [flags]",
+        flags: "  -h, --help   help for remove\n      --yes    skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["printer", "tls", "refresh"],
+        short: "Re-pin or disable TLS certificate for a printer profile",
+        args: "<name> [flags]",
+        flags: "  -h, --help                    help for refresh\n      --insecure                disable TLS verification for this profile\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["speed", "set"],
+        short: "Set active print speed profile on a printer",
+        args: "<printer> <profile> [flags]",
+        flags: "  -h, --help                    help for set\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["status"],
+        short: "Show the current status of a printer",
+        args: "<name> [flags]",
+        flags: "      --detailed                include extended telemetry (fans, time, speed, AMS, etc.)\n  -h, --help                    help for status\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)",
+    },
+    LeafCommand {
+        path: &["temperature", "set"],
+        short: "Set heater target temperatures on a printer",
+        args: "<printer> [flags]",
+        flags: "      --bed float               bed target temperature in Celsius (0 turns off)\n      --chamber float           chamber target temperature in Celsius (0 turns off)\n  -h, --help                    help for set\n      --insecure                skip TLS fingerprint verification for this invocation\n      --nozzle float            nozzle target temperature in Celsius (0 turns off)\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
+    },
+];
+
 const COMMAND_GROUPS: &[CommandGroup] = &[
     CommandGroup {
         path: &[],
@@ -44,6 +200,10 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
             (
                 "completion",
                 "Generate the autocompletion script for the specified shell",
+            ),
+            (
+                "emergency-stop",
+                "Immediately halt all printer motion and heating",
             ),
             ("fans", "Fan control operations on a named printer"),
             ("files", "File operations on a named printer"),
@@ -179,6 +339,7 @@ impl ParsedOptions {
 struct ConnectionOptions {
     timeout: Option<String>,
     insecure: bool,
+    protocol_trace: Option<String>,
 }
 
 struct ResolvedPrinter {
@@ -191,8 +352,41 @@ struct ResolvedPrinter {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Meta<'a> {
     command: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration_ms: Option<u64>,
+}
+
+thread_local! {
+    static NETWORK_CALL_START: std::cell::Cell<Option<Instant>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// `durationMs` is only reported for commands that reach the network, matching
+/// the reference implementation.
+fn mark_network_call() {
+    NETWORK_CALL_START.with(|start| {
+        if start.get().is_none() {
+            start.set(Some(Instant::now()));
+        }
+    });
+}
+
+fn network_duration_ms() -> Option<u64> {
+    NETWORK_CALL_START.with(|start| {
+        start
+            .get()
+            .map(|started| started.elapsed().as_millis().min(u64::MAX.into()) as u64)
+    })
+}
+
+fn meta(command: &str) -> Meta<'_> {
+    Meta {
+        command,
+        duration_ms: network_duration_ms(),
+    }
 }
 
 #[derive(Serialize)]
@@ -355,6 +549,7 @@ fn run_bare_group(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> 
     let mut path = Vec::new();
     let mut unknown_flag = None;
     let mut json_requested = false;
+    let mut help_requested = false;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -363,7 +558,11 @@ fn run_bare_group(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> 
                 json_requested |= value == "json";
                 index += 2;
             }
-            "--verbose" | "-v" | "--help" | "-h" => index += 1,
+            "--help" | "-h" => {
+                help_requested = true;
+                index += 1;
+            }
+            "--verbose" | "-v" => index += 1,
             argument if let Some(value) = argument.strip_prefix("--output=") => {
                 json_requested |= value == "json";
                 index += 1;
@@ -377,6 +576,17 @@ fn run_bare_group(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> 
                 index += 1;
             }
         }
+    }
+
+    // `<leaf> --help` describes the command instead of running it, even when
+    // positional arguments are already present.
+    if help_requested
+        && let Some(leaf) = LEAF_COMMANDS
+            .iter()
+            .filter(|leaf| path.starts_with(leaf.path))
+            .max_by_key(|leaf| leaf.path.len())
+    {
+        return Some(write_leaf_help(leaf, out));
     }
 
     let group = COMMAND_GROUPS
@@ -399,6 +609,15 @@ fn run_bare_group(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> 
     Some(write_group_help(group, out))
 }
 
+fn write_leaf_help(leaf: &LeafCommand, out: &mut dyn Write) -> i32 {
+    let command = leaf.path.join(" ");
+    let help = format!(
+        "{}\n\nUsage:\n  polimero {command} {}\n\nFlags:\n{}\n\nGlobal Flags:\n      --output string   output format: human or json (default \"human\")\n  -v, --verbose         show detailed progress output\n",
+        leaf.short, leaf.args, leaf.flags
+    );
+    out.write_all(help.as_bytes()).map_or(1, |_| 0)
+}
+
 fn group_command_name(group: &CommandGroup) -> String {
     match group.path {
         [] => "polimero".into(),
@@ -414,8 +633,16 @@ fn write_group_help(group: &CommandGroup, out: &mut dyn Write) -> i32 {
         help.push_str(&command);
     }
     help.push_str(" [command]\n\nAvailable Commands:\n");
+    // Cobra pads names to the longest in the group, with 11 as the floor.
+    let width = group
+        .commands
+        .iter()
+        .map(|(name, _)| name.len())
+        .max()
+        .unwrap_or(0)
+        .max(11);
     for (name, description) in group.commands {
-        help.push_str(&format!("  {name:<11} {description}\n"));
+        help.push_str(&format!("  {name:<width$} {description}\n"));
     }
     if group.path.is_empty() {
         help.push_str(
@@ -457,7 +684,7 @@ fn add_profile(
                 format,
                 AppError {
                     exit_code: 1,
-                    code: "internal-error",
+                    code: "internal_error",
                     message: error.to_string(),
                 },
                 out,
@@ -578,21 +805,251 @@ fn printer_status(
         printer.tls_fingerprint.as_deref(),
     ) {
         Ok(status) => {
-            let state = status.state;
+            let detailed = options.enabled("detailed");
+            let report = human_status(&printer.name, &status, detailed);
             write_success(
                 "status",
                 format,
                 StatusData {
-                    profile: printer.name,
+                    profile: printer.name.clone(),
                     driver: printer.driver_kind.name(),
-                    status,
+                    status: if detailed {
+                        status
+                    } else {
+                        status.without_extended()
+                    },
                     capabilities: printer.driver_kind.capabilities(),
                 },
-                |out| writeln!(out, "STATE\t{state:?}"),
+                |out| writeln!(out, "{report}"),
                 out,
             )
         }
         Err(error) => write_error("status", format, driver_error(error), out, err),
+    }
+}
+
+/// Printer-supplied text reaches a terminal here, so control characters are
+/// replaced before display to keep escape sequences from being interpreted.
+fn sanitize(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                '\u{fffd}'
+            } else {
+                character
+            }
+        })
+        .collect()
+}
+
+fn temperature_line(label: &str, reading: &moonraker::Temperature) -> String {
+    match reading.target_celsius {
+        Some(target) => format!("{label}: {:.1} C / {target:.1} C", reading.current_celsius),
+        None => format!("{label}: {:.1} C", reading.current_celsius),
+    }
+}
+
+fn fan_display_name(key: &str) -> &str {
+    match key {
+        "partCooling" => "Part cooling",
+        "heatbreak" => "Heatbreak",
+        "auxiliary" => "Auxiliary",
+        "chamber" => "Chamber",
+        other => other,
+    }
+}
+
+fn human_status(name: &str, status: &moonraker::Status, detailed: bool) -> String {
+    let mut lines = vec![
+        format!("Printer: {}", sanitize(name)),
+        format!("State: {}", status.state.as_str()),
+    ];
+    if detailed
+        && let Some(stage) = status.stage
+        && status.state != moonraker::PrinterState::Idle
+    {
+        lines.push(format!("Stage: {stage}"));
+    }
+    if let Some(progress) = &status.progress {
+        match (detailed, progress.current_layer, progress.total_layers) {
+            (true, Some(current), Some(total)) => lines.push(format!(
+                "Progress: {}% (layer {current} / {total})",
+                progress.percent
+            )),
+            _ => lines.push(format!("Progress: {}%", progress.percent)),
+        }
+    }
+    if detailed && let Some(speed) = &status.speed_level {
+        lines.push(format!("Speed: {}", sanitize(speed)));
+    }
+    if detailed && let Some(estimates) = &status.time_estimates {
+        lines.push(time_estimate_line(estimates));
+    }
+    if let Some(temperatures) = &status.temperatures {
+        if let Some(nozzle) = &temperatures.nozzle {
+            lines.push(temperature_line("Nozzle", nozzle));
+        }
+        if let Some(bed) = &temperatures.bed {
+            lines.push(temperature_line("Bed", bed));
+        }
+        if let Some(chamber) = &temperatures.chamber {
+            lines.push(format!("Chamber: {:.1} C", chamber.current_celsius));
+        }
+    }
+    if detailed && !status.fans.is_empty() {
+        lines.push("Fans:".into());
+        // Known fans lead in a fixed order; anything else follows sorted.
+        let order = ["partCooling", "heatbreak", "auxiliary", "chamber"];
+        let known = order
+            .iter()
+            .filter_map(|key| status.fans.get(*key).map(|speed| (*key, *speed)));
+        let rest = status
+            .fans
+            .iter()
+            .filter(|(key, _)| !order.contains(&key.as_str()))
+            .map(|(key, speed)| (key.as_str(), *speed));
+        for (key, speed) in known.chain(rest) {
+            lines.push(format!("  {}: {speed}%", fan_display_name(key)));
+        }
+    }
+    if detailed && let Some(wifi) = &status.wifi {
+        lines.push(format!("Wi-Fi: {} dBm", wifi.signal_dbm));
+    }
+    if detailed && !status.lights.is_empty() {
+        lines.push("Lights:".into());
+        for (light, state) in &status.lights {
+            lines.push(format!("  {}: {}", sanitize(light), sanitize(state)));
+        }
+    }
+    if let Some(job) = &status.job {
+        let mut line = format!("Job: {}", sanitize(&job.name));
+        if detailed && let Some(meta) = &status.print_meta {
+            let mut parts = Vec::new();
+            if let Some(size) = meta.file_size {
+                parts.push(format_file_size(size));
+            }
+            if let Some(diameter) = meta.nozzle_diameter {
+                parts.push(format!("{diameter:.1}mm nozzle"));
+            }
+            if let Some(bed_type) = &meta.bed_type {
+                parts.push(sanitize(bed_type));
+            }
+            if !parts.is_empty() {
+                line.push_str(&format!(" ({})", parts.join(", ")));
+            }
+        }
+        lines.push(line);
+    }
+    if detailed && let Some(position) = &status.gcode_position {
+        if position.z_mm > 0.0 {
+            lines.push(format!(
+                "G-code: Z {:.2} mm, line {} / {}",
+                position.z_mm, position.current_line, position.total_lines
+            ));
+        } else {
+            lines.push(format!(
+                "G-code: line {} / {}",
+                position.current_line, position.total_lines
+            ));
+        }
+    }
+    if detailed && let Some(timelapse) = &status.timelapse {
+        lines.push(match (timelapse.recording, timelapse.progress) {
+            (true, Some(percent)) => format!("Timelapse: recording ({percent}%)"),
+            (true, None) => "Timelapse: recording".into(),
+            (false, _) => "Timelapse: off".into(),
+        });
+    }
+    if detailed
+        && let Some(extension) = &status.extensions.bambu_lan
+        && let Some(ams) = &extension.ams
+    {
+        lines.push("AMS:".into());
+        for unit in &ams.units {
+            let mut parts = Vec::new();
+            if let (Some(range), Some(level)) = (unit.humidity_range, unit.humidity_level) {
+                parts.push(format!("humidity: {range} [{level}]"));
+            }
+            if let Some(temperature) = unit.temperature {
+                parts.push(format!("temp: {temperature:.1} C"));
+            }
+            let suffix = if parts.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", parts.join(", "))
+            };
+            lines.push(format!("  Unit {}{suffix}:", unit.id));
+            for tray in &unit.trays {
+                let mut line = format!("    Slot {}: ", tray.slot);
+                match &tray.filament_type {
+                    Some(filament) => {
+                        line.push_str(&sanitize(filament));
+                        if let Some(color) = &tray.color {
+                            line.push_str(&format!(" {}", sanitize(color)));
+                        }
+                        if let Some(remaining) = tray.remaining_percent {
+                            line.push_str(&format!(" ({remaining}%)"));
+                        }
+                    }
+                    None => line.push_str("(empty)"),
+                }
+                lines.push(line);
+            }
+        }
+    }
+    if !status.errors.is_empty() {
+        lines.push("Errors:".into());
+        for error in &status.errors {
+            lines.push(format!("- {} {}", error.code, sanitize(&error.message)));
+        }
+    }
+    if !status.warnings.is_empty() {
+        lines.push("Warnings:".into());
+        for warning in &status.warnings {
+            lines.push(format!("- {}", warning.message));
+        }
+    }
+    lines.join("\n")
+}
+
+fn time_estimate_line(estimates: &moonraker::TimeEstimates) -> String {
+    let mut parts = Vec::new();
+    if estimates.elapsed_seconds > 0 {
+        parts.push(format!(
+            "{} elapsed",
+            format_duration(estimates.elapsed_seconds)
+        ));
+    }
+    if let Some(remaining) = estimates.remaining_seconds.filter(|value| *value > 0) {
+        parts.push(format!("{} remaining", format_duration(remaining)));
+    }
+    if parts.is_empty() {
+        return "Time: unknown".into();
+    }
+    format!("Time: {}", parts.join(", "))
+}
+
+fn format_duration(seconds: u32) -> String {
+    if seconds < 60 {
+        return format!("{seconds}s");
+    }
+    let (hours, minutes) = (seconds / 3600, (seconds % 3600) / 60);
+    if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else {
+        format!("{minutes}m")
+    }
+}
+
+fn format_file_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    let value = bytes as f64;
+    match bytes {
+        _ if value >= KB * KB * KB => format!("{:.1} GB", value / (KB * KB * KB)),
+        _ if value >= KB * KB => format!("{:.1} MB", value / (KB * KB)),
+        _ if value >= KB => format!("{:.1} KB", value / KB),
+        _ => format!("{bytes} B"),
     }
 }
 
@@ -670,17 +1127,21 @@ fn one_positional<'a>(command: &str, positionals: &'a [String]) -> Result<&'a st
     }
 }
 
-fn connection_options(options: &ParsedOptions) -> Result<ConnectionOptions, AppError> {
-    if options.value("protocol-trace").is_some() {
-        return Err(AppError {
-            exit_code: 5,
-            code: "capability-unsupported",
-            message: "protocol tracing is not available in the Rust driver yet".into(),
-        });
+/// `printer add` and `printer discover` do not resolve an existing profile,
+/// so there is no request/response session to attach a tracer to.
+fn protocol_trace_unsupported() -> AppError {
+    AppError {
+        exit_code: 5,
+        code: "capability_unsupported",
+        message: "protocol tracing is not available for this command yet".into(),
     }
+}
+
+fn connection_options(options: &ParsedOptions) -> Result<ConnectionOptions, AppError> {
     Ok(ConnectionOptions {
         timeout: options.value("timeout").map(str::to_owned),
         insecure: options.enabled("insecure"),
+        protocol_trace: options.value("protocol-trace").map(str::to_owned),
     })
 }
 
@@ -689,6 +1150,7 @@ fn resolve_printer(
     connection: ConnectionOptions,
     operation: drivers::Operation,
 ) -> Result<ResolvedPrinter, AppError> {
+    mark_network_call();
     let name = requested_name.to_ascii_lowercase();
     let config = Config::load().map_err(config_error)?;
     let mut profile = config
@@ -702,7 +1164,15 @@ fn resolve_printer(
         profile.insecure = true;
     }
     let timeout = drivers::parse_timeout(&profile.timeout).map_err(driver_error)?;
-    let driver = drivers::profile(&profile).map_err(driver_error)?;
+    let mut driver = drivers::profile(&profile).map_err(driver_error)?;
+    if let Some(path) = connection.protocol_trace {
+        let tracer = JsonlTracer::create(Path::new(&path)).map_err(|_| AppError {
+            exit_code: 1,
+            code: "internal_error",
+            message: format!("cannot write protocol trace to {path:?}"),
+        })?;
+        driver = drivers::attach_tracer(driver, std::sync::Arc::new(tracer));
+    }
     let driver_kind = driver.driver();
     if !driver_kind.supports(operation) {
         return Err(driver_error(DriverError::UnsupportedOperation(
@@ -717,7 +1187,7 @@ fn resolve_printer(
             Err(SecretError::NotFound) if driver_kind.requires_access_code() => {
                 return Err(AppError {
                     exit_code: 3,
-                    code: "secret-not-found",
+                    code: "secret_not_found",
                     message: "required printer access code is unavailable".into(),
                 });
             }
@@ -728,7 +1198,7 @@ fn resolve_printer(
             Err(SecretError::Unavailable(_)) => {
                 return Err(AppError {
                     exit_code: 3,
-                    code: "secret-store-failed",
+                    code: "secret_store_failed",
                     message: "keychain operation failed".into(),
                 });
             }
@@ -739,14 +1209,14 @@ fn resolve_printer(
             Err(SecretError::NotFound) => {
                 return Err(AppError {
                     exit_code: 3,
-                    code: "secret-not-found",
+                    code: "secret_not_found",
                     message: "required printer TLS fingerprint is unavailable".into(),
                 });
             }
             Err(SecretError::Unavailable(_)) => {
                 return Err(AppError {
                     exit_code: 3,
-                    code: "secret-store-failed",
+                    code: "secret_store_failed",
                     message: "keychain operation failed".into(),
                 });
             }
@@ -795,7 +1265,7 @@ fn require_confirmation(
             format,
             AppError {
                 exit_code: 1,
-                code: "internal-error",
+                code: "internal_error",
                 message: "cannot read confirmation".into(),
             },
             out,
@@ -830,7 +1300,7 @@ fn require_state(
     }
     Err(AppError {
         exit_code: 2,
-        code: "invalid-printer-state",
+        code: "invalid_printer_state",
         message: format!("printer state {:?} does not allow {command}", status.state),
     })
 }
@@ -965,7 +1435,7 @@ fn write_snapshot_file(destination: &Path, image: &[u8], overwrite: bool) -> Res
     if image.is_empty() {
         return Err(AppError {
             exit_code: 1,
-            code: "internal-error",
+            code: "internal_error",
             message: "camera snapshot returned empty image data".into(),
         });
     }
@@ -973,17 +1443,17 @@ fn write_snapshot_file(destination: &Path, image: &[u8], overwrite: bool) -> Res
     let parent = destination.parent().unwrap_or_else(|| Path::new("."));
     let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|_| AppError {
         exit_code: 1,
-        code: "internal-error",
+        code: "internal_error",
         message: "cannot create snapshot file".into(),
     })?;
     temporary.write_all(image).map_err(|_| AppError {
         exit_code: 1,
-        code: "internal-error",
+        code: "internal_error",
         message: "cannot write snapshot file".into(),
     })?;
     temporary.as_file_mut().sync_all().map_err(|_| AppError {
         exit_code: 1,
-        code: "internal-error",
+        code: "internal_error",
         message: "cannot finalize snapshot file".into(),
     })?;
     let committed = if overwrite {
@@ -993,7 +1463,7 @@ fn write_snapshot_file(destination: &Path, image: &[u8], overwrite: bool) -> Res
     };
     committed.map_err(|_| AppError {
         exit_code: 1,
-        code: "internal-error",
+        code: "internal_error",
         message: "cannot move snapshot file into place".into(),
     })?;
     Ok(image.len() as u64)
@@ -1093,7 +1563,7 @@ fn camera_stream(
                     format,
                     AppError {
                         exit_code: 1,
-                        code: "internal-error",
+                        code: "internal_error",
                         message: "cannot prepare camera stream shutdown".into(),
                     },
                     out,
@@ -1122,7 +1592,7 @@ fn camera_stream(
             format,
             AppError {
                 exit_code: 1,
-                code: "internal-error",
+                code: "internal_error",
                 message: "cannot configure local camera server".into(),
             },
             out,
@@ -1471,10 +1941,10 @@ fn lights_set(
         state,
     ) {
         Ok(result) => {
-            let display = if result.light == "chamber" {
-                "Chamber".into()
-            } else {
-                result.light.clone()
+            let display = match result.light.as_str() {
+                "chamber_light" => "Chamber".into(),
+                "aux_light" => "Aux".into(),
+                _ => result.light.clone(),
             };
             let state = match result.state {
                 polimero_core::moonraker::LightState::On => "on",
@@ -1508,7 +1978,8 @@ fn normalize_light(light: &str) -> Result<String, AppError> {
         return Err(AppError::usage("invalid light name syntax"));
     }
     match light.to_ascii_lowercase().as_str() {
-        "chamber" | "chamber-light" | "chamber_light" => Ok("chamber".into()),
+        "chamber" | "chamber-light" | "chamber_light" => Ok("chamber_light".into()),
+        "aux" | "aux-light" | "aux_light" => Ok("aux_light".into()),
         _ => Ok(light.into()),
     }
 }
@@ -1550,6 +2021,15 @@ fn discover_printers(
         Ok(connection) => connection,
         Err(error) => return write_error("printer discover", format, error, out, err),
     };
+    if connection.protocol_trace.is_some() {
+        return write_error(
+            "printer discover",
+            format,
+            protocol_trace_unsupported(),
+            out,
+            err,
+        );
+    }
     let driver = match options.value("driver") {
         Some(name) => match drivers::Driver::parse(name) {
             Ok(driver) => driver,
@@ -1583,6 +2063,7 @@ fn discover_printers(
             );
         }
     };
+    mark_network_call();
     let configured = match Config::load() {
         Ok(config) => config
             .sorted_profiles()
@@ -1641,7 +2122,7 @@ fn discover_printers(
             format,
             AppError {
                 exit_code: 4,
-                code: "connection-failed",
+                code: "connection_failed",
                 message: "printer discovery failed".into(),
             },
             out,
@@ -1712,7 +2193,7 @@ fn refresh_tls(
                 format,
                 AppError {
                     exit_code: 1,
-                    code: "internal-error",
+                    code: "internal_error",
                     message: error.to_string(),
                 },
                 out,
@@ -1824,6 +2305,7 @@ fn files_roots(
     ) {
         Ok(roots) => {
             let human_roots = roots.clone();
+            let profile = printer.name.clone();
             write_success(
                 "files roots",
                 format,
@@ -1835,12 +2317,21 @@ fn files_roots(
                     capabilities: file_capabilities(printer.driver_kind.capabilities()),
                 },
                 |out| {
-                    writeln!(out, "ROOT\tWRITABLE\tDESCRIPTION")?;
+                    writeln!(out, "Printer: {profile}\n")?;
+                    writeln!(
+                        out,
+                        "{:<8} {:<9} {:<10} {:<10} DESCRIPTION",
+                        "ROOT", "WRITABLE", "FREE", "CAPACITY"
+                    )?;
                     for root in &human_roots {
                         writeln!(
                             out,
-                            "{}\t{}\t{}",
-                            root.name, root.writable, root.description
+                            "{:<8} {:<9} {:<10} {:<10} {}",
+                            root.name,
+                            root.writable,
+                            optional_size(root.free_bytes.map(|v| v as i64)),
+                            optional_size(root.capacity_bytes.map(|v| v as i64)),
+                            root.description
                         )?;
                     }
                     Ok(())
@@ -1920,6 +2411,8 @@ fn files_list(
             Err(error) => return write_error("files list", format, driver_error(error), out, err),
         }
     }
+    let profile = printer.name.clone();
+    let human_paths = results.clone();
     write_success(
         "files list",
         format,
@@ -1930,9 +2423,66 @@ fn files_list(
             warnings: Vec::new(),
             capabilities: file_capabilities(printer.driver_kind.capabilities()),
         },
-        |out| writeln!(out, "File listing retrieved."),
+        |out| {
+            writeln!(out, "Printer: {profile}")?;
+            for (index, path) in human_paths.iter().enumerate() {
+                if index > 0 {
+                    writeln!(out)?;
+                }
+                writeln!(out, "Path: {}\n", sanitize(&path.device_path))?;
+                if path.entries.is_empty() {
+                    writeln!(out, "(empty)")?;
+                    continue;
+                }
+                writeln!(out, "{:<10} {:<9} {:<21} NAME", "TYPE", "SIZE", "MODIFIED")?;
+                for entry in &path.entries {
+                    writeln!(
+                        out,
+                        "{:<10} {:<9} {:<21} {}",
+                        entry.entry_type.as_str(),
+                        optional_size(entry.size_bytes),
+                        entry
+                            .modified_at
+                            .as_deref()
+                            .map_or_else(|| "-".to_owned(), format_modified_time),
+                        sanitize(&entry.name)
+                    )?;
+                }
+            }
+            Ok(())
+        },
         out,
     )
+}
+
+/// Binary-unit sizes, matching the reference `files` tables. Distinct from
+/// [`format_file_size`], which renders decimal units for print metadata.
+fn optional_size(bytes: Option<i64>) -> String {
+    let Some(bytes) = bytes else {
+        return "-".to_owned();
+    };
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = 1024.0 * 1024.0;
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    let value = bytes as f64;
+    match value {
+        v if v >= GIB => format!("{:.1} GiB", v / GIB),
+        v if v >= MIB => format!("{:.1} MiB", v / MIB),
+        v if v >= KIB => format!("{:.1} KiB", v / KIB),
+        _ => format!("{bytes} B"),
+    }
+}
+
+/// ponytail: both drivers emit UTC RFC 3339 (`2026-06-19T00:44:00Z`), so the
+/// display form is a slice rather than a parse. Anything else passes through
+/// unchanged, matching the reference fallback.
+fn format_modified_time(rfc3339: &str) -> String {
+    let bytes = rfc3339.as_bytes();
+    if bytes.len() == 20 && bytes[10] == b'T' && bytes[19] == b'Z' {
+        format!("{} {} UTC", &rfc3339[..10], &rfc3339[11..16])
+    } else {
+        rfc3339.to_owned()
+    }
 }
 
 fn file_root(driver: drivers::Driver) -> &'static str {
@@ -1980,7 +2530,7 @@ struct FileRootsData {
     capabilities: FileCapabilities,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FilePathData {
     device_path: String,
@@ -2213,7 +2763,7 @@ fn files_download(
                 format,
                 AppError {
                     exit_code: 1,
-                    code: "internal-error",
+                    code: "internal_error",
                     message: "cannot create destination file".into(),
                 },
                 out,
@@ -2237,7 +2787,7 @@ fn files_download(
             format,
             AppError {
                 exit_code: 1,
-                code: "internal-error",
+                code: "internal_error",
                 message: "cannot finalize downloaded file".into(),
             },
             out,
@@ -2255,7 +2805,7 @@ fn files_download(
             format,
             AppError {
                 exit_code: 1,
-                code: "internal-error",
+                code: "internal_error",
                 message: "cannot move downloaded file into place".into(),
             },
             out,
@@ -2391,7 +2941,7 @@ fn job_action(
             format,
             AppError {
                 exit_code: 5,
-                code: "capability-unsupported",
+                code: "capability_unsupported",
                 message: "Moonraker does not support Bambu job start options".into(),
             },
             out,
@@ -3119,12 +3669,12 @@ fn driver_error(error: DriverError) -> AppError {
         }
         DriverError::UnsupportedOperation(_, _) => AppError {
             exit_code: 5,
-            code: "capability-unsupported",
+            code: "capability_unsupported",
             message: error.to_string(),
         },
         DriverError::Moonraker(polimero_core::moonraker::Error::Authentication) => AppError {
             exit_code: 3,
-            code: "authentication-failed",
+            code: "authentication_failed",
             message: "printer authentication failed".into(),
         },
         DriverError::Moonraker(polimero_core::moonraker::Error::Timeout) => AppError {
@@ -3134,7 +3684,7 @@ fn driver_error(error: DriverError) -> AppError {
         },
         DriverError::Moonraker(polimero_core::moonraker::Error::Transport(_)) => AppError {
             exit_code: 4,
-            code: "connection-failed",
+            code: "connection_failed",
             message: "printer connection failed".into(),
         },
         DriverError::Moonraker(polimero_core::moonraker::Error::HttpStatus(status))
@@ -3142,13 +3692,13 @@ fn driver_error(error: DriverError) -> AppError {
         {
             AppError {
                 exit_code: 4,
-                code: "connection-failed",
+                code: "connection_failed",
                 message: "printer connection failed".into(),
             }
         }
         DriverError::Moonraker(polimero_core::moonraker::Error::Unsupported(_)) => AppError {
             exit_code: 5,
-            code: "capability-unsupported",
+            code: "capability_unsupported",
             message: error.to_string(),
         },
         DriverError::Moonraker(polimero_core::moonraker::Error::InvalidDevicePath)
@@ -3161,7 +3711,7 @@ fn driver_error(error: DriverError) -> AppError {
         }
         DriverError::Moonraker(polimero_core::moonraker::Error::LocalIo(_)) => AppError {
             exit_code: 1,
-            code: "internal-error",
+            code: "internal_error",
             message: "local file operation failed".into(),
         },
         DriverError::Bambu(
@@ -3170,7 +3720,7 @@ fn driver_error(error: DriverError) -> AppError {
             | polimero_core::bambu::TransportError::Pin(_),
         ) => AppError {
             exit_code: 3,
-            code: "authentication-failed",
+            code: "authentication_failed",
             message: "printer authentication failed".into(),
         },
         DriverError::Bambu(polimero_core::bambu::TransportError::Timeout) => AppError {
@@ -3185,7 +3735,7 @@ fn driver_error(error: DriverError) -> AppError {
             | polimero_core::bambu::TransportError::FileTransfer,
         ) => AppError {
             exit_code: 4,
-            code: "connection-failed",
+            code: "connection_failed",
             message: "printer connection failed".into(),
         },
         DriverError::Bambu(
@@ -3193,7 +3743,7 @@ fn driver_error(error: DriverError) -> AppError {
             | polimero_core::bambu::TransportError::InvalidSpeedProfile,
         ) => AppError {
             exit_code: 5,
-            code: "capability-unsupported",
+            code: "capability_unsupported",
             message: error.to_string(),
         },
         DriverError::Bambu(
@@ -3207,22 +3757,22 @@ fn driver_error(error: DriverError) -> AppError {
         ) => AppError::usage(error.to_string()),
         DriverError::Bambu(polimero_core::bambu::TransportError::LocalIo) => AppError {
             exit_code: 1,
-            code: "internal-error",
+            code: "internal_error",
             message: "local file operation failed".into(),
         },
         DriverError::Bambu(_) => AppError {
             exit_code: 1,
-            code: "printer-unavailable",
+            code: "printer_unavailable",
             message: "printer request failed".into(),
         },
         DriverError::Moonraker(_) => AppError {
             exit_code: 1,
-            code: "printer-unavailable",
+            code: "printer_unavailable",
             message: "printer request failed".into(),
         },
         DriverError::Camera(_) => AppError {
             exit_code: 1,
-            code: "printer-unavailable",
+            code: "printer_unavailable",
             message: "printer camera request failed".into(),
         },
     }
@@ -3256,7 +3806,7 @@ fn remove_profile(
                 format,
                 AppError {
                     exit_code: 1,
-                    code: "internal-error",
+                    code: "internal_error",
                     message: "cannot read confirmation".into(),
                 },
                 out,
@@ -3282,7 +3832,7 @@ fn remove_profile(
                 format,
                 AppError {
                     exit_code: 1,
-                    code: "internal-error",
+                    code: "internal_error",
                     message: error.to_string(),
                 },
                 out,
@@ -3324,7 +3874,7 @@ fn profile_error(error: ProfileError) -> AppError {
         ProfileError::Driver(error) => driver_error(error),
         ProfileError::Secret(_) => AppError {
             exit_code: 3,
-            code: "secret-store-failed",
+            code: "secret_store_failed",
             message: "keychain operation failed".into(),
         },
         ProfileError::Config(ConfigError::ProfileAlreadyExists) => {
@@ -3332,7 +3882,7 @@ fn profile_error(error: ProfileError) -> AppError {
         }
         ProfileError::Config(_) | ProfileError::RollbackFailed => AppError {
             exit_code: 1,
-            code: "internal-error",
+            code: "internal_error",
             message: error.to_string(),
         },
     }
@@ -3351,13 +3901,13 @@ fn write_drivers(format: OutputFormat, out: &mut dyn Write) -> i32 {
             out,
         ),
         OutputFormat::Human => {
-            let _ = writeln!(out, "DRIVER\tDESCRIPTION");
-            for driver in drivers {
-                if writeln!(out, "{}\t{}", driver.name, driver.description).is_err() {
-                    return 1;
-                }
-            }
-            0
+            let mut rows = vec![vec!["DRIVER".to_owned(), "DESCRIPTION".to_owned()]];
+            rows.extend(
+                drivers
+                    .iter()
+                    .map(|driver| vec![driver.name.to_owned(), driver.description.to_owned()]),
+            );
+            write_padded_table(out, &rows).map_or(1, |()| 0)
         }
     }
 }
@@ -3433,7 +3983,7 @@ fn write_success<T: Serialize>(
                 ok: true,
                 data: Some(data),
                 error: None,
-                meta: Meta { command },
+                meta: meta(command),
             };
             write_json(out, &envelope).map_or(1, |_| 0)
         }
@@ -3489,26 +4039,50 @@ fn write_printer_list(
             writeln!(out, "No printer profiles configured.").map_or(1, |_| 0)
         }
         OutputFormat::Human => {
-            let _ = writeln!(out, "NAME\tDRIVER\tHOST\tSERIAL\tTIMEOUT\tINSECURE");
-            for profile in data {
-                if writeln!(
-                    out,
-                    "{}\t{}\t{}\t{}\t{}\t{}",
-                    profile.name,
-                    profile.driver,
-                    profile.host,
-                    profile.serial,
-                    profile.timeout,
-                    profile.insecure
-                )
-                .is_err()
-                {
-                    return 1;
-                }
-            }
-            0
+            let mut rows = vec![
+                ["NAME", "DRIVER", "HOST", "SERIAL", "TIMEOUT", "INSECURE"]
+                    .map(str::to_owned)
+                    .to_vec(),
+            ];
+            rows.extend(data.iter().map(|profile| {
+                vec![
+                    profile.name.to_string(),
+                    profile.driver.to_string(),
+                    profile.host.to_string(),
+                    profile.serial.to_string(),
+                    profile.timeout.to_string(),
+                    profile.insecure.to_string(),
+                ]
+            }));
+            write_padded_table(out, &rows).map_or(1, |()| 0)
         }
     }
+}
+
+/// Column-aligned table with a two-space gap, matching the reference tables.
+/// The final column is never padded, so rows carry no trailing whitespace.
+fn write_padded_table(out: &mut dyn Write, rows: &[Vec<String>]) -> std::io::Result<()> {
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let widths: Vec<usize> = (0..columns)
+        .map(|column| {
+            rows.iter()
+                .filter_map(|row| row.get(column))
+                .map(|cell| cell.chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    for row in rows {
+        for (column, cell) in row.iter().enumerate() {
+            if column + 1 == row.len() {
+                writeln!(out, "{cell}")?;
+            } else {
+                let pad = widths[column] - cell.chars().count() + 2;
+                write!(out, "{cell}{:pad$}", "")?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn config_error(error: ConfigError) -> AppError {
@@ -3519,7 +4093,7 @@ fn config_error(error: ConfigError) -> AppError {
         ConfigError::Malformed(_) => AppError::usage("config file is malformed"),
         _ => AppError {
             exit_code: 1,
-            code: "internal-error",
+            code: "internal_error",
             message: "failed to read config".into(),
         },
     }
@@ -3541,7 +4115,11 @@ fn write_error(
                 message: &error.message,
                 details: BTreeMap::new(),
             }),
-            meta: Meta { command },
+            // The reference implementation reports durationMs on success only.
+            meta: Meta {
+                command,
+                duration_ms: None,
+            },
         };
         let _ = write_json(out, &envelope);
     } else {
@@ -3557,8 +4135,222 @@ fn write_json<T: Serialize>(out: &mut dyn Write, value: &T) -> serde_json::Resul
 
 #[cfg(test)]
 mod tests {
+    fn sample_status() -> moonraker::Status {
+        moonraker::Status {
+            state: moonraker::PrinterState::Printing,
+            temperatures: Some(moonraker::Temperatures {
+                nozzle: Some(moonraker::Temperature {
+                    current_celsius: 212.5,
+                    target_celsius: Some(220.0),
+                }),
+                bed: Some(moonraker::Temperature {
+                    current_celsius: 59.0,
+                    target_celsius: Some(60.0),
+                }),
+                chamber: Some(moonraker::Temperature {
+                    current_celsius: 26.0,
+                    target_celsius: None,
+                }),
+            }),
+            job: Some(moonraker::Job {
+                name: "cube.3mf".into(),
+                id: "job-1".into(),
+            }),
+            progress: Some(moonraker::Progress {
+                percent: 61,
+                current_layer: Some(3),
+                total_layers: Some(100),
+            }),
+            errors: Vec::new(),
+            warnings: Vec::new(),
+            fans: [("auxiliary".to_string(), 15u8), ("partCooling".into(), 9)]
+                .into_iter()
+                .collect(),
+            time_estimates: Some(moonraker::TimeEstimates {
+                elapsed_seconds: 0,
+                remaining_seconds: Some(5460),
+                total_seconds: None,
+            }),
+            speed_level: Some("standard".into()),
+            wifi: Some(moonraker::Wifi { signal_dbm: -68 }),
+            lights: [("chamber_light".to_string(), "on".to_string())]
+                .into_iter()
+                .collect(),
+            print_meta: Some(moonraker::PrintMeta {
+                file_name: "cube.3mf".into(),
+                file_size: Some(2 * 1024 * 1024),
+                nozzle_diameter: Some(0.4),
+                bed_type: Some("textured_plate".into()),
+            }),
+            stage: Some("printing"),
+            timelapse: Some(moonraker::Timelapse {
+                recording: false,
+                progress: None,
+                ready: None,
+            }),
+            gcode_position: Some(moonraker::GcodePosition {
+                z_mm: 0.0,
+                current_line: 120,
+                total_lines: 4000,
+            }),
+            firmware_version: Some("01.08.00.00".into()),
+            extensions: moonraker::Extensions {
+                bambu_lan: Some(moonraker::BambuExtension {
+                    ams: Some(moonraker::AmsData {
+                        units: vec![moonraker::AmsUnit {
+                            id: 0,
+                            humidity_range: Some("20-30%"),
+                            humidity_level: Some("moderate"),
+                            temperature: Some(25.4),
+                            trays: vec![
+                                moonraker::AmsTray {
+                                    slot: 0,
+                                    filament_type: Some("PLA".into()),
+                                    color: Some("161616FF".into()),
+                                    remaining_percent: Some(42),
+                                    nozzle_temp_min: None,
+                                    nozzle_temp_max: None,
+                                },
+                                moonraker::AmsTray {
+                                    slot: 1,
+                                    filament_type: None,
+                                    color: None,
+                                    remaining_percent: None,
+                                    nozzle_temp_min: None,
+                                    nozzle_temp_max: None,
+                                },
+                            ],
+                        }],
+                    }),
+                    sd_card_state: Some("normal"),
+                    emmc_storage: None,
+                    reported_ip: None,
+                }),
+            },
+        }
+    }
+
+    #[test]
+    fn human_status_matches_the_reference_layout() {
+        let brief = human_status("dakota", &sample_status(), false);
+        assert_eq!(
+            brief,
+            "Printer: dakota\nState: printing\nProgress: 61%\nNozzle: 212.5 C / 220.0 C\nBed: 59.0 C / 60.0 C\nChamber: 26.0 C\nJob: cube.3mf"
+        );
+
+        let detailed = human_status("dakota", &sample_status(), true);
+        assert!(detailed.contains("Progress: 61% (layer 3 / 100)"));
+        // Known fans keep the reference order rather than the map's ordering.
+        assert!(detailed.contains("Fans:\n  Part cooling: 9%\n  Auxiliary: 15%"));
+        // Extended sections follow the reference implementation's ordering.
+        assert!(detailed.contains("Stage: printing"), "{detailed}");
+        assert!(detailed.contains("Speed: standard"), "{detailed}");
+        assert!(detailed.contains("Time: 1h 31m remaining"), "{detailed}");
+        assert!(detailed.contains("Wi-Fi: -68 dBm"), "{detailed}");
+        assert!(
+            detailed.contains("Lights:\n  chamber_light: on"),
+            "{detailed}"
+        );
+        assert!(
+            detailed.contains("Job: cube.3mf (2.0 MB, 0.4mm nozzle, textured_plate)"),
+            "{detailed}"
+        );
+        assert!(detailed.contains("G-code: line 120 / 4000"), "{detailed}");
+        assert!(detailed.contains("Timelapse: off"), "{detailed}");
+        assert!(
+            detailed.contains(
+                "AMS:\n  Unit 0 (humidity: 20-30% [moderate], temp: 25.4 C):\n    Slot 0: PLA 161616FF (42%)\n    Slot 1: (empty)"
+            ),
+            "{detailed}"
+        );
+    }
+
+    #[test]
+    fn brief_status_drops_the_detail_only_fields() {
+        let brief = sample_status().without_extended();
+        assert!(brief.fans.is_empty());
+        assert!(brief.lights.is_empty());
+        assert!(brief.wifi.is_none());
+        assert!(brief.speed_level.is_none());
+        assert!(brief.extensions.is_empty());
+        // Base fields survive.
+        assert!(brief.progress.is_some());
+        assert!(brief.temperatures.is_some());
+    }
+
+    #[test]
+    fn human_status_neutralizes_printer_supplied_escape_sequences() {
+        let mut status = sample_status();
+        status.job = Some(moonraker::Job {
+            name: "evil\u{1b}[2Jname".into(),
+            id: "job-1".into(),
+        });
+        let rendered = human_status("dakota", &status, false);
+        assert!(!rendered.contains('\u{1b}'), "{rendered}");
+        assert!(rendered.contains("Job: evil\u{fffd}[2Jname"), "{rendered}");
+    }
+
     use super::*;
     use polimero_core::config::Profile;
+
+    #[test]
+    fn tables_align_every_column_but_the_last() {
+        let rows = vec![
+            ["NAME", "DRIVER", "HOST"].map(str::to_owned).to_vec(),
+            ["alaska", "bambu-lan", "10.20.20.5"]
+                .map(str::to_owned)
+                .to_vec(),
+        ];
+        let mut out = Vec::new();
+
+        write_padded_table(&mut out, &rows).unwrap();
+
+        // Two spaces past the widest cell, and no trailing padding to strip.
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "NAME    DRIVER     HOST\nalaska  bambu-lan  10.20.20.5\n"
+        );
+    }
+
+    #[test]
+    fn file_sizes_and_timestamps_use_the_reference_display_forms() {
+        assert_eq!(optional_size(None), "-");
+        assert_eq!(optional_size(Some(16)), "16 B");
+        assert_eq!(optional_size(Some(229_376)), "224.0 KiB");
+        assert_eq!(optional_size(Some(6_601_748)), "6.3 MiB");
+        assert_eq!(optional_size(Some(2_147_483_648)), "2.0 GiB");
+        assert_eq!(
+            format_modified_time("2026-06-19T00:44:00Z"),
+            "2026-06-19 00:44 UTC"
+        );
+        // Anything that is not plain UTC passes through untouched.
+        assert_eq!(format_modified_time("whenever"), "whenever");
+    }
+
+    #[test]
+    fn every_leaf_command_documents_itself() {
+        for leaf in LEAF_COMMANDS {
+            let mut args = leaf
+                .path
+                .iter()
+                .map(|part| (*part).into())
+                .collect::<Vec<String>>();
+            args.push("--help".into());
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+
+            assert_eq!(run(&args, &mut out, &mut err), 0, "{:?}", leaf.path);
+            assert!(err.is_empty(), "{:?}", leaf.path);
+            let output = String::from_utf8(out).unwrap();
+            assert!(output.starts_with(leaf.short), "{:?}", leaf.path);
+            assert!(
+                output.contains(&format!("polimero {} {}", leaf.path.join(" "), leaf.args)),
+                "{:?}",
+                leaf.path
+            );
+            assert!(output.contains("\nGlobal Flags:\n"), "{:?}", leaf.path);
+        }
+    }
 
     #[test]
     fn bare_commands_render_cobra_style_group_help() {
@@ -3652,7 +4444,7 @@ mod tests {
         assert_eq!(run(&args, &mut out, &mut err), 2);
         assert!(err.is_empty());
         let output = String::from_utf8(out).unwrap();
-        assert!(output.contains(r#""code": "config-error""#));
+        assert!(output.contains(r#""code": "config_error""#));
         assert!(output.contains(r#""command": "camera""#));
     }
 
@@ -3672,7 +4464,7 @@ mod tests {
         assert!(
             String::from_utf8(out)
                 .unwrap()
-                .contains(r#""code": "config-error""#)
+                .contains(r#""code": "config_error""#)
         );
     }
 
@@ -3724,7 +4516,7 @@ mod tests {
         ));
 
         assert_eq!(error.exit_code, 5);
-        assert_eq!(error.code, "capability-unsupported");
+        assert_eq!(error.code, "capability_unsupported");
     }
 
     #[test]
@@ -3828,7 +4620,29 @@ mod tests {
         assert!(
             String::from_utf8(out)
                 .unwrap()
-                .contains("capability-unsupported")
+                .contains("capability_unsupported")
+        );
+    }
+
+    #[test]
+    fn discover_rejects_protocol_trace_since_it_has_no_resolved_profile() {
+        let args = [
+            "printer".into(),
+            "discover".into(),
+            "--driver".into(),
+            "bambu-lan".into(),
+            "--protocol-trace".into(),
+            "/tmp/trace.jsonl".into(),
+            "--output".into(),
+            "json".into(),
+        ];
+        let mut out = Vec::new();
+
+        assert_eq!(run(&args, &mut out, &mut Vec::new()), 5);
+        assert!(
+            String::from_utf8(out)
+                .unwrap()
+                .contains("capability_unsupported")
         );
     }
 
@@ -3972,7 +4786,10 @@ mod tests {
     #[test]
     fn lights_accept_chamber_aliases_and_exact_states() {
         for alias in ["chamber", "chamber-light", "chamber_light", "CHAMBER"] {
-            assert_eq!(normalize_light(alias).unwrap(), "chamber");
+            assert_eq!(normalize_light(alias).unwrap(), "chamber_light");
+        }
+        for alias in ["aux", "aux-light", "aux_light", "AUX"] {
+            assert_eq!(normalize_light(alias).unwrap(), "aux_light");
         }
         assert_eq!(normalize_light("work-light").unwrap(), "work-light");
         assert!(normalize_light("bad light").is_err());

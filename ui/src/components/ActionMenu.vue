@@ -7,6 +7,7 @@ export interface ActionMenuItem {
   label: string
   icon: Component
   danger?: boolean
+  disabled?: boolean
   onSelect: () => void
 }
 
@@ -24,7 +25,7 @@ const groups = computed(() =>
 <template>
   <Menu as="div" class="relative inline-block text-left">
     <MenuButton
-      class="inline-grid size-8 shrink-0 place-items-center rounded-md text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-white"
+      class="inline-grid size-11 shrink-0 place-items-center rounded-md text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-white"
       :title="label"
       :aria-label="label"
     >
@@ -45,7 +46,8 @@ const groups = computed(() =>
           <MenuItem v-for="item in group" :key="item.label" v-slot="{ active }">
             <button
               type="button"
-              class="flex w-full items-center px-4 py-2 text-left text-sm whitespace-nowrap"
+              :disabled="item.disabled"
+              class="flex w-full items-center px-4 py-2 text-left text-sm whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-40"
               :class="
                 item.danger
                   ? active
@@ -55,7 +57,7 @@ const groups = computed(() =>
                     ? 'bg-gray-100 text-gray-900 outline-hidden dark:bg-white/5 dark:text-white'
                     : 'text-gray-700 dark:text-gray-300'
               "
-              @click="item.onSelect"
+              @click="!item.disabled && item.onSelect()"
             >
               <component
                 :is="item.icon"
