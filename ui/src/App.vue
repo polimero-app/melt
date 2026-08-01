@@ -1200,6 +1200,7 @@ async function fallbackCamera(printerName: string, request: number, reason: stri
   cameraPeer.value = undefined
   cameraMediaStream.value?.getTracks().forEach((track) => track.stop())
   cameraMediaStream.value = undefined
+  await stopCameraSession()
   const stream = await invoke<CameraStream>('printer_camera_stream', { name: printerName })
   if (request !== cameraRequest || activePrinter.value?.name !== printerName) return
   cameraUrl.value = stream.url
@@ -1243,6 +1244,15 @@ async function stopCamera() {
   cameraUrl.value = undefined
   cameraTransport.value = undefined
   cameraLoading.value = false
+  await stopCameraSession()
+}
+
+async function stopCameraSession() {
+  try {
+    await invoke('printer_camera_webrtc_stop')
+  } catch {
+    // The local peer is already closed; backend teardown is best effort.
+  }
 }
 
 async function saveSnapshot() {

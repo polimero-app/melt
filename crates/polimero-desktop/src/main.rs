@@ -4,7 +4,7 @@ use std::{
     net::{TcpListener, TcpStream},
     sync::{
         Arc, Condvar, LazyLock, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -292,6 +292,7 @@ struct MonitorState {
 
 #[derive(Default)]
 struct CameraWebRtcState {
+    generation: AtomicU64,
     session: Mutex<Option<webrtc_camera::Session>>,
 }
 
@@ -2004,6 +2005,7 @@ fn printer_camera_webrtc_offer(
     state: tauri::State<'_, CameraWebRtcState>,
 ) -> Result<CameraWebRtcAnswer, CommandError> {
     let printer = desktop_printer(&name, Operation::CameraStream)?;
+    let generation = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
     let _ = state
         .session
         .lock()
@@ -2016,12 +2018,29 @@ fn printer_camera_webrtc_offer(
         offer,
     )
     .map_err(|error| CommandError::new("cameraPreviewUnavailable").with_detail(error))?;
+    let mut active = state
+        .session
+        .lock()
+        .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?;
+    if state.generation.load(Ordering::Acquire) != generation {
+        return Err(CommandError::new("cameraPreviewUnavailable")
+            .with_detail("WebRTC request was superseded"));
+    }
+    active.replace(session);
+    Ok(CameraWebRtcAnswer { kind: "answer", sdp })
+}
+
+#[tauri::command(async)]
+fn printer_camera_webrtc_stop(
+    state: tauri::State<'_, CameraWebRtcState>,
+) -> Result<(), CommandError> {
+    state.generation.fetch_add(1, Ordering::AcqRel);
     state
         .session
         .lock()
         .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?
-        .replace(session);
-    Ok(CameraWebRtcAnswer { kind: "answer", sdp })
+        .take();
+    Ok(())
 }
 
 fn start_camera_server(
@@ -2383,6 +2402,7 @@ fn main() {
             printer_camera_snapshot,
             printer_camera_stream,
             printer_camera_webrtc_offer,
+            printer_camera_webrtc_stop,
             diagnostics_report,
             remove_configured_printer
         ])
