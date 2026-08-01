@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch, watchEffect, type Component } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch, watchEffect, type Component } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog'
@@ -210,6 +210,11 @@ type CameraStream = {
   url: string
 }
 
+type CameraWebRtcAnswer = {
+  type: 'answer'
+  sdp: string
+}
+
 interface MaterialSlot {
   slot: string
   status: string
@@ -308,6 +313,8 @@ const diagnosticsLoading = ref(false)
 const pendingConfirm = ref<{ title: string; description: string; confirm: string; run: () => Promise<void> }>()
 const confirming = ref(false)
 const cameraUrl = ref<string>()
+const cameraPeer = shallowRef<RTCPeerConnection>()
+const cameraMediaStream = shallowRef<MediaStream>()
 const cameraLoading = ref(false)
 const cameraError = ref<string>()
 let monitorUnlisten: UnlistenFn | undefined
@@ -458,7 +465,7 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
     })),
   }))
 })
-const cameraOnline = computed(() => Boolean(cameraUrl.value))
+const cameraOnline = computed(() => Boolean(cameraPeer.value || cameraUrl.value))
 const cameraSupported = computed(() => Boolean(capabilities.value?.cameraStream || capabilities.value?.cameraSnapshot))
 
 const fleetStats = computed(() => [
@@ -619,6 +626,7 @@ async function load() {
 }
 
 function clearSelection() {
+  void stopCamera()
   activePrinterId.value = ''
   capabilities.value = undefined
   monitoring.value = []
@@ -649,6 +657,7 @@ async function refreshMonitoring() {
 // view, background re-selections (load, removal fallback) keep the current view.
 async function selectPrinter(name: string, refresh = true, focus = refresh) {
   const request = ++selectionRequest
+  await stopCamera()
   activePrinterId.value = name
   if (focus) activeView.value = 'control'
   capabilities.value = undefined
@@ -1094,7 +1103,27 @@ async function refreshCamera() {
   cameraError.value = undefined
   try {
     if (capabilities.value?.cameraStream) {
-      cameraUrl.value = (await invoke<CameraStream>('printer_camera_stream', { name: activePrinter.value.name })).url
+      const printerName = activePrinter.value.name
+      try {
+        await stopCamera()
+        const peer = new RTCPeerConnection({ iceServers: [] })
+        peer.addTransceiver('video', { direction: 'recvonly' })
+        peer.ontrack = (event) => {
+          cameraMediaStream.value = event.streams[0] ?? new MediaStream([event.track])
+        }
+        const offer = await peer.createOffer()
+        await peer.setLocalDescription(offer)
+        await waitForIceGathering(peer)
+        const answer = await invoke<CameraWebRtcAnswer>('printer_camera_webrtc_offer', {
+          name: printerName,
+          offer: peer.localDescription?.sdp ?? offer.sdp,
+        })
+        await peer.setRemoteDescription(answer)
+        cameraPeer.value = peer
+      } catch {
+        await stopCamera()
+        cameraUrl.value = (await invoke<CameraStream>('printer_camera_stream', { name: printerName })).url
+      }
     } else if (capabilities.value?.cameraSnapshot) {
       cameraUrl.value = (await invoke<CameraSnapshot>('printer_camera_snapshot', { name: activePrinter.value.name })).dataUrl
     }
@@ -1104,6 +1133,28 @@ async function refreshCamera() {
   } finally {
     cameraLoading.value = false
   }
+}
+
+async function waitForIceGathering(peer: RTCPeerConnection) {
+  if (peer.iceGatheringState === 'complete') return
+  await new Promise<void>((resolve) => {
+    const timer = window.setTimeout(resolve, 3000)
+    const onStateChange = () => {
+      if (peer.iceGatheringState !== 'complete') return
+      window.clearTimeout(timer)
+      peer.removeEventListener('icegatheringstatechange', onStateChange)
+      resolve()
+    }
+    peer.addEventListener('icegatheringstatechange', onStateChange)
+  })
+}
+
+async function stopCamera() {
+  cameraPeer.value?.close()
+  cameraPeer.value = undefined
+  cameraMediaStream.value?.getTracks().forEach((track) => track.stop())
+  cameraMediaStream.value = undefined
+  cameraUrl.value = undefined
 }
 
 async function saveSnapshot() {
@@ -1305,6 +1356,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  void stopCamera()
   systemThemeQuery?.removeEventListener('change', handleSystemThemeChange)
   monitorUnlisten?.()
   notificationUnlisten?.()
@@ -1470,7 +1522,8 @@ onUnmounted(() => {
                 class="relative min-h-60 overflow-hidden sm:min-h-77.5"
                 :class="cameraOnline ? 'bg-black' : 'grid place-items-center bg-gray-100 dark:bg-gray-800'"
               >
-                <img v-if="cameraOnline" :src="cameraUrl" :alt="t('camera.title')" width="1280" height="720" class="absolute inset-0 size-full object-contain" @error="cameraUrl = undefined" />
+                <video v-if="cameraPeer" :srcObject="cameraMediaStream" :aria-label="t('camera.title')" class="absolute inset-0 size-full object-contain" autoplay muted playsinline />
+                <img v-else-if="cameraUrl" :src="cameraUrl" :alt="t('camera.title')" width="1280" height="720" class="absolute inset-0 size-full object-contain" @error="cameraUrl = undefined" />
                 <div v-else class="relative z-10 text-center">
                   <PhWarning class="mx-auto size-8 text-yellow-600 dark:text-yellow-400" />
                   <p class="mt-3 font-medium text-gray-900 dark:text-white">{{ t('camera.unavailable') }}</p>

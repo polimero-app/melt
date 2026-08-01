@@ -26,6 +26,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
 mod preview;
+mod webrtc_camera;
 
 #[tauri::command(async)]
 fn app_info() -> AppInfo {
@@ -272,6 +273,19 @@ struct MonitorState {
     entries: Arc<Mutex<BTreeMap<String, CachedMonitor>>>,
     previous: Arc<Mutex<HashMap<String, MonitorEntry>>>,
     pool: Arc<ConnectionPool>,
+}
+
+#[derive(Default)]
+struct CameraWebRtcState {
+    session: Mutex<Option<webrtc_camera::Session>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CameraWebRtcAnswer {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    sdp: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -1968,6 +1982,33 @@ fn printer_camera_stream(name: String) -> Result<CameraStream, CommandError> {
     start_camera_server(stream).map(|url| CameraStream { url })
 }
 
+#[tauri::command(async)]
+fn printer_camera_webrtc_offer(
+    name: String,
+    offer: String,
+    state: tauri::State<'_, CameraWebRtcState>,
+) -> Result<CameraWebRtcAnswer, CommandError> {
+    let printer = desktop_printer(&name, Operation::CameraStream)?;
+    let _ = state
+        .session
+        .lock()
+        .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?
+        .take();
+    let (sdp, session) = webrtc_camera::start(
+        printer.driver,
+        printer.access_code,
+        printer.tls_fingerprint,
+        offer,
+    )
+    .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?;
+    state
+        .session
+        .lock()
+        .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?
+        .replace(session);
+    Ok(CameraWebRtcAnswer { kind: "answer", sdp })
+}
+
 fn start_camera_server(
     mut stream: polimero_core::bambu::MjpegStream,
 ) -> Result<String, CommandError> {
@@ -2256,6 +2297,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(MonitorState::default())
+        .manage(CameraWebRtcState::default())
         .manage(PreviewState::default())
         .manage(TransferState::default())
         .manage(SlicerState::default())
@@ -2308,6 +2350,7 @@ fn main() {
             printer_emergency_stop,
             printer_camera_snapshot,
             printer_camera_stream,
+            printer_camera_webrtc_offer,
             diagnostics_report,
             remove_configured_printer
         ])
