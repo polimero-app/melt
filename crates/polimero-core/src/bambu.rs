@@ -2,21 +2,24 @@
 
 use std::{
     io::{self, Read, Write},
-    net::{IpAddr, TcpStream, ToSocketAddrs},
+    net::{IpAddr, TcpStream},
     str::FromStr,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
-use native_tls::{TlsConnector, TlsStream};
+use openssl::ssl::SslStream;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::trace::SharedTracer;
+
 mod discovery;
+mod rtsp;
 mod transport;
 
 pub use discovery::{DiscoveredPrinter, DiscoveryError, discover};
-pub use transport::{Client, Error as TransportError, JobStartOptions};
+pub use transport::{Client, Error as TransportError, JobStartOptions, PersistentConnection};
 
 pub const MQTT_PORT: u16 = 8883;
 pub const MQTT_USERNAME: &str = "bblp";
@@ -27,12 +30,13 @@ const CAMERA_FRAME_HEADER_SIZE: usize = 16;
 const CAMERA_MAX_FRAME_SIZE: u32 = 1 << 20;
 const MJPEG_BOUNDARY: &str = "frame";
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Profile {
     host: String,
     serial: String,
     insecure: bool,
     timeout: Duration,
+    tracer: Option<SharedTracer>,
 }
 
 impl Profile {
@@ -61,7 +65,13 @@ impl Profile {
             serial,
             insecure,
             timeout,
+            tracer: None,
         })
+    }
+
+    pub fn with_tracer(mut self, tracer: SharedTracer) -> Self {
+        self.tracer = Some(tracer);
+        self
     }
 
     pub fn host(&self) -> &str {
@@ -270,7 +280,7 @@ pub enum CameraError {
     #[error("Bambu camera connection failed")]
     Connect(#[source] io::Error),
     #[error("Bambu camera TLS handshake failed")]
-    Tls(#[source] native_tls::Error),
+    Tls,
     #[error("Bambu camera authentication failed")]
     Authentication(#[source] io::Error),
     #[error("Bambu camera frame is invalid")]
@@ -279,24 +289,44 @@ pub enum CameraError {
     Stream(#[source] io::Error),
 }
 
-/// A real Bambu LAN MJPEG stream, converted from the printer's framed TLS
-/// protocol into the standard multipart response used by browser image tags.
+/// A real Bambu LAN camera stream, converted from whichever protocol the
+/// printer actually speaks into the standard MJPEG multipart response used
+/// by browser image tags. H/X-series printers only serve their camera over
+/// RTSPS/H.264 on port 322; A1/A1 mini serve the classic framed-TLS MJPEG
+/// protocol on port 6000. `open_mjpeg_stream` probes for the former first
+/// and falls back to the latter, so callers never need to know which one a
+/// given printer uses.
 pub struct MjpegStream {
-    connection: TlsStream<TcpStream>,
+    source: MjpegSource,
     pending: Vec<u8>,
+}
+
+enum MjpegSource {
+    Classic(SslStream<TcpStream>),
+    H264(Box<rtsp::H264Stream>),
 }
 
 impl MjpegStream {
     /// Returns a socket handle that can interrupt a blocked stream read.
     pub fn shutdown_handle(&self) -> io::Result<TcpStream> {
-        self.connection.get_ref().try_clone()
+        match &self.source {
+            MjpegSource::Classic(connection) => connection.get_ref().try_clone(),
+            MjpegSource::H264(stream) => stream.shutdown_handle(),
+        }
+    }
+
+    fn next_frame(&mut self) -> io::Result<Vec<u8>> {
+        match &mut self.source {
+            MjpegSource::Classic(connection) => read_camera_frame(connection),
+            MjpegSource::H264(stream) => stream.next_jpeg_frame(),
+        }
     }
 }
 
 impl Read for MjpegStream {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         if self.pending.is_empty() {
-            let frame = read_camera_frame(&mut self.connection)?;
+            let frame = self.next_frame()?;
             self.pending = multipart_frame(&frame);
         }
         let count = buffer.len().min(self.pending.len());
@@ -306,10 +336,15 @@ impl Read for MjpegStream {
     }
 }
 
-/// Connects to the Bambu LAN MJPEG camera endpoint and returns its live stream.
+/// Connects to the Bambu LAN camera endpoint and returns its live stream.
 ///
-/// No stream is synthesized: a successful return means the printer accepted the
-/// camera TLS connection and its authentication packet.
+/// No stream is synthesized: a successful return means the printer accepted
+/// the camera connection and its authentication. RTSPS (port 322, H.264) is
+/// tried first since that's what H/X-series printers exclusively serve; the
+/// classic MJPEG protocol (port 6000) is only tried as a fallback, and only
+/// when the RTSPS attempt failed for a reason other than a TLS fingerprint
+/// mismatch (a pin failure is a security signal, not evidence the printer
+/// doesn't support RTSPS, so it must not be silently swallowed by a retry).
 pub fn open_mjpeg_stream(
     profile: &Profile,
     access_code: Option<&str>,
@@ -319,15 +354,27 @@ pub fn open_mjpeg_stream(
     let access_code = access_code
         .filter(|value| !value.is_empty())
         .ok_or(CameraError::MissingAccessCode)?;
+
+    match rtsp::open_h264_stream(profile, access_code, fingerprint, timeout) {
+        Ok(stream) => {
+            return Ok(MjpegStream {
+                source: MjpegSource::H264(Box::new(stream)),
+                pending: Vec::new(),
+            });
+        }
+        Err(CameraError::Pin(error)) => return Err(CameraError::Pin(error)),
+        Err(_) => {}
+    }
+
     let mut connection = open_camera_connection(profile, fingerprint, timeout)?;
     send_camera_auth(&mut connection, access_code).map_err(CameraError::Authentication)?;
     Ok(MjpegStream {
-        connection,
+        source: MjpegSource::Classic(connection),
         pending: Vec::new(),
     })
 }
 
-/// Captures one actual JPEG frame from the Bambu LAN MJPEG endpoint.
+/// Captures one actual JPEG frame from the Bambu LAN camera endpoint.
 pub fn snapshot(
     profile: &Profile,
     access_code: Option<&str>,
@@ -335,7 +382,7 @@ pub fn snapshot(
     timeout: Duration,
 ) -> Result<Vec<u8>, CameraError> {
     let mut stream = open_mjpeg_stream(profile, access_code, fingerprint, timeout)?;
-    read_camera_frame(&mut stream.connection).map_err(|error| match error.kind() {
+    stream.next_frame().map_err(|error| match error.kind() {
         io::ErrorKind::InvalidData => CameraError::InvalidFrame,
         _ => CameraError::Stream(error),
     })
@@ -345,45 +392,27 @@ fn open_camera_connection(
     profile: &Profile,
     fingerprint: Option<&str>,
     timeout: Duration,
-) -> Result<TlsStream<TcpStream>, CameraError> {
-    let address = (profile.host(), CAMERA_PORT)
-        .to_socket_addrs()
-        .map_err(CameraError::Connect)?
-        .next()
-        .ok_or_else(|| CameraError::Connect(io::Error::other("camera host has no address")))?;
-    let connection = TcpStream::connect_timeout(&address, timeout).map_err(CameraError::Connect)?;
-    connection
-        .set_read_timeout(Some(timeout))
-        .map_err(CameraError::Connect)?;
-    connection
-        .set_write_timeout(Some(timeout))
-        .map_err(CameraError::Connect)?;
-    let connector = TlsConnector::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(CameraError::Tls)?;
-    let connection =
-        connector
-            .connect(profile.serial(), connection)
-            .map_err(|error| match error {
-                native_tls::HandshakeError::Failure(error) => CameraError::Tls(error),
-                native_tls::HandshakeError::WouldBlock(_) => CameraError::Connect(io::Error::new(
-                    io::ErrorKind::WouldBlock,
-                    "TLS handshake blocked",
-                )),
-            })?;
-    if !profile.insecure() {
-        let certificate = connection
-            .peer_certificate()
-            .map_err(CameraError::Tls)?
-            .ok_or(CameraError::MissingCertificate)?;
-        verify_tls_fingerprint(
-            false,
-            fingerprint.unwrap_or_default(),
-            &certificate.to_der().map_err(CameraError::Tls)?,
-        )?;
-    }
-    Ok(connection)
+) -> Result<SslStream<TcpStream>, CameraError> {
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| CameraError::Connect(io::Error::from(io::ErrorKind::TimedOut)))?;
+    let connector = transport::tls_connector().map_err(|_| CameraError::Tls)?;
+    transport::open_tls(
+        &connector,
+        profile,
+        CAMERA_PORT,
+        fingerprint,
+        true,
+        deadline,
+    )
+    .map(|(stream, _)| stream)
+    .map_err(|error| match error {
+        TransportError::Pin(error) => CameraError::Pin(error),
+        TransportError::MissingCertificate => CameraError::MissingCertificate,
+        TransportError::Tls => CameraError::Tls,
+        TransportError::Timeout => CameraError::Connect(io::Error::from(io::ErrorKind::TimedOut)),
+        _ => CameraError::Connect(io::Error::from(io::ErrorKind::ConnectionRefused)),
+    })
 }
 
 fn send_camera_auth(connection: &mut impl Write, access_code: &str) -> io::Result<()> {

@@ -8,15 +8,20 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use native_tls::{HandshakeError, TlsConnector, TlsStream};
+use crate::moonraker::{
+    AmsData, AmsTray, AmsUnit, BambuExtension, Extensions, FanResult, FileEntry, FileEntryType,
+    FileList, FileRoot, GcodePosition, Job, JobResult, LightResult, LightState, MotionResult,
+    MotionState, PrintMeta, PrinterState, Progress, SpeedResult, Status, StatusError,
+    StatusWarning, Temperature, TemperatureResult, TemperatureTargets, Temperatures, TimeEstimates,
+    Timelapse, Wifi,
+};
+use crate::trace::TraceEvent;
+use openssl::ssl::{
+    SslConnector, SslMethod, SslSession, SslSessionRef, SslStream, SslVerifyMode, SslVersion,
+};
 use serde_json::{Map, Value, json};
 use thiserror::Error;
-
-use crate::moonraker::{
-    FanResult, FileEntry, FileEntryType, FileList, FileRoot, Job, JobResult, LightResult,
-    LightState, MotionResult, MotionState, PrinterState, Progress, SpeedResult, Status,
-    StatusError, StatusWarning, Temperature, TemperatureResult, TemperatureTargets, Temperatures,
-};
+use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rfc3339};
 
 use super::{
     MQTT_USERNAME, MqttTopics, Profile, TlsPinError, is_pushall_payload, is_valid_tls_fingerprint,
@@ -29,6 +34,7 @@ const MAX_MQTT_PACKET_SIZE: usize = 8 << 20;
 const MAX_FTP_REPLY_SIZE: usize = 64 << 10;
 const MAX_FTP_LISTING_SIZE: u64 = 8 << 20;
 const MAX_LIST_DEPTH: u8 = 32;
+const MAX_LIST_ENTRIES: usize = 50_000;
 const PUSHALL_INTERVAL: Duration = Duration::from_secs(3);
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -96,14 +102,11 @@ impl Client {
 
     /// Performs a TLS and MQTT authentication exchange before a profile is saved.
     ///
-    /// A secure profile receives a leaf-certificate fingerprint for TOFU pinning;
-    /// an explicitly insecure profile deliberately skips the network check.
+    /// A secure profile receives a leaf-certificate fingerprint for TOFU pinning.
+    /// An insecure profile stores no pin, but its credentials are still checked
+    /// against the printer: insecure means unpinned, not unverified.
     pub fn verify(&self, access_code: Option<&str>) -> Result<Option<String>, Error> {
         let access_code = valid_access_code(access_code)?;
-        if self.profile.insecure() {
-            return Ok(None);
-        }
-
         let deadline = deadline_after(self.profile.timeout())?;
         let connector = tls_connector()?;
         let (stream, fingerprint) = open_tls(
@@ -115,9 +118,10 @@ impl Client {
             deadline,
         )?;
         let mut mqtt = MqttConnection::new(stream, self.profile.mqtt_topics(), deadline);
-        let result = mqtt.connect(access_code).map(|_| fingerprint);
+        let result = mqtt.connect(access_code);
         mqtt.disconnect();
-        result.map(Some)
+        result?;
+        Ok((!self.profile.insecure()).then_some(fingerprint))
     }
 
     /// Captures the printer's leaf certificate without authenticating or sending
@@ -144,6 +148,75 @@ impl Client {
         let payload = pushall_payload(next_sequence());
         let report = self.exchange(access_code, fingerprint, payload, is_full_report)?;
         parse_status(&report)
+    }
+
+    /// Like [`status`](Self::status), but reuses a live MQTT session across
+    /// calls (kept in `cached`) instead of connecting fresh each time.
+    ///
+    /// A `cached` connection that fails is dropped and retried once with a
+    /// fresh connect, so a printer that closes an idle session self-heals on
+    /// its next poll.
+    pub fn poll_status(
+        &self,
+        cached: &mut Option<PersistentConnection>,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+    ) -> Result<Status, Error> {
+        let access_code = valid_access_code(access_code)?;
+        validate_pin(&self.profile, fingerprint)?;
+        let payload = pushall_payload(next_sequence());
+        let label = format!("poll {}", self.profile.mqtt_topics().request);
+
+        if let Some(PersistentConnection(mqtt)) = cached {
+            mqtt.deadline = deadline_after(self.profile.timeout())?;
+            match mqtt.exchange(payload.clone(), is_full_report) {
+                Ok(report) => {
+                    self.trace(
+                        TraceEvent::response("mqtt", label.as_str())
+                            .with_outcome("ok")
+                            .with_bytes(report.len() as u64),
+                    );
+                    return parse_status(&report);
+                }
+                Err(_) => *cached = None,
+            }
+        }
+
+        self.trace(TraceEvent::request("mqtt", label.as_str()).with_bytes(payload.len() as u64));
+        let deadline = deadline_after(self.profile.timeout())?;
+        let connector = tls_connector()?;
+        let (stream, _) = open_tls(
+            &connector,
+            &self.profile,
+            super::MQTT_PORT,
+            fingerprint,
+            true,
+            deadline,
+        )?;
+        let mut mqtt = MqttConnection::new(stream, self.profile.mqtt_topics(), deadline);
+        if let Err(error) = mqtt.connect(access_code).and_then(|_| mqtt.subscribe()) {
+            self.trace(
+                TraceEvent::response("mqtt", label.as_str()).with_outcome(error.to_string()),
+            );
+            return Err(error);
+        }
+        let report = match mqtt.exchange(payload, is_full_report) {
+            Ok(report) => report,
+            Err(error) => {
+                self.trace(
+                    TraceEvent::response("mqtt", label.as_str()).with_outcome(error.to_string()),
+                );
+                return Err(error);
+            }
+        };
+        self.trace(
+            TraceEvent::response("mqtt", label.as_str())
+                .with_outcome("ok")
+                .with_bytes(report.len() as u64),
+        );
+        let status = parse_status(&report)?;
+        *cached = Some(PersistentConnection(mqtt));
+        Ok(status)
     }
 
     pub fn job_start(
@@ -190,12 +263,22 @@ impl Client {
         self.job_control(access_code, fingerprint, "stop", PrinterState::Idle)
     }
 
+    /// Stops the printer and waits for the report that proves it was accepted.
+    ///
+    /// M112 travels as a gcode_line, which current firmware refuses when it is
+    /// unsigned; a refused stop must never be reported as a successful one.
     pub fn emergency_stop(
         &self,
         access_code: Option<&str>,
         fingerprint: Option<&str>,
     ) -> Result<(), Error> {
-        self.publish_only(access_code, fingerprint, gcode_payload("M112"))
+        self.exchange(
+            access_code,
+            fingerprint,
+            gcode_payload("M112"),
+            is_full_report,
+        )
+        .map(|_| ())
     }
 
     pub fn temperature_set(
@@ -344,7 +427,8 @@ impl Client {
                 parse_status_value(report)
                     .ok()
                     .and_then(|status| status.fans.get(fan).copied())
-                    .is_some_and(|reported| reported.abs_diff(speed_percent) <= 4)
+                    // Reports use a 0-15 scale, so one step is about 7 points.
+                    .is_some_and(|reported| reported.abs_diff(speed_percent) <= 7)
             },
         )?;
         let status = parse_status(&report)?;
@@ -364,15 +448,14 @@ impl Client {
         light: &str,
         state: LightState,
     ) -> Result<LightResult, Error> {
-        if light != "chamber" {
-            return Err(Error::Unsupported("requested light"));
-        }
-        let report = self.exchange(access_code, fingerprint, ledctrl_payload(state), |report| {
-            light_state_is(report, "chamber_light", state)
-                || light_unsupported_on_model(report, "chamber_light")
-        })?;
+        let report = self.exchange(
+            access_code,
+            fingerprint,
+            ledctrl_payload(light, state),
+            |report| light_state_is(report, light, state) || light_unsupported_on_model(report, light),
+        )?;
         let report: Value = serde_json::from_slice(&report).map_err(|_| Error::InvalidResponse)?;
-        if light_unsupported_on_model(&report, "chamber_light") {
+        if light_unsupported_on_model(&report, light) {
             return Err(Error::Unsupported("requested light on this printer model"));
         }
         Ok(LightResult {
@@ -422,8 +505,10 @@ impl Client {
         let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
         let result = vec![FileRoot {
             name: FILE_ROOT,
-            description: "Bambu SD card",
+            description: "SD card",
             writable: true,
+            capacity_bytes: None,
+            free_bytes: None,
             metadata: BTreeMap::new(),
         }];
         ftp.quit();
@@ -446,6 +531,7 @@ impl Client {
         }
         .map(|entries| FileList { entries });
         ftp.quit();
+        self.trace_ftps("LIST", &path, result.as_ref().err());
         result
     }
 
@@ -463,6 +549,7 @@ impl Client {
         let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
         let result = ftp.download(&path, destination);
         ftp.quit();
+        self.trace_ftps("RETR", &path, result.as_ref().err());
         result
     }
 
@@ -491,7 +578,43 @@ impl Client {
             ftp.upload(&path, &mut source)
         })();
         ftp.quit();
+        self.trace_ftps("STOR", &path, result.as_ref().err());
         result
+    }
+
+    pub fn delete_file(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        device_path: &str,
+    ) -> Result<(), Error> {
+        let path = normalize_device_path(device_path)?;
+        if path == "/" {
+            return Err(Error::InvalidDevicePath);
+        }
+        let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
+        let result = ftp.command(&format!("DELE {path}")).and_then(|reply| {
+            if matches!(reply.code, 250 | 251) {
+                Ok(())
+            } else {
+                Err(Error::FileTransfer)
+            }
+        });
+        ftp.quit();
+        self.trace_ftps("DELE", &path, result.as_ref().err());
+        result
+    }
+
+    /// Records one summary event per FTPS operation; the underlying
+    /// connection issues several control-channel commands per call, which is
+    /// more detail than a diagnostics trace needs.
+    fn trace_ftps(&self, command: &str, path: &str, error: Option<&Error>) {
+        let label = format!("{command} {path}");
+        let event = match error {
+            None => TraceEvent::response("ftps", label).with_outcome("ok"),
+            Some(error) => TraceEvent::response("ftps", label).with_outcome(error.to_string()),
+        };
+        self.trace(event);
     }
 
     fn job_control(
@@ -528,15 +651,6 @@ impl Client {
         })
     }
 
-    fn publish_only(
-        &self,
-        access_code: Option<&str>,
-        fingerprint: Option<&str>,
-        payload: String,
-    ) -> Result<(), Error> {
-        self.with_mqtt(access_code, fingerprint, |mqtt| mqtt.publish(&payload))
-    }
-
     fn exchange(
         &self,
         access_code: Option<&str>,
@@ -544,9 +658,28 @@ impl Client {
         payload: String,
         predicate: impl Fn(&Value) -> bool,
     ) -> Result<Vec<u8>, Error> {
-        self.with_mqtt(access_code, fingerprint, |mqtt| {
+        let label = format!("publish {}", self.profile.mqtt_topics().request);
+        self.trace(TraceEvent::request("mqtt", label.as_str()).with_bytes(payload.len() as u64));
+        let result = self.with_mqtt(access_code, fingerprint, |mqtt| {
             mqtt.exchange(payload, predicate)
-        })
+        });
+        match &result {
+            Ok(report) => self.trace(
+                TraceEvent::response("mqtt", label.as_str())
+                    .with_outcome("ok")
+                    .with_bytes(report.len() as u64),
+            ),
+            Err(error) => self.trace(
+                TraceEvent::response("mqtt", label.as_str()).with_outcome(error.to_string()),
+            ),
+        }
+        result
+    }
+
+    fn trace(&self, event: TraceEvent) {
+        if let Some(tracer) = &self.profile.tracer {
+            tracer.record(event);
+        }
     }
 
     fn with_mqtt<T>(
@@ -599,23 +732,29 @@ fn deadline_after(timeout: Duration) -> Result<Instant, Error> {
     Instant::now().checked_add(timeout).ok_or(Error::Timeout)
 }
 
-fn tls_connector() -> Result<TlsConnector, Error> {
-    TlsConnector::builder()
-        // Bambu LAN uses a self-signed leaf. The leaf is always pinned below
-        // before credentials or data are sent unless the profile is explicit.
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|_| Error::Tls)
+pub(super) fn tls_connector() -> Result<SslConnector, Error> {
+    let mut builder = SslConnector::builder(SslMethod::tls_client()).map_err(|_| Error::Tls)?;
+    // Bambu LAN uses a self-signed leaf on an old TLS stack. The leaf is always
+    // pinned below before credentials or data are sent unless the profile is
+    // explicit, so platform CA checks and OpenSSL's policy level are relaxed.
+    builder.set_verify(SslVerifyMode::NONE);
+    builder.set_security_level(0);
+    // TLS 1.2 keeps the session id that the printer's FTP server requires to
+    // accept a data connection; 1.3 tickets arrive too late to be reused.
+    builder
+        .set_max_proto_version(Some(SslVersion::TLS1_2))
+        .map_err(|_| Error::Tls)?;
+    Ok(builder.build())
 }
 
-fn open_tls(
-    connector: &TlsConnector,
+pub(super) fn open_tls(
+    connector: &SslConnector,
     profile: &Profile,
     port: u16,
     expected_fingerprint: Option<&str>,
     verify_pin: bool,
     deadline: Instant,
-) -> Result<(TlsStream<TcpStream>, String), Error> {
+) -> Result<(SslStream<TcpStream>, String), Error> {
     let socket = resolve_and_connect(profile.host(), port, deadline)?;
     open_tls_socket(
         connector,
@@ -624,27 +763,47 @@ fn open_tls(
         expected_fingerprint,
         verify_pin,
         deadline,
+        None,
     )
 }
 
+/// Completes a TLS handshake on a connected socket and returns the leaf pin.
+///
+/// `session` resumes an established TLS session, which the printer's FTP server
+/// requires before it will accept a passive data connection.
 fn open_tls_socket(
-    connector: &TlsConnector,
+    connector: &SslConnector,
     profile: &Profile,
     socket: TcpStream,
     expected_fingerprint: Option<&str>,
     verify_pin: bool,
     deadline: Instant,
-) -> Result<(TlsStream<TcpStream>, String), Error> {
+    session: Option<&SslSessionRef>,
+) -> Result<(SslStream<TcpStream>, String), Error> {
     set_socket_timeout(&socket, deadline)?;
-    let connection = connector
-        .connect(profile.serial(), socket)
-        .map_err(|error| match error {
-            HandshakeError::Failure(_) => Error::Tls,
-            HandshakeError::WouldBlock(_) => Error::Timeout,
+    let mut ssl = connector
+        .configure()
+        .and_then(|configuration| {
+            configuration
+                .verify_hostname(false)
+                .into_ssl(profile.serial())
+        })
+        .map_err(|_| Error::Tls)?;
+    if let Some(session) = session {
+        // SAFETY: the session was produced by a live connection built from this
+        // same connector, which is what OpenSSL requires to resume it.
+        unsafe { ssl.set_session(session) }.map_err(|_| Error::Tls)?;
+    }
+    let mut connection = SslStream::new(ssl, socket).map_err(|_| Error::Tls)?;
+    connection
+        .connect()
+        .map_err(|error| match error.io_error() {
+            Some(error) if is_timeout(error) => Error::Timeout,
+            _ => Error::Tls,
         })?;
     let certificate = connection
+        .ssl()
         .peer_certificate()
-        .map_err(|_| Error::Tls)?
         .ok_or(Error::MissingCertificate)?;
     let certificate = certificate.to_der().map_err(|_| Error::Tls)?;
     let actual_fingerprint = tls_fingerprint(&certificate);
@@ -692,7 +851,12 @@ fn connect_socket(address: SocketAddr, deadline: Instant) -> Result<TcpStream, E
 }
 
 fn set_socket_timeout(socket: &TcpStream, deadline: Instant) -> Result<(), Error> {
-    let timeout = remaining(deadline)?;
+    set_socket_idle_timeout(socket, remaining(deadline)?)
+}
+
+/// Bounds how long a single read or write may stall, rather than how long the
+/// whole operation may take, so bulk transfers are not cut off mid-file.
+fn set_socket_idle_timeout(socket: &TcpStream, timeout: Duration) -> Result<(), Error> {
     socket
         .set_read_timeout(Some(timeout))
         .and_then(|_| socket.set_write_timeout(Some(timeout)))
@@ -713,18 +877,25 @@ fn is_timeout(error: &io::Error) -> bool {
     )
 }
 
+/// An authenticated, subscribed MQTT session kept alive across polls by a
+/// caller (see [`Client::poll_status`]) instead of reconnecting each time.
+/// Opaque outside this module: callers only ever pass it back in unchanged.
+pub struct PersistentConnection(MqttConnection);
+
 struct MqttConnection {
-    stream: TlsStream<TcpStream>,
+    stream: SslStream<TcpStream>,
     topics: MqttTopics,
     deadline: Instant,
+    pending: Vec<u8>,
 }
 
 impl MqttConnection {
-    fn new(stream: TlsStream<TcpStream>, topics: MqttTopics, deadline: Instant) -> Self {
+    fn new(stream: SslStream<TcpStream>, topics: MqttTopics, deadline: Instant) -> Self {
         Self {
             stream,
             topics,
             deadline,
+            pending: Vec::new(),
         }
     }
 
@@ -732,7 +903,9 @@ impl MqttConnection {
         let mut payload = Vec::new();
         mqtt_string(&mut payload, "MQTT")?;
         payload.extend_from_slice(&[4, 0b1100_0010]);
-        payload.extend_from_slice(&60_u16.to_be_bytes());
+        // Keepalive is disabled: a connection lives for one operation and this
+        // client never sends PINGREQ, so a long timeout must not be dropped.
+        payload.extend_from_slice(&0_u16.to_be_bytes());
         mqtt_string(&mut payload, &format!("polimero-{:016x}", next_sequence()))?;
         mqtt_string(&mut payload, MQTT_USERNAME)?;
         mqtt_string(&mut payload, access_code)?;
@@ -798,11 +971,12 @@ impl MqttConnection {
             match self.read_packet_until(wait_until)? {
                 Some(packet) if packet.kind >> 4 == 3 => {
                     let report = mqtt_publish_payload(packet.kind, &packet.payload)?;
-                    if command_rejection(&report, command_sequence.as_deref())? {
-                        return Err(Error::CommandRejected);
-                    }
-                    let value: Value =
-                        serde_json::from_slice(&report).map_err(|_| Error::InvalidResponse)?;
+                    // Unrelated or malformed reports are ignored rather than
+                    // failing the exchange, matching payload_sequence_id.
+                    let Ok(value) = serde_json::from_slice::<Value>(&report) else {
+                        continue;
+                    };
+                    command_rejection(&value, command_sequence.as_deref())?;
                     if predicate(&value) {
                         return Ok(report);
                     }
@@ -827,19 +1001,27 @@ impl MqttConnection {
         self.stream.flush().map_err(map_io)
     }
 
+    /// Reads the next packet, buffering partial ones.
+    ///
+    /// A read timeout may land in the middle of a packet, so consumed bytes are
+    /// kept: resuming a fresh `read_exact` there would desynchronize the stream.
     fn read_packet_until(&mut self, until: Instant) -> Result<Option<MqttPacket>, Error> {
-        let timeout = match until.checked_duration_since(Instant::now()) {
-            Some(timeout) if !timeout.is_zero() => timeout,
-            _ => return Ok(None),
-        };
-        self.stream
-            .get_ref()
-            .set_read_timeout(Some(timeout))
-            .map_err(|_| Error::Connection)?;
-        match read_mqtt_packet(&mut self.stream) {
-            Ok(packet) => Ok(Some(packet)),
-            Err(error) if is_timeout(&error) => Ok(None),
-            Err(error) => Err(map_io(error)),
+        loop {
+            if let Some(packet) = take_mqtt_packet(&mut self.pending)? {
+                return Ok(Some(packet));
+            }
+            let timeout = match until.checked_duration_since(Instant::now()) {
+                Some(timeout) if !timeout.is_zero() => timeout,
+                _ => return Ok(None),
+            };
+            set_socket_idle_timeout(self.stream.get_ref(), timeout)?;
+            let mut buffer = [0; 8192];
+            match self.stream.read(&mut buffer) {
+                Ok(0) => return Err(Error::Connection),
+                Ok(read) => self.pending.extend_from_slice(&buffer[..read]),
+                Err(error) if is_timeout(&error) => return Ok(None),
+                Err(error) => return Err(map_io(error)),
+            }
         }
     }
 
@@ -878,39 +1060,34 @@ fn mqtt_remaining_length(packet: &mut Vec<u8>, mut length: usize) -> Result<(), 
     }
 }
 
-fn read_mqtt_packet(stream: &mut impl Read) -> io::Result<MqttPacket> {
-    let mut first = [0];
-    stream.read_exact(&mut first)?;
+/// Removes the next complete packet from `buffer`, leaving partial ones behind.
+fn take_mqtt_packet(buffer: &mut Vec<u8>) -> Result<Option<MqttPacket>, Error> {
+    let Some(kind) = buffer.first().copied() else {
+        return Ok(None);
+    };
     let mut length = 0usize;
     let mut multiplier = 1usize;
-    for _ in 0..4 {
-        let mut encoded = [0];
-        stream.read_exact(&mut encoded)?;
-        length = length
-            .checked_add(usize::from(encoded[0] & 0x7f).saturating_mul(multiplier))
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid MQTT length"))?;
-        if encoded[0] & 0x80 == 0 {
+    for index in 0..4 {
+        let Some(encoded) = buffer.get(1 + index).copied() else {
+            return Ok(None);
+        };
+        length += usize::from(encoded & 0x7f) * multiplier;
+        if encoded & 0x80 == 0 {
             if length > MAX_MQTT_PACKET_SIZE {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "MQTT packet too large",
-                ));
+                return Err(Error::InvalidResponse);
             }
-            let mut payload = vec![0; length];
-            stream.read_exact(&mut payload)?;
-            return Ok(MqttPacket {
-                kind: first[0],
-                payload,
-            });
+            let start = 2 + index;
+            let end = start + length;
+            if buffer.len() < end {
+                return Ok(None);
+            }
+            let payload = buffer[start..end].to_vec();
+            buffer.drain(..end);
+            return Ok(Some(MqttPacket { kind, payload }));
         }
-        multiplier = multiplier
-            .checked_mul(128)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid MQTT length"))?;
+        multiplier *= 128;
     }
-    Err(io::Error::new(
-        io::ErrorKind::InvalidData,
-        "invalid MQTT length",
-    ))
+    Err(Error::InvalidResponse)
 }
 
 fn mqtt_publish_payload(header: u8, payload: &[u8]) -> Result<Vec<u8>, Error> {
@@ -937,21 +1114,21 @@ fn mqtt_publish_payload(header: u8, payload: &[u8]) -> Result<Vec<u8>, Error> {
         .ok_or(Error::InvalidResponse)
 }
 
-fn command_rejection(report: &[u8], sequence: Option<&str>) -> Result<bool, Error> {
+/// Fails the exchange when the printer refuses the command we just sent.
+fn command_rejection(report: &Value, sequence: Option<&str>) -> Result<(), Error> {
     let Some(sequence) = sequence else {
-        return Ok(false);
+        return Ok(());
     };
-    let report: Value = serde_json::from_slice(report).map_err(|_| Error::InvalidResponse)?;
     let command = ["print", "system"]
         .into_iter()
         .find_map(|key| report.get(key).and_then(Value::as_object));
     let Some(command) = command else {
-        return Ok(false);
+        return Ok(());
     };
     if string(command.get("sequence_id")).as_deref() != Some(sequence)
         || !string(command.get("result")).is_some_and(|result| result.eq_ignore_ascii_case("fail"))
     {
-        return Ok(false);
+        return Ok(());
     }
     let reason = string(command.get("reason")).unwrap_or_default();
     if integer(command.get("err_code")) == Some(84_033_543)
@@ -960,7 +1137,7 @@ fn command_rejection(report: &[u8], sequence: Option<&str>) -> Result<bool, Erro
     {
         return Err(Error::UnsignedCommand);
     }
-    Ok(true)
+    Err(Error::CommandRejected)
 }
 
 fn next_sequence_id() -> String {
@@ -996,12 +1173,12 @@ fn gcode_payload(gcode: &str) -> String {
     .to_string()
 }
 
-fn ledctrl_payload(state: LightState) -> String {
+fn ledctrl_payload(node: &str, state: LightState) -> String {
     json!({
         "system": {
             "sequence_id": next_sequence_id(),
             "command": "ledctrl",
-            "led_node": "chamber_light",
+            "led_node": node,
             "led_mode": match state {
                 LightState::On => "on",
                 LightState::Off => "off",
@@ -1038,6 +1215,8 @@ fn job_start_payload(path: &str, options: JobStartOptions) -> Result<String, Err
     print.insert("vibration_cali".into(), Value::Bool(false));
     print.insert("layer_inspect".into(), Value::Bool(false));
     print.insert("timelapse".into(), Value::Bool(false));
+    // ponytail: prints from the external spool only. Add use_ams plus a real
+    // ams_mapping to JobStartOptions when AMS slot selection is exposed.
     print.insert("use_ams".into(), Value::Bool(false));
     if command == "project_file" {
         let plate = options.plate.unwrap_or(1).max(1);
@@ -1053,7 +1232,10 @@ fn job_start_payload(path: &str, options: JobStartOptions) -> Result<String, Err
             "file".into(),
             Value::String(path.trim_start_matches('/').into()),
         );
-        print.insert("url".into(), Value::String(format!("file://{path}")));
+        print.insert(
+            "url".into(),
+            Value::String(format!("file:///{FILE_ROOT}{path}")),
+        );
         print.insert("md5".into(), Value::String(String::new()));
         print.insert("ams_mapping".into(), Value::Array(Vec::new()));
         print.insert("ams_mapping2".into(), Value::Array(Vec::new()));
@@ -1133,18 +1315,25 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
     let state = match string(print.get("gcode_state")).as_deref() {
         Some("IDLE" | "FINISH") => PrinterState::Idle,
         Some("PRINTING" | "PREPARE" | "RUNNING" | "SLICING") => PrinterState::Printing,
-        Some("PAUSED") => PrinterState::Paused,
+        // Firmware reports PAUSE; PAUSED is accepted for third-party stacks.
+        Some("PAUSE" | "PAUSED") => PrinterState::Paused,
         Some("FAILED") => PrinterState::Error,
         Some(_) => PrinterState::Unknown,
         None => return Err(Error::InvalidResponse),
     };
     let nozzle = heater(print, "nozzle_temper", "nozzle_target_temper");
     let bed = heater(print, "bed_temper", "bed_target_temper");
-    let temperatures = (nozzle.is_some() || bed.is_some()).then_some(Temperatures { nozzle, bed });
+    let chamber = chamber_temperature(print);
+    let temperatures =
+        (nozzle.is_some() || bed.is_some() || chamber.is_some()).then_some(Temperatures {
+            nozzle,
+            bed,
+            chamber,
+        });
     let mut warnings = Vec::new();
     if temperatures.is_none() {
         warnings.push(StatusWarning {
-            code: "temperature-data-unavailable",
+            code: "temperature_data_unavailable",
             message: "temperature data unavailable",
         });
     }
@@ -1157,32 +1346,58 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
     });
     if progress.is_none() {
         warnings.push(StatusWarning {
-            code: "progress-unavailable",
+            code: "progress_unavailable",
             message: "progress unavailable",
         });
     }
     let job_name = string(print.get("subtask_name"))
         .filter(|value| !value.is_empty())
         .or_else(|| string(print.get("gcode_file")).filter(|value| !value.is_empty()));
-    let job = matches!(state, PrinterState::Printing | PrinterState::Paused)
-        .then(|| {
-            job_name.map(|name| Job {
-                id: synthetic_job_id(&name),
-                name,
-            })
-        })
-        .flatten();
+    let job = job_name.map(|name| Job {
+        id: synthetic_job_id(&name),
+        name,
+    });
     let errors = status_errors(print, state);
+    let extension = BambuExtension {
+        ams: ams_data(print),
+        sd_card_state: sd_card_state(print),
+        emmc_storage: has_emmc(print),
+        reported_ip: string(print.get("wifi_ip")).filter(|value| !value.is_empty()),
+    };
     Ok(Status {
         state,
         temperatures,
         job,
-        progress: matches!(state, PrinterState::Printing | PrinterState::Paused)
-            .then_some(progress)
-            .flatten(),
+        progress,
         errors,
         warnings,
         fans: status_fans(print),
+        time_estimates: time_estimates(print),
+        speed_level: speed_level(print),
+        wifi: wifi(print),
+        lights: lights(report),
+        print_meta: print_meta(print),
+        stage: stage(print),
+        timelapse: timelapse(print),
+        gcode_position: gcode_position(print),
+        firmware_version: firmware_version(print),
+        extensions: Extensions {
+            bambu_lan: (!extension.is_empty()).then_some(extension),
+        },
+    })
+}
+
+/// Chamber readings move between firmware generations: X1-class printers report
+/// a flat `chamber_temper`, while H2-class printers expose the chamber
+/// temperature controller at `device.ctc.info.temp`.
+// ponytail: two known layouts, not a recursive key search. Add another arm if a
+// model reports the chamber somewhere else.
+fn chamber_temperature(print: &Map<String, Value>) -> Option<Temperature> {
+    let current_celsius = number(print.get("chamber_temper"))
+        .or_else(|| number(print.get("device")?.get("ctc")?.get("info")?.get("temp")))?;
+    Some(Temperature {
+        current_celsius,
+        target_celsius: None,
     })
 }
 
@@ -1199,7 +1414,7 @@ fn status_errors(print: &Map<String, Value>, state: PrinterState) -> Vec<StatusE
     let mut errors = Vec::new();
     if integer(print.get("mc_print_error_code")).is_some_and(|value| value != 0) {
         errors.push(StatusError {
-            code: "printer-error",
+            code: "printer_error",
             message: "printer reported an error".into(),
         });
     }
@@ -1216,13 +1431,13 @@ fn status_errors(print: &Map<String, Value>, state: PrinterState) -> Vec<StatusE
         })
     {
         errors.push(StatusError {
-            code: "hardware-error",
+            code: "hardware_error",
             message: "printer reported a hardware error".into(),
         });
     }
     if errors.is_empty() && state == PrinterState::Error {
         errors.push(StatusError {
-            code: "printer-error",
+            code: "printer_error",
             message: "printer reported an error state".into(),
         });
     }
@@ -1239,11 +1454,264 @@ fn status_fans(print: &Map<String, Value>) -> BTreeMap<String, u8> {
     .into_iter()
     .filter_map(|(field, name)| {
         integer(print.get(field)).map(|value| {
-            let percent = value.clamp(0, 15) * 100 / 15;
+            let percent = (value.clamp(0, 15) * 100 + 7) / 15;
             (name.to_owned(), percent.try_into().unwrap_or(100))
         })
     })
     .collect()
+}
+
+/// Remaining time is reported in minutes; H2-class firmware renames the field.
+fn time_estimates(print: &Map<String, Value>) -> Option<TimeEstimates> {
+    let minutes = integer(print.get("mc_remaining_time"))
+        .or_else(|| integer(print.get("remain_time")))?
+        .max(0);
+    Some(TimeEstimates {
+        elapsed_seconds: 0,
+        remaining_seconds: (minutes * 60).try_into().ok(),
+        total_seconds: None,
+    })
+}
+
+fn speed_level(print: &Map<String, Value>) -> Option<String> {
+    let level = integer(print.get("spd_lvl"))?;
+    Some(
+        match level {
+            1 => "silent",
+            2 => "standard",
+            3 => "sport",
+            4 => "ludicrous",
+            _ => return Some(level.to_string()),
+        }
+        .to_owned(),
+    )
+}
+
+/// H2-class firmware sends the signal as `"-69dBm"` rather than a number.
+fn wifi(print: &Map<String, Value>) -> Option<Wifi> {
+    let raw = print.get("wifi_signal")?;
+    let signal = integer(Some(raw)).or_else(|| {
+        let text = raw.as_str()?.trim();
+        text.strip_suffix("dBm")
+            .or_else(|| text.strip_suffix("dbm"))
+            .unwrap_or(text)
+            .trim()
+            .parse()
+            .ok()
+    })?;
+    Some(Wifi {
+        signal_dbm: signal.try_into().ok()?,
+    })
+}
+
+fn lights(report: &Value) -> BTreeMap<String, String> {
+    lights_report(report)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let node = string(entry.get("node")).filter(|value| !value.is_empty())?;
+                    let mode = string(entry.get("mode")).filter(|value| !value.is_empty())?;
+                    Some((node, mode))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn stage(print: &Map<String, Value>) -> Option<&'static str> {
+    let stage = integer(print.get("stg_cur"))?;
+    match stage {
+        0 => Some("printing"),
+        1 => Some("auto_bed_leveling"),
+        2 => Some("heatbed_preheating"),
+        3 => Some("sweeping_xy_mech_mode"),
+        4 => Some("changing_filament"),
+        5 => Some("m400_pause"),
+        6 => Some("filament_runout_pause"),
+        7 => Some("heating_hotend"),
+        8 => Some("calibrating_extrusion"),
+        9 => Some("scanning_bed_surface"),
+        10 => Some("inspecting_first_layer"),
+        11 => Some("identifying_build_plate_type"),
+        14 => Some("cleaning_nozzle_tip"),
+        15 => Some("checking_extruder_temperature"),
+        16 => Some("paused_user_input"),
+        17 => Some("paused_front_cover_falling"),
+        18 => Some("calibrating_micro_lidar"),
+        19 => Some("calibrating_extrusion_flow"),
+        20 => Some("paused_nozzle_temperature_malfunction"),
+        21 => Some("paused_heat_bed_temperature_malfunction"),
+        _ => None,
+    }
+}
+
+fn print_meta(print: &Map<String, Value>) -> Option<PrintMeta> {
+    let file_name = string(print.get("gcode_file"))
+        .filter(|value| !value.is_empty())
+        .or_else(|| string(print.get("subtask_name")).filter(|value| !value.is_empty()))?;
+    Some(PrintMeta {
+        file_name,
+        file_size: integer(print.get("file_size"))
+            .filter(|value| *value > 0)
+            .and_then(|value| value.try_into().ok()),
+        nozzle_diameter: number(print.get("nozzle_diameter")).filter(|value| *value > 0.0),
+        bed_type: string(print.get("bed_type")).filter(|value| !value.is_empty()),
+    })
+}
+
+/// H2-class firmware nests the timelapse flag inside `ipcam`.
+fn timelapse(print: &Map<String, Value>) -> Option<Timelapse> {
+    let state = string(print.get("timelapse")).or_else(|| {
+        string(
+            print
+                .get("ipcam")
+                .and_then(|ipcam| ipcam.get("timelapse"))
+                .or_else(|| print.get("ipcam")?.get("timelapse_stat")),
+        )
+    })?;
+    Some(Timelapse {
+        recording: state == "enable",
+        progress: None,
+        ready: None,
+    })
+}
+
+fn gcode_position(print: &Map<String, Value>) -> Option<GcodePosition> {
+    Some(GcodePosition {
+        // ponytail: Z height is not reliably present in pushall, same as Go.
+        z_mm: 0.0,
+        current_line: integer(print.get("mc_print_line_number"))
+            .or_else(|| integer(print.get("cur_line_num")))?,
+        total_lines: integer(print.get("total_line_num"))?,
+    })
+}
+
+fn firmware_version(print: &Map<String, Value>) -> Option<String> {
+    string(print.get("ota_version")).filter(|value| !value.is_empty())
+}
+
+fn ams_humidity(index: i64) -> Option<(&'static str, &'static str)> {
+    match index {
+        1 => Some(("< 10%", "very dry")),
+        2 => Some(("10-20%", "dry")),
+        3 => Some(("20-30%", "moderate")),
+        4 => Some(("30-40%", "slightly humid")),
+        5 => Some(("> 40%", "humid")),
+        _ => None,
+    }
+}
+
+fn ams_data(print: &Map<String, Value>) -> Option<AmsData> {
+    let mut units: Vec<AmsUnit> = print
+        .get("ams")
+        .and_then(|ams| ams.get("ams"))
+        .and_then(Value::as_array)
+        .map(|entries| entries.iter().map(ams_unit).collect())
+        .unwrap_or_default();
+    units.extend(virtual_tray_units(print));
+    (!units.is_empty()).then_some(AmsData { units })
+}
+
+fn ams_unit(unit: &Value) -> AmsUnit {
+    let humidity = integer(unit.get("humidity")).and_then(ams_humidity);
+    AmsUnit {
+        id: integer(unit.get("id"))
+            .and_then(|value| value.try_into().ok())
+            .unwrap_or_default(),
+        humidity_range: humidity.map(|(range, _)| range),
+        humidity_level: humidity.map(|(_, level)| level),
+        temperature: number(unit.get("temp")).filter(|value| *value > 0.0),
+        trays: unit
+            .get("tray")
+            .and_then(Value::as_array)
+            .map(|trays| {
+                trays
+                    .iter()
+                    .map(|tray| AmsTray {
+                        slot: integer(tray.get("id"))
+                            .and_then(|value| value.try_into().ok())
+                            .unwrap_or_default(),
+                        filament_type: string(tray.get("tray_type"))
+                            .filter(|value| !value.is_empty()),
+                        color: string(tray.get("tray_color")).filter(|value| !value.is_empty()),
+                        remaining_percent: integer(tray.get("remain"))
+                            .and_then(|value| value.try_into().ok()),
+                        nozzle_temp_min: integer(tray.get("nozzle_temp_min"))
+                            .and_then(|value| value.try_into().ok()),
+                        nozzle_temp_max: integer(tray.get("nozzle_temp_max"))
+                            .and_then(|value| value.try_into().ok()),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
+/// External spool holders report outside the AMS array: `vt_tray` on the A1
+/// Mini, `vir_slot` on the H2. Each loaded holder becomes a single-slot unit,
+/// conventionally numbered 254.
+fn virtual_tray_units(print: &Map<String, Value>) -> Vec<AmsUnit> {
+    let trays = print
+        .get("vt_tray")
+        .into_iter()
+        .chain(
+            print
+                .get("vir_slot")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        )
+        .filter(|tray| {
+            string(tray.get("tray_type")).is_some_and(|value| !value.is_empty())
+                || virtual_tray_color(tray).is_some()
+        });
+    trays
+        .map(|tray| AmsUnit {
+            id: integer(tray.get("id"))
+                .and_then(|value| value.try_into().ok())
+                .unwrap_or(254),
+            humidity_range: None,
+            humidity_level: None,
+            temperature: None,
+            trays: vec![AmsTray {
+                slot: 0,
+                filament_type: string(tray.get("tray_type")).filter(|value| !value.is_empty()),
+                color: virtual_tray_color(tray),
+                remaining_percent: integer(tray.get("remain"))
+                    .filter(|value| *value > 0)
+                    .and_then(|value| value.try_into().ok()),
+                nozzle_temp_min: integer(tray.get("nozzle_temp_min"))
+                    .filter(|value| *value > 0)
+                    .and_then(|value| value.try_into().ok()),
+                nozzle_temp_max: integer(tray.get("nozzle_temp_max"))
+                    .filter(|value| *value > 0)
+                    .and_then(|value| value.try_into().ok()),
+            }],
+        })
+        .collect()
+}
+
+fn virtual_tray_color(tray: &Value) -> Option<String> {
+    string(tray.get("tray_color")).filter(|value| !value.is_empty() && value != "00000000")
+}
+
+/// SD card state lives in `home_flag` bits [8:9] rather than a dedicated field.
+fn sd_card_state(print: &Map<String, Value>) -> Option<&'static str> {
+    match (integer(print.get("home_flag"))? >> 8) & 0x3 {
+        0 => Some("none"),
+        1 => Some("normal"),
+        2 => Some("abnormal"),
+        3 => Some("readonly"),
+        _ => None,
+    }
+}
+
+/// eMMC support is advertised by bit 17 of the hex `fun2` capability mask.
+fn has_emmc(print: &Map<String, Value>) -> Option<bool> {
+    let raw = string(print.get("fun2")).filter(|value| !value.is_empty())?;
+    let bits = u64::from_str_radix(raw.trim(), 16).ok()?;
+    (bits & (1 << 17) != 0).then_some(true)
 }
 
 fn string(value: Option<&Value>) -> Option<String> {
@@ -1351,11 +1819,19 @@ fn map_io(error: io::Error) -> Error {
 }
 
 struct FtpsConnection {
-    control: TlsStream<TcpStream>,
-    connector: TlsConnector,
+    control: SslStream<TcpStream>,
+    connector: SslConnector,
     profile: Profile,
     fingerprint: Option<String>,
-    deadline: Instant,
+    /// Idle budget for one command, reply, or transfer chunk.
+    timeout: Duration,
+    /// DER-encoded control session, re-decoded per data connection.
+    ///
+    /// OpenSSL retires an `SSL_SESSION` once it has been used to resume, so the
+    /// second transfer would be refused with `522 session reuse required`.
+    /// Decoding a fresh object from these bytes keeps every data connection
+    /// resumable, which is what the printer's FTP server demands.
+    session: Option<Vec<u8>>,
     pending: Vec<u8>,
     last_reply: String,
 }
@@ -1368,15 +1844,27 @@ impl FtpsConnection {
     ) -> Result<Self, Error> {
         let access_code = valid_access_code(access_code)?;
         validate_pin(profile, fingerprint)?;
-        let deadline = deadline_after(profile.timeout())?;
+        let timeout = profile.timeout();
         let connector = tls_connector()?;
-        let (control, _) = open_tls(&connector, profile, FTP_PORT, fingerprint, true, deadline)?;
+        let (control, _) = open_tls(
+            &connector,
+            profile,
+            FTP_PORT,
+            fingerprint,
+            true,
+            deadline_after(timeout)?,
+        )?;
+        let session = control
+            .ssl()
+            .session()
+            .and_then(|session| session.to_der().ok());
         let mut connection = Self {
             control,
             connector,
             profile: profile.clone(),
             fingerprint: fingerprint.map(str::to_owned),
-            deadline,
+            timeout,
+            session,
             pending: Vec::new(),
             last_reply: String::new(),
         };
@@ -1392,16 +1880,21 @@ impl FtpsConnection {
             });
         }
         connection.expect_command("TYPE I", &[200])?;
+        // RFC 4217 leaves the data channel in the clear until PROT P, and the
+        // printer refuses a data connection that does not resume this session.
+        connection.expect_command("PBSZ 0", &[200])?;
+        connection.expect_command("PROT P", &[200])?;
         Ok(connection)
     }
 
     fn list(&mut self, path: &str) -> Result<Vec<FileEntry>, Error> {
-        let mut data = self.passive_data()?;
+        let socket = self.passive_socket()?;
         let reply = self.command(&format!("LIST {path}"))?;
         if !matches!(reply.code, 125 | 150) {
             return Err(Error::FileTransfer);
         }
-        let bytes = read_data(&mut data, self.deadline)?;
+        let mut data = self.start_data_tls(socket)?;
+        let bytes = read_data(&mut data, self.timeout)?;
         drop(data);
         self.expect(&[226, 250])?;
         let mut entries = parse_ftp_listing(&bytes, path);
@@ -1423,6 +1916,9 @@ impl FtpsConnection {
                 }
                 all.push(entry);
             }
+            if all.len() > MAX_LIST_ENTRIES {
+                return Err(Error::FileTransfer);
+            }
         }
         all.sort_by(|left, right| left.path.cmp(&right.path));
         Ok(all)
@@ -1438,24 +1934,26 @@ impl FtpsConnection {
     }
 
     fn download(&mut self, path: &str, destination: &mut dyn Write) -> Result<u64, Error> {
-        let mut data = self.passive_data()?;
+        let socket = self.passive_socket()?;
         let reply = self.command(&format!("RETR {path}"))?;
         if !matches!(reply.code, 125 | 150) {
             return Err(Error::FileTransfer);
         }
-        let result = copy_data(&mut data, destination, self.deadline);
+        let mut data = self.start_data_tls(socket)?;
+        let result = copy_data(&mut data, destination);
         drop(data);
         self.expect(&[226, 250])?;
         result
     }
 
     fn upload(&mut self, path: &str, source: &mut dyn Read) -> Result<u64, Error> {
-        let mut data = self.passive_data()?;
+        let socket = self.passive_socket()?;
         let reply = self.command(&format!("STOR {path}"))?;
         if !matches!(reply.code, 125 | 150) {
             return Err(Error::FileTransfer);
         }
-        let result = copy_data(source, &mut data, self.deadline);
+        let mut data = self.start_data_tls(socket)?;
+        let result = copy_data(source, &mut data);
         let _ = data.flush();
         let _ = data.shutdown();
         drop(data);
@@ -1463,7 +1961,12 @@ impl FtpsConnection {
         result
     }
 
-    fn passive_data(&mut self) -> Result<TlsStream<TcpStream>, Error> {
+    /// Opens the passive data socket without handshaking.
+    ///
+    /// The printer's FTP server does not service the data channel's TLS
+    /// handshake until the transfer command has been accepted on the control
+    /// channel, so the handshake is deferred to [`Self::start_data_tls`].
+    fn passive_socket(&mut self) -> Result<TcpStream, Error> {
         let port = match self.command("EPSV")? {
             FtpReply { code: 229 } => parse_epsv_port(self.last_reply_line()?)?,
             FtpReply {
@@ -1485,26 +1988,39 @@ impl FtpsConnection {
                 .ip(),
             port,
         );
-        let socket = connect_socket(address, self.deadline)?;
-        open_tls_socket(
+        let deadline = deadline_after(self.timeout)?;
+        connect_socket(address, deadline)
+    }
+
+    fn start_data_tls(&mut self, socket: TcpStream) -> Result<SslStream<TcpStream>, Error> {
+        let deadline = deadline_after(self.timeout)?;
+        let session = match &self.session {
+            Some(der) => Some(SslSession::from_der(der).map_err(|_| Error::Tls)?),
+            None => None,
+        };
+        let (data, _) = open_tls_socket(
             &self.connector,
             &self.profile,
             socket,
             self.fingerprint.as_deref(),
             true,
-            self.deadline,
-        )
-        .map(|(stream, _)| stream)
+            deadline,
+            session.as_deref(),
+        )?;
+        set_socket_idle_timeout(data.get_ref(), self.timeout)?;
+        Ok(data)
     }
 
     fn command(&mut self, command: &str) -> Result<FtpReply, Error> {
         if command.contains(['\r', '\n']) {
             return Err(Error::InvalidDevicePath);
         }
-        set_socket_timeout(self.control.get_ref(), self.deadline)?;
+        set_socket_idle_timeout(self.control.get_ref(), self.timeout)?;
+        // The A1 firmware parses one TLS record per command, so the terminator
+        // has to share a record with the verb or every later reply is off by one.
+        let line = format!("{command}\r\n");
         self.control
-            .write_all(command.as_bytes())
-            .and_then(|_| self.control.write_all(b"\r\n"))
+            .write_all(line.as_bytes())
             .and_then(|_| self.control.flush())
             .map_err(map_io)?;
         self.read_reply()
@@ -1568,7 +2084,7 @@ impl FtpsConnection {
             if self.pending.len() >= MAX_FTP_REPLY_SIZE {
                 return Err(Error::InvalidResponse);
             }
-            set_socket_timeout(self.control.get_ref(), self.deadline)?;
+            set_socket_idle_timeout(self.control.get_ref(), self.timeout)?;
             let mut buffer = [0; 1024];
             let read = self.control.read(&mut buffer).map_err(map_io)?;
             if read == 0 {
@@ -1635,12 +2151,18 @@ fn parse_pasv_port(line: &str) -> Result<u16, Error> {
     Ok(u16::from(numbers[4]) << 8 | u16::from(numbers[5]))
 }
 
-fn read_data(data: &mut TlsStream<TcpStream>, deadline: Instant) -> Result<Vec<u8>, Error> {
+fn read_data(data: &mut SslStream<TcpStream>, timeout: Duration) -> Result<Vec<u8>, Error> {
     let mut bytes = Vec::new();
     let mut buffer = [0; 8192];
     loop {
-        set_socket_timeout(data.get_ref(), deadline)?;
-        let read = data.read(&mut buffer).map_err(map_io)?;
+        set_socket_idle_timeout(data.get_ref(), timeout)?;
+        let read = match data.read(&mut buffer) {
+            Ok(read) => read,
+            // The printer closes the data connection to mark the end of a
+            // listing, sometimes without sending a TLS close_notify first.
+            Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => 0,
+            Err(error) => return Err(map_io(error)),
+        };
         if read == 0 {
             return Ok(bytes);
         }
@@ -1651,20 +2173,19 @@ fn read_data(data: &mut TlsStream<TcpStream>, deadline: Instant) -> Result<Vec<u
     }
 }
 
-fn copy_data(
-    source: &mut dyn Read,
-    destination: &mut dyn Write,
-    deadline: Instant,
-) -> Result<u64, Error> {
+/// Streams a transfer, bounded by the socket idle timeouts set by the caller
+/// rather than by a wall clock, so a large file is not cut off part way.
+fn copy_data(source: &mut dyn Read, destination: &mut dyn Write) -> Result<u64, Error> {
     let mut buffer = [0; 8192];
     let mut copied = 0_u64;
     loop {
-        let read = source.read(&mut buffer).map_err(|_| Error::FileTransfer)?;
+        let read = match source.read(&mut buffer) {
+            Ok(read) => read,
+            Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => 0,
+            Err(error) => return Err(map_io(error)),
+        };
         if read == 0 {
             return Ok(copied);
-        }
-        if Instant::now() >= deadline {
-            return Err(Error::Timeout);
         }
         destination.write_all(&buffer[..read]).map_err(map_io)?;
         copied = copied.checked_add(read as u64).ok_or(Error::FileTransfer)?;
@@ -1698,7 +2219,7 @@ fn parse_ftp_listing(bytes: &[u8], parent: &str) -> Vec<FileEntry> {
                 path,
                 entry_type: entry.entry_type,
                 size_bytes: entry.size_bytes,
-                modified_at: None,
+                modified_at: entry.modified_at,
                 metadata: BTreeMap::new(),
             }
         })
@@ -1709,48 +2230,92 @@ struct ParsedFtpEntry {
     name: String,
     entry_type: FileEntryType,
     size_bytes: Option<i64>,
+    modified_at: Option<String>,
 }
 
 fn parse_ftp_list_line(line: &str) -> Option<ParsedFtpEntry> {
-    let mut fields = line.split_whitespace();
-    let mode = fields.next()?;
-    let entry_type = match mode.as_bytes().first().copied()? {
+    let entry_type = match line.as_bytes().first().copied()? {
         b'd' => FileEntryType::Directory,
         b'-' => FileEntryType::File,
         _ => return None,
     };
-    fields.next()?; // links
-    fields.next()?; // owner
-    fields.next()?; // group
-    let size_bytes = (entry_type == FileEntryType::File)
-        .then(|| fields.next()?.parse().ok())
-        .flatten();
-    if entry_type == FileEntryType::Directory {
-        fields.next()?; // directory size
+    // Mode, links, owner, group, size, month, day, and time or year. The name
+    // is whatever follows, taken whole so runs of spaces inside it survive.
+    let mut rest = line;
+    let mut size = "";
+    let (mut month, mut day, mut time_or_year) = ("", "", "");
+    for field in 0..8 {
+        rest = rest.trim_start();
+        let end = rest.find(char::is_whitespace)?;
+        match field {
+            4 => size = &rest[..end],
+            5 => month = &rest[..end],
+            6 => day = &rest[..end],
+            7 => time_or_year = &rest[..end],
+            _ => {}
+        }
+        rest = &rest[end..];
     }
-    fields.next()?; // month
-    fields.next()?; // day
-    fields.next()?; // time or year
-    let name = fields.collect::<Vec<_>>().join(" ");
-    (!name.is_empty()).then_some(ParsedFtpEntry {
-        name,
+    let name = rest.trim_start();
+    (!name.is_empty()).then(|| ParsedFtpEntry {
+        name: name.to_owned(),
         entry_type,
-        size_bytes,
+        size_bytes: (entry_type == FileEntryType::File)
+            .then(|| size.parse().ok())
+            .flatten(),
+        modified_at: ftp_modified_at(month, day, time_or_year),
     })
+}
+
+/// Unix `LIST` output carries either a clock time (recent entries, year
+/// implied) or a year (older entries). The implied year is the most recent one
+/// that does not place the entry in the future.
+fn ftp_modified_at(month: &str, day: &str, time_or_year: &str) -> Option<String> {
+    let month = match month {
+        "Jan" => Month::January,
+        "Feb" => Month::February,
+        "Mar" => Month::March,
+        "Apr" => Month::April,
+        "May" => Month::May,
+        "Jun" => Month::June,
+        "Jul" => Month::July,
+        "Aug" => Month::August,
+        "Sep" => Month::September,
+        "Oct" => Month::October,
+        "Nov" => Month::November,
+        "Dec" => Month::December,
+        _ => return None,
+    };
+    let day: u8 = day.parse().ok()?;
+    let now = OffsetDateTime::now_utc();
+    let (year, hour, minute) = match time_or_year.split_once(':') {
+        Some((hour, minute)) => {
+            let candidate = Date::from_calendar_date(now.year(), month, day).ok()?;
+            let year = if candidate > now.date() {
+                now.year() - 1
+            } else {
+                now.year()
+            };
+            (year, hour.parse().ok()?, minute.parse().ok()?)
+        }
+        None => (time_or_year.parse().ok()?, 0, 0),
+    };
+    let date = Date::from_calendar_date(year, month, day).ok()?;
+    let time = Time::from_hms(hour, minute, 0).ok()?;
+    date.with_time(time).assume_utc().format(&Rfc3339).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use std::{io::Write, net::TcpListener, sync::mpsc, thread};
 
-    use native_tls::{Identity, TlsAcceptor};
     use openssl::{
         asn1::Asn1Time,
         bn::BigNum,
         hash::MessageDigest,
-        pkcs12::Pkcs12,
         pkey::PKey,
         rsa::Rsa,
+        ssl::{SslAcceptor, SslMethod},
         x509::{X509, X509NameBuilder},
     };
 
@@ -1794,29 +2359,119 @@ mod tests {
     #[test]
     fn parses_ftp_entries_without_exposing_parent_paths() {
         let entries = parse_ftp_listing(
-            b"drwxr-xr-x 1 root root 0 Jan 01 12:00 models\r\n-rw-r--r-- 1 root root 12 Jan 01 12:00 cube.3mf\r\n",
+            b"drwxr-xr-x 1 root root 0 Jan 01 12:00 models\r\n-rw-r--r--   1 root root    12 Jan 01 12:00 big  cube.3mf\r\n",
             "/",
         );
 
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].device_path, "sdcard:/models");
         assert_eq!(entries[1].size_bytes, Some(12));
+        // Runs of spaces inside a name are part of the name on the printer.
+        assert_eq!(entries[1].name, "big  cube.3mf");
+        assert_eq!(entries[1].device_path, "sdcard:/big  cube.3mf");
+    }
+
+    #[test]
+    fn ftp_timestamps_resolve_the_year_the_listing_leaves_implicit() {
+        // A clock time means the most recent occurrence, never the future.
+        let year = OffsetDateTime::now_utc().year();
+        let recent = ftp_modified_at("Jan", "1", "12:00").unwrap();
+        assert!(
+            recent == format!("{year}-01-01T12:00:00Z")
+                || recent == format!("{}-01-01T12:00:00Z", year - 1),
+            "{recent}"
+        );
+        assert!(recent <= OffsetDateTime::now_utc().format(&Rfc3339).unwrap());
+        // A year in place of the clock means midnight on that day.
+        assert_eq!(
+            ftp_modified_at("Jun", "19", "2024").as_deref(),
+            Some("2024-06-19T00:00:00Z")
+        );
+        assert_eq!(ftp_modified_at("Foo", "19", "2024"), None);
+    }
+
+    #[test]
+    fn external_spool_holders_become_a_virtual_ams_unit() {
+        let print = serde_json::from_str::<Value>(
+            r#"{"vt_tray":{"id":"254","tray_type":"PLA","tray_color":"F6DA5AFF","remain":"-1","nozzle_temp_min":"190","nozzle_temp_max":"240"},
+                "vir_slot":[{"id":"255","tray_type":"","tray_color":"00000000"}]}"#,
+        )
+        .unwrap();
+        let print = print.as_object().unwrap();
+
+        let units = ams_data(print).unwrap().units;
+
+        // The empty H2 slot is dropped; only the loaded holder is reported.
+        assert_eq!(units.len(), 1);
+        assert_eq!(units[0].id, 254);
+        assert_eq!(units[0].trays[0].slot, 0);
+        assert_eq!(units[0].trays[0].filament_type.as_deref(), Some("PLA"));
+        assert_eq!(units[0].trays[0].color.as_deref(), Some("F6DA5AFF"));
+        // Unknown remaining filament is omitted rather than reported as -1%.
+        assert_eq!(units[0].trays[0].remaining_percent, None);
+        assert_eq!(units[0].trays[0].nozzle_temp_max, Some(240));
     }
 
     #[test]
     fn command_rejections_are_scoped_to_the_active_sequence() {
-        let rejection =
-            br#"{"print":{"sequence_id":"7","result":"fail","reason":"verification failed"}}"#;
+        let rejection: Value = serde_json::from_str(
+            r#"{"print":{"sequence_id":"7","result":"fail","reason":"verification failed"}}"#,
+        )
+        .unwrap();
         assert!(matches!(
-            command_rejection(rejection, Some("7")),
+            command_rejection(&rejection, Some("7")),
             Err(Error::UnsignedCommand)
         ));
-        assert!(!command_rejection(rejection, Some("other")).unwrap());
+        assert!(command_rejection(&rejection, Some("other")).is_ok());
+    }
+
+    #[test]
+    fn partial_packets_stay_buffered_until_the_rest_arrives() {
+        let mut packet = vec![0x30];
+        mqtt_remaining_length(&mut packet, 300).unwrap();
+        packet.extend_from_slice(&[7; 300]);
+
+        // A read timeout can land anywhere, so every split must be resumable.
+        for split in [1, 2, 3, 10, packet.len() - 1] {
+            let mut buffer = packet[..split].to_vec();
+            assert!(take_mqtt_packet(&mut buffer).unwrap().is_none(), "{split}");
+            buffer.extend_from_slice(&packet[split..]);
+            let taken = take_mqtt_packet(&mut buffer).unwrap().unwrap();
+            assert_eq!(taken.kind, 0x30);
+            assert_eq!(taken.payload.len(), 300);
+            assert!(buffer.is_empty());
+        }
+    }
+
+    #[test]
+    fn maps_the_firmware_pause_state_and_rounds_reported_fan_speeds() {
+        let status = parse_status(
+            br#"{"print":{"gcode_state":"PAUSE","subtask_name":"cube.3mf","mc_percent":10,"cooling_fan_speed":"7","big_fan1_speed":15}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(status.state, PrinterState::Paused);
+        assert!(status.job.is_some());
+        assert_eq!(status.fans["partCooling"], 47);
+        assert_eq!(status.fans["auxiliary"], 100);
+    }
+
+    #[test]
+    fn starts_project_files_from_the_printer_sd_card() {
+        let payload: Value = serde_json::from_str(
+            &job_start_payload("/models/cube.3mf", JobStartOptions::default()).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(payload["print"]["command"], "project_file");
+        assert_eq!(payload["print"]["url"], "file:///sdcard/models/cube.3mf");
+        assert_eq!(payload["print"]["param"], "Metadata/plate_1.gcode");
     }
 
     #[test]
     fn builds_chamber_ledctrl_payload_and_acknowledges_reported_state() {
-        let payload: Value = serde_json::from_str(&ledctrl_payload(LightState::On)).unwrap();
+        let payload: Value =
+            serde_json::from_str(&ledctrl_payload("chamber_light", LightState::On)).unwrap();
         let command = &payload["system"];
         assert!(
             command["sequence_id"]
@@ -1859,15 +2514,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_lights_other_than_the_chamber_before_connecting() {
-        let profile = Profile::new("printer.local", "SN001", false).unwrap();
-        assert!(matches!(
-            Client::new(profile).light_set(None, None, "work", LightState::On),
-            Err(Error::Unsupported("requested light"))
-        ));
-    }
-
-    #[test]
     fn verifies_mqtt_credentials_then_uses_the_pinned_transport_for_status() {
         let (host, port, credentials, server) = mqtt_server();
         let profile = Profile::with_timeout(host, "SN001", false, Duration::from_secs(2)).unwrap();
@@ -1906,17 +2552,78 @@ mod tests {
         assert!(is_valid_tls_fingerprint(&fingerprint));
     }
 
+    #[test]
+    fn poll_status_reuses_a_cached_session_instead_of_reconnecting() {
+        // The server accepts exactly one TCP connection and answers two
+        // status exchanges over it — a `poll_status` that reconnected on the
+        // second call would hang waiting on a connection nothing accepts.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let host = address.ip().to_string();
+        let port = address.port();
+        let acceptor = test_acceptor();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            let connect = read_test_packet(&mut stream);
+            assert_eq!(connect.kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            stream.flush().unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            assert_eq!(subscribe.kind, 0x82);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+
+            for _ in 0..2 {
+                let publish = read_test_packet(&mut stream);
+                assert_eq!(publish.kind, 0x30);
+                let report = br#"{"print":{"gcode_state":"IDLE","mc_percent":0}}"#;
+                let mut payload = Vec::new();
+                mqtt_string(&mut payload, "device/SN001/report").unwrap();
+                payload.extend_from_slice(report);
+                let mut packet = vec![0x30];
+                mqtt_remaining_length(&mut packet, payload.len()).unwrap();
+                packet.extend_from_slice(&payload);
+                stream.write_all(&packet).unwrap();
+                stream.flush().unwrap();
+            }
+        });
+
+        let profile = Profile::with_timeout(host, "SN001", true, Duration::from_secs(2)).unwrap();
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) = open_tls(&connector, &profile, port, None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+        mqtt.subscribe().unwrap();
+        let mut cached = Some(PersistentConnection(mqtt));
+
+        let client = Client::new(profile);
+        let first = client
+            .poll_status(&mut cached, Some("access-code"), None)
+            .unwrap();
+        assert!(cached.is_some(), "a successful poll keeps the session cached");
+        let second = client
+            .poll_status(&mut cached, Some("access-code"), None)
+            .unwrap();
+
+        server.join().unwrap();
+        assert_eq!(first.state, PrinterState::Idle);
+        assert_eq!(second.state, PrinterState::Idle);
+    }
+
     fn mqtt_server() -> (String, u16, mpsc::Receiver<String>, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let host = address.ip().to_string();
-        let acceptor = TlsAcceptor::new(test_identity()).unwrap();
+        let acceptor = test_acceptor();
         let (sender, credentials) = mpsc::channel();
         let server = thread::spawn(move || {
             for status_request in [false, true] {
                 let (socket, _) = listener.accept().unwrap();
                 let mut stream = acceptor.accept(socket).unwrap();
-                let connect = read_mqtt_packet(&mut stream).unwrap();
+                let connect = read_test_packet(&mut stream);
                 assert_eq!(connect.kind, 0x10);
                 sender.send(connect_password(&connect.payload)).unwrap();
                 stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
@@ -1925,12 +2632,12 @@ mod tests {
                 if !status_request {
                     continue;
                 }
-                let subscribe = read_mqtt_packet(&mut stream).unwrap();
+                let subscribe = read_test_packet(&mut stream);
                 assert_eq!(subscribe.kind, 0x82);
                 let id = &subscribe.payload[..2];
                 stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
                 stream.flush().unwrap();
-                let publish = read_mqtt_packet(&mut stream).unwrap();
+                let publish = read_test_packet(&mut stream);
                 assert_eq!(publish.kind, 0x30);
                 let report = br#"{"print":{"gcode_state":"IDLE","mc_percent":0}}"#;
                 let mut payload = Vec::new();
@@ -1968,7 +2675,113 @@ mod tests {
         value
     }
 
-    fn test_identity() -> Identity {
+    fn read_test_packet(stream: &mut impl Read) -> MqttPacket {
+        let mut pending = Vec::new();
+        loop {
+            if let Some(packet) = take_mqtt_packet(&mut pending).unwrap() {
+                return packet;
+            }
+            let mut chunk = [0; 512];
+            let read = stream.read(&mut chunk).unwrap();
+            assert!(read > 0, "stream closed mid-packet");
+            pending.extend_from_slice(&chunk[..read]);
+        }
+    }
+
+    /// The printer's FTP server refuses a data connection whose TLS session was
+    /// already used to resume (`522 session reuse required`), so the connection
+    /// keeps the control session as DER and decodes a fresh object per
+    /// transfer. Guard that a re-decoded session still resumes.
+    #[test]
+    fn ftp_commands_and_their_terminator_share_one_record() {
+        // The A1 firmware reads a whole command per TLS record, so a reply is
+        // only ever in step when the CRLF travels with the verb.
+        let acceptor = std::sync::Arc::new(test_acceptor());
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sender, records) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let mut stream = acceptor.accept(listener.accept().unwrap().0).unwrap();
+            let mut buffer = [0; 512];
+            let read = stream.read(&mut buffer).unwrap();
+            sender.send(buffer[..read].to_vec()).unwrap();
+            stream.write_all(b"331 \r\n").unwrap();
+            stream.flush().unwrap();
+        });
+
+        let connector = tls_connector().unwrap();
+        let socket = TcpStream::connect(address).unwrap();
+        let ssl = connector
+            .configure()
+            .unwrap()
+            .verify_hostname(false)
+            .into_ssl("SN001")
+            .unwrap();
+        let mut control = SslStream::new(ssl, socket).unwrap();
+        control.connect().unwrap();
+        let mut connection = FtpsConnection {
+            control,
+            connector,
+            profile: Profile::new("127.0.0.1", "SN001", true).unwrap(),
+            fingerprint: None,
+            timeout: Duration::from_secs(5),
+            session: None,
+            pending: Vec::new(),
+            last_reply: String::new(),
+        };
+
+        let reply = connection.command("USER bblp").unwrap();
+
+        server.join().unwrap();
+        assert_eq!(reply.code, 331);
+        assert_eq!(records.recv().unwrap(), b"USER bblp\r\n");
+    }
+
+    #[test]
+    fn a_der_encoded_session_resumes_more_than_once() {
+        let acceptor = std::sync::Arc::new(test_acceptor());
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            for stream in listener.incoming().take(3) {
+                let acceptor = acceptor.clone();
+                thread::spawn(move || {
+                    let _ = acceptor.accept(stream.unwrap());
+                });
+            }
+        });
+
+        let connector = tls_connector().unwrap();
+        let handshake = |session: Option<&SslSessionRef>| {
+            let socket = TcpStream::connect(address).unwrap();
+            let mut ssl = connector
+                .configure()
+                .unwrap()
+                .verify_hostname(false)
+                .into_ssl("SN001")
+                .unwrap();
+            if let Some(session) = session {
+                unsafe { ssl.set_session(session) }.unwrap();
+            }
+            let mut stream = SslStream::new(ssl, socket).unwrap();
+            stream.connect().unwrap();
+            stream
+        };
+
+        let control = handshake(None);
+        let der = control.ssl().session().unwrap().to_der().unwrap();
+
+        for attempt in 1..=2 {
+            let session = SslSession::from_der(&der).unwrap();
+            let data = handshake(Some(&session));
+            assert!(
+                data.ssl().session_reused(),
+                "transfer {attempt} did not resume the control session"
+            );
+        }
+    }
+
+    fn test_acceptor() -> SslAcceptor {
         let key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
         let mut name = X509NameBuilder::new().unwrap();
         name.append_entry_by_text("CN", "SN001").unwrap();
@@ -1988,12 +2801,10 @@ mod tests {
         certificate.set_pubkey(&key).unwrap();
         certificate.sign(&key, MessageDigest::sha256()).unwrap();
         let certificate = certificate.build();
-        let identity = Pkcs12::builder()
-            .name("polimero-test")
-            .pkey(&key)
-            .cert(&certificate)
-            .build2("polimero-test")
-            .unwrap();
-        Identity::from_pkcs12(&identity.to_der().unwrap(), "polimero-test").unwrap()
+
+        let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+        acceptor.set_private_key(&key).unwrap();
+        acceptor.set_certificate(&certificate).unwrap();
+        acceptor.build()
     }
 }
