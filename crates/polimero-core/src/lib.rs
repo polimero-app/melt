@@ -7,6 +7,7 @@ pub mod drivers;
 pub mod keychain;
 pub mod monitor;
 pub mod moonraker;
+pub mod pool;
 pub mod profiles;
 
 use serde::Serialize;
