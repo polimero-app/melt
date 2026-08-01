@@ -1270,6 +1270,9 @@ onMounted(() => {
     monitoring.value = event.payload
   }).then((unlisten) => {
     monitorUnlisten = unlisten
+    void invoke<MonitorEntry[] | null>('cached_monitoring').then((cached) => {
+      if (cached && monitoring.value.length === 0) monitoring.value = cached
+    })
   })
   void listen<NotificationEvent>('printer-notification', (event) => {
     const labels: Record<NotificationEvent['kind'], MessageKey> = {

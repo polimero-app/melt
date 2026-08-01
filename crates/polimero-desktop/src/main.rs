@@ -730,6 +730,14 @@ fn monitored_printers(
     collect_monitored_printers(&state)
 }
 
+/// Returns the last persisted monitoring payload for immediate UI paint.
+/// The frontend requests this after registering its event listener so the
+/// startup snapshot cannot be lost before the webview is ready.
+#[tauri::command(async)]
+fn cached_monitoring() -> Option<serde_json::Value> {
+    load_status_cache()
+}
+
 /// Like [`monitored_printers`], but polls (and caches) just one printer —
 /// for refreshing after an action scoped to a single printer instead of
 /// re-probing every configured one.
@@ -2240,10 +2248,6 @@ fn main() {
         .manage(SlicerState::default())
         .setup(|app| {
             let state = app.state::<MonitorState>().inner().clone();
-            if let Some(cached) = load_status_cache() {
-                use tauri::Emitter;
-                let _ = app.emit("monitoring-updated", cached);
-            }
             start_monitor_worker(app.handle().clone(), state);
             Ok(())
         })
@@ -2261,6 +2265,7 @@ fn main() {
             discover_printers,
             printer_capabilities,
             monitored_printers,
+            cached_monitoring,
             printer_status,
             create_configured_printer,
             preview_printer_tls,
