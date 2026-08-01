@@ -858,7 +858,7 @@ async function refreshTls() {
     })
     tlsOpen.value = false
     showToast(t('printersView.tlsRefreshRequested'))
-    await refreshMonitoring()
+    void refreshMonitoring()
   } catch (reason) {
     tlsError.value = message(reason)
   } finally {
@@ -893,7 +893,7 @@ async function runJobAction(action: 'start' | 'pause' | 'resume' | 'cancel', dev
         ? t('filesView.sentToPrinter', { name: devicePath?.split('/').pop() ?? '' })
         : t(jobToastKeys[action]),
     )
-    await refreshMonitoring()
+    void refreshMonitoring()
   } catch (reason) {
     showToast(message(reason))
   }
@@ -943,10 +943,10 @@ async function sendFan(fan: string, event: Event) {
       request: { name: activePrinter.value.name, fan, speedPercent: speed },
     })
     showToast(t('control.fanSet', { fan: fanLabel(fan), percent: speed }))
-    await refreshMonitoring()
+    void refreshMonitoring()
   } catch (reason) {
     showToast(message(reason))
-    await refreshMonitoring()
+    void refreshMonitoring()
   }
 }
 
@@ -955,7 +955,7 @@ async function homeAxes() {
   try {
     await invoke('printer_motion_home', { name: activePrinter.value.name })
     showToast(t('control.homingStarted'))
-    await refreshMonitoring()
+    void refreshMonitoring()
   } catch (reason) {
     showToast(message(reason))
   }
@@ -983,7 +983,7 @@ async function jog(axis: 'x' | 'y' | 'z', direction: 1 | -1) {
       },
     })
     showToast(t('control.moved', { axis: axis.toUpperCase(), distance: `${distance} mm` }))
-    await refreshMonitoring()
+    void refreshMonitoring()
   } catch (reason) {
     showToast(message(reason))
   } finally {
@@ -998,10 +998,10 @@ async function toggleLight(light: string, on: boolean) {
       request: { name: activePrinter.value.name, light, on },
     })
     showToast(t('control.lightSet', { light: lightLabel(light), state: t(on ? 'common.enabled' : 'common.disabled') }))
-    await refreshMonitoring()
+    void refreshMonitoring()
   } catch (reason) {
     showToast(message(reason))
-    await refreshMonitoring()
+    void refreshMonitoring()
   }
 }
 
@@ -1019,7 +1019,7 @@ async function runEmergencyStop() {
   try {
     await invoke('printer_emergency_stop', { name: activePrinter.value.name })
     showToast(t('control.emergencyStopSent'))
-    await refreshMonitoring()
+    void refreshMonitoring()
   } catch (reason) {
     showToast(message(reason))
   }
@@ -1043,7 +1043,7 @@ async function setSpeedProfile(event: Event) {
       request: { name: activePrinter.value.name, speedProfile: value },
     })
     showToast(t('control.speedSet', { profile: t(speedProfileKeys[value]) }))
-    await refreshMonitoring()
+    void refreshMonitoring()
   } catch (reason) {
     showToast(message(reason))
   } finally {
