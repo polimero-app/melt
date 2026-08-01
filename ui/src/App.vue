@@ -84,6 +84,7 @@ type CommandError = {
   code: string
   operation?: string
   state?: string
+  detail?: string
 }
 
 type Driver = {
@@ -319,6 +320,7 @@ const cameraPeer = shallowRef<RTCPeerConnection>()
 const cameraMediaStream = shallowRef<MediaStream>()
 const cameraVideo = ref<HTMLVideoElement>()
 const cameraTransport = ref<CameraTransport>()
+const cameraTransportDetail = ref<string>()
 const cameraLoading = ref(false)
 const cameraError = ref<string>()
 let monitorUnlisten: UnlistenFn | undefined
@@ -491,6 +493,11 @@ function message(reason: unknown) {
     operation: t(`operations.${error.operation ?? 'operation'}` as MessageKey),
     state: t(`printerState.${error.state ?? 'unknown'}` as MessageKey),
   })
+}
+
+function commandDetail(reason: unknown) {
+  const error = reason as CommandError | null
+  return error && typeof error === 'object' && typeof error.detail === 'string' ? error.detail : undefined
 }
 
 function askConfirmation(
@@ -1109,6 +1116,7 @@ async function refreshCamera() {
   if (!activePrinter.value || cameraLoading.value || !cameraSupported.value) return
   cameraLoading.value = true
   cameraError.value = undefined
+  cameraTransportDetail.value = undefined
   try {
     if (capabilities.value?.cameraStream) {
       const printerName = activePrinter.value.name
@@ -1129,7 +1137,8 @@ async function refreshCamera() {
         await peer.setRemoteDescription(answer)
         cameraPeer.value = peer
         cameraTransport.value = 'webrtc'
-      } catch {
+      } catch (reason) {
+        cameraTransportDetail.value = commandDetail(reason) ?? message(reason)
         await stopCamera()
         cameraUrl.value = (await invoke<CameraStream>('printer_camera_stream', { name: printerName })).url
         cameraTransport.value = 'mjpeg'
@@ -1517,6 +1526,7 @@ onUnmounted(() => {
                 <template #suffix>
                   <span
                     class="inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-xs font-medium"
+                    :title="cameraTransport === 'mjpeg' ? cameraTransportDetail : undefined"
                     :class="cameraOnline
                       ? 'bg-green-100 fill-green-500 text-green-700 dark:bg-green-400/10 dark:fill-green-400 dark:text-green-400'
                       : 'bg-yellow-100 fill-yellow-500 text-yellow-800 dark:bg-yellow-400/10 dark:fill-yellow-400 dark:text-yellow-500'"

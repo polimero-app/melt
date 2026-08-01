@@ -43,6 +43,8 @@ struct CommandError {
     operation: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     state: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
 }
 
 impl CommandError {
@@ -51,7 +53,13 @@ impl CommandError {
             code,
             operation: None,
             state: None,
+            detail: None,
         }
+    }
+
+    fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
     }
 
     fn of(code: &'static str, operation: Operation) -> Self {
@@ -59,6 +67,7 @@ impl CommandError {
             code,
             operation: Some(operation_slug(operation)),
             state: None,
+            detail: None,
         }
     }
 }
@@ -2000,7 +2009,7 @@ fn printer_camera_webrtc_offer(
         printer.tls_fingerprint,
         offer,
     )
-    .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?;
+    .map_err(|error| CommandError::new("cameraPreviewUnavailable").with_detail(error))?;
     state
         .session
         .lock()
@@ -2202,6 +2211,7 @@ fn check_allowed_state(
         code: "printerWrongState",
         operation: Some(operation_slug(operation)),
         state: Some(state_slug(state)),
+        detail: None,
     })
 }
 
