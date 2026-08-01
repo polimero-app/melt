@@ -214,22 +214,34 @@ pub fn registered() -> [DriverInfo; 2] {
 }
 
 pub fn profile(config: &config::Profile) -> Result<Profile, DriverError> {
+    profile_with_timeout(config, parse_timeout(&config.timeout)?)
+}
+
+/// A status poll only needs to know "is it reachable", so it doesn't need to
+/// wait as long as a real operation (e.g. a print-job command) might.
+pub const STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Like [`profile`], but clamps the configured timeout to
+/// [`STATUS_POLL_TIMEOUT`] — for use by the periodic status poller only, not
+/// by command execution which should honor the user-configured timeout.
+pub fn profile_for_status(config: &config::Profile) -> Result<Profile, DriverError> {
+    let timeout = parse_timeout(&config.timeout)?.min(STATUS_POLL_TIMEOUT);
+    profile_with_timeout(config, timeout)
+}
+
+fn profile_with_timeout(config: &config::Profile, timeout: Duration) -> Result<Profile, DriverError> {
     match Driver::parse(&config.driver)? {
         Driver::BambuLan => bambu::Profile::with_timeout(
             &config.host,
             &config.serial,
             config.insecure,
-            parse_timeout(&config.timeout)?,
+            timeout,
         )
         .map(Profile::Bambu)
         .map_err(|_| DriverError::InvalidProfile(Driver::BambuLan)),
-        Driver::Moonraker => moonraker::Profile::new(
-            &config.host,
-            config.insecure,
-            parse_timeout(&config.timeout)?,
-        )
-        .map(Profile::Moonraker)
-        .map_err(|_| DriverError::InvalidProfile(Driver::Moonraker)),
+        Driver::Moonraker => moonraker::Profile::new(&config.host, config.insecure, timeout)
+            .map(Profile::Moonraker)
+            .map_err(|_| DriverError::InvalidProfile(Driver::Moonraker)),
     }
 }
 
