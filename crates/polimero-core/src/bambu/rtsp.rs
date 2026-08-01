@@ -110,7 +110,12 @@ impl FramedConnection {
     }
 }
 
-pub(super) struct H264Stream {
+/// Native H.264/RTP stream from an H/X-series Bambu camera.
+///
+/// Unlike [`MjpegStream`](super::MjpegStream), this exposes the printer's
+/// original RTP payloads so a WebRTC gateway can forward them without
+/// decoding and re-encoding every frame.
+pub struct H264Stream {
     connection: FramedConnection,
     decoder: Decoder,
     sps: Vec<u8>,
@@ -121,12 +126,22 @@ pub(super) struct H264Stream {
 }
 
 impl H264Stream {
-    pub(super) fn shutdown_handle(&self) -> io::Result<TcpStream> {
+    pub fn shutdown_handle(&self) -> io::Result<TcpStream> {
         self.connection.connection.get_ref().try_clone()
+    }
+
+    pub fn parameter_sets(&self) -> (&[u8], &[u8]) {
+        (&self.sps, &self.pps)
+    }
+
+    pub fn next_rtp_packet(&mut self) -> io::Result<Vec<u8>> {
+        self.connection
+            .next_rtp_packet()
+            .map_err(|error| io::Error::other(format!("{error}")))
     }
 }
 
-pub(super) fn open_h264_stream(
+pub fn open_h264_stream(
     profile: &Profile,
     access_code: &str,
     fingerprint: Option<&str>,

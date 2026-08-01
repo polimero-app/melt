@@ -19,6 +19,7 @@ mod rtsp;
 mod transport;
 
 pub use discovery::{DiscoveredPrinter, DiscoveryError, discover};
+pub use rtsp::H264Stream;
 pub use transport::{Client, Error as TransportError, JobStartOptions, PersistentConnection};
 
 pub const MQTT_PORT: u16 = 8883;
@@ -372,6 +373,19 @@ pub fn open_mjpeg_stream(
         source: MjpegSource::Classic(connection),
         pending: Vec::new(),
     })
+}
+
+/// Opens the native H.264/RTP camera stream without decoding it.
+pub fn open_h264_stream(
+    profile: &Profile,
+    access_code: Option<&str>,
+    fingerprint: Option<&str>,
+    timeout: Duration,
+) -> Result<H264Stream, CameraError> {
+    let access_code = access_code
+        .filter(|value| !value.is_empty())
+        .ok_or(CameraError::MissingAccessCode)?;
+    rtsp::open_h264_stream(profile, access_code, fingerprint, timeout)
 }
 
 /// Captures one actual JPEG frame from the Bambu LAN camera endpoint.

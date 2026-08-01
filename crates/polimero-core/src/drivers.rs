@@ -320,6 +320,28 @@ pub fn camera_stream(
     }
 }
 
+/// Opens the native H.264/RTP camera source for a WebRTC gateway.
+pub fn camera_h264_stream(
+    profile: &Profile,
+    access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
+    timeout: Duration,
+) -> Result<bambu::H264Stream, DriverError> {
+    match profile {
+        Profile::Bambu(profile) => bambu::open_h264_stream(
+            profile,
+            access_code,
+            tls_fingerprint,
+            timeout,
+        )
+        .map_err(DriverError::Camera),
+        Profile::Moonraker(_) => Err(DriverError::UnsupportedOperation(
+            Driver::Moonraker,
+            Operation::CameraStream,
+        )),
+    }
+}
+
 pub fn file_roots(
     profile: &Profile,
     access_code: Option<&str>,
