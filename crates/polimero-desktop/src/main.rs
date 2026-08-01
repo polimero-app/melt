@@ -226,6 +226,7 @@ struct PrinterSummary {
 }
 
 struct DesktopPrinter {
+    name: String,
     driver: drivers::Profile,
     access_code: Option<String>,
     tls_fingerprint: Option<String>,
@@ -261,6 +262,7 @@ struct MonitorEntry {
 
 struct CachedMonitor {
     next_poll: Instant,
+    sampled_at: Instant,
     backoff: monitor::Backoff,
     entry: MonitorEntry,
 }
@@ -895,11 +897,13 @@ fn cached_monitor_entry(state: &MonitorState, name: String, profile: Profile) ->
     if let Ok(mut entries) = state.entries.lock() {
         let cached = entries.entry(name).or_insert_with(|| CachedMonitor {
             next_poll: now,
+            sampled_at: now,
             backoff: monitor::Backoff::new(monitor::DEFAULT_INTERVAL),
             entry: entry.clone(),
         });
         let delay = cached.backoff.after_result(entry.error.is_none());
         cached.next_poll = now + delay;
+        cached.sampled_at = Instant::now();
         cached.entry = entry.clone();
     }
     entry
@@ -1180,6 +1184,7 @@ fn print_library_file(
     )
     .map_err(|error| operation_error(error, Operation::FileUpload))?;
     ensure_state(
+        &state,
         &printer,
         &[moonraker::PrinterState::Idle],
         Operation::JobStart,
@@ -1222,7 +1227,7 @@ fn printer_job_action(
         ][..],
         _ => unreachable!("action is validated above"),
     };
-    ensure_state(&printer, allowed, operation)?;
+    ensure_state(&state, &printer, allowed, operation)?;
     let result = match request.action.as_str() {
         "start" => {
             let device_path = request
@@ -1278,6 +1283,7 @@ fn printer_temperature_set(
     }
     let printer = desktop_printer(&request.name, Operation::TemperatureSet)?;
     ensure_state(
+        &state,
         &printer,
         &[moonraker::PrinterState::Idle],
         Operation::TemperatureSet,
@@ -1300,6 +1306,7 @@ fn printer_fan_set(
 ) -> Result<moonraker::FanResult, CommandError> {
     let printer = desktop_printer(&request.name, Operation::FanSet)?;
     ensure_state(
+        &state,
         &printer,
         &[
             moonraker::PrinterState::Idle,
@@ -1328,6 +1335,7 @@ fn printer_motion_home(
 ) -> Result<moonraker::MotionResult, CommandError> {
     let printer = desktop_printer(&name, Operation::MotionHome)?;
     ensure_state(
+        &state,
         &printer,
         &[moonraker::PrinterState::Idle],
         Operation::MotionHome,
@@ -1356,6 +1364,7 @@ fn printer_motion_jog(
     }
     let printer = desktop_printer(&request.name, Operation::MotionJog)?;
     ensure_state(
+        &state,
         &printer,
         &[moonraker::PrinterState::Idle],
         Operation::MotionJog,
@@ -1383,6 +1392,7 @@ fn printer_light_set(
 ) -> Result<moonraker::LightResult, CommandError> {
     let printer = desktop_printer(&request.name, Operation::LightSet)?;
     ensure_state(
+        &state,
         &printer,
         &[
             moonraker::PrinterState::Idle,
@@ -1416,6 +1426,7 @@ fn printer_speed_set(
 ) -> Result<moonraker::SpeedResult, CommandError> {
     let printer = desktop_printer(&request.name, Operation::SpeedSet)?;
     ensure_state(
+        &state,
         &printer,
         &[
             moonraker::PrinterState::Printing,
@@ -2042,6 +2053,7 @@ fn desktop_printer(name: &str, operation: Operation) -> Result<DesktopPrinter, C
     let access_code = access_code(&profile.driver, &name, driver_kind)?;
     let tls_fingerprint = tls_fingerprint(&profile.driver, &name, driver_kind, profile.insecure)?;
     Ok(DesktopPrinter {
+        name,
         driver,
         access_code,
         tls_fingerprint,
@@ -2088,23 +2100,41 @@ fn invalidate(state: &MonitorState, name: &str) {
 }
 
 fn ensure_state(
+    state: &MonitorState,
     printer: &DesktopPrinter,
     allowed: &[moonraker::PrinterState],
     operation: Operation,
 ) -> Result<(), CommandError> {
+    if let Ok(entries) = state.entries.lock()
+        && let Some(cached) = entries.get(&printer.name)
+        && cached.sampled_at.elapsed() <= Duration::from_secs(5)
+        && let Some(status) = cached.entry.status.as_ref()
+        && cached.entry.error.is_none()
+    {
+        return check_allowed_state(status.state, allowed, operation);
+    }
+
     let status = drivers::status(
         &printer.driver,
         printer.access_code.as_deref(),
         printer.tls_fingerprint.as_deref(),
     )
     .map_err(|error| operation_error(error, operation))?;
-    if allowed.contains(&status.state) {
+    check_allowed_state(status.state, allowed, operation)
+}
+
+fn check_allowed_state(
+    state: moonraker::PrinterState,
+    allowed: &[moonraker::PrinterState],
+    operation: Operation,
+) -> Result<(), CommandError> {
+    if allowed.contains(&state) {
         return Ok(());
     }
     Err(CommandError {
         code: "printerWrongState",
         operation: Some(operation_slug(operation)),
-        state: Some(state_slug(status.state)),
+        state: Some(state_slug(state)),
     })
 }
 
