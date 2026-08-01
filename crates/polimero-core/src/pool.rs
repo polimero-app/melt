@@ -14,13 +14,19 @@ use std::{
 use crate::{bambu, drivers, moonraker};
 
 struct BambuSession {
+    identity: [u8; 32],
     client: bambu::Client,
     connection: Option<bambu::PersistentConnection>,
 }
 
+struct MoonrakerSession {
+    identity: String,
+    client: Arc<moonraker::Client>,
+}
+
 #[derive(Default)]
 pub struct ConnectionPool {
-    moonraker: Mutex<HashMap<String, Arc<moonraker::Client>>>,
+    moonraker: Mutex<HashMap<String, MoonrakerSession>>,
     bambu: Mutex<HashMap<String, Arc<Mutex<BambuSession>>>>,
 }
 
@@ -34,46 +40,55 @@ impl ConnectionPool {
     ) -> Result<moonraker::Status, drivers::DriverError> {
         match profile {
             drivers::Profile::Moonraker(profile) => {
-                // ponytail: pool entries aren't invalidated on a profile edit
-                // (host/timeout/insecure) while the app is running; a changed
-                // printer picks up new settings on its next reconnect after
-                // an error, or after an app restart. Revisit if that proves
-                // surprising in practice.
+                let identity = profile.connection_identity();
                 let client = {
                     let mut clients =
                         self.moonraker.lock().unwrap_or_else(|error| error.into_inner());
-                    match clients.get(name) {
-                        Some(client) => client.clone(),
-                        None => {
-                            let client = Arc::new(
-                                moonraker::Client::new(profile.clone())
-                                    .map_err(drivers::DriverError::Moonraker)?,
-                            );
-                            clients.insert(name.to_string(), client.clone());
-                            client
-                        }
+                    let replace = clients
+                        .get(name)
+                        .is_none_or(|session| session.identity != identity);
+                    if replace {
+                        let client = Arc::new(
+                            moonraker::Client::new(profile.clone())
+                                .map_err(drivers::DriverError::Moonraker)?,
+                        );
+                        clients.insert(
+                            name.to_string(),
+                            MoonrakerSession {
+                                identity,
+                                client,
+                            },
+                        );
                     }
+                    clients[name].client.clone()
                 };
                 client.status(access_code).map_err(drivers::DriverError::Moonraker)
             }
             drivers::Profile::Bambu(profile) => {
+                let identity = profile.connection_identity(access_code, tls_fingerprint);
                 let session = {
                     let mut sessions =
                         self.bambu.lock().unwrap_or_else(|error| error.into_inner());
-                    sessions
-                        .entry(name.to_string())
-                        .or_insert_with(|| {
+                    let replace = sessions.get(name).is_none_or(|session| {
+                        session
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner())
+                            .identity
+                            != identity
+                    });
+                    if replace {
+                        sessions.insert(
+                            name.to_string(),
                             Arc::new(Mutex::new(BambuSession {
+                                identity,
                                 client: bambu::Client::new(profile.clone()),
                                 connection: None,
-                            }))
-                        })
-                        .clone()
+                            })),
+                        );
+                    }
+                    sessions[name].clone()
                 };
                 let session = &mut *session.lock().unwrap_or_else(|error| error.into_inner());
-                // Cheap (no I/O): keeps access-code/timeout/insecure current
-                // even though the live `connection`, if any, stays open.
-                session.client = bambu::Client::new(profile.clone());
                 session
                     .client
                     .poll_status(&mut session.connection, access_code, tls_fingerprint)
@@ -90,5 +105,58 @@ impl ConnectionPool {
         if let Ok(mut sessions) = self.bambu.lock() {
             sessions.retain(|name, _| keep(name));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+        time::Duration,
+    };
+
+    use super::*;
+
+    #[test]
+    fn moonraker_profile_edits_replace_the_cached_client() {
+        let (first_host, first_server) = status_server("standby");
+        let (second_host, second_server) = status_server("printing");
+        let pool = ConnectionPool::default();
+        let first = drivers::Profile::Moonraker(
+            moonraker::Profile::new(&first_host, false, Duration::from_secs(2)).unwrap(),
+        );
+        let second = drivers::Profile::Moonraker(
+            moonraker::Profile::new(&second_host, false, Duration::from_secs(2)).unwrap(),
+        );
+
+        let initial = pool.status("printer", &first, None, None).unwrap();
+        let edited = pool.status("printer", &second, None, None).unwrap();
+
+        first_server.join().unwrap();
+        second_server.join().unwrap();
+        assert_eq!(initial.state, moonraker::PrinterState::Idle);
+        assert_eq!(edited.state, moonraker::PrinterState::Printing);
+    }
+
+    fn status_server(state: &'static str) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 2048];
+            let _ = stream.read(&mut request).unwrap();
+            let body = format!(
+                r#"{{"result":{{"status":{{"print_stats":{{"state":"{state}"}}}}}}}}"#
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        (format!("http://{address}"), server)
     }
 }

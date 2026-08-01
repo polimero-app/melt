@@ -98,6 +98,26 @@ impl Profile {
     pub fn mqtt_topics(&self) -> MqttTopics {
         MqttTopics::for_serial(&self.serial)
     }
+
+    pub(crate) fn connection_identity(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+    ) -> [u8; 32] {
+        let mut identity = Sha256::new();
+        for component in [
+            self.host.as_str(),
+            self.serial.as_str(),
+            if self.insecure { "insecure" } else { "pinned" },
+            fingerprint.unwrap_or_default(),
+            access_code.unwrap_or_default(),
+        ] {
+            identity.update(component.len().to_be_bytes());
+            identity.update(component.as_bytes());
+        }
+        identity.update(self.timeout.as_nanos().to_be_bytes());
+        identity.finalize().into()
+    }
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]

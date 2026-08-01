@@ -83,6 +83,15 @@ impl Profile {
         self.tracer = Some(tracer);
         self
     }
+
+    pub(crate) fn connection_identity(&self) -> String {
+        format!(
+            "{}|{}|{}",
+            self.base_url,
+            self.insecure,
+            self.timeout.as_nanos()
+        )
+    }
 }
 
 #[derive(Debug, Error)]
