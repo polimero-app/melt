@@ -89,17 +89,23 @@ pub fn start(
         }
     });
 
+    let session = Session {
+        stop,
+        shutdown: Some(shutdown),
+        thread: Some(thread),
+    };
+    await_answer(answer_rx, session, SETUP_TIMEOUT)
+}
+
+fn await_answer(
+    answer_rx: mpsc::Receiver<Result<String, String>>,
+    session: Session,
+    timeout: Duration,
+) -> Result<(String, Session), String> {
     let answer = answer_rx
-        .recv_timeout(SETUP_TIMEOUT)
+        .recv_timeout(timeout)
         .map_err(|_| "WebRTC negotiation timed out".to_owned())??;
-    Ok((
-        answer,
-        Session {
-            stop,
-            shutdown: Some(shutdown),
-            thread: Some(thread),
-        },
-    ))
+    Ok((answer, session))
 }
 
 async fn serve(
@@ -145,7 +151,10 @@ async fn serve(
     peer.set_local_description(answer)
         .await
         .map_err(|error| format!("WebRTC local description: {error}"))?;
-    let _ = gathering_complete.recv().await;
+    tokio::time::timeout(SETUP_TIMEOUT, gathering_complete.recv())
+        .await
+        .map_err(|_| "WebRTC ICE gathering timed out".to_owned())?
+        .ok_or_else(|| "WebRTC ICE gathering canceled".to_owned())?;
     let answer = peer
         .local_description()
         .await
@@ -246,7 +255,13 @@ fn decode_profile(value: &str) -> Option<[u8; 3]> {
 
 #[cfg(test)]
 mod tests {
-    use super::{compatible_offer_profile, decode_profile};
+    use std::{
+        sync::{Arc, atomic::{AtomicBool, Ordering}, mpsc},
+        thread,
+        time::Duration,
+    };
+
+    use super::{Session, await_answer, compatible_offer_profile, decode_profile};
 
     #[test]
     fn selects_browser_profile_compatible_with_camera() {
@@ -267,5 +282,30 @@ mod tests {
         assert_eq!(decode_profile("640c"), None);
         assert_eq!(decode_profile("zz0c1f"), None);
         assert_eq!(decode_profile("640c1f"), Some([0x64, 0x0c, 0x1f]));
+    }
+
+    #[test]
+    fn timeout_stops_and_joins_pending_session() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let exited = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let thread_exited = Arc::clone(&exited);
+        let thread = thread::spawn(move || {
+            while !thread_stop.load(Ordering::Acquire) {
+                thread::yield_now();
+            }
+            thread_exited.store(true, Ordering::Release);
+        });
+        let (_answer_tx, answer_rx) = mpsc::channel();
+        let session = Session {
+            stop,
+            shutdown: None,
+            thread: Some(thread),
+        };
+
+        let result = await_answer(answer_rx, session, Duration::from_millis(10));
+
+        assert!(matches!(result, Err(error) if error == "WebRTC negotiation timed out"));
+        assert!(exited.load(Ordering::Acquire));
     }
 }
