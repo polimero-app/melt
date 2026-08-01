@@ -651,20 +651,11 @@ struct SlicerState {
     processes: Arc<Mutex<HashMap<u32, ManagedSlicer>>>,
 }
 
+#[derive(Default)]
 struct PreviewCache {
     entries: HashMap<String, FilePreviewResponse>,
     order: VecDeque<String>,
     bytes: usize,
-}
-
-impl Default for PreviewCache {
-    fn default() -> Self {
-        Self {
-            entries: HashMap::new(),
-            order: VecDeque::new(),
-            bytes: 0,
-        }
-    }
 }
 
 impl PreviewCache {

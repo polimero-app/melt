@@ -70,7 +70,7 @@ struct PreferencesFile {
     library_path: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
     pub notifications: NotificationPreferences,
@@ -80,17 +80,6 @@ pub struct Preferences {
     pub library_path: Option<String>,
     #[serde(skip)]
     digest: Option<[u8; 32]>,
-}
-
-impl Default for Preferences {
-    fn default() -> Self {
-        Self {
-            notifications: NotificationPreferences::default(),
-            slicers: Vec::new(),
-            library_path: None,
-            digest: None,
-        }
-    }
 }
 
 impl Preferences {
@@ -142,8 +131,7 @@ impl Preferences {
             *existing = slicer;
         } else {
             self.slicers.push(slicer);
-            self.slicers
-                .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+            self.slicers.sort_by_key(|item| item.name.to_lowercase());
         }
         Ok(())
     }
