@@ -117,7 +117,7 @@ impl FramedConnection {
 /// decoding and re-encoding every frame.
 pub struct H264Stream {
     connection: FramedConnection,
-    decoder: Decoder,
+    decoder: Option<Decoder>,
     sps: Vec<u8>,
     pps: Vec<u8>,
     started: bool,
@@ -146,6 +146,25 @@ pub fn open_h264_stream(
     access_code: &str,
     fingerprint: Option<&str>,
     timeout: Duration,
+) -> Result<H264Stream, CameraError> {
+    open_h264_stream_with_decoder(profile, access_code, fingerprint, timeout, false)
+}
+
+pub(super) fn open_decoded_h264_stream(
+    profile: &Profile,
+    access_code: &str,
+    fingerprint: Option<&str>,
+    timeout: Duration,
+) -> Result<H264Stream, CameraError> {
+    open_h264_stream_with_decoder(profile, access_code, fingerprint, timeout, true)
+}
+
+fn open_h264_stream_with_decoder(
+    profile: &Profile,
+    access_code: &str,
+    fingerprint: Option<&str>,
+    timeout: Duration,
+    decode: bool,
 ) -> Result<H264Stream, CameraError> {
     let deadline = Instant::now()
         .checked_add(timeout)
@@ -216,7 +235,9 @@ pub fn open_h264_stream(
         return Err(stream_error(&format!("RTSP PLAY failed: {}", play.reason_phrase())));
     }
 
-    let decoder = Decoder::new().map_err(|error| stream_error(&format!("H.264 decoder init failed: {error}")))?;
+    let decoder = decode
+        .then(|| Decoder::new().map_err(|error| stream_error(&format!("H.264 decoder init failed: {error}"))))
+        .transpose()?;
 
     Ok(H264Stream {
         connection,
@@ -376,7 +397,11 @@ impl H264Stream {
             let Some(access_unit) = self.build_access_unit() else {
                 continue;
             };
-            match self.decoder.decode(&access_unit) {
+            let decoder = self
+                .decoder
+                .as_mut()
+                .ok_or_else(|| io::Error::other("H.264 decoder is unavailable for JPEG output"))?;
+            match decoder.decode(&access_unit) {
                 Ok(Some(yuv)) => return encode_jpeg(&yuv),
                 Ok(None) => continue,
                 Err(error) => {

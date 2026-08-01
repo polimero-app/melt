@@ -356,7 +356,7 @@ pub fn open_mjpeg_stream(
         .filter(|value| !value.is_empty())
         .ok_or(CameraError::MissingAccessCode)?;
 
-    match rtsp::open_h264_stream(profile, access_code, fingerprint, timeout) {
+    match rtsp::open_decoded_h264_stream(profile, access_code, fingerprint, timeout) {
         Ok(stream) => {
             return Ok(MjpegStream {
                 source: MjpegSource::H264(Box::new(stream)),
