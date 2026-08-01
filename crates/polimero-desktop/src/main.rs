@@ -2319,6 +2319,8 @@ fn main() {
 
                     if let Some(settings) = webview.inner().settings() {
                         settings.set_enable_webrtc(true);
+                        settings.set_enable_media_stream(true);
+                        webview.inner().reload();
                     }
                 });
             }
