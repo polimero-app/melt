@@ -23,7 +23,7 @@ use webrtc::{
         configuration::RTCConfiguration, sdp::session_description::RTCSessionDescription,
     },
     rtp::packet::Packet,
-    rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
+    rtp_transceiver::rtp_codec::{RTCRtpCodecCapability, RTCRtpCodecParameters},
     track::track_local::{
         track_local_static_rtp::TrackLocalStaticRTP, TrackLocal, TrackLocalWriter,
     },
@@ -114,6 +114,10 @@ async fn serve(
     stop: Arc<AtomicBool>,
     answer_tx: mpsc::SyncSender<Result<String, String>>,
 ) -> Result<(), String> {
+    let (sps, pps) = stream.parameter_sets();
+    let sps = sps.to_vec();
+    let pps = pps.to_vec();
+    let (codec, payload_type) = codec_capability(&sps, &pps, &offer_sdp)?;
     let mut media_engine = MediaEngine::default();
     media_engine
         .register_default_codecs()
@@ -130,13 +134,28 @@ async fn serve(
             .map_err(|error| format!("WebRTC peer: {error}"))?,
     );
     let track = Arc::new(TrackLocalStaticRTP::new(
-        codec_capability(&stream, &offer_sdp),
+        codec.clone(),
         "video".to_owned(),
         "bambu-camera".to_owned(),
     ));
-    peer.add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
+    let _sender = peer
+        .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
         .await
         .map_err(|error| format!("WebRTC track: {error}"))?;
+    let transceiver = peer
+        .get_transceivers()
+        .await
+        .into_iter()
+        .last()
+        .ok_or_else(|| "WebRTC video transceiver missing".to_owned())?;
+    transceiver
+        .set_codec_preferences(vec![RTCRtpCodecParameters {
+            capability: codec,
+            payload_type,
+            ..Default::default()
+        }])
+        .await
+        .map_err(|error| format!("WebRTC H.264 profile: {error}"))?;
 
     let offer = RTCSessionDescription::offer(offer_sdp)
         .map_err(|error| format!("WebRTC offer: {error}"))?;
@@ -179,12 +198,32 @@ async fn serve(
         }
     });
 
+    let mut started = false;
     while let Some(raw) = packet_rx.recv().await {
         if stop.load(Ordering::Acquire) {
             break;
         }
         let mut raw = &raw[..];
         let packet = Packet::unmarshal(&mut raw).map_err(|error| format!("RTP packet: {error}"))?;
+        if !started {
+            if !is_idr_start(&packet.payload) {
+                continue;
+            }
+            for (sequence_offset, parameter_set) in [(2, &sps), (1, &pps)] {
+                let mut configuration = packet.clone();
+                configuration.header.marker = false;
+                configuration.header.sequence_number = packet
+                    .header
+                    .sequence_number
+                    .wrapping_sub(sequence_offset);
+                configuration.payload = parameter_set.clone().into();
+                track
+                    .write_rtp(&configuration)
+                    .await
+                    .map_err(|error| format!("WebRTC H.264 configuration: {error}"))?;
+            }
+            started = true;
+        }
         track
             .write_rtp(&packet)
             .await
@@ -196,35 +235,42 @@ async fn serve(
     Ok(())
 }
 
-fn codec_capability(stream: &H264Stream, offer_sdp: &str) -> RTCRtpCodecCapability {
-    let (sps, pps) = stream.parameter_sets();
-    let profile = sps
+fn codec_capability(
+    sps: &[u8],
+    pps: &[u8],
+    offer_sdp: &str,
+) -> Result<(RTCRtpCodecCapability, u8), String> {
+    let camera_profile = sps
         .get(1..3)
-        .and_then(|profile| compatible_offer_profile(offer_sdp, profile));
-    let fmtp = match (profile.or_else(|| sps.get(1..4).map(hex_profile)), (!sps.is_empty() && !pps.is_empty())) {
-        (Some(profile), true) => format!(
-            "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id={:02x}{:02x}{:02x};sprop-parameter-sets={},{}",
-            profile[0], profile[1], profile[2],
-            base64::engine::general_purpose::STANDARD.encode(sps),
-            base64::engine::general_purpose::STANDARD.encode(pps),
-        ),
-        _ => "level-asymmetry-allowed=1;packetization-mode=1".to_owned(),
-    };
-    RTCRtpCodecCapability {
-        mime_type: MIME_TYPE_H264.to_owned(),
-        clock_rate: 90_000,
-        sdp_fmtp_line: fmtp,
-        ..Default::default()
+        .ok_or_else(|| "camera H.264 SPS is missing its profile".to_owned())?;
+    if pps.is_empty() {
+        return Err("camera H.264 PPS is missing".to_owned());
     }
+    let (payload_type, profile) = compatible_offer_profile(offer_sdp, camera_profile)
+        .ok_or_else(|| "webview does not offer the camera H.264 profile".to_owned())?;
+    let fmtp = format!(
+        "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id={:02x}{:02x}{:02x};sprop-parameter-sets={},{}",
+        profile[0],
+        profile[1],
+        profile[2],
+        base64::engine::general_purpose::STANDARD.encode(sps),
+        base64::engine::general_purpose::STANDARD.encode(pps),
+    );
+    Ok((
+        RTCRtpCodecCapability {
+            mime_type: MIME_TYPE_H264.to_owned(),
+            clock_rate: 90_000,
+            sdp_fmtp_line: fmtp,
+            ..Default::default()
+        },
+        payload_type,
+    ))
 }
 
-fn hex_profile(profile: &[u8]) -> [u8; 3] {
-    [profile[0], profile[1], profile[2]]
-}
-
-fn compatible_offer_profile(offer_sdp: &str, camera_profile: &[u8]) -> Option<[u8; 3]> {
+fn compatible_offer_profile(offer_sdp: &str, camera_profile: &[u8]) -> Option<(u8, [u8; 3])> {
     offer_sdp.lines().find_map(|line| {
-        let params = line.strip_prefix("a=fmtp:")?.split_once(' ')?.1;
+        let (payload_type, params) = line.strip_prefix("a=fmtp:")?.split_once(' ')?;
+        let payload_type = payload_type.parse().ok()?;
         let packetization_mode = params.split(';').find_map(|param| {
             let (key, value) = param.trim().split_once('=')?;
             (key == "packetization-mode").then_some(value)
@@ -238,8 +284,36 @@ fn compatible_offer_profile(offer_sdp: &str, camera_profile: &[u8]) -> Option<[u
         })?;
         let bytes = decode_profile(profile)?;
         (bytes.len() == 3 && bytes[0] == camera_profile[0] && bytes[1] == camera_profile[1])
-            .then_some([bytes[0], bytes[1], bytes[2]])
+            .then_some((payload_type, [bytes[0], bytes[1], bytes[2]]))
     })
+}
+
+fn is_idr_start(payload: &[u8]) -> bool {
+    let Some(&first) = payload.first() else {
+        return false;
+    };
+    match first & 0x1f {
+        5 => true,
+        24 => {
+            let mut rest = &payload[1..];
+            while rest.len() >= 2 {
+                let size = u16::from_be_bytes([rest[0], rest[1]]) as usize;
+                rest = &rest[2..];
+                if rest.len() < size {
+                    return false;
+                }
+                if rest.first().is_some_and(|byte| byte & 0x1f == 5) {
+                    return true;
+                }
+                rest = &rest[size..];
+            }
+            false
+        }
+        28 => payload
+            .get(1)
+            .is_some_and(|header| header & 0x80 != 0 && header & 0x1f == 5),
+        _ => false,
+    }
 }
 
 fn decode_profile(value: &str) -> Option<[u8; 3]> {
@@ -261,18 +335,18 @@ mod tests {
         time::Duration,
     };
 
-    use super::{Session, await_answer, compatible_offer_profile, decode_profile};
+    use super::{Session, await_answer, compatible_offer_profile, decode_profile, is_idr_start};
 
     #[test]
     fn selects_browser_profile_compatible_with_camera() {
         let offer = "a=fmtp:126 profile-level-id=640c1f;packetization-mode=1\r\na=fmtp:127 profile-level-id=42e01f;packetization-mode=1\r\n";
         assert_eq!(
             compatible_offer_profile(offer, &[0x64, 0x0c]),
-            Some([0x64, 0x0c, 0x1f])
+            Some((126, [0x64, 0x0c, 0x1f]))
         );
         assert_eq!(
             compatible_offer_profile(offer, &[0x42, 0xe0]),
-            Some([0x42, 0xe0, 0x1f])
+            Some((127, [0x42, 0xe0, 0x1f]))
         );
         assert_eq!(compatible_offer_profile(offer, &[0x4d, 0x40]), None);
     }
@@ -307,5 +381,14 @@ mod tests {
 
         assert!(matches!(result, Err(error) if error == "WebRTC negotiation timed out"));
         assert!(exited.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn detects_idr_starts_in_supported_h264_packetizations() {
+        assert!(is_idr_start(&[0x65, 0x01]));
+        assert!(is_idr_start(&[0x7c, 0x85, 0x01]));
+        assert!(!is_idr_start(&[0x7c, 0x45, 0x01]));
+        assert!(is_idr_start(&[0x78, 0x00, 0x02, 0x65, 0x01]));
+        assert!(!is_idr_start(&[0x61, 0x01]));
     }
 }
