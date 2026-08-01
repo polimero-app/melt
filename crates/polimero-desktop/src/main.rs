@@ -2,7 +2,10 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     io::{Cursor, Read, Write},
     net::{TcpListener, TcpStream},
-    sync::{Arc, Condvar, LazyLock, Mutex},
+    sync::{
+        Arc, Condvar, LazyLock, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -27,6 +30,9 @@ use tauri_plugin_notification::NotificationExt;
 
 mod preview;
 mod webrtc_camera;
+
+#[cfg(target_os = "linux")]
+static WEBRTC_SETTINGS_APPLIED: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command(async)]
 fn app_info() -> AppInfo {
@@ -2306,14 +2312,11 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .manage(MonitorState::default())
-        .manage(CameraWebRtcState::default())
-        .manage(PreviewState::default())
-        .manage(TransferState::default())
-        .manage(SlicerState::default())
-        .setup(|app| {
+        .on_page_load(|webview, payload| {
             #[cfg(target_os = "linux")]
-            if let Some(webview) = app.get_webview_window("main") {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished
+                && !WEBRTC_SETTINGS_APPLIED.swap(true, Ordering::AcqRel)
+            {
                 let _ = webview.with_webview(|webview| {
                     use webkit2gtk::{SettingsExt, WebViewExt};
 
@@ -2324,6 +2327,13 @@ fn main() {
                     }
                 });
             }
+        })
+        .manage(MonitorState::default())
+        .manage(CameraWebRtcState::default())
+        .manage(PreviewState::default())
+        .manage(TransferState::default())
+        .manage(SlicerState::default())
+        .setup(|app| {
             let state = app.state::<MonitorState>().inner().clone();
             start_monitor_worker(app.handle().clone(), state);
             Ok(())
