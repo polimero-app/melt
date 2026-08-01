@@ -1013,6 +1013,7 @@ impl MqttConnection {
         predicate: impl Fn(&Value) -> bool,
     ) -> Result<Vec<u8>, Error> {
         let command_sequence = payload_sequence_id(command.as_bytes());
+        let mut acknowledged = is_pushall_payload(command.as_bytes());
         self.publish(&command)?;
         let refresh = if is_pushall_payload(command.as_bytes()) {
             command
@@ -1034,7 +1035,8 @@ impl MqttConnection {
                         continue;
                     };
                     command_rejection(&value, command_sequence.as_deref())?;
-                    if predicate(&value) {
+                    acknowledged |= report_matches_sequence(&value, command_sequence.as_deref());
+                    if acknowledged && predicate(&value) {
                         return Ok(report);
                     }
                 }
@@ -1195,6 +1197,20 @@ fn command_rejection(report: &Value, sequence: Option<&str>) -> Result<(), Error
         return Err(Error::UnsignedCommand);
     }
     Err(Error::CommandRejected)
+}
+
+fn report_matches_sequence(report: &Value, sequence: Option<&str>) -> bool {
+    let Some(sequence) = sequence else {
+        return false;
+    };
+    ["print", "system", "pushing"].into_iter().any(|key| {
+        report
+            .get(key)
+            .and_then(Value::as_object)
+            .and_then(|command| string(command.get("sequence_id")))
+            .as_deref()
+            == Some(sequence)
+    })
 }
 
 fn next_sequence_id() -> String {
@@ -2480,6 +2496,19 @@ mod tests {
             Err(Error::UnsignedCommand)
         ));
         assert!(command_rejection(&rejection, Some("other")).is_ok());
+    }
+
+    #[test]
+    fn command_acknowledgements_are_scoped_to_the_active_sequence() {
+        let stale_status: Value =
+            serde_json::from_str(r#"{"print":{"sequence_id":"previous","gcode_state":"IDLE"}}"#)
+                .unwrap();
+        let acknowledgement: Value =
+            serde_json::from_str(r#"{"print":{"sequence_id":"current","result":"success"}}"#)
+                .unwrap();
+
+        assert!(!report_matches_sequence(&stale_status, Some("current")));
+        assert!(report_matches_sequence(&acknowledgement, Some("current")));
     }
 
     #[test]
