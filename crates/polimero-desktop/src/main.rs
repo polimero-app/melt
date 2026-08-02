@@ -2432,10 +2432,21 @@ mod tests {
 
     use super::{
         DesktopPrinter, MonitorEntry, MonitorState, camera_preview_request, ensure_state,
-        extract_3mf_thumbnail, load_status_cache_from, save_status_cache_to,
+        extract_3mf_thumbnail, load_status_cache_from, operation_error, save_status_cache_to,
     };
 
     const TOKEN: &str = "/stream/0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn moonraker_timeouts_use_the_stable_printer_timeout_code() {
+        let error = operation_error(
+            drivers::DriverError::Moonraker(moonraker::Error::Timeout),
+            Operation::Status,
+        );
+
+        assert_eq!(error.code, "printerTimeout");
+        assert_eq!(error.operation, Some("status"));
+    }
 
     #[test]
     fn status_cache_round_trips_the_last_monitoring_payload() {

@@ -343,8 +343,13 @@ impl Client {
         let response = match request.send() {
             Ok(response) => response,
             Err(error) => {
-                self.trace(TraceEvent::response("http", label).with_outcome("transport_error"));
-                return Err(Error::Transport(error));
+                let outcome = if error.is_timeout() {
+                    "timeout"
+                } else {
+                    "transport_error"
+                };
+                self.trace(TraceEvent::response("http", label).with_outcome(outcome));
+                return Err(map_request_error(error));
             }
         };
         self.trace(TraceEvent::response("http", label).with_outcome(response.status().as_str()));
@@ -749,10 +754,13 @@ impl Client {
         let response = match request.send() {
             Ok(response) => response,
             Err(error) => {
-                self.trace(
-                    TraceEvent::response("http", label.as_str()).with_outcome("transport_error"),
-                );
-                return Err(Error::Transport(error));
+                let outcome = if error.is_timeout() {
+                    "timeout"
+                } else {
+                    "transport_error"
+                };
+                self.trace(TraceEvent::response("http", label.as_str()).with_outcome(outcome));
+                return Err(map_request_error(error));
             }
         };
         let status = response.status();
@@ -783,6 +791,14 @@ impl Client {
         );
         url.set_path(&path);
         url
+    }
+}
+
+fn map_request_error(error: reqwest::Error) -> Error {
+    if error.is_timeout() {
+        Error::Timeout
+    } else {
+        Error::Transport(error)
     }
 }
 
@@ -1817,6 +1833,39 @@ mod tests {
         assert!(available.starts_with("GET /printer/objects/query?extruder= "));
         assert!(command.contains("script=M104+S215"));
         assert!(acknowledged.starts_with("GET /printer/objects/query?extruder= "));
+    }
+
+    #[test]
+    fn profile_request_timeout_is_classified_as_timeout() {
+        let (host, server) = stalling_server();
+        let profile = Profile::new(&host, false, Duration::from_millis(20)).unwrap();
+        let client = Client::new(profile).unwrap();
+
+        assert!(matches!(client.status(None), Err(Error::Timeout)));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn status_timeout_override_is_classified_as_timeout() {
+        let (host, server) = stalling_server();
+        let profile = Profile::new(&host, false, Duration::from_secs(2)).unwrap();
+        let client = Client::new(profile).unwrap();
+
+        assert!(matches!(
+            client.status_with_timeout(None, Duration::from_millis(20)),
+            Err(Error::Timeout)
+        ));
+        server.join().unwrap();
+    }
+
+    fn stalling_server() -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let host = format!("http://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (_stream, _) = listener.accept().unwrap();
+            thread::sleep(Duration::from_millis(100));
+        });
+        (host, server)
     }
 
     fn server(
