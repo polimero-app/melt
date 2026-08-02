@@ -1176,7 +1176,7 @@ fn resolve_printer(
         driver = drivers::attach_tracer(driver, std::sync::Arc::new(tracer));
     }
     let driver_kind = driver.driver();
-    if !driver_kind.supports(operation) {
+    if !driver.capabilities().supports(operation) {
         return Err(driver_error(DriverError::UnsupportedOperation(
             driver_kind,
             operation,

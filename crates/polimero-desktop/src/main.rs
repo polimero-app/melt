@@ -250,6 +250,8 @@ struct DesktopPrinter {
 struct PrinterCapabilities {
     name: String,
     capabilities: Capabilities,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bambu: Option<polimero_core::bambu::RuntimeCapabilities>,
 }
 
 #[derive(Serialize)]
@@ -761,7 +763,8 @@ fn printer_capabilities(name: String) -> Result<PrinterCapabilities, CommandErro
     let driver = drivers::profile(profile).map_err(|_| CommandError::new("profileInvalid"))?;
     Ok(PrinterCapabilities {
         name,
-        capabilities: driver.driver().capabilities(),
+        capabilities: driver.capabilities(),
+        bambu: driver.bambu_runtime_capabilities(),
     })
 }
 
@@ -2309,7 +2312,7 @@ fn desktop_printer(name: &str, operation: Operation) -> Result<DesktopPrinter, C
         .ok_or_else(|| CommandError::new("profileNotFound"))?;
     let driver = drivers::profile(&profile).map_err(|_| CommandError::new("profileInvalid"))?;
     let driver_kind = driver.driver();
-    if !driver_kind.supports(operation) {
+    if !driver.capabilities().supports(operation) {
         return Err(CommandError::of("driverUnsupported", operation));
     }
     let access_code = access_code(&profile.driver, &name, driver_kind)?;

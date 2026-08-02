@@ -51,6 +51,32 @@ pub struct Capabilities {
     pub speed_control: bool,
 }
 
+impl Capabilities {
+    pub fn supports(self, operation: Operation) -> bool {
+        match operation {
+            Operation::Status | Operation::Verify => self.status,
+            Operation::Discovery => self.discovery,
+            Operation::CameraStream => self.camera_stream,
+            Operation::CameraSnapshot => self.camera_snapshot,
+            Operation::FileList => self.file_list,
+            Operation::FileDownload => self.file_download,
+            Operation::FileUpload => self.file_upload,
+            Operation::FileDelete => self.file_delete,
+            Operation::JobStart => self.job_start,
+            Operation::JobPause => self.job_pause,
+            Operation::JobResume => self.job_resume,
+            Operation::JobCancel => self.job_cancel,
+            Operation::EmergencyStop => self.emergency_stop,
+            Operation::TemperatureSet => self.temperature_write,
+            Operation::MotionHome | Operation::MotionJog => self.motion_control,
+            Operation::TlsRefresh => self.tls_refresh,
+            Operation::FanSet => self.fan_control,
+            Operation::LightSet => self.light_control,
+            Operation::SpeedSet => self.speed_control,
+        }
+    }
+}
+
 impl Driver {
     pub fn parse(name: &str) -> Result<Self, DriverError> {
         match name {
@@ -72,27 +98,7 @@ impl Driver {
     }
 
     pub fn supports(self, operation: Operation) -> bool {
-        match operation {
-            Operation::Status | Operation::Verify => self.capabilities().status,
-            Operation::Discovery => self.capabilities().discovery,
-            Operation::CameraStream => self.capabilities().camera_stream,
-            Operation::CameraSnapshot => self.capabilities().camera_snapshot,
-            Operation::FileList => self.capabilities().file_list,
-            Operation::FileDownload => self.capabilities().file_download,
-            Operation::FileUpload => self.capabilities().file_upload,
-            Operation::FileDelete => self.capabilities().file_delete,
-            Operation::JobStart => self.capabilities().job_start,
-            Operation::JobPause => self.capabilities().job_pause,
-            Operation::JobResume => self.capabilities().job_resume,
-            Operation::JobCancel => self.capabilities().job_cancel,
-            Operation::EmergencyStop => self.capabilities().emergency_stop,
-            Operation::TemperatureSet => self.capabilities().temperature_write,
-            Operation::MotionHome | Operation::MotionJog => self.capabilities().motion_control,
-            Operation::TlsRefresh => self.capabilities().tls_refresh,
-            Operation::FanSet => self.capabilities().fan_control,
-            Operation::LightSet => self.capabilities().light_control,
-            Operation::SpeedSet => self.capabilities().speed_control,
-        }
+        self.capabilities().supports(operation)
     }
 
     pub fn capabilities(self) -> Capabilities {
@@ -183,6 +189,33 @@ impl Profile {
         match self {
             Self::Bambu(_) => Driver::BambuLan,
             Self::Moonraker(_) => Driver::Moonraker,
+        }
+    }
+
+    pub fn capabilities(&self) -> Capabilities {
+        let mut capabilities = self.driver().capabilities();
+        if let Self::Bambu(profile) = self {
+            let runtime = profile.default_capabilities();
+            if runtime.camera == bambu::CameraTransport::Unknown {
+                // Unknown models are still probed at operation time.
+            }
+            if runtime.storage_transport == bambu::StorageTransport::Tunnel6000 {
+                // The current file driver is FTPS-only. Do not advertise file
+                // operations for a model whose known storage path is :6000.
+                capabilities.file_list = false;
+                capabilities.file_download = false;
+                capabilities.file_upload = false;
+                capabilities.file_delete = false;
+                capabilities.job_start = false;
+            }
+        }
+        capabilities
+    }
+
+    pub fn bambu_runtime_capabilities(&self) -> Option<bambu::RuntimeCapabilities> {
+        match self {
+            Self::Bambu(profile) => Some(profile.default_capabilities()),
+            Self::Moonraker(_) => None,
         }
     }
 }
@@ -728,6 +761,23 @@ mod tests {
         assert!(capabilities.speed_control);
         assert!(capabilities.discovery);
         assert!(capabilities.tls_refresh);
+    }
+
+    #[test]
+    fn profile_capabilities_do_not_advertise_ftps_for_tunnel_models() {
+        let profile = Profile::Bambu(
+            bambu::Profile::new("printer.local", "SN001", true)
+                .unwrap()
+                .with_model("H2D"),
+        );
+
+        assert!(!profile.capabilities().file_list);
+        assert!(!profile.capabilities().file_upload);
+        assert!(!profile.capabilities().job_start);
+        assert_eq!(
+            profile.bambu_runtime_capabilities().unwrap().model_family,
+            bambu::ModelFamily::H2
+        );
     }
 
     #[test]
