@@ -139,7 +139,7 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
         path: &["printer", "add"],
         short: "Add a printer profile",
         args: "<name> [flags]",
-        flags: "      --access-code-file string   file containing the access code\n      --driver string             driver name (e.g. bambu-lan)\n  -h, --help                      help for add\n      --host string               printer IP or hostname\n      --insecure                  skip TLS verification and auth check\n      --protocol-trace string     write protocol diagnostics to this file (JSON Lines)\n      --serial string             printer serial number (required by some drivers)\n      --timeout string            connection timeout (default \"10s\")",
+        flags: "      --access-code-file string   file containing the access code\n      --driver string             driver name (e.g. bambu-lan)\n  -h, --help                      help for add\n      --host string               printer IP or hostname\n      --insecure                  skip TLS verification and auth check\n      --model string              printer model reported by discovery\n      --protocol-trace string     write protocol diagnostics to this file (JSON Lines)\n      --serial string             printer serial number (required by some drivers)\n      --timeout string            connection timeout (default \"10s\")",
     },
     LeafCommand {
         path: &["printer", "discover"],
@@ -713,6 +713,7 @@ fn parse_add_request(name: &str, flags: &[&String]) -> Result<profiles::CreateRe
         driver: String::new(),
         host: String::new(),
         serial: String::new(),
+        model: String::new(),
         timeout: "10s".into(),
         insecure: false,
         access_code: String::new(),
@@ -722,7 +723,7 @@ fn parse_add_request(name: &str, flags: &[&String]) -> Result<profiles::CreateRe
         let flag = flags[index].as_str();
         match flag {
             "--insecure" => request.insecure = true,
-            "--driver" | "--host" | "--serial" | "--timeout" | "--access-code-file" => {
+            "--driver" | "--host" | "--serial" | "--model" | "--timeout" | "--access-code-file" => {
                 let value = flags
                     .get(index + 1)
                     .ok_or_else(|| format!("{flag} requires a value"))?;
@@ -730,6 +731,7 @@ fn parse_add_request(name: &str, flags: &[&String]) -> Result<profiles::CreateRe
                     "--driver" => request.driver = (*value).clone(),
                     "--host" => request.host = (*value).clone(),
                     "--serial" => request.serial = (*value).clone(),
+                    "--model" => request.model = (*value).clone(),
                     "--timeout" => request.timeout = (*value).clone(),
                     "--access-code-file" => {
                         request.access_code = read_access_code_file(value)?;
@@ -4476,6 +4478,7 @@ mod tests {
                 driver: "moonraker".into(),
                 host: "printer.local".into(),
                 serial: String::new(),
+                model: String::new(),
                 timeout: "10s".into(),
                 insecure: false,
                 created: String::new(),
@@ -4538,6 +4541,8 @@ mod tests {
             "printer.local".into(),
             "--serial".into(),
             "unused".into(),
+            "--model".into(),
+            "P1S".into(),
             "--timeout".into(),
             "5s".into(),
             "--insecure".into(),
@@ -4549,6 +4554,7 @@ mod tests {
         assert_eq!(request.name, "Garage");
         assert_eq!(request.driver, "moonraker");
         assert_eq!(request.host, "printer.local");
+        assert_eq!(request.model, "P1S");
         assert_eq!(request.timeout, "5s");
         assert!(request.insecure);
     }
