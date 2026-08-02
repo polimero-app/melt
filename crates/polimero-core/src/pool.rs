@@ -79,13 +79,14 @@ impl ConnectionPool {
         access_code: Option<&str>,
         tls_fingerprint: Option<&str>,
     ) -> Option<Result<moonraker::Status, drivers::DriverError>> {
-        self.status_at(
+        let result = self.status_at(
             Some(generation),
             name,
             profile,
             access_code,
             tls_fingerprint,
-        )
+        )?;
+        self.is_current_generation(generation).then_some(result)
     }
 
     fn status_at(
@@ -751,6 +752,49 @@ mod tests {
             pool.with_current_generation(generation, |_| ()).is_none(),
             "the old generation cannot admit a command after removal"
         );
+    }
+
+    #[test]
+    fn status_invalidated_while_in_flight_returns_none() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = mpsc::channel();
+        let (respond_tx, respond_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream.read(&mut chunk).unwrap();
+                request.extend_from_slice(&chunk[..read]);
+            }
+            request_tx.send(()).unwrap();
+            respond_rx.recv().unwrap();
+            let body = r#"{"result":{"status":{"print_stats":{"state":"standby"}}}}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        let profile = drivers::Profile::Moonraker(
+            moonraker::Profile::new(&format!("http://{address}"), false, Duration::from_secs(2))
+                .unwrap(),
+        );
+        let pool = Arc::new(ConnectionPool::default());
+        let generation = pool.lifecycle_generation();
+        let polling_pool = pool.clone();
+        let poll = thread::spawn(move || {
+            polling_pool.status_if_current(generation, "printer", &profile, None, None)
+        });
+        request_rx.recv().unwrap();
+
+        pool.remove("printer");
+        respond_tx.send(()).unwrap();
+
+        assert!(poll.join().unwrap().is_none());
+        server.join().unwrap();
     }
 
     #[test]
