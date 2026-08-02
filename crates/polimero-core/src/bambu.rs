@@ -544,24 +544,44 @@ pub fn open_mjpeg_stream(
     let access_code = access_code
         .filter(|value| !value.is_empty())
         .ok_or(CameraError::MissingAccessCode)?;
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| CameraError::Connect(io::Error::from(io::ErrorKind::TimedOut)))?;
 
-    match rtsp::open_decoded_h264_stream(profile, access_code, fingerprint, timeout) {
-        Ok(stream) => {
-            return Ok(MjpegStream {
-                source: MjpegSource::H264(Box::new(stream)),
-                pending: Vec::new(),
-            });
+    // Discovery gives us a strong ordering hint. Unknown models still probe
+    // RTSPS first, but both attempts share one caller-supplied deadline.
+    if profile.default_capabilities().camera != CameraTransport::MjpegTls {
+        match rtsp::open_decoded_h264_stream(
+            profile,
+            access_code,
+            fingerprint,
+            camera_time_remaining(deadline)?,
+        ) {
+            Ok(stream) => {
+                return Ok(MjpegStream {
+                    source: MjpegSource::H264(Box::new(stream)),
+                    pending: Vec::new(),
+                });
+            }
+            Err(CameraError::Pin(error)) => return Err(CameraError::Pin(error)),
+            Err(_) => {}
         }
-        Err(CameraError::Pin(error)) => return Err(CameraError::Pin(error)),
-        Err(_) => {}
     }
 
-    let mut connection = open_camera_connection(profile, fingerprint, timeout)?;
+    let mut connection =
+        open_camera_connection(profile, fingerprint, camera_time_remaining(deadline)?)?;
     send_camera_auth(&mut connection, access_code).map_err(CameraError::Authentication)?;
     Ok(MjpegStream {
         source: MjpegSource::Classic(connection),
         pending: Vec::new(),
     })
+}
+
+fn camera_time_remaining(deadline: Instant) -> Result<Duration, CameraError> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| CameraError::Connect(io::Error::from(io::ErrorKind::TimedOut)))
 }
 
 /// Opens the native H.264/RTP camera stream without decoding it.

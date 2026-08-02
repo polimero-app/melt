@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     io::{Cursor, Read, Write},
-    net::{TcpListener, TcpStream},
+    net::{Shutdown, TcpListener, TcpStream},
     sync::{
         Arc, Condvar, LazyLock, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -293,9 +293,26 @@ struct MonitorState {
 }
 
 #[derive(Default)]
+struct WebRtcSessions {
+    generations: HashMap<String, u64>,
+    active: HashMap<String, webrtc_camera::Session>,
+}
+
+#[derive(Default)]
 struct CameraWebRtcState {
     generation: AtomicU64,
-    session: Mutex<Option<webrtc_camera::Session>>,
+    sessions: Mutex<WebRtcSessions>,
+}
+
+struct CameraProxy {
+    generation: u64,
+    shutdown: TcpStream,
+}
+
+#[derive(Clone, Default)]
+struct CameraStreamState {
+    generation: Arc<AtomicU64>,
+    active: Arc<Mutex<HashMap<String, CameraProxy>>>,
 }
 
 #[derive(Serialize)]
@@ -2089,7 +2106,10 @@ fn printer_camera_snapshot(name: String) -> Result<CameraSnapshot, CommandError>
 }
 
 #[tauri::command(async)]
-fn printer_camera_stream(name: String) -> Result<CameraStream, CommandError> {
+fn printer_camera_stream(
+    name: String,
+    state: tauri::State<'_, CameraStreamState>,
+) -> Result<CameraStream, CommandError> {
     let printer = desktop_printer(&name, Operation::CameraStream)?;
     let stream = drivers::camera_stream(
         &printer.driver,
@@ -2098,7 +2118,8 @@ fn printer_camera_stream(name: String) -> Result<CameraStream, CommandError> {
         Duration::from_secs(10),
     )
     .map_err(|error| operation_error(error, Operation::CameraStream))?;
-    start_camera_server(stream).map(|url| CameraStream { url })
+    start_camera_server(stream, name.to_ascii_lowercase(), state.inner().clone())
+        .map(|url| CameraStream { url })
 }
 
 #[tauri::command(async)]
@@ -2108,12 +2129,16 @@ fn printer_camera_webrtc_offer(
     state: tauri::State<'_, CameraWebRtcState>,
 ) -> Result<CameraWebRtcAnswer, CommandError> {
     let printer = desktop_printer(&name, Operation::CameraStream)?;
+    let name = name.to_ascii_lowercase();
     let generation = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
-    let _ = state
-        .session
-        .lock()
-        .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?
-        .take();
+    {
+        let mut sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?;
+        sessions.generations.insert(name.clone(), generation);
+        sessions.active.remove(&name);
+    }
     let (sdp, session) = webrtc_camera::start(
         printer.driver,
         printer.access_code,
@@ -2121,15 +2146,15 @@ fn printer_camera_webrtc_offer(
         offer,
     )
     .map_err(|error| CommandError::new("cameraPreviewUnavailable").with_detail(error))?;
-    let mut active = state
-        .session
+    let mut sessions = state
+        .sessions
         .lock()
         .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?;
-    if state.generation.load(Ordering::Acquire) != generation {
+    if sessions.generations.get(&name) != Some(&generation) {
         return Err(CommandError::new("cameraPreviewUnavailable")
             .with_detail("WebRTC request was superseded"));
     }
-    active.replace(session);
+    sessions.active.insert(name, session);
     Ok(CameraWebRtcAnswer {
         kind: "answer",
         sdp,
@@ -2138,19 +2163,29 @@ fn printer_camera_webrtc_offer(
 
 #[tauri::command(async)]
 fn printer_camera_webrtc_stop(
+    name: Option<String>,
     state: tauri::State<'_, CameraWebRtcState>,
 ) -> Result<(), CommandError> {
-    state.generation.fetch_add(1, Ordering::AcqRel);
-    state
-        .session
+    let generation = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
+    let mut sessions = state
+        .sessions
         .lock()
-        .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?
-        .take();
+        .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?;
+    if let Some(name) = name {
+        let name = name.to_ascii_lowercase();
+        sessions.generations.insert(name.clone(), generation);
+        sessions.active.remove(&name);
+    } else {
+        sessions.generations.clear();
+        sessions.active.clear();
+    }
     Ok(())
 }
 
 fn start_camera_server(
     mut stream: polimero_core::bambu::MjpegStream,
+    name: String,
+    state: CameraStreamState,
 ) -> Result<String, CommandError> {
     let unavailable = || CommandError::new("cameraPreviewUnavailable");
     let mut token = [0_u8; 16];
@@ -2160,6 +2195,17 @@ fn start_camera_server(
     let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|_| unavailable())?;
     let address = listener.local_addr().map_err(|_| unavailable())?;
     listener.set_nonblocking(true).map_err(|_| unavailable())?;
+    let shutdown = stream.shutdown_handle().map_err(|_| unavailable())?;
+    let generation = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
+    if let Some(previous) = state.active.lock().map_err(|_| unavailable())?.insert(
+        name.clone(),
+        CameraProxy {
+            generation,
+            shutdown,
+        },
+    ) {
+        let _ = previous.shutdown.shutdown(Shutdown::Both);
+    }
     let expected = path.clone();
     thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -2167,13 +2213,20 @@ fn start_camera_server(
             match listener.accept() {
                 Ok((socket, _)) => {
                     proxy_camera_stream(&mut stream, socket, &expected);
-                    return;
+                    break;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(25));
                 }
-                Err(_) => return,
+                Err(_) => break,
             }
+        }
+        if let Ok(mut active) = state.active.lock()
+            && active
+                .get(&name)
+                .is_some_and(|proxy| proxy.generation == generation)
+        {
+            active.remove(&name);
         }
     });
     Ok(format!("http://127.0.0.1:{}{path}", address.port()))
@@ -2470,6 +2523,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(MonitorState::default())
+        .manage(CameraStreamState::default())
         .manage(CameraWebRtcState::default())
         .manage(PreviewState::default())
         .manage(TransferState::default())

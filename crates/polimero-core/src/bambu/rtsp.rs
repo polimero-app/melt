@@ -30,6 +30,7 @@ const RTSP_PATH: &str = "/streaming/live/1";
 /// real RTSP responses and RTP frames are a few hundred bytes to a few KB, so
 /// anything past this is a protocol confusion, not a slow network.
 const MAX_BUFFERED: usize = 1 << 20;
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(25);
 
 /// A TCP+TLS connection to the RTSP control/data channel, with the small
 /// amount of buffering `rtsp_types::Message::parse` needs to find message
@@ -128,6 +129,11 @@ impl FramedConnection {
 /// decoding and re-encoding every frame.
 pub struct H264Stream {
     connection: FramedConnection,
+    uri: rtsp_types::Url,
+    access_code: String,
+    session: String,
+    cseq: u32,
+    next_keepalive: Instant,
     decoder: Option<Decoder>,
     sps: Vec<u8>,
     pps: Vec<u8>,
@@ -146,9 +152,41 @@ impl H264Stream {
     }
 
     pub fn next_rtp_packet(&mut self) -> io::Result<Vec<u8>> {
-        self.connection
-            .next_rtp_packet()
+        self.keepalive_if_due()
+            .and_then(|()| self.connection.next_rtp_packet())
             .map_err(|error| io::Error::other(format!("{error}")))
+    }
+
+    fn keepalive_if_due(&mut self) -> Result<(), CameraError> {
+        if Instant::now() < self.next_keepalive {
+            return Ok(());
+        }
+        let response = authorized_request(
+            &mut self.connection,
+            rtsp_types::Method::GetParameter,
+            &self.uri,
+            &mut self.cseq,
+            &self.access_code,
+            &[(rtsp_types::headers::SESSION, self.session.clone())],
+        )?;
+        if response.status() != rtsp_types::StatusCode::Ok {
+            return Err(stream_error("RTSP keepalive was rejected"));
+        }
+        self.next_keepalive = Instant::now() + KEEPALIVE_INTERVAL;
+        Ok(())
+    }
+}
+
+impl Drop for H264Stream {
+    fn drop(&mut self) {
+        let _ = authorized_request(
+            &mut self.connection,
+            rtsp_types::Method::Teardown,
+            &self.uri,
+            &mut self.cseq,
+            &self.access_code,
+            &[(rtsp_types::headers::SESSION, self.session.clone())],
+        );
     }
 }
 
@@ -252,7 +290,7 @@ fn open_h264_stream_with_decoder(
         &mut cseq,
         access_code,
         &[
-            (rtsp_types::headers::SESSION, session),
+            (rtsp_types::headers::SESSION, session.clone()),
             (rtsp_types::headers::RANGE, "npt=0.000-".to_owned()),
         ],
     )?;
@@ -272,6 +310,11 @@ fn open_h264_stream_with_decoder(
 
     Ok(H264Stream {
         connection,
+        uri,
+        access_code: access_code.to_owned(),
+        session,
+        cseq,
+        next_keepalive: Instant::now() + KEEPALIVE_INTERVAL,
         decoder,
         sps,
         pps,
@@ -421,10 +464,7 @@ fn parse_sdp(sdp: &str) -> Option<(String, Vec<u8>, Vec<u8>)> {
 impl H264Stream {
     pub(super) fn next_jpeg_frame(&mut self) -> io::Result<Vec<u8>> {
         loop {
-            let packet = self
-                .connection
-                .next_rtp_packet()
-                .map_err(|error| io::Error::other(format!("{error}")))?;
+            let packet = self.next_rtp_packet()?;
             let Some((marker, payload)) = parse_rtp(&packet) else {
                 continue;
             };
