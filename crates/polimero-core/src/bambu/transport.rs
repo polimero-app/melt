@@ -39,6 +39,7 @@ const MAX_FTP_LISTING_SIZE: u64 = 8 << 20;
 const MAX_LIST_DEPTH: u8 = 32;
 const MAX_LIST_ENTRIES: usize = 50_000;
 const PUSHALL_INTERVAL: Duration = Duration::from_secs(3);
+const MQTT_DRAIN_QUIET_WINDOW: Duration = Duration::from_millis(5);
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Error)]
@@ -1017,9 +1018,13 @@ impl MqttConnection {
         predicate: impl Fn(&Value) -> bool,
     ) -> Result<Vec<u8>, Error> {
         let command_sequence = payload_sequence_id(command.as_bytes());
-        let mut acknowledged = is_pushall_payload(command.as_bytes());
+        let is_status_poll = is_pushall_payload(command.as_bytes());
+        if is_status_poll {
+            self.drain_stale_packets()?;
+        }
+        let mut acknowledged = is_status_poll;
         self.publish(&command)?;
-        let refresh = if is_pushall_payload(command.as_bytes()) {
+        let refresh = if is_status_poll {
             command
         } else {
             let refresh = pushall_payload(next_sequence());
@@ -1050,6 +1055,25 @@ impl MqttConnection {
                     self.publish(&refresh)?;
                     retry_at = Instant::now() + PUSHALL_INTERVAL;
                 }
+            }
+        }
+    }
+
+    /// Clears reports received before a new status request is published. Bambu
+    /// pushall reports do not consistently echo their sequence id, so request
+    /// ordering is the only reliable freshness boundary for status polls.
+    fn drain_stale_packets(&mut self) -> Result<(), Error> {
+        let until = self
+            .deadline
+            .min(Instant::now() + MQTT_DRAIN_QUIET_WINDOW);
+        loop {
+            match self.read_packet_until(until)? {
+                Some(_) => {}
+                None if self.pending.is_empty() => return Ok(()),
+                // Reusing a stream with half of an old packet would allow that
+                // report to complete after publish and cross the freshness
+                // boundary. Force the caller to reconnect instead.
+                None => return Err(Error::Connection),
             }
         }
     }
@@ -2674,7 +2698,14 @@ mod tests {
             let subscribe = read_test_packet(&mut stream);
             assert_eq!(subscribe.kind, 0x82);
             let id = &subscribe.payload[..2];
-            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            let stale_report = br#"{"print":{"gcode_state":"PRINTING","mc_percent":75}}"#;
+            let mut stale_payload = Vec::new();
+            mqtt_string(&mut stale_payload, "device/SN001/report").unwrap();
+            stale_payload.extend_from_slice(stale_report);
+            let mut subscribe_and_stale = vec![0x90, 0x03, id[0], id[1], 0, 0x30];
+            mqtt_remaining_length(&mut subscribe_and_stale, stale_payload.len()).unwrap();
+            subscribe_and_stale.extend_from_slice(&stale_payload);
+            stream.write_all(&subscribe_and_stale).unwrap();
             stream.flush().unwrap();
 
             for _ in 0..2 {
