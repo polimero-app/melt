@@ -182,7 +182,7 @@ impl Client {
 
         if let Some(mqtt) = matching_cached_connection(&mut cached, identity) {
             mqtt.deadline = deadline;
-            match mqtt.exchange(payload.clone(), is_full_report) {
+            match mqtt.exchange_reused_status(payload.clone()) {
                 Ok(report) => {
                     self.trace(
                         TraceEvent::response("mqtt", label.as_str())
@@ -1091,20 +1091,34 @@ impl MqttConnection {
         command: String,
         predicate: impl Fn(&Value) -> bool,
     ) -> Result<Vec<u8>, Error> {
-        let command_sequence = payload_sequence_id(command.as_bytes());
+        self.exchange_with_status_barrier(command, predicate, false)
+    }
+
+    fn exchange_reused_status(&mut self, command: String) -> Result<Vec<u8>, Error> {
+        self.exchange_with_status_barrier(command, is_full_report, true)
+    }
+
+    fn exchange_with_status_barrier(
+        &mut self,
+        command: String,
+        predicate: impl Fn(&Value) -> bool,
+        require_status_barrier: bool,
+    ) -> Result<Vec<u8>, Error> {
+        let mut command_sequence = payload_sequence_id(command.as_bytes());
         let is_status_poll = is_pushall_payload(command.as_bytes());
         if is_status_poll {
             self.drain_stale_packets()?;
         }
         let mut acknowledged = is_status_poll;
         self.publish(&command)?;
-        let refresh = if is_status_poll {
+        let mut refresh = if is_status_poll {
             command
         } else {
             let refresh = pushall_payload(next_sequence());
             self.publish(&refresh)?;
             refresh
         };
+        let mut status_barrier_crossed = !require_status_barrier;
         let mut retry_at = Instant::now() + PUSHALL_INTERVAL;
 
         loop {
@@ -1119,6 +1133,20 @@ impl MqttConnection {
                     };
                     command_rejection(&value, command_sequence.as_deref())?;
                     acknowledged |= report_matches_sequence(&value, command_sequence.as_deref());
+                    if is_status_poll && predicate(&value) {
+                        if report_matches_sequence(&value, command_sequence.as_deref()) {
+                            return Ok(report);
+                        }
+                        if !status_barrier_crossed {
+                            status_barrier_crossed = true;
+                            refresh = pushall_payload(next_sequence());
+                            command_sequence = payload_sequence_id(refresh.as_bytes());
+                            self.publish(&refresh)?;
+                            retry_at = Instant::now() + PUSHALL_INTERVAL;
+                            continue;
+                        }
+                        return Ok(report);
+                    }
                     if acknowledged && predicate(&value) {
                         return Ok(report);
                     }
@@ -2785,7 +2813,7 @@ mod tests {
             stream.write_all(&subscribe_and_stale).unwrap();
             stream.flush().unwrap();
 
-            for _ in 0..2 {
+            for _ in 0..4 {
                 let publish = read_test_packet(&mut stream);
                 assert_eq!(publish.kind, 0x30);
                 let report = br#"{"print":{"gcode_state":"IDLE","mc_percent":0}}"#;
@@ -2832,6 +2860,60 @@ mod tests {
                 .is_none(),
             "credentials changes must discard an authenticated cached session"
         );
+    }
+
+    #[test]
+    fn delayed_stale_report_cannot_satisfy_a_reused_status_poll() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let host = address.ip().to_string();
+        let port = address.port();
+        let acceptor = test_acceptor();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            assert_eq!(read_test_packet(&mut stream).kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            stream.flush().unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+
+            for state in ["PRINTING", "IDLE"] {
+                let publish = read_test_packet(&mut stream);
+                assert!(is_pushall_payload(
+                    &mqtt_publish_payload(publish.kind, &publish.payload).unwrap()
+                ));
+                let report = json!({"print": {"gcode_state": state, "mc_percent": 0}});
+                let mut payload = Vec::new();
+                mqtt_string(&mut payload, "device/SN001/report").unwrap();
+                payload.extend_from_slice(report.to_string().as_bytes());
+                let mut packet = vec![0x30];
+                mqtt_remaining_length(&mut packet, payload.len()).unwrap();
+                packet.extend_from_slice(&payload);
+                stream.write_all(&packet).unwrap();
+                stream.flush().unwrap();
+            }
+        });
+
+        let profile = Profile::with_timeout(host, "SN001", true, Duration::from_secs(2)).unwrap();
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) = open_tls(&connector, &profile, port, None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+        mqtt.subscribe().unwrap();
+        let identity = profile.connection_identity(Some("access-code"), None);
+        let client = Client::new(profile);
+        *client.mqtt.lock().unwrap() = Some(CachedConnection { identity, mqtt });
+
+        let status = client
+            .poll_status(Some("access-code"), None, Duration::from_secs(2))
+            .unwrap();
+
+        server.join().unwrap();
+        assert_eq!(status.state, PrinterState::Idle);
     }
 
     #[test]
