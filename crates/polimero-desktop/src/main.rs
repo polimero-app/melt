@@ -271,6 +271,11 @@ struct MonitorEntry {
     driver: String,
     status: Option<moonraker::Status>,
     error: Option<CommandError>,
+    /// True when `status` is the last successful sample retained across a
+    /// failed refresh rather than a result from the current attempt.
+    stale: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    observed_at: Option<String>,
 }
 
 struct CachedMonitor {
@@ -971,13 +976,21 @@ fn cached_monitor_entry_at(
         }
     }
 
-    let entry = monitor_printer(&state.pool, name.clone(), profile, generation)?;
+    let mut entry = monitor_printer(&state.pool, name.clone(), profile, generation)?;
     if !state.pool.is_current_generation(generation) {
         return None;
     }
     if let Ok(mut entries) = state.entries.lock() {
         if !state.pool.is_current_generation(generation) {
             return None;
+        }
+        if entry.status.is_none()
+            && let Some(previous) = entries.get(&name)
+            && let Some(status) = previous.entry.status.clone()
+        {
+            entry.status = Some(status);
+            entry.observed_at = previous.entry.observed_at.clone();
+            entry.stale = true;
         }
         let cached = entries.entry(name).or_insert_with(|| CachedMonitor {
             next_poll: now,
@@ -1008,6 +1021,8 @@ fn monitor_printer(
                 driver,
                 status: None,
                 error: Some(CommandError::new("profileInvalid")),
+                stale: true,
+                observed_at: None,
             });
         }
     };
@@ -1018,6 +1033,8 @@ fn monitor_printer(
             driver,
             status: None,
             error: Some(CommandError::of("driverUnsupported", Operation::Status)),
+            stale: true,
+            observed_at: None,
         });
     }
     let access_code = match access_code(&profile.driver, &name, kind) {
@@ -1028,6 +1045,8 @@ fn monitor_printer(
                 driver,
                 status: None,
                 error: Some(error),
+                stale: true,
+                observed_at: None,
             });
         }
     };
@@ -1039,6 +1058,8 @@ fn monitor_printer(
                 driver,
                 status: None,
                 error: Some(error),
+                stale: true,
+                observed_at: None,
             });
         }
     };
@@ -1055,12 +1076,18 @@ fn monitor_printer(
             driver,
             status: Some(status),
             error: None,
+            stale: false,
+            observed_at: time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .ok(),
         },
         Err(error) => MonitorEntry {
             name,
             driver,
             status: None,
             error: Some(operation_error(error, Operation::Status)),
+            stale: true,
+            observed_at: None,
         },
     })
 }
@@ -2549,6 +2576,8 @@ mod tests {
             driver: "bambu-lan".into(),
             status: None,
             error: None,
+            stale: false,
+            observed_at: None,
         }];
         save_status_cache_to(dir.path(), &entries);
 
@@ -2572,6 +2601,8 @@ mod tests {
                     driver: "moonraker".into(),
                     status: None,
                     error: None,
+                    stale: false,
+                    observed_at: None,
                 },
             },
         );
@@ -2632,6 +2663,74 @@ mod tests {
         assert!(monitor.join().unwrap().is_none());
         server.join().unwrap();
         assert!(state.entries.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn failed_refresh_retains_the_last_successful_status_as_stale() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let body = r#"{"result":{"status":{"print_stats":{"state":"printing"}}}}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+
+            // Accept the refresh and close without a response to simulate a
+            // transient disconnect after a known printing state.
+            let _ = listener.accept().unwrap();
+        });
+        let state = MonitorState::default();
+        let generation = state.pool.lifecycle_generation();
+        let profile = Profile {
+            driver: "moonraker".into(),
+            host: format!("http://{address}"),
+            serial: String::new(),
+            model: String::new(),
+            timeout: "250ms".into(),
+            insecure: false,
+            created: String::new(),
+            updated: String::new(),
+        };
+
+        let first =
+            cached_monitor_entry_at(&state, "printer".into(), profile.clone(), generation).unwrap();
+        assert_eq!(
+            first.status.as_ref().map(|status| status.state),
+            Some(moonraker::PrinterState::Printing)
+        );
+        assert!(!first.stale);
+        let observed_at = first.observed_at.clone();
+        state
+            .entries
+            .lock()
+            .unwrap()
+            .get_mut("printer")
+            .unwrap()
+            .next_poll = Instant::now();
+
+        let failed =
+            cached_monitor_entry_at(&state, "printer".into(), profile, generation).unwrap();
+        server.join().unwrap();
+
+        assert_eq!(
+            failed.status.as_ref().map(|status| status.state),
+            Some(moonraker::PrinterState::Printing)
+        );
+        assert!(failed.error.is_some());
+        assert!(failed.stale);
+        assert_eq!(failed.observed_at, observed_at);
     }
 
     #[test]
