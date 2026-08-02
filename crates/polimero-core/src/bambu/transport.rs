@@ -87,7 +87,7 @@ pub enum Error {
     LocalIo,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct JobStartOptions {
     pub plate: Option<u32>,
@@ -102,25 +102,6 @@ pub struct JobStartOptions {
     pub ams_mapping2: Vec<i32>,
     pub nozzle_mapping: Vec<i32>,
     pub nozzle_offset_calibration: bool,
-}
-
-impl Default for JobStartOptions {
-    fn default() -> Self {
-        Self {
-            plate: None,
-            skip_leveling: false,
-            bed_type: None,
-            flow_calibration: false,
-            vibration_calibration: false,
-            layer_inspection: false,
-            timelapse: false,
-            use_ams: false,
-            ams_mapping: Vec::new(),
-            ams_mapping2: Vec::new(),
-            nozzle_mapping: Vec::new(),
-            nozzle_offset_calibration: false,
-        }
-    }
 }
 
 /// Authenticated Bambu LAN operations for one validated profile.
