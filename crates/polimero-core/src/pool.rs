@@ -8,7 +8,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, RwLock,
         atomic::{AtomicU64, Ordering},
     },
 };
@@ -30,6 +30,7 @@ enum PooledSession {
 pub struct ConnectionPool {
     sessions: Mutex<HashMap<String, PooledSession>>,
     lifecycle: AtomicU64,
+    lifecycle_gate: RwLock<()>,
 }
 
 impl ConnectionPool {
@@ -39,6 +40,24 @@ impl ConnectionPool {
 
     pub fn is_current_generation(&self, generation: u64) -> bool {
         self.lifecycle_generation() == generation
+    }
+
+    /// Runs an operation only while its configuration generation remains
+    /// current. Lifecycle mutations wait for an admitted operation to finish,
+    /// preventing a removed or refreshed profile from being reinserted later.
+    pub fn with_current_generation<T>(
+        &self,
+        generation: u64,
+        operation: impl FnOnce(&Self) -> T,
+    ) -> Option<T> {
+        let _gate = self
+            .lifecycle_gate
+            .read()
+            .unwrap_or_else(|error| error.into_inner());
+        if !self.is_current_generation(generation) {
+            return None;
+        }
+        Some(operation(self))
     }
 
     pub fn status(
@@ -469,6 +488,10 @@ impl ConnectionPool {
 
     /// Immediately drops the pooled connection for one configured printer.
     pub fn remove(&self, name: &str) {
+        let _gate = self
+            .lifecycle_gate
+            .write()
+            .unwrap_or_else(|error| error.into_inner());
         let mut sessions = self
             .sessions
             .lock()
@@ -487,6 +510,7 @@ mod tests {
     use std::{
         io::{BufRead, BufReader, Read, Write},
         net::TcpListener,
+        sync::mpsc,
         thread,
         time::Duration,
     };
@@ -689,6 +713,43 @@ mod tests {
                 None,
             )
             .is_some()
+        );
+    }
+
+    #[test]
+    fn lifecycle_mutation_waits_for_an_admitted_command_lease() {
+        let pool = Arc::new(ConnectionPool::default());
+        let generation = pool.lifecycle_generation();
+        let leased_pool = pool.clone();
+        let (admitted_tx, admitted_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let command = thread::spawn(move || {
+            leased_pool
+                .with_current_generation(generation, |_| {
+                    admitted_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                })
+                .unwrap();
+        });
+        admitted_rx.recv().unwrap();
+        let removing_pool = pool.clone();
+        let (removed_tx, removed_rx) = mpsc::channel();
+        let removal = thread::spawn(move || {
+            removing_pool.remove("printer");
+            removed_tx.send(()).unwrap();
+        });
+
+        assert!(
+            removed_rx.recv_timeout(Duration::from_millis(20)).is_err(),
+            "removal must wait until the admitted command releases its lease"
+        );
+        release_tx.send(()).unwrap();
+        removed_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        command.join().unwrap();
+        removal.join().unwrap();
+        assert!(
+            pool.with_current_generation(generation, |_| ()).is_none(),
+            "the old generation cannot admit a command after removal"
         );
     }
 

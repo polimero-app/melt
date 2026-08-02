@@ -1259,7 +1259,8 @@ fn print_library_file(
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| CommandError::new("libraryPathInvalid"))?;
-    let printer = desktop_printer(&request.printer, Operation::FileUpload)?;
+    let (generation, printer) =
+        pooled_desktop_printer(&state, &request.printer, Operation::FileUpload)?;
     let device_path = format!("/{filename}");
     drivers::upload_file(
         &printer.driver,
@@ -1272,13 +1273,13 @@ fn print_library_file(
     .map_err(|error| operation_error(error, Operation::FileUpload))?;
     ensure_state(
         &state,
+        generation,
         &printer,
         &[moonraker::PrinterState::Idle],
         Operation::JobStart,
     )?;
-    let result = state
-        .pool
-        .job_start(
+    let result = current_pool_operation(&state, generation, Operation::JobStart, |pool| {
+        pool.job_start(
             &request.printer,
             &printer.driver,
             printer.access_code.as_deref(),
@@ -1286,7 +1287,7 @@ fn print_library_file(
             &device_path,
             polimero_core::bambu::JobStartOptions::default(),
         )
-        .map_err(|error| operation_error(error, Operation::JobStart));
+    });
     invalidate(&state, &request.printer);
     result
 }
@@ -1306,7 +1307,7 @@ fn printer_job_action(
         "cancel" => Operation::JobCancel,
         _ => return Err(CommandError::new("actionUnsupported")),
     };
-    let printer = desktop_printer(&request.name, operation)?;
+    let (generation, printer) = pooled_desktop_printer(&state, &request.name, operation)?;
     let allowed = match request.action.as_str() {
         "start" => &[moonraker::PrinterState::Idle][..],
         "pause" => &[moonraker::PrinterState::Printing][..],
@@ -1317,44 +1318,49 @@ fn printer_job_action(
         ][..],
         _ => unreachable!("action is validated above"),
     };
-    ensure_state(&state, &printer, allowed, operation)?;
-    let result = match request.action.as_str() {
-        "start" => {
-            let device_path = request
+    ensure_state(&state, generation, &printer, allowed, operation)?;
+    let device_path = if request.action == "start" {
+        Some(
+            request
                 .device_path
                 .as_deref()
                 .filter(|path| !path.is_empty())
-                .ok_or_else(|| CommandError::new("jobFileMissing"))?;
-            state.pool.job_start(
+                .ok_or_else(|| CommandError::new("jobFileMissing"))?,
+        )
+    } else {
+        None
+    };
+    let result = current_pool_operation(&state, generation, operation, |pool| {
+        match request.action.as_str() {
+            "start" => pool.job_start(
                 &request.name,
                 &printer.driver,
                 printer.access_code.as_deref(),
                 printer.tls_fingerprint.as_deref(),
-                device_path,
+                device_path.expect("start device path was validated"),
                 polimero_core::bambu::JobStartOptions::default(),
-            )
+            ),
+            "pause" => pool.job_pause(
+                &request.name,
+                &printer.driver,
+                printer.access_code.as_deref(),
+                printer.tls_fingerprint.as_deref(),
+            ),
+            "resume" => pool.job_resume(
+                &request.name,
+                &printer.driver,
+                printer.access_code.as_deref(),
+                printer.tls_fingerprint.as_deref(),
+            ),
+            "cancel" => pool.job_cancel(
+                &request.name,
+                &printer.driver,
+                printer.access_code.as_deref(),
+                printer.tls_fingerprint.as_deref(),
+            ),
+            _ => unreachable!("action is validated above"),
         }
-        "pause" => state.pool.job_pause(
-            &request.name,
-            &printer.driver,
-            printer.access_code.as_deref(),
-            printer.tls_fingerprint.as_deref(),
-        ),
-        "resume" => state.pool.job_resume(
-            &request.name,
-            &printer.driver,
-            printer.access_code.as_deref(),
-            printer.tls_fingerprint.as_deref(),
-        ),
-        "cancel" => state.pool.job_cancel(
-            &request.name,
-            &printer.driver,
-            printer.access_code.as_deref(),
-            printer.tls_fingerprint.as_deref(),
-        ),
-        _ => unreachable!("action is validated above"),
-    }
-    .map_err(|error| operation_error(error, operation));
+    });
     invalidate(&state, &request.name);
     result
 }
@@ -1375,23 +1381,24 @@ fn printer_temperature_set(
     {
         return Err(CommandError::new("temperatureTargetMissing"));
     }
-    let printer = desktop_printer(&request.name, Operation::TemperatureSet)?;
+    let (generation, printer) =
+        pooled_desktop_printer(&state, &request.name, Operation::TemperatureSet)?;
     ensure_state(
         &state,
+        generation,
         &printer,
         &[moonraker::PrinterState::Idle],
         Operation::TemperatureSet,
     )?;
-    let result = state
-        .pool
-        .temperature_set(
+    let result = current_pool_operation(&state, generation, Operation::TemperatureSet, |pool| {
+        pool.temperature_set(
             &request.name,
             &printer.driver,
             printer.access_code.as_deref(),
             printer.tls_fingerprint.as_deref(),
             targets,
         )
-        .map_err(|error| operation_error(error, Operation::TemperatureSet));
+    });
     invalidate(&state, &request.name);
     result
 }
@@ -1401,9 +1408,10 @@ fn printer_fan_set(
     request: FanRequest,
     state: tauri::State<'_, MonitorState>,
 ) -> Result<moonraker::FanResult, CommandError> {
-    let printer = desktop_printer(&request.name, Operation::FanSet)?;
+    let (generation, printer) = pooled_desktop_printer(&state, &request.name, Operation::FanSet)?;
     ensure_state(
         &state,
+        generation,
         &printer,
         &[
             moonraker::PrinterState::Idle,
@@ -1413,9 +1421,8 @@ fn printer_fan_set(
         ],
         Operation::FanSet,
     )?;
-    let result = state
-        .pool
-        .fan_set(
+    let result = current_pool_operation(&state, generation, Operation::FanSet, |pool| {
+        pool.fan_set(
             &request.name,
             &printer.driver,
             printer.access_code.as_deref(),
@@ -1423,7 +1430,7 @@ fn printer_fan_set(
             &request.fan,
             request.speed_percent,
         )
-        .map_err(|error| operation_error(error, Operation::FanSet));
+    });
     invalidate(&state, &request.name);
     result
 }
@@ -1433,23 +1440,23 @@ fn printer_motion_home(
     name: String,
     state: tauri::State<'_, MonitorState>,
 ) -> Result<moonraker::MotionResult, CommandError> {
-    let printer = desktop_printer(&name, Operation::MotionHome)?;
+    let (generation, printer) = pooled_desktop_printer(&state, &name, Operation::MotionHome)?;
     ensure_state(
         &state,
+        generation,
         &printer,
         &[moonraker::PrinterState::Idle],
         Operation::MotionHome,
     )?;
-    let result = state
-        .pool
-        .motion_home(
+    let result = current_pool_operation(&state, generation, Operation::MotionHome, |pool| {
+        pool.motion_home(
             &name,
             &printer.driver,
             printer.access_code.as_deref(),
             printer.tls_fingerprint.as_deref(),
             &[moonraker::Axis::X, moonraker::Axis::Y, moonraker::Axis::Z],
         )
-        .map_err(|error| operation_error(error, Operation::MotionHome));
+    });
     invalidate(&state, &name);
     result
 }
@@ -1465,16 +1472,17 @@ fn printer_motion_jog(
     {
         return Err(CommandError::new("jogTargetMissing"));
     }
-    let printer = desktop_printer(&request.name, Operation::MotionJog)?;
+    let (generation, printer) =
+        pooled_desktop_printer(&state, &request.name, Operation::MotionJog)?;
     ensure_state(
         &state,
+        generation,
         &printer,
         &[moonraker::PrinterState::Idle],
         Operation::MotionJog,
     )?;
-    let result = state
-        .pool
-        .motion_jog(
+    let result = current_pool_operation(&state, generation, Operation::MotionJog, |pool| {
+        pool.motion_jog(
             &request.name,
             &printer.driver,
             printer.access_code.as_deref(),
@@ -1486,7 +1494,7 @@ fn printer_motion_jog(
                 feedrate_mm_per_min: request.feedrate_mm_per_min,
             },
         )
-        .map_err(|error| operation_error(error, Operation::MotionJog));
+    });
     invalidate(&state, &request.name);
     result
 }
@@ -1496,9 +1504,10 @@ fn printer_light_set(
     request: LightRequest,
     state: tauri::State<'_, MonitorState>,
 ) -> Result<moonraker::LightResult, CommandError> {
-    let printer = desktop_printer(&request.name, Operation::LightSet)?;
+    let (generation, printer) = pooled_desktop_printer(&state, &request.name, Operation::LightSet)?;
     ensure_state(
         &state,
+        generation,
         &printer,
         &[
             moonraker::PrinterState::Idle,
@@ -1513,9 +1522,8 @@ fn printer_light_set(
     } else {
         moonraker::LightState::Off
     };
-    let result = state
-        .pool
-        .light_set(
+    let result = current_pool_operation(&state, generation, Operation::LightSet, |pool| {
+        pool.light_set(
             &request.name,
             &printer.driver,
             printer.access_code.as_deref(),
@@ -1523,7 +1531,7 @@ fn printer_light_set(
             &request.light,
             light_state,
         )
-        .map_err(|error| operation_error(error, Operation::LightSet));
+    });
     invalidate(&state, &request.name);
     result
 }
@@ -1533,9 +1541,10 @@ fn printer_speed_set(
     request: SpeedRequest,
     state: tauri::State<'_, MonitorState>,
 ) -> Result<moonraker::SpeedResult, CommandError> {
-    let printer = desktop_printer(&request.name, Operation::SpeedSet)?;
+    let (generation, printer) = pooled_desktop_printer(&state, &request.name, Operation::SpeedSet)?;
     ensure_state(
         &state,
+        generation,
         &printer,
         &[
             moonraker::PrinterState::Printing,
@@ -1543,16 +1552,15 @@ fn printer_speed_set(
         ],
         Operation::SpeedSet,
     )?;
-    let result = state
-        .pool
-        .speed_set(
+    let result = current_pool_operation(&state, generation, Operation::SpeedSet, |pool| {
+        pool.speed_set(
             &request.name,
             &printer.driver,
             printer.access_code.as_deref(),
             printer.tls_fingerprint.as_deref(),
             &request.speed_profile,
         )
-        .map_err(|error| operation_error(error, Operation::SpeedSet));
+    });
     invalidate(&state, &request.name);
     result
 }
@@ -2223,6 +2231,15 @@ fn desktop_printer(name: &str, operation: Operation) -> Result<DesktopPrinter, C
     })
 }
 
+fn pooled_desktop_printer(
+    state: &MonitorState,
+    name: &str,
+    operation: Operation,
+) -> Result<(u64, DesktopPrinter), CommandError> {
+    let generation = state.pool.lifecycle_generation();
+    desktop_printer(name, operation).map(|printer| (generation, printer))
+}
+
 fn access_code(
     driver: &str,
     name: &str,
@@ -2264,10 +2281,14 @@ fn invalidate(state: &MonitorState, name: &str) {
 
 fn ensure_state(
     state: &MonitorState,
+    generation: u64,
     printer: &DesktopPrinter,
     allowed: &[moonraker::PrinterState],
     operation: Operation,
 ) -> Result<(), CommandError> {
+    if !state.pool.is_current_generation(generation) {
+        return Err(CommandError::new("profileNotFound"));
+    }
     if let Ok(entries) = state.entries.lock()
         && let Some(cached) = entries.get(&printer.name)
         && cached.sampled_at.elapsed() <= Duration::from_secs(5)
@@ -2279,14 +2300,29 @@ fn ensure_state(
 
     let status = state
         .pool
-        .status(
+        .status_if_current(
+            generation,
             &printer.name,
             &printer.driver,
             printer.access_code.as_deref(),
             printer.tls_fingerprint.as_deref(),
         )
+        .ok_or_else(|| CommandError::new("profileNotFound"))?
         .map_err(|error| operation_error(error, operation))?;
     check_allowed_state(status.state, allowed, operation)
+}
+
+fn current_pool_operation<T>(
+    state: &MonitorState,
+    generation: u64,
+    operation: Operation,
+    run: impl FnOnce(&ConnectionPool) -> Result<T, DriverError>,
+) -> Result<T, CommandError> {
+    state
+        .pool
+        .with_current_generation(generation, run)
+        .ok_or_else(|| CommandError::new("profileNotFound"))?
+        .map_err(|error| operation_error(error, operation))
 }
 
 fn check_allowed_state(
@@ -2602,6 +2638,7 @@ mod tests {
 
         ensure_state(
             &state,
+            state.pool.lifecycle_generation(),
             &printer,
             &[moonraker::PrinterState::Idle],
             Operation::EmergencyStop,
