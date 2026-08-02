@@ -94,7 +94,7 @@ pub struct JobStartOptions {
 /// Authenticated Bambu LAN operations for one validated profile.
 pub struct Client {
     profile: Profile,
-    mqtt: Mutex<Option<PersistentConnection>>,
+    mqtt: Mutex<Option<CachedConnection>>,
 }
 
 impl Client {
@@ -170,12 +170,15 @@ impl Client {
         let started = Instant::now();
         let access_code = valid_access_code(access_code)?;
         validate_pin(&self.profile, fingerprint)?;
+        let identity = self
+            .profile
+            .connection_identity(Some(access_code), fingerprint);
         let payload = pushall_payload(next_sequence());
         let label = format!("poll {}", self.profile.mqtt_topics().request);
         let mut cached = self.mqtt.lock().unwrap_or_else(|error| error.into_inner());
         self.trace(TraceEvent::request("mqtt", label.as_str()).with_bytes(payload.len() as u64));
 
-        if let Some(PersistentConnection(mqtt)) = cached.as_mut() {
+        if let Some(mqtt) = matching_cached_connection(&mut cached, identity) {
             mqtt.deadline = deadline_after(timeout)?;
             match mqtt.exchange(payload.clone(), is_full_report) {
                 Ok(report) => {
@@ -228,7 +231,7 @@ impl Client {
                 .with_elapsed_ms(started.elapsed().as_millis() as u64),
         );
         let status = parse_status(&report)?;
-        *cached = Some(PersistentConnection(mqtt));
+        *cached = Some(CachedConnection { identity, mqtt });
         Ok(status)
     }
 
@@ -709,8 +712,11 @@ impl Client {
     ) -> Result<T, Error> {
         let access_code = valid_access_code(access_code)?;
         validate_pin(&self.profile, fingerprint)?;
+        let identity = self
+            .profile
+            .connection_identity(Some(access_code), fingerprint);
         let mut cached = self.mqtt.lock().unwrap_or_else(|error| error.into_inner());
-        if let Some(PersistentConnection(mqtt)) = cached.as_mut() {
+        if let Some(mqtt) = matching_cached_connection(&mut cached, identity) {
             mqtt.deadline = deadline_after(self.profile.timeout())?;
             return match operation(mqtt) {
                 Ok(result) => Ok(result),
@@ -739,7 +745,7 @@ impl Client {
         let result = operation(&mut mqtt);
         match result {
             Ok(result) => {
-                *cached = Some(PersistentConnection(mqtt));
+                *cached = Some(CachedConnection { identity, mqtt });
                 Ok(result)
             }
             Err(error) => {
@@ -919,7 +925,23 @@ fn is_timeout(error: &io::Error) -> bool {
 /// An authenticated, subscribed MQTT session kept alive across polls by a
 /// caller (see [`Client::poll_status`]) instead of reconnecting each time.
 /// Opaque outside this module: callers only ever pass it back in unchanged.
-struct PersistentConnection(MqttConnection);
+struct CachedConnection {
+    identity: [u8; 32],
+    mqtt: MqttConnection,
+}
+
+fn matching_cached_connection(
+    cached: &mut Option<CachedConnection>,
+    identity: [u8; 32],
+) -> Option<&mut MqttConnection> {
+    if cached
+        .as_ref()
+        .is_some_and(|connection| connection.identity != identity)
+    {
+        *cached = None;
+    }
+    cached.as_mut().map(|connection| &mut connection.mqtt)
+}
 
 struct MqttConnection {
     stream: SslStream<TcpStream>,
@@ -2677,8 +2699,9 @@ mod tests {
         let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
         mqtt.connect("access-code").unwrap();
         mqtt.subscribe().unwrap();
+        let identity = profile.connection_identity(Some("access-code"), None);
         let client = Client::new(profile);
-        *client.mqtt.lock().unwrap() = Some(PersistentConnection(mqtt));
+        *client.mqtt.lock().unwrap() = Some(CachedConnection { identity, mqtt });
         let first = client
             .poll_status(Some("access-code"), None, Duration::from_secs(2))
             .unwrap();
@@ -2693,6 +2716,14 @@ mod tests {
         server.join().unwrap();
         assert_eq!(first.state, PrinterState::Idle);
         assert_eq!(second.state, PrinterState::Idle);
+        let changed_access_code = client
+            .profile
+            .connection_identity(Some("different-access-code"), None);
+        assert!(
+            matching_cached_connection(&mut client.mqtt.lock().unwrap(), changed_access_code)
+                .is_none(),
+            "credentials changes must discard an authenticated cached session"
+        );
     }
 
     #[test]
@@ -2745,8 +2776,9 @@ mod tests {
         let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
         mqtt.connect("access-code").unwrap();
         mqtt.subscribe().unwrap();
+        let identity = profile.connection_identity(Some("access-code"), None);
         let client = Client::new(profile);
-        *client.mqtt.lock().unwrap() = Some(PersistentConnection(mqtt));
+        *client.mqtt.lock().unwrap() = Some(CachedConnection { identity, mqtt });
 
         client.emergency_stop(Some("access-code"), None).unwrap();
         client.emergency_stop(Some("access-code"), None).unwrap();
