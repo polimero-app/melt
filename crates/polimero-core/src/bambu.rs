@@ -17,6 +17,7 @@ use crate::trace::{SharedTracer, next_tracer_generation};
 mod discovery;
 mod rtsp;
 mod transport;
+mod tunnel;
 
 pub use discovery::{DiscoveredPrinter, DiscoveryError, discover};
 pub use rtsp::H264Stream;

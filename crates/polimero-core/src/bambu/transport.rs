@@ -29,7 +29,7 @@ use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rf
 
 use super::{
     MQTT_USERNAME, MqttTopics, Profile, TlsPinError, is_pushall_payload, is_valid_tls_fingerprint,
-    payload_sequence_id, pushall_payload, tls_fingerprint, verify_tls_fingerprint,
+    payload_sequence_id, pushall_payload, tls_fingerprint, tunnel, verify_tls_fingerprint,
 };
 
 const FTP_PORT: u16 = 990;
@@ -272,12 +272,12 @@ impl Client {
         device_path: &str,
         options: JobStartOptions,
     ) -> Result<JobResult, Error> {
-        let path = normalize_device_path(device_path)?;
+        let (storage, path) = storage_location(&self.profile, device_path)?;
         if path == "/" {
             return Err(Error::InvalidDevicePath);
         }
         validate_job_options(&self.profile, &options)?;
-        let payload = job_start_payload(&path, options)?;
+        let payload = job_start_payload(storage, &path, options)?;
         let report = self.exchange(access_code, fingerprint, payload, |report| {
             report_state_is(report, &[PrinterState::Printing])
         })?;
@@ -551,6 +551,11 @@ impl Client {
         access_code: Option<&str>,
         fingerprint: Option<&str>,
     ) -> Result<Vec<FileRoot>, Error> {
+        if self.profile.default_capabilities().storage_transport
+            == super::StorageTransport::Tunnel6000
+        {
+            return tunnel::Connection::open(&self.profile, access_code, fingerprint)?.roots();
+        }
         let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
         let result = vec![FileRoot {
             name: FILE_ROOT,
@@ -571,7 +576,16 @@ impl Client {
         device_path: &str,
         recursive: bool,
     ) -> Result<FileList, Error> {
-        let path = normalize_device_path(device_path)?;
+        let (storage, path) = storage_location(&self.profile, device_path)?;
+        if self.profile.default_capabilities().storage_transport
+            == super::StorageTransport::Tunnel6000
+        {
+            if recursive && path != "/" {
+                return Err(Error::Unsupported("recursive :6000 file listing"));
+            }
+            return tunnel::Connection::open(&self.profile, access_code, fingerprint)?
+                .list(storage, &path);
+        }
         let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
         let result = if recursive {
             ftp.list_recursive(&path)
@@ -637,15 +651,48 @@ impl Client {
         device_path: &str,
         destination: &mut dyn Write,
     ) -> Result<u64, Error> {
-        let path = normalize_device_path(device_path)?;
+        let (_storage, path) = storage_location(&self.profile, device_path)?;
         if path == "/" {
             return Err(Error::InvalidDevicePath);
+        }
+        if self.profile.default_capabilities().storage_transport
+            == super::StorageTransport::Tunnel6000
+        {
+            return tunnel::Connection::open(&self.profile, access_code, fingerprint)?
+                .download(&path, destination);
         }
         let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
         let result = ftp.download(&path, destination);
         ftp.quit();
         self.trace_ftps("RETR", &path, result.as_ref().err());
         result
+    }
+
+    pub fn thumbnail_to(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        device_path: &str,
+        plate: u32,
+        destination: &mut dyn Write,
+    ) -> Result<u64, Error> {
+        if self.profile.default_capabilities().storage_transport
+            != super::StorageTransport::Tunnel6000
+        {
+            return Err(Error::Unsupported(":6000 SUB_FILE thumbnail"));
+        }
+        let (storage, path) = storage_location(&self.profile, device_path)?;
+        let plate = plate.max(1);
+        let paths = [
+            format!("{path}#Metadata/plate_{plate}.png"),
+            format!("{path}#Metadata/plate_no_light_{plate}.png"),
+            format!("{path}#thumbnail"),
+        ];
+        tunnel::Connection::open(&self.profile, access_code, fingerprint)?.sub_file(
+            storage,
+            &paths,
+            destination,
+        )
     }
 
     pub fn upload_file(
@@ -660,9 +707,25 @@ impl Client {
         if !metadata.is_file() {
             return Err(Error::LocalIo);
         }
-        let path = normalize_device_path(device_path)?;
+        let (storage, path) = storage_location(&self.profile, device_path)?;
         if path == "/" {
             return Err(Error::DirectoryDestination);
+        }
+        if self.profile.default_capabilities().storage_transport
+            == super::StorageTransport::Tunnel6000
+        {
+            let mut connection = tunnel::Connection::open(&self.profile, access_code, fingerprint)?;
+            if !overwrite {
+                let exists = connection
+                    .list(storage, "/")?
+                    .entries
+                    .into_iter()
+                    .any(|entry| entry.path == path || entry.name == path.trim_start_matches('/'));
+                if exists {
+                    return Err(Error::FileAlreadyExists);
+                }
+            }
+            return connection.upload(storage, source, path.trim_start_matches('/'));
         }
         let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
         let result = (|| {
@@ -683,9 +746,15 @@ impl Client {
         fingerprint: Option<&str>,
         device_path: &str,
     ) -> Result<(), Error> {
-        let path = normalize_device_path(device_path)?;
+        let (storage, path) = storage_location(&self.profile, device_path)?;
         if path == "/" {
             return Err(Error::InvalidDevicePath);
+        }
+        if self.profile.default_capabilities().storage_transport
+            == super::StorageTransport::Tunnel6000
+        {
+            return tunnel::Connection::open(&self.profile, access_code, fingerprint)?
+                .delete(storage, path.trim_start_matches('/'));
         }
         let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
         let result = ftp.command(&format!("DELE {path}")).and_then(|reply| {
@@ -1457,7 +1526,7 @@ fn ledctrl_payload(node: &str, state: LightState) -> String {
     .to_string()
 }
 
-fn job_start_payload(path: &str, options: JobStartOptions) -> Result<String, Error> {
+fn job_start_payload(storage: &str, path: &str, options: JobStartOptions) -> Result<String, Error> {
     let filename = path
         .rsplit('/')
         .next()
@@ -1504,10 +1573,7 @@ fn job_start_payload(path: &str, options: JobStartOptions) -> Result<String, Err
             "file".into(),
             Value::String(path.trim_start_matches('/').into()),
         );
-        print.insert(
-            "url".into(),
-            Value::String(format!("file:///{FILE_ROOT}{path}")),
-        );
+        print.insert("url".into(), Value::String(job_file_url(storage, path)));
         print.insert("md5".into(), Value::String(String::new()));
         print.insert("ams_mapping".into(), json!(options.ams_mapping));
         print.insert("ams_mapping2".into(), json!(options.ams_mapping2));
@@ -1655,7 +1721,7 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
         .filter(|value| !value.is_empty())
         .or_else(|| string(print.get("gcode_file")).filter(|value| !value.is_empty()));
     let job = job_name.map(|name| Job {
-        id: synthetic_job_id(&name),
+        id: synthetic_job_id(print, &name),
         name,
     });
     let errors = status_errors(print, state);
@@ -2044,11 +2110,24 @@ fn integer(value: Option<&Value>) -> Option<i64> {
         .or_else(|| value?.as_str()?.trim().parse().ok())
 }
 
-fn synthetic_job_id(name: &str) -> String {
+fn synthetic_job_id(print: &Map<String, Value>, name: &str) -> String {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in name.bytes() {
-        hash ^= u64::from(byte);
+    for component in std::iter::once(Some(name.to_owned())).chain(
+        [
+            "task_id",
+            "subtask_id",
+            "gcode_start_time",
+            "print_start_time",
+        ]
+        .map(|key| string(print.get(key))),
+    ) {
+        let Some(component) = component else { continue };
+        hash ^= component.len() as u64;
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        for byte in component.bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
     }
     format!("lan-{hash:x}")
 }
@@ -2109,6 +2188,33 @@ fn normalize_device_path(value: &str) -> Result<String, Error> {
         return Err(Error::InvalidDevicePath);
     }
     Ok(format!("/{}", segments.join("/")))
+}
+
+fn storage_location(profile: &Profile, value: &str) -> Result<(&'static str, String), Error> {
+    let (requested, path) = value
+        .split_once(':')
+        .map_or((None, value), |(storage, path)| (Some(storage), path));
+    let storage = match requested.map(str::to_ascii_lowercase).as_deref() {
+        Some("emmc" | "internal") => "emmc",
+        Some("udisk" | "usb" | "external") => "udisk",
+        Some("sdcard") => "sdcard",
+        Some(_) => return Err(Error::InvalidDevicePath),
+        None if profile.default_capabilities().storage_transport
+            == super::StorageTransport::Tunnel6000 =>
+        {
+            "emmc"
+        }
+        None => FILE_ROOT,
+    };
+    Ok((storage, normalize_device_path(path)?))
+}
+
+fn job_file_url(storage: &str, path: &str) -> String {
+    if matches!(storage, "emmc" | "udisk") {
+        format!("brtc://{storage}/{}", path.trim_start_matches('/'))
+    } else {
+        format!("file:///{storage}{path}")
+    }
 }
 
 fn map_io(error: io::Error) -> Error {
@@ -2813,7 +2919,7 @@ mod tests {
     #[test]
     fn starts_project_files_from_the_printer_sd_card() {
         let payload: Value = serde_json::from_str(
-            &job_start_payload("/models/cube.3mf", JobStartOptions::default()).unwrap(),
+            &job_start_payload("sdcard", "/models/cube.3mf", JobStartOptions::default()).unwrap(),
         )
         .unwrap();
 
@@ -2837,7 +2943,8 @@ mod tests {
             ..Default::default()
         };
         let payload: Value =
-            serde_json::from_str(&job_start_payload("/models/dual.3mf", options).unwrap()).unwrap();
+            serde_json::from_str(&job_start_payload("emmc", "/models/dual.3mf", options).unwrap())
+                .unwrap();
 
         assert_eq!(payload["print"]["param"], "Metadata/plate_2.gcode");
         assert_eq!(payload["print"]["bed_type"], "textured_plate");
@@ -2847,6 +2954,30 @@ mod tests {
         assert_eq!(payload["print"]["ams_mapping"], json!([0, 3, -1]));
         assert_eq!(payload["print"]["nozzle_mapping"], json!([0, 1]));
         assert_eq!(payload["print"]["nozzle_offset_cali"], 1);
+        assert_eq!(payload["print"]["url"], "brtc://emmc/models/dual.3mf");
+    }
+
+    #[test]
+    fn parses_explicit_and_model_default_storage_locations() {
+        let p1 = Profile::new("printer.local", "SN001", true)
+            .unwrap()
+            .with_model("P1S");
+        assert_eq!(
+            storage_location(&p1, "sdcard:/models/cube.3mf").unwrap(),
+            ("sdcard", "/models/cube.3mf".into())
+        );
+
+        let h2 = Profile::new("printer.local", "SN001", true)
+            .unwrap()
+            .with_model("H2D");
+        assert_eq!(
+            storage_location(&h2, "/cube.3mf").unwrap(),
+            ("emmc", "/cube.3mf".into())
+        );
+        assert_eq!(
+            storage_location(&h2, "usb:/cube.3mf").unwrap(),
+            ("udisk", "/cube.3mf".into())
+        );
     }
 
     #[test]

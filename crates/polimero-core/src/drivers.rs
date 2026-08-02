@@ -193,23 +193,7 @@ impl Profile {
     }
 
     pub fn capabilities(&self) -> Capabilities {
-        let mut capabilities = self.driver().capabilities();
-        if let Self::Bambu(profile) = self {
-            let runtime = profile.default_capabilities();
-            if runtime.camera == bambu::CameraTransport::Unknown {
-                // Unknown models are still probed at operation time.
-            }
-            if runtime.storage_transport == bambu::StorageTransport::Tunnel6000 {
-                // The current file driver is FTPS-only. Do not advertise file
-                // operations for a model whose known storage path is :6000.
-                capabilities.file_list = false;
-                capabilities.file_download = false;
-                capabilities.file_upload = false;
-                capabilities.file_delete = false;
-                capabilities.job_start = false;
-            }
-        }
-        capabilities
+        self.driver().capabilities()
     }
 
     pub fn bambu_runtime_capabilities(&self) -> Option<bambu::RuntimeCapabilities> {
@@ -417,6 +401,31 @@ pub fn download_to(
         Profile::Bambu(profile) => bambu::Client::new(profile.clone())
             .download_to(access_code, tls_fingerprint, device_path, destination)
             .map_err(DriverError::Bambu),
+    }
+}
+
+pub fn file_thumbnail_to(
+    profile: &Profile,
+    access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
+    device_path: &str,
+    plate: u32,
+    destination: &mut dyn std::io::Write,
+) -> Result<u64, DriverError> {
+    match profile {
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .thumbnail_to(
+                access_code,
+                tls_fingerprint,
+                device_path,
+                plate,
+                destination,
+            )
+            .map_err(DriverError::Bambu),
+        Profile::Moonraker(_) => Err(DriverError::UnsupportedOperation(
+            Driver::Moonraker,
+            Operation::FileDownload,
+        )),
     }
 }
 
@@ -764,16 +773,16 @@ mod tests {
     }
 
     #[test]
-    fn profile_capabilities_do_not_advertise_ftps_for_tunnel_models() {
+    fn profile_capabilities_expose_tunnel_storage_metadata() {
         let profile = Profile::Bambu(
             bambu::Profile::new("printer.local", "SN001", true)
                 .unwrap()
                 .with_model("H2D"),
         );
 
-        assert!(!profile.capabilities().file_list);
-        assert!(!profile.capabilities().file_upload);
-        assert!(!profile.capabilities().job_start);
+        assert!(profile.capabilities().file_list);
+        assert!(profile.capabilities().file_upload);
+        assert!(profile.capabilities().job_start);
         assert_eq!(
             profile.bambu_runtime_capabilities().unwrap().model_family,
             bambu::ModelFamily::H2

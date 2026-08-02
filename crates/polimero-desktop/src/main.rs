@@ -1754,6 +1754,27 @@ fn printer_file_preview(
     // this, so cached folders stay instant regardless of the limit.
     let _permit = RENDER_SEMAPHORE.acquire();
     let printer = desktop_printer(&request.name, Operation::FileDownload)?;
+    if extension == "3mf" {
+        let mut thumbnail = Vec::new();
+        if drivers::file_thumbnail_to(
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+            &request.device_path,
+            1,
+            &mut thumbnail,
+        )
+        .is_ok()
+            && !thumbnail.is_empty()
+        {
+            let preview = FilePreviewResponse {
+                kind: "png",
+                data: STANDARD.encode(thumbnail),
+            };
+            cache_preview(&state, &cache_key, &preview);
+            return Ok(preview);
+        }
+    }
     let mut bytes = Vec::new();
     drivers::download_to(
         &printer.driver,
