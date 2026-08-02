@@ -35,6 +35,7 @@ const MJPEG_BOUNDARY: &str = "frame";
 pub struct Profile {
     host: String,
     serial: String,
+    model: String,
     insecure: bool,
     timeout: Duration,
     tracer: Option<SharedTracer>,
@@ -65,6 +66,7 @@ impl Profile {
         Ok(Self {
             host,
             serial,
+            model: String::new(),
             insecure,
             timeout,
             tracer: None,
@@ -78,12 +80,29 @@ impl Profile {
         self
     }
 
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into().trim().to_owned();
+        self
+    }
+
     pub fn host(&self) -> &str {
         &self.host
     }
 
     pub fn serial(&self) -> &str {
         &self.serial
+    }
+
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    pub fn model_family(&self) -> ModelFamily {
+        ModelFamily::from_model(&self.model)
+    }
+
+    pub fn default_capabilities(&self) -> RuntimeCapabilities {
+        RuntimeCapabilities::for_model(&self.model)
     }
 
     pub fn insecure(&self) -> bool {
@@ -111,6 +130,7 @@ impl Profile {
         for component in [
             self.host.as_str(),
             self.serial.as_str(),
+            self.model.as_str(),
             if self.insecure { "insecure" } else { "pinned" },
             fingerprint.unwrap_or_default(),
             access_code.unwrap_or_default(),
@@ -121,6 +141,151 @@ impl Profile {
         identity.update(self.timeout.as_nanos().to_be_bytes());
         identity.update(self.tracer_generation.to_be_bytes());
         identity.finalize().into()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelFamily {
+    A1,
+    P1,
+    P2,
+    X1,
+    X2,
+    H2,
+    #[default]
+    Unknown,
+}
+
+impl ModelFamily {
+    pub fn from_model(model: &str) -> Self {
+        let model = model
+            .trim()
+            .to_ascii_uppercase()
+            .replace(['-', '_', ' '], "");
+        if model.starts_with("A1") {
+            Self::A1
+        } else if model.starts_with("P1") {
+            Self::P1
+        } else if model.starts_with("P2") {
+            Self::P2
+        } else if model.starts_with("X1") {
+            Self::X1
+        } else if model.starts_with("X2") {
+            Self::X2
+        } else if model.starts_with("H2") {
+            Self::H2
+        } else {
+            Self::Unknown
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AuthorizationMode {
+    #[default]
+    Unknown,
+    DeveloperMode,
+    SigningRequired,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CameraTransport {
+    #[default]
+    Unknown,
+    MjpegTls,
+    RtspsH264,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StorageTransport {
+    #[default]
+    Unknown,
+    Ftps,
+    Tunnel6000,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StorageVolume {
+    SdCard,
+    Emmc,
+    UsbDisk,
+}
+
+/// Model-derived hints. Live observations may refine these values, but an
+/// unknown model deliberately remains unknown instead of over-advertising.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeCapabilities {
+    pub model_family: ModelFamily,
+    pub authorization: AuthorizationMode,
+    pub camera: CameraTransport,
+    pub storage_transport: StorageTransport,
+    pub storage_volumes: Vec<StorageVolume>,
+    pub extruder_count: Option<u8>,
+    pub ams_supported: Option<bool>,
+}
+
+impl RuntimeCapabilities {
+    pub fn for_model(model: &str) -> Self {
+        let normalized = model
+            .trim()
+            .to_ascii_uppercase()
+            .replace(['-', '_', ' '], "");
+        let model_family = ModelFamily::from_model(&normalized);
+        let (camera, storage_transport, storage_volumes, extruder_count) = match model_family {
+            ModelFamily::A1 => (
+                CameraTransport::MjpegTls,
+                StorageTransport::Ftps,
+                vec![StorageVolume::SdCard],
+                Some(1),
+            ),
+            ModelFamily::P1 => (
+                if normalized.starts_with("P1S") {
+                    CameraTransport::RtspsH264
+                } else {
+                    CameraTransport::MjpegTls
+                },
+                StorageTransport::Ftps,
+                vec![StorageVolume::SdCard],
+                Some(1),
+            ),
+            ModelFamily::X1 => (
+                CameraTransport::RtspsH264,
+                StorageTransport::Ftps,
+                vec![StorageVolume::SdCard],
+                Some(1),
+            ),
+            ModelFamily::P2 | ModelFamily::X2 | ModelFamily::H2 => (
+                CameraTransport::RtspsH264,
+                StorageTransport::Tunnel6000,
+                vec![StorageVolume::Emmc, StorageVolume::UsbDisk],
+                if normalized.starts_with("H2D") {
+                    Some(2)
+                } else {
+                    Some(1)
+                },
+            ),
+            ModelFamily::Unknown => (
+                CameraTransport::Unknown,
+                StorageTransport::Unknown,
+                Vec::new(),
+                None,
+            ),
+        };
+        Self {
+            model_family,
+            authorization: AuthorizationMode::Unknown,
+            camera,
+            storage_transport,
+            storage_volumes,
+            extruder_count,
+            ams_supported: (model_family != ModelFamily::Unknown).then_some(true),
+        }
     }
 }
 
@@ -570,6 +735,54 @@ mod tests {
                 request: "device/SN001/request".into(),
                 report: "device/SN001/report".into(),
             }
+        );
+    }
+
+    #[test]
+    fn classifies_supported_model_families_without_exact_model_matches() {
+        for (model, family) in [
+            ("A1 mini", ModelFamily::A1),
+            ("P1S", ModelFamily::P1),
+            ("P2S", ModelFamily::P2),
+            ("X1 Carbon", ModelFamily::X1),
+            ("X2C", ModelFamily::X2),
+            ("H2D", ModelFamily::H2),
+            ("future-printer", ModelFamily::Unknown),
+        ] {
+            assert_eq!(ModelFamily::from_model(model), family, "{model}");
+        }
+    }
+
+    #[test]
+    fn derives_conservative_transport_hints_from_the_model() {
+        let p1p = RuntimeCapabilities::for_model("P1P");
+        assert_eq!(p1p.camera, CameraTransport::MjpegTls);
+        assert_eq!(p1p.storage_transport, StorageTransport::Ftps);
+
+        let h2d = RuntimeCapabilities::for_model("H2D");
+        assert_eq!(h2d.camera, CameraTransport::RtspsH264);
+        assert_eq!(h2d.storage_transport, StorageTransport::Tunnel6000);
+        assert_eq!(h2d.extruder_count, Some(2));
+
+        let unknown = RuntimeCapabilities::for_model("");
+        assert_eq!(unknown.model_family, ModelFamily::Unknown);
+        assert_eq!(unknown.camera, CameraTransport::Unknown);
+        assert!(unknown.storage_volumes.is_empty());
+        assert_eq!(unknown.ams_supported, None);
+    }
+
+    #[test]
+    fn model_changes_connection_identity() {
+        let p1 = Profile::new("printer.local", "SN001", false)
+            .unwrap()
+            .with_model("P1S");
+        let h2 = Profile::new("printer.local", "SN001", false)
+            .unwrap()
+            .with_model("H2D");
+
+        assert_ne!(
+            p1.connection_identity(Some("code"), None),
+            h2.connection_identity(Some("code"), None)
         );
     }
 

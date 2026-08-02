@@ -241,6 +241,7 @@ fn profile_with_timeout(
     match Driver::parse(&config.driver)? {
         Driver::BambuLan => {
             bambu::Profile::with_timeout(&config.host, &config.serial, config.insecure, timeout)
+                .map(|profile| profile.with_model(&config.model))
                 .map(Profile::Bambu)
                 .map_err(|_| DriverError::InvalidProfile(Driver::BambuLan))
         }
@@ -644,6 +645,7 @@ mod tests {
             driver: "bambu-lan".into(),
             host: "printer.local".into(),
             serial: "01S09C450100XXX".into(),
+            model: "P1S".into(),
             timeout: "10s".into(),
             insecure: false,
             created: String::new(),
@@ -658,6 +660,7 @@ mod tests {
             driver: "moonraker".into(),
             host: "printer.local".into(),
             serial: String::new(),
+            model: String::new(),
             timeout: "250ms".into(),
             insecure: false,
             created: String::new(),
@@ -675,6 +678,7 @@ mod tests {
             driver: "unknown".into(),
             host: "printer.local".into(),
             serial: String::new(),
+            model: String::new(),
             timeout: "10s".into(),
             insecure: false,
             created: String::new(),

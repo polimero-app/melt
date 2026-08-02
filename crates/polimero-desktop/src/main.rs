@@ -2614,6 +2614,7 @@ mod tests {
             driver: "moonraker".into(),
             host: format!("http://{address}"),
             serial: String::new(),
+            model: String::new(),
             timeout: "2s".into(),
             insecure: false,
             created: String::new(),

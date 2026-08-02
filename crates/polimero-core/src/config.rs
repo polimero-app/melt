@@ -37,6 +37,8 @@ pub struct Profile {
     pub host: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub serial: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model: String,
     pub timeout: String,
     pub insecure: bool,
     pub created: String,
@@ -264,6 +266,7 @@ profiles:
             driver: "moonraker".into(),
             host: "printer.local".into(),
             serial: String::new(),
+            model: String::new(),
             timeout: "10s".into(),
             insecure: false,
             created: "2026-06-13T11:00:00Z".into(),
@@ -282,6 +285,26 @@ profiles:
         assert_eq!(
             config.get_profile("attic-p1s").unwrap().serial,
             "01P00C450100XYZ"
+        );
+        assert_eq!(config.get_profile("attic-p1s").unwrap().model, "");
+    }
+
+    #[test]
+    fn persists_optional_printer_models() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::open(dir.path()).unwrap();
+        let mut profile = profile();
+        profile.model = "H2D".into();
+        config.add_profile("workshop", profile).unwrap();
+        config.save(dir.path()).unwrap();
+
+        assert_eq!(
+            Config::open(dir.path())
+                .unwrap()
+                .get_profile("workshop")
+                .unwrap()
+                .model,
+            "H2D"
         );
     }
 
