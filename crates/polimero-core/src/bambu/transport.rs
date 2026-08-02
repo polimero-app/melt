@@ -178,20 +178,41 @@ impl Client {
         let payload = pushall_payload(next_sequence());
         let label = format!("poll {}", self.profile.mqtt_topics().request);
         self.trace(TraceEvent::request("mqtt", label.as_str()).with_bytes(payload.len() as u64));
+        let result = self.poll_status_inner(access_code, fingerprint, deadline, identity, payload);
+        let result = result.and_then(|report| {
+            let bytes = report.len() as u64;
+            parse_status(&report).map(|status| (status, bytes))
+        });
+        match &result {
+            Ok((_, bytes)) => self.trace(
+                TraceEvent::response("mqtt", label)
+                    .with_outcome("ok")
+                    .with_elapsed_ms(started.elapsed().as_millis() as u64)
+                    .with_bytes(*bytes),
+            ),
+            Err(error) => self.trace(
+                TraceEvent::response("mqtt", label)
+                    .with_outcome(error.to_string())
+                    .with_elapsed_ms(started.elapsed().as_millis() as u64),
+            ),
+        }
+        result.map(|(status, _)| status)
+    }
+
+    fn poll_status_inner(
+        &self,
+        access_code: &str,
+        fingerprint: Option<&str>,
+        deadline: Instant,
+        identity: [u8; 32],
+        payload: String,
+    ) -> Result<Vec<u8>, Error> {
         let mut cached = self.lock_mqtt_until(deadline)?;
 
         if let Some(mqtt) = matching_cached_connection(&mut cached, identity) {
             mqtt.deadline = deadline;
             match mqtt.exchange_reused_status(payload.clone()) {
-                Ok(report) => {
-                    self.trace(
-                        TraceEvent::response("mqtt", label.as_str())
-                            .with_outcome("ok")
-                            .with_bytes(report.len() as u64)
-                            .with_elapsed_ms(started.elapsed().as_millis() as u64),
-                    );
-                    return parse_status(&report);
-                }
+                Ok(report) => return Ok(report),
                 Err(_) => *cached = None,
             }
         }
@@ -208,33 +229,11 @@ impl Client {
         )?;
         let mut mqtt = MqttConnection::new(stream, self.profile.mqtt_topics(), deadline);
         if let Err(error) = mqtt.connect(access_code).and_then(|_| mqtt.subscribe()) {
-            self.trace(
-                TraceEvent::response("mqtt", label.as_str())
-                    .with_outcome(error.to_string())
-                    .with_elapsed_ms(started.elapsed().as_millis() as u64),
-            );
             return Err(error);
         }
-        let report = match mqtt.exchange(payload, is_full_report) {
-            Ok(report) => report,
-            Err(error) => {
-                self.trace(
-                    TraceEvent::response("mqtt", label.as_str())
-                        .with_outcome(error.to_string())
-                        .with_elapsed_ms(started.elapsed().as_millis() as u64),
-                );
-                return Err(error);
-            }
-        };
-        self.trace(
-            TraceEvent::response("mqtt", label.as_str())
-                .with_outcome("ok")
-                .with_bytes(report.len() as u64)
-                .with_elapsed_ms(started.elapsed().as_millis() as u64),
-        );
-        let status = parse_status(&report)?;
+        let report = mqtt.exchange(payload, is_full_report)?;
         *cached = Some(CachedConnection { identity, mqtt });
-        Ok(status)
+        Ok(report)
     }
 
     pub fn job_start(
@@ -2532,6 +2531,22 @@ mod tests {
     };
 
     use super::*;
+    use crate::trace::{Direction, ProtocolTracer};
+
+    #[derive(Debug)]
+    struct BlockingResponseTracer {
+        started: mpsc::Sender<()>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+
+    impl ProtocolTracer for BlockingResponseTracer {
+        fn record(&self, event: TraceEvent) {
+            if event.direction == Some(Direction::Response) {
+                self.started.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+            }
+        }
+    }
 
     #[test]
     fn encodes_mqtt_remaining_lengths_and_rejects_oversized_packets() {
@@ -2873,6 +2888,70 @@ mod tests {
                 .is_none(),
             "credentials changes must discard an authenticated cached session"
         );
+    }
+
+    #[test]
+    fn status_tracing_does_not_hold_the_cached_session_lock() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let host = address.ip().to_string();
+        let port = address.port();
+        let acceptor = test_acceptor();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            assert_eq!(read_test_packet(&mut stream).kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            stream.flush().unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+
+            for _ in 0..2 {
+                let publish = read_test_packet(&mut stream);
+                assert_eq!(publish.kind, 0x30);
+                write_test_report(
+                    &mut stream,
+                    &json!({"print": {"gcode_state": "IDLE", "mc_percent": 0}}),
+                );
+            }
+        });
+
+        let (trace_started_tx, trace_started_rx) = mpsc::channel();
+        let (trace_release_tx, trace_release_rx) = mpsc::channel();
+        let tracer = Arc::new(BlockingResponseTracer {
+            started: trace_started_tx,
+            release: Mutex::new(trace_release_rx),
+        });
+        let profile = Profile::with_timeout(host, "SN001", true, Duration::from_secs(2))
+            .unwrap()
+            .with_tracer(tracer);
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) = open_tls(&connector, &profile, port, None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+        mqtt.subscribe().unwrap();
+        let identity = profile.connection_identity(Some("access-code"), None);
+        let client = Arc::new(Client::new(profile));
+        *client.mqtt.lock().unwrap() = Some(CachedConnection { identity, mqtt });
+
+        let polling_client = client.clone();
+        let poll = thread::spawn(move || {
+            polling_client.poll_status(Some("access-code"), None, Duration::from_secs(2))
+        });
+        trace_started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert!(
+            client.mqtt.try_lock().is_ok(),
+            "the response tracer must run after releasing the MQTT session lock"
+        );
+        trace_release_tx.send(()).unwrap();
+
+        assert_eq!(poll.join().unwrap().unwrap().state, PrinterState::Idle);
+        server.join().unwrap();
     }
 
     #[test]
