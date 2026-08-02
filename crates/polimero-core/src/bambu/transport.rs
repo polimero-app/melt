@@ -228,9 +228,7 @@ impl Client {
             deadline,
         )?;
         let mut mqtt = MqttConnection::new(stream, self.profile.mqtt_topics(), deadline);
-        if let Err(error) = mqtt.connect(access_code).and_then(|_| mqtt.subscribe()) {
-            return Err(error);
-        }
+        mqtt.connect(access_code).and_then(|_| mqtt.subscribe())?;
         let report = mqtt.exchange(payload, is_full_report)?;
         *cached = Some(CachedConnection { identity, mqtt });
         Ok(report)
