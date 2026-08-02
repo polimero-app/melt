@@ -815,8 +815,7 @@ fn collect_monitored_printers(state: &MonitorState) -> Result<Vec<MonitorEntry>,
             })
             .collect::<Vec<_>>()
             .into_iter()
-            .map(|handle| handle.join().expect("monitor thread panicked"))
-            .flatten()
+            .filter_map(|handle| handle.join().expect("monitor thread panicked"))
             .collect()
     });
     if !state.pool.is_current_generation(generation) {
