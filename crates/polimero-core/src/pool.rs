@@ -380,9 +380,11 @@ impl ConnectionPool {
 
     /// Drops pooled connections for printers no longer present in the config.
     pub fn retain(&self, keep: impl Fn(&str) -> bool) {
-        if let Ok(mut sessions) = self.sessions.lock() {
-            sessions.retain(|name, _| keep(name));
-        }
+        let mut sessions = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        sessions.retain(|name, _| keep(name));
     }
 }
 
@@ -506,6 +508,27 @@ mod tests {
         let _moonraker_client = pool.moonraker_client("printer", &moonraker).unwrap();
         assert!(old_bambu.upgrade().is_none());
         assert_eq!(pool.sessions.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn retain_evicts_sessions_after_the_pool_lock_is_poisoned() {
+        let profile =
+            moonraker::Profile::new("http://printer.local", false, Duration::from_secs(2)).unwrap();
+        let pool = ConnectionPool::default();
+        let _client = pool.moonraker_client("printer", &profile).unwrap();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _sessions = pool.sessions.lock().unwrap();
+            panic!("poison the connection pool for the regression test");
+        }));
+
+        pool.retain(|_| false);
+
+        assert!(
+            pool.sessions
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_empty()
+        );
     }
 
     fn status_server(state: &'static str) -> (String, thread::JoinHandle<()>) {
