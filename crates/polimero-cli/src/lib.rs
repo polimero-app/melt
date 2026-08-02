@@ -3720,12 +3720,18 @@ fn driver_error(error: DriverError) -> AppError {
         },
         DriverError::Bambu(
             polimero_core::bambu::TransportError::Authentication
-            | polimero_core::bambu::TransportError::UnsignedCommand
             | polimero_core::bambu::TransportError::Pin(_),
         ) => AppError {
             exit_code: 3,
             code: "authentication_failed",
             message: "printer authentication failed".into(),
+        },
+        DriverError::Bambu(polimero_core::bambu::TransportError::UnsignedCommand) => AppError {
+            exit_code: 5,
+            code: "signing_required",
+            message:
+                "printer rejected an unsigned command; enable Developer Mode or use a signed client"
+                    .into(),
         },
         DriverError::Bambu(polimero_core::bambu::TransportError::Timeout) => AppError {
             exit_code: 4,
@@ -4533,6 +4539,16 @@ mod tests {
 
         assert_eq!(error.exit_code, 4);
         assert_eq!(error.code, "timeout");
+    }
+
+    #[test]
+    fn unsigned_bambu_commands_use_the_capability_exit_contract() {
+        let error = driver_error(DriverError::Bambu(
+            polimero_core::bambu::TransportError::UnsignedCommand,
+        ));
+
+        assert_eq!(error.exit_code, 5);
+        assert_eq!(error.code, "signing_required");
     }
 
     #[test]

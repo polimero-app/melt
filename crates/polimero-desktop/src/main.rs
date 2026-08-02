@@ -2535,9 +2535,11 @@ fn operation_error(error: DriverError, operation: Operation) -> CommandError {
         DriverError::Moonraker(polimero_core::moonraker::Error::Authentication)
         | DriverError::Bambu(
             polimero_core::bambu::TransportError::Authentication
-            | polimero_core::bambu::TransportError::UnsignedCommand
             | polimero_core::bambu::TransportError::Pin(_),
         ) => "printerAuthFailed",
+        DriverError::Bambu(polimero_core::bambu::TransportError::UnsignedCommand) => {
+            "printerSigningRequired"
+        }
         DriverError::Moonraker(polimero_core::moonraker::Error::Timeout)
         | DriverError::Bambu(polimero_core::bambu::TransportError::Timeout) => "printerTimeout",
         DriverError::Camera(polimero_core::bambu::CameraError::MissingAccessCode) => {
@@ -2675,6 +2677,16 @@ mod tests {
 
         assert_eq!(error.code, "printerTimeout");
         assert_eq!(error.operation, Some("status"));
+    }
+
+    #[test]
+    fn unsigned_commands_report_a_signing_requirement_not_bad_credentials() {
+        let error = operation_error(
+            drivers::DriverError::Bambu(polimero_core::bambu::TransportError::UnsignedCommand),
+            Operation::JobStart,
+        );
+
+        assert_eq!(error.code, "printerSigningRequired");
     }
 
     #[test]
