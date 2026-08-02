@@ -1127,6 +1127,8 @@ pub struct BambuExtension {
     pub sd_card_state: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub emmc_storage: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extruder_count: Option<u8>,
     #[serde(rename = "reportedIP", skip_serializing_if = "Option::is_none")]
     pub reported_ip: Option<String>,
 }
@@ -1136,6 +1138,7 @@ impl BambuExtension {
         self.ams.is_none()
             && self.sd_card_state.is_none()
             && self.emmc_storage.is_none()
+            && self.extruder_count.is_none()
             && self.reported_ip.is_none()
     }
 }

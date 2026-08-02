@@ -1725,6 +1725,7 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
         ams: ams_data(print),
         sd_card_state: sd_card_state(print),
         emmc_storage: has_emmc(print),
+        extruder_count: observed_extruder_count(print),
         reported_ip: string(print.get("wifi_ip")).filter(|value| !value.is_empty()),
     };
     Ok(Status {
@@ -1748,6 +1749,17 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
             bambu_lan: (!extension.is_empty()).then_some(extension),
         },
     })
+}
+
+fn observed_extruder_count(print: &Map<String, Value>) -> Option<u8> {
+    print
+        .get("device")?
+        .get("extruder")?
+        .get("info")?
+        .as_array()?
+        .len()
+        .try_into()
+        .ok()
 }
 
 /// Chamber readings move between firmware generations: X1-class printers report
@@ -2916,6 +2928,22 @@ mod tests {
         // Unknown remaining filament is omitted rather than reported as -1%.
         assert_eq!(units[0].trays[0].remaining_percent, None);
         assert_eq!(units[0].trays[0].nozzle_temp_max, Some(240));
+    }
+
+    #[test]
+    fn reports_the_observed_extruder_count_from_newer_device_trees() {
+        let status = parse_status(
+            br#"{"print":{"gcode_state":"IDLE","device":{"extruder":{"info":[{"id":0},{"id":1}]}}}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            status
+                .extensions
+                .bambu_lan
+                .and_then(|extension| extension.extruder_count),
+            Some(2)
+        );
     }
 
     #[test]

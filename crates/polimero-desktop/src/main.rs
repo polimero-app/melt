@@ -234,6 +234,7 @@ struct PrinterSummary {
     driver: String,
     host: String,
     serial: String,
+    model: String,
     timeout: String,
     insecure: bool,
 }
@@ -735,6 +736,7 @@ fn configured_printers() -> Result<Vec<PrinterSummary>, CommandError> {
                     driver: profile.profile.driver,
                     host: profile.profile.host,
                     serial: profile.profile.serial,
+                    model: profile.profile.model,
                     timeout: profile.profile.timeout,
                     insecure: profile.profile.insecure,
                 })
@@ -755,16 +757,45 @@ fn discover_printers() -> Result<Vec<polimero_core::bambu::DiscoveredPrinter>, C
 }
 
 #[tauri::command(async)]
-fn printer_capabilities(name: String) -> Result<PrinterCapabilities, CommandError> {
+fn printer_capabilities(
+    name: String,
+    state: tauri::State<'_, MonitorState>,
+) -> Result<PrinterCapabilities, CommandError> {
     let config = Config::load().map_err(|_| unreadable_config())?;
     let profile = config
         .get_profile(&name.to_ascii_lowercase())
         .ok_or_else(|| CommandError::new("profileNotFound"))?;
     let driver = drivers::profile(profile).map_err(|_| CommandError::new("profileInvalid"))?;
+    let mut bambu = driver.bambu_runtime_capabilities();
+    if let Some(runtime) = bambu.as_mut()
+        && let Ok(entries) = state.entries.lock()
+        && let Some(extension) = entries
+            .get(&name.to_ascii_lowercase())
+            .and_then(|cached| cached.entry.status.as_ref())
+            .and_then(|status| status.extensions.bambu_lan.as_ref())
+    {
+        if let Some(count) = extension.extruder_count {
+            runtime.extruder_count = Some(count);
+        }
+        if extension.ams.is_some() {
+            runtime.ams_supported = Some(true);
+        }
+        if extension.emmc_storage == Some(true) {
+            runtime.storage_transport = polimero_core::bambu::StorageTransport::Tunnel6000;
+            if !runtime
+                .storage_volumes
+                .contains(&polimero_core::bambu::StorageVolume::Emmc)
+            {
+                runtime
+                    .storage_volumes
+                    .push(polimero_core::bambu::StorageVolume::Emmc);
+            }
+        }
+    }
     Ok(PrinterCapabilities {
         name,
         capabilities: driver.capabilities(),
-        bambu: driver.bambu_runtime_capabilities(),
+        bambu,
     })
 }
 

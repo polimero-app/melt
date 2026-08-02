@@ -4228,6 +4228,7 @@ mod tests {
                     }),
                     sd_card_state: Some("normal"),
                     emmc_storage: None,
+                    extruder_count: None,
                     reported_ip: None,
                 }),
             },
