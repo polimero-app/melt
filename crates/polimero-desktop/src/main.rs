@@ -337,6 +337,8 @@ struct JobActionRequest {
     action: String,
     #[serde(default)]
     device_path: Option<String>,
+    #[serde(default)]
+    options: polimero_core::bambu::JobStartOptions,
     confirmed: bool,
 }
 
@@ -1391,7 +1393,7 @@ fn printer_job_action(
                 printer.access_code.as_deref(),
                 printer.tls_fingerprint.as_deref(),
                 device_path.expect("start device path was validated"),
-                polimero_core::bambu::JobStartOptions::default(),
+                request.options.clone(),
             ),
             "pause" => pool.job_pause(
                 &request.name,

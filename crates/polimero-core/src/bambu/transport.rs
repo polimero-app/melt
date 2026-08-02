@@ -22,6 +22,7 @@ use crate::trace::TraceEvent;
 use openssl::ssl::{
     SslConnector, SslMethod, SslSession, SslSessionRef, SslStream, SslVerifyMode, SslVersion,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use thiserror::Error;
 use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rfc3339};
@@ -86,10 +87,40 @@ pub enum Error {
     LocalIo,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct JobStartOptions {
     pub plate: Option<u32>,
     pub skip_leveling: bool,
+    pub bed_type: Option<String>,
+    pub flow_calibration: bool,
+    pub vibration_calibration: bool,
+    pub layer_inspection: bool,
+    pub timelapse: bool,
+    pub use_ams: bool,
+    pub ams_mapping: Vec<i32>,
+    pub ams_mapping2: Vec<i32>,
+    pub nozzle_mapping: Vec<i32>,
+    pub nozzle_offset_calibration: bool,
+}
+
+impl Default for JobStartOptions {
+    fn default() -> Self {
+        Self {
+            plate: None,
+            skip_leveling: false,
+            bed_type: None,
+            flow_calibration: false,
+            vibration_calibration: false,
+            layer_inspection: false,
+            timelapse: false,
+            use_ams: false,
+            ams_mapping: Vec::new(),
+            ams_mapping2: Vec::new(),
+            nozzle_mapping: Vec::new(),
+            nozzle_offset_calibration: false,
+        }
+    }
 }
 
 /// Authenticated Bambu LAN operations for one validated profile.
@@ -245,6 +276,7 @@ impl Client {
         if path == "/" {
             return Err(Error::InvalidDevicePath);
         }
+        validate_job_options(&self.profile, &options)?;
         let payload = job_start_payload(&path, options)?;
         let report = self.exchange(access_code, fingerprint, payload, |report| {
             report_state_is(report, &[PrinterState::Printing])
@@ -1442,15 +1474,22 @@ fn job_start_payload(path: &str, options: JobStartOptions) -> Result<String, Err
     let mut print = Map::new();
     print.insert("sequence_id".into(), Value::String(next_sequence_id()));
     print.insert("command".into(), Value::String(command.into()));
-    print.insert("bed_type".into(), Value::String("auto".into()));
+    print.insert(
+        "bed_type".into(),
+        Value::String(options.bed_type.clone().unwrap_or_else(|| "auto".into())),
+    );
     print.insert("bed_leveling".into(), Value::Bool(!options.skip_leveling));
-    print.insert("flow_cali".into(), Value::Bool(false));
-    print.insert("vibration_cali".into(), Value::Bool(false));
-    print.insert("layer_inspect".into(), Value::Bool(false));
-    print.insert("timelapse".into(), Value::Bool(false));
-    // ponytail: prints from the external spool only. Add use_ams plus a real
-    // ams_mapping to JobStartOptions when AMS slot selection is exposed.
-    print.insert("use_ams".into(), Value::Bool(false));
+    print.insert("flow_cali".into(), Value::Bool(options.flow_calibration));
+    print.insert(
+        "vibration_cali".into(),
+        Value::Bool(options.vibration_calibration),
+    );
+    print.insert(
+        "layer_inspect".into(),
+        Value::Bool(options.layer_inspection),
+    );
+    print.insert("timelapse".into(), Value::Bool(options.timelapse));
+    print.insert("use_ams".into(), Value::Bool(options.use_ams));
     if command == "project_file" {
         let plate = options.plate.unwrap_or(1).max(1);
         print.insert(
@@ -1470,21 +1509,50 @@ fn job_start_payload(path: &str, options: JobStartOptions) -> Result<String, Err
             Value::String(format!("file:///{FILE_ROOT}{path}")),
         );
         print.insert("md5".into(), Value::String(String::new()));
-        print.insert("ams_mapping".into(), Value::Array(Vec::new()));
-        print.insert("ams_mapping2".into(), Value::Array(Vec::new()));
-        for key in [
-            "auto_bed_leveling",
-            "nozzle_offset_cali",
-            "extrude_cali_flag",
-        ] {
-            print.insert(key.into(), Value::from(0));
+        print.insert("ams_mapping".into(), json!(options.ams_mapping));
+        print.insert("ams_mapping2".into(), json!(options.ams_mapping2));
+        if !options.nozzle_mapping.is_empty() {
+            print.insert("nozzle_mapping".into(), json!(options.nozzle_mapping));
         }
+        print.insert("auto_bed_leveling".into(), Value::from(0));
+        print.insert(
+            "nozzle_offset_cali".into(),
+            Value::from(u8::from(options.nozzle_offset_calibration)),
+        );
+        print.insert("extrude_cali_flag".into(), Value::from(0));
     } else {
         print.insert("param".into(), Value::String(path.into()));
         print.insert("subtask_name".into(), Value::String(filename.into()));
         print.insert("plate_idx".into(), Value::from(options.plate.unwrap_or(0)));
     }
     Ok(Value::Object(Map::from_iter([("print".into(), Value::Object(print))])).to_string())
+}
+
+fn validate_job_options(profile: &Profile, options: &JobStartOptions) -> Result<(), Error> {
+    if options.plate == Some(0)
+        || options.bed_type.as_ref().is_some_and(|value| {
+            value.is_empty() || value.len() > 64 || value.chars().any(char::is_control)
+        })
+        || (!options.use_ams
+            && (!options.ams_mapping.is_empty() || !options.ams_mapping2.is_empty()))
+        || [
+            &options.ams_mapping,
+            &options.ams_mapping2,
+            &options.nozzle_mapping,
+        ]
+        .into_iter()
+        .any(|mapping| mapping.len() > 16 || mapping.iter().any(|slot| !(-1..=255).contains(slot)))
+    {
+        return Err(Error::Unsupported("requested print options"));
+    }
+    if !options.nozzle_mapping.is_empty()
+        && profile.default_capabilities().extruder_count == Some(1)
+    {
+        return Err(Error::Unsupported(
+            "nozzle mapping on a single-extruder model",
+        ));
+    }
+    Ok(())
 }
 
 fn is_full_report(report: &Value) -> bool {
@@ -2752,6 +2820,74 @@ mod tests {
         assert_eq!(payload["print"]["command"], "project_file");
         assert_eq!(payload["print"]["url"], "file:///sdcard/models/cube.3mf");
         assert_eq!(payload["print"]["param"], "Metadata/plate_1.gcode");
+    }
+
+    #[test]
+    fn serializes_typed_ams_and_multi_extruder_print_options() {
+        let options = JobStartOptions {
+            plate: Some(2),
+            bed_type: Some("textured_plate".into()),
+            flow_calibration: true,
+            timelapse: true,
+            use_ams: true,
+            ams_mapping: vec![0, 3, -1],
+            ams_mapping2: vec![1, 0, -1],
+            nozzle_mapping: vec![0, 1],
+            nozzle_offset_calibration: true,
+            ..Default::default()
+        };
+        let payload: Value =
+            serde_json::from_str(&job_start_payload("/models/dual.3mf", options).unwrap()).unwrap();
+
+        assert_eq!(payload["print"]["param"], "Metadata/plate_2.gcode");
+        assert_eq!(payload["print"]["bed_type"], "textured_plate");
+        assert_eq!(payload["print"]["flow_cali"], true);
+        assert_eq!(payload["print"]["timelapse"], true);
+        assert_eq!(payload["print"]["use_ams"], true);
+        assert_eq!(payload["print"]["ams_mapping"], json!([0, 3, -1]));
+        assert_eq!(payload["print"]["nozzle_mapping"], json!([0, 1]));
+        assert_eq!(payload["print"]["nozzle_offset_cali"], 1);
+    }
+
+    #[test]
+    fn rejects_inconsistent_or_model_incompatible_print_options() {
+        let p1 = Profile::new("printer.local", "SN001", true)
+            .unwrap()
+            .with_model("P1S");
+        assert!(
+            validate_job_options(
+                &p1,
+                &JobStartOptions {
+                    ams_mapping: vec![0],
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            validate_job_options(
+                &p1,
+                &JobStartOptions {
+                    nozzle_mapping: vec![0, 1],
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
+
+        let h2d = Profile::new("printer.local", "SN001", true)
+            .unwrap()
+            .with_model("H2D");
+        assert!(
+            validate_job_options(
+                &h2d,
+                &JobStartOptions {
+                    nozzle_mapping: vec![0, 1],
+                    ..Default::default()
+                }
+            )
+            .is_ok()
+        );
     }
 
     #[test]

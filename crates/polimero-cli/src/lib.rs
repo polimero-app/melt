@@ -2962,6 +2962,7 @@ fn job_action(
             Ok(plate) => polimero_core::bambu::JobStartOptions {
                 plate: Some(plate),
                 skip_leveling: options.enabled("skip-leveling"),
+                ..Default::default()
             },
             Err(_) => {
                 return write_error(
@@ -2976,6 +2977,7 @@ fn job_action(
         None => polimero_core::bambu::JobStartOptions {
             plate: None,
             skip_leveling: options.enabled("skip-leveling"),
+            ..Default::default()
         },
     };
     let allowed = match action {
