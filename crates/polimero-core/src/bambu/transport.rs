@@ -5,7 +5,7 @@ use std::{
     net::{SocketAddr, TcpStream, ToSocketAddrs},
     path::Path,
     sync::{
-        Mutex,
+        Mutex, MutexGuard, TryLockError,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -169,6 +169,7 @@ impl Client {
         timeout: Duration,
     ) -> Result<Status, Error> {
         let started = Instant::now();
+        let deadline = deadline_after(timeout)?;
         let access_code = valid_access_code(access_code)?;
         validate_pin(&self.profile, fingerprint)?;
         let identity = self
@@ -176,11 +177,11 @@ impl Client {
             .connection_identity(Some(access_code), fingerprint);
         let payload = pushall_payload(next_sequence());
         let label = format!("poll {}", self.profile.mqtt_topics().request);
-        let mut cached = self.mqtt.lock().unwrap_or_else(|error| error.into_inner());
         self.trace(TraceEvent::request("mqtt", label.as_str()).with_bytes(payload.len() as u64));
+        let mut cached = self.lock_mqtt_until(deadline)?;
 
         if let Some(mqtt) = matching_cached_connection(&mut cached, identity) {
-            mqtt.deadline = deadline_after(timeout)?;
+            mqtt.deadline = deadline;
             match mqtt.exchange(payload.clone(), is_full_report) {
                 Ok(report) => {
                     self.trace(
@@ -195,7 +196,7 @@ impl Client {
             }
         }
 
-        let deadline = deadline_after(timeout)?;
+        remaining(deadline)?;
         let connector = tls_connector()?;
         let (stream, _) = open_tls(
             &connector,
@@ -716,9 +717,10 @@ impl Client {
         let identity = self
             .profile
             .connection_identity(Some(access_code), fingerprint);
-        let mut cached = self.mqtt.lock().unwrap_or_else(|error| error.into_inner());
+        let deadline = deadline_after(self.profile.timeout())?;
+        let mut cached = self.lock_mqtt_until(deadline)?;
         if let Some(mqtt) = matching_cached_connection(&mut cached, identity) {
-            mqtt.deadline = deadline_after(self.profile.timeout())?;
+            mqtt.deadline = deadline;
             return match operation(mqtt) {
                 Ok(result) => Ok(result),
                 Err(error) => {
@@ -728,7 +730,7 @@ impl Client {
             };
         }
 
-        let deadline = deadline_after(self.profile.timeout())?;
+        remaining(deadline)?;
         let connector = tls_connector()?;
         let (stream, _) = open_tls(
             &connector,
@@ -752,6 +754,21 @@ impl Client {
             Err(error) => {
                 mqtt.disconnect();
                 Err(error)
+            }
+        }
+    }
+
+    fn lock_mqtt_until(
+        &self,
+        deadline: Instant,
+    ) -> Result<MutexGuard<'_, Option<CachedConnection>>, Error> {
+        loop {
+            match self.mqtt.try_lock() {
+                Ok(cached) => return Ok(cached),
+                Err(TryLockError::Poisoned(error)) => return Ok(error.into_inner()),
+                Err(TryLockError::WouldBlock) => {
+                    std::thread::sleep(remaining(deadline)?.min(Duration::from_millis(1)));
+                }
             }
         }
     }
@@ -2399,7 +2416,12 @@ fn ftp_modified_at(month: &str, day: &str, time_or_year: &str) -> Option<String>
 
 #[cfg(test)]
 mod tests {
-    use std::{io::Write, net::TcpListener, sync::mpsc, thread};
+    use std::{
+        io::Write,
+        net::TcpListener,
+        sync::{Arc, mpsc},
+        thread,
+    };
 
     use openssl::{
         asn1::Asn1Time,
@@ -2753,6 +2775,68 @@ mod tests {
                 .is_none(),
             "credentials changes must discard an authenticated cached session"
         );
+    }
+
+    #[test]
+    fn mqtt_lock_wait_is_bounded_by_the_status_deadline() {
+        let profile =
+            Profile::with_timeout("127.0.0.1", "SN001", true, Duration::from_millis(20)).unwrap();
+        let client = Arc::new(Client::new(profile));
+        let holder = client.clone();
+        let (locked_tx, locked_rx) = mpsc::channel();
+        let thread = thread::spawn(move || {
+            let _guard = holder.mqtt.lock().unwrap();
+            locked_tx.send(()).unwrap();
+            thread::sleep(Duration::from_millis(100));
+        });
+        locked_rx.recv().unwrap();
+
+        let started = Instant::now();
+        let result = client.poll_status(Some("access-code"), None, Duration::from_millis(20));
+
+        assert!(matches!(result, Err(Error::Timeout)));
+        assert!(started.elapsed() < Duration::from_millis(80));
+        thread.join().unwrap();
+    }
+
+    #[test]
+    fn cached_status_retry_shares_one_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let host = address.ip().to_string();
+        let port = address.port();
+        let acceptor = test_acceptor();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            assert_eq!(read_test_packet(&mut stream).kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            stream.flush().unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+            assert_eq!(read_test_packet(&mut stream).kind, 0x30);
+            thread::sleep(Duration::from_millis(100));
+        });
+
+        let profile = Profile::with_timeout(host, "SN001", true, Duration::from_secs(2)).unwrap();
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) = open_tls(&connector, &profile, port, None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+        mqtt.subscribe().unwrap();
+        let identity = profile.connection_identity(Some("access-code"), None);
+        let client = Client::new(profile);
+        *client.mqtt.lock().unwrap() = Some(CachedConnection { identity, mqtt });
+
+        let started = Instant::now();
+        let result = client.poll_status(Some("access-code"), None, Duration::from_millis(20));
+
+        assert!(matches!(result, Err(Error::Timeout)));
+        assert!(started.elapsed() < Duration::from_millis(80));
+        server.join().unwrap();
     }
 
     #[test]
