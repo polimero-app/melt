@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::trace::SharedTracer;
+use crate::trace::{SharedTracer, next_tracer_generation};
 
 mod discovery;
 mod rtsp;
@@ -38,6 +38,7 @@ pub struct Profile {
     insecure: bool,
     timeout: Duration,
     tracer: Option<SharedTracer>,
+    tracer_generation: u64,
 }
 
 impl Profile {
@@ -67,11 +68,13 @@ impl Profile {
             insecure,
             timeout,
             tracer: None,
+            tracer_generation: 0,
         })
     }
 
     pub fn with_tracer(mut self, tracer: SharedTracer) -> Self {
         self.tracer = Some(tracer);
+        self.tracer_generation = next_tracer_generation();
         self
     }
 
@@ -116,6 +119,7 @@ impl Profile {
             identity.update(component.as_bytes());
         }
         identity.update(self.timeout.as_nanos().to_be_bytes());
+        identity.update(self.tracer_generation.to_be_bytes());
         identity.finalize().into()
     }
 }

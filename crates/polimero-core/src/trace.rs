@@ -9,7 +9,10 @@ use std::{
     fs::File,
     io::Write,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use serde::Serialize;
@@ -20,6 +23,12 @@ pub trait ProtocolTracer: fmt::Debug + Send + Sync {
 }
 
 pub type SharedTracer = Arc<dyn ProtocolTracer>;
+
+static NEXT_TRACER_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+pub(crate) fn next_tracer_generation() -> u64 {
+    NEXT_TRACER_GENERATION.fetch_add(1, Ordering::Relaxed)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Direction {

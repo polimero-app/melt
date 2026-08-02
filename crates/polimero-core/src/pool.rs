@@ -411,6 +411,15 @@ mod tests {
 
     use super::*;
 
+    #[derive(Debug, Default)]
+    struct RecordingTracer(std::sync::Mutex<Vec<crate::trace::TraceEvent>>);
+
+    impl crate::trace::ProtocolTracer for RecordingTracer {
+        fn record(&self, event: crate::trace::TraceEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
     #[test]
     fn moonraker_profile_edits_replace_the_cached_client() {
         let (first_host, first_server) = status_server("standby");
@@ -496,6 +505,43 @@ mod tests {
 
         assert!(Arc::ptr_eq(&first, &reused));
         assert_eq!(pool.sessions.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn attaching_a_tracer_replaces_then_reuses_the_moonraker_client() {
+        let (host, server) = status_server("standby");
+        let profile = moonraker::Profile::new(&host, false, Duration::from_secs(2)).unwrap();
+        let tracer = Arc::new(RecordingTracer::default());
+        let pool = ConnectionPool::default();
+        let untraced = pool.moonraker_client("printer", &profile).unwrap();
+        let traced = profile.with_tracer(tracer.clone());
+
+        let replacement = pool.moonraker_client("printer", &traced).unwrap();
+        let reused = pool.moonraker_client("printer", &traced).unwrap();
+        assert!(!Arc::ptr_eq(&untraced, &replacement));
+        assert!(Arc::ptr_eq(&replacement, &reused));
+
+        let status = pool
+            .status("printer", &drivers::Profile::Moonraker(traced), None, None)
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(status.state, moonraker::PrinterState::Idle);
+        assert_eq!(tracer.0.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn attaching_a_tracer_replaces_then_reuses_the_bambu_client() {
+        let profile = bambu::Profile::new("printer.local", "SN001", true).unwrap();
+        let tracer = Arc::new(RecordingTracer::default());
+        let pool = ConnectionPool::default();
+        let untraced = pool.bambu_client("printer", &profile, Some("access-code"), None);
+        let traced = profile.with_tracer(tracer);
+
+        let replacement = pool.bambu_client("printer", &traced, Some("access-code"), None);
+        let reused = pool.bambu_client("printer", &traced, Some("access-code"), None);
+
+        assert!(!Arc::ptr_eq(&untraced, &replacement));
+        assert!(Arc::ptr_eq(&replacement, &reused));
     }
 
     #[test]

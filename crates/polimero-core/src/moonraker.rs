@@ -21,7 +21,7 @@ use thiserror::Error;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use url::Url;
 
-use crate::trace::{SharedTracer, TraceEvent};
+use crate::trace::{SharedTracer, TraceEvent, next_tracer_generation};
 
 pub const DEFAULT_PORT: u16 = 7125;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -33,6 +33,7 @@ pub struct Profile {
     insecure: bool,
     timeout: Duration,
     tracer: Option<SharedTracer>,
+    tracer_generation: u64,
 }
 
 impl Profile {
@@ -72,6 +73,7 @@ impl Profile {
             insecure,
             timeout,
             tracer: None,
+            tracer_generation: 0,
         })
     }
 
@@ -85,15 +87,17 @@ impl Profile {
 
     pub fn with_tracer(mut self, tracer: SharedTracer) -> Self {
         self.tracer = Some(tracer);
+        self.tracer_generation = next_tracer_generation();
         self
     }
 
     pub(crate) fn connection_identity(&self) -> String {
         format!(
-            "{}|{}|{}",
+            "{}|{}|{}|{}",
             self.base_url,
             self.insecure,
-            self.timeout.as_nanos()
+            self.timeout.as_nanos(),
+            self.tracer_generation
         )
     }
 }
