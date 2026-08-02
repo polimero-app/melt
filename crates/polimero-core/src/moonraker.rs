@@ -629,17 +629,14 @@ impl Client {
     ) -> Result<JobResult, Error> {
         let deadline = Instant::now() + self.profile.timeout;
         loop {
-            let status = self.status(access_code)?;
+            let status = self.status_with_timeout(access_code, remaining_operation(deadline)?)?;
             if status.state == expected {
                 return Ok(JobResult { state: expected });
             }
             if status.state == PrinterState::Error {
                 return Err(Error::UnexpectedState);
             }
-            if Instant::now() >= deadline {
-                return Err(Error::Timeout);
-            }
-            thread::sleep(Duration::from_millis(300));
+            sleep_for_poll(deadline)?;
         }
     }
 
@@ -650,7 +647,11 @@ impl Client {
     ) -> Result<f64, Error> {
         let deadline = Instant::now() + self.profile.timeout;
         loop {
-            let objects = self.object_status(access_code, &[object])?;
+            let objects = self.object_status_with_timeout(
+                access_code,
+                &[object],
+                remaining_operation(deadline)?,
+            )?;
             if let Some(target) = objects
                 .get(object)
                 .and_then(Value::as_object)
@@ -658,17 +659,18 @@ impl Client {
             {
                 return Ok(target);
             }
-            if Instant::now() >= deadline {
-                return Err(Error::Timeout);
-            }
-            thread::sleep(Duration::from_millis(300));
+            sleep_for_poll(deadline)?;
         }
     }
 
     fn wait_for_fan_speed(&self, access_code: Option<&str>, expected: u8) -> Result<(), Error> {
         let deadline = Instant::now() + self.profile.timeout;
         loop {
-            let objects = self.object_status(access_code, &["fan"])?;
+            let objects = self.object_status_with_timeout(
+                access_code,
+                &["fan"],
+                remaining_operation(deadline)?,
+            )?;
             if objects
                 .get("fan")
                 .and_then(Value::as_object)
@@ -677,17 +679,18 @@ impl Client {
             {
                 return Ok(());
             }
-            if Instant::now() >= deadline {
-                return Err(Error::Timeout);
-            }
-            thread::sleep(Duration::from_millis(300));
+            sleep_for_poll(deadline)?;
         }
     }
 
     fn wait_for_speed_factor(&self, access_code: Option<&str>, expected: u16) -> Result<(), Error> {
         let deadline = Instant::now() + self.profile.timeout;
         loop {
-            let objects = self.object_status(access_code, &["gcode_move"])?;
+            let objects = self.object_status_with_timeout(
+                access_code,
+                &["gcode_move"],
+                remaining_operation(deadline)?,
+            )?;
             if objects
                 .get("gcode_move")
                 .and_then(Value::as_object)
@@ -696,10 +699,7 @@ impl Client {
             {
                 return Ok(());
             }
-            if Instant::now() >= deadline {
-                return Err(Error::Timeout);
-            }
-            thread::sleep(Duration::from_millis(300));
+            sleep_for_poll(deadline)?;
         }
     }
 
@@ -708,12 +708,35 @@ impl Client {
         access_code: Option<&str>,
         objects: &[&str],
     ) -> Result<BTreeMap<String, Value>, Error> {
+        self.object_status_with_optional_timeout(access_code, objects, None)
+    }
+
+    fn object_status_with_timeout(
+        &self,
+        access_code: Option<&str>,
+        objects: &[&str],
+        timeout: Duration,
+    ) -> Result<BTreeMap<String, Value>, Error> {
+        self.object_status_with_optional_timeout(access_code, objects, Some(timeout))
+    }
+
+    fn object_status_with_optional_timeout(
+        &self,
+        access_code: Option<&str>,
+        objects: &[&str],
+        timeout: Option<Duration>,
+    ) -> Result<BTreeMap<String, Value>, Error> {
         let query = objects
             .iter()
             .map(|object| (*object, String::new()))
             .collect::<Vec<_>>();
-        let payload: StatusPayload =
-            self.json_request(Method::GET, "printer/objects/query", &query, access_code)?;
+        let payload: StatusPayload = self.json_request_with_timeout(
+            Method::GET,
+            "printer/objects/query",
+            &query,
+            access_code,
+            timeout,
+        )?;
         Ok(payload.status)
     }
 
@@ -724,8 +747,20 @@ impl Client {
         query: &[(&str, String)],
         access_code: Option<&str>,
     ) -> Result<T, Error> {
+        self.json_request_with_timeout(method, endpoint, query, access_code, None)
+    }
+
+    fn json_request_with_timeout<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        endpoint: &str,
+        query: &[(&str, String)],
+        access_code: Option<&str>,
+        timeout: Option<Duration>,
+    ) -> Result<T, Error> {
         let label = format!("{method} {endpoint}");
-        let response = self.response(&self.http, method, endpoint, query, access_code)?;
+        let response =
+            self.response_with_timeout(&self.http, method, endpoint, query, access_code, timeout)?;
         let body = self.read_response(response, &label)?;
         let envelope: Envelope =
             serde_json::from_slice(&body).map_err(|_| Error::InvalidResponse)?;
@@ -871,6 +906,18 @@ fn map_request_error(error: reqwest::Error) -> Error {
     } else {
         Error::Transport(error)
     }
+}
+
+fn remaining_operation(deadline: Instant) -> Result<Duration, Error> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|duration| !duration.is_zero())
+        .ok_or(Error::Timeout)
+}
+
+fn sleep_for_poll(deadline: Instant) -> Result<(), Error> {
+    thread::sleep(remaining_operation(deadline)?.min(Duration::from_millis(300)));
+    Ok(())
 }
 
 fn body_error_is_timeout(error: &std::io::Error) -> bool {
@@ -1901,6 +1948,46 @@ mod tests {
         assert!(available.starts_with("GET /printer/objects/query?extruder= "));
         assert!(command.contains("script=M104+S215"));
         assert!(acknowledged.starts_with("GET /printer/objects/query?extruder= "));
+    }
+
+    #[test]
+    fn confirmation_loops_do_not_start_requests_after_the_operation_deadline() {
+        let cases: [(&str, fn(&Client) -> Result<(), Error>); 4] = [
+            (
+                r#"{"result":{"status":{"print_stats":{"state":"standby"}}}}"#,
+                |client| {
+                    client
+                        .wait_for_state(None, PrinterState::Printing)
+                        .map(|_| ())
+                },
+            ),
+            (
+                r#"{"result":{"status":{"extruder":{"temperature":25}}}}"#,
+                |client| {
+                    client
+                        .wait_for_temperature_target(None, "extruder")
+                        .map(|_| ())
+                },
+            ),
+            (r#"{"result":{"status":{"fan":{"speed":0}}}}"#, |client| {
+                client.wait_for_fan_speed(None, 100)
+            }),
+            (
+                r#"{"result":{"status":{"gcode_move":{"speed_factor":1}}}}"#,
+                |client| client.wait_for_speed_factor(None, 200),
+            ),
+        ];
+
+        for (body, operation) in cases {
+            let (host, _request, server) = server(body);
+            let profile = Profile::new(&host, false, Duration::from_millis(40)).unwrap();
+            let client = Client::new(profile).unwrap();
+            let started = Instant::now();
+
+            assert!(matches!(operation(&client), Err(Error::Timeout)));
+            assert!(started.elapsed() < Duration::from_millis(120));
+            server.join().unwrap();
+        }
     }
 
     #[test]
