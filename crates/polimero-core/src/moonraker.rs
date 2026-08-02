@@ -26,6 +26,7 @@ use crate::trace::{SharedTracer, TraceEvent, next_tracer_generation};
 pub const DEFAULT_PORT: u16 = 7125;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_JSON_RESPONSE_BYTES: u64 = 8 << 20;
+const MIN_TRANSFER_BYTES_PER_SECOND: u64 = 64 << 10;
 
 #[derive(Clone, Debug)]
 pub struct Profile {
@@ -169,6 +170,7 @@ impl Client {
             .map_err(Error::Client)?;
         let transfer_http = ClientBuilder::new()
             .connect_timeout(profile.timeout)
+            .timeout(None)
             .danger_accept_invalid_certs(profile.insecure)
             .redirect(Policy::none())
             .build()
@@ -287,12 +289,13 @@ impl Client {
             return Err(Error::InvalidDevicePath);
         }
         let endpoint = format!("server/files/gcodes/{relative}");
-        let mut response = self.response(
+        let mut response = self.response_with_timeout(
             &self.transfer_http,
             Method::GET,
             &endpoint,
             &[],
             access_code,
+            Some(self.profile.timeout),
         )?;
         let label = format!("GET {endpoint}");
         let status = response.status();
@@ -353,7 +356,8 @@ impl Client {
             .transfer_http
             .post(url)
             .header(ACCEPT, "application/json")
-            .multipart(form);
+            .multipart(form)
+            .timeout(transfer_timeout(self.profile.timeout, metadata.len()));
         if let Some(access_code) = access_code.filter(|value| !value.is_empty()) {
             let value = HeaderValue::from_str(access_code).map_err(|_| Error::InvalidAccessCode)?;
             request = request.header("X-Api-Key", value);
@@ -913,6 +917,14 @@ fn remaining_operation(deadline: Instant) -> Result<Duration, Error> {
         .checked_duration_since(Instant::now())
         .filter(|duration| !duration.is_zero())
         .ok_or(Error::Timeout)
+}
+
+fn transfer_timeout(profile_timeout: Duration, bytes: u64) -> Duration {
+    let estimated_millis = bytes
+        .saturating_mul(1_000)
+        .div_ceil(MIN_TRANSFER_BYTES_PER_SECOND)
+        .max(1);
+    profile_timeout.max(Duration::from_millis(estimated_millis))
 }
 
 fn sleep_for_poll(deadline: Instant) -> Result<(), Error> {
@@ -2031,6 +2043,31 @@ mod tests {
         assert_eq!(events[1].outcome.as_deref(), Some("timeout"));
     }
 
+    #[test]
+    fn stalled_download_and_upload_use_transfer_timeouts() {
+        let (download_host, download_server) = body_stalling_server();
+        let download_profile =
+            Profile::new(&download_host, false, Duration::from_millis(20)).unwrap();
+        let download_client = Client::new(download_profile).unwrap();
+        let mut destination = Vec::new();
+        assert!(matches!(
+            download_client.download_to(None, "/cube.gcode", &mut destination),
+            Err(Error::Timeout)
+        ));
+        download_server.join().unwrap();
+
+        let (upload_host, upload_server) = stalling_upload_server();
+        let upload_profile = Profile::new(&upload_host, false, Duration::from_millis(20)).unwrap();
+        let upload_client = Client::new(upload_profile).unwrap();
+        let mut source = tempfile::NamedTempFile::new().unwrap();
+        source.write_all(b"G28\n").unwrap();
+        assert!(matches!(
+            upload_client.upload_file(None, source.path(), "/cube.gcode", false),
+            Err(Error::Timeout)
+        ));
+        upload_server.join().unwrap();
+    }
+
     fn stalling_server() -> (String, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let host = format!("http://{}", listener.local_addr().unwrap());
@@ -2054,6 +2091,33 @@ mod tests {
             )
             .unwrap();
             stream.flush().unwrap();
+            thread::sleep(Duration::from_millis(100));
+        });
+        (host, server)
+    }
+
+    fn stalling_upload_server() -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let host = format!("http://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut preflight, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = preflight.read(&mut chunk).unwrap();
+                request.extend_from_slice(&chunk[..read]);
+            }
+            let body = r#"{"result":{"dirs":[],"files":[]}}"#;
+            write!(
+                preflight,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            preflight.flush().unwrap();
+            drop(preflight);
+
+            let (_upload, _) = listener.accept().unwrap();
             thread::sleep(Duration::from_millis(100));
         });
         (host, server)
