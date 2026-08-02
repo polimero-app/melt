@@ -1063,9 +1063,7 @@ impl MqttConnection {
     /// pushall reports do not consistently echo their sequence id, so request
     /// ordering is the only reliable freshness boundary for status polls.
     fn drain_stale_packets(&mut self) -> Result<(), Error> {
-        let until = self
-            .deadline
-            .min(Instant::now() + MQTT_DRAIN_QUIET_WINDOW);
+        let until = self.deadline.min(Instant::now() + MQTT_DRAIN_QUIET_WINDOW);
         loop {
             match self.read_packet_until(until)? {
                 Some(_) => {}
