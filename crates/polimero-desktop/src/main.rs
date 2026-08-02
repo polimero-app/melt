@@ -771,7 +771,7 @@ fn printer_status(
             .get_profile(&name.to_ascii_lowercase())
             .ok_or_else(|| CommandError::new("profileNotFound"))?
             .clone();
-        if let Some(entry) = cached_ui_monitor_entry(&state, &name) {
+        if let Some(entry) = cached_ui_monitor_entry(&state, &name, generation) {
             return Ok(entry);
         }
         if let Some(entry) = cached_monitor_entry_at(&state, name.clone(), profile, generation) {
@@ -784,10 +784,19 @@ fn printer_status(
 /// Printer selection should repaint from the last known state immediately.
 /// The monitor worker remains responsible for refreshing this snapshot; a
 /// live probe is only needed when no recent entry exists.
-fn cached_ui_monitor_entry(state: &MonitorState, name: &str) -> Option<MonitorEntry> {
+fn cached_ui_monitor_entry(
+    state: &MonitorState,
+    name: &str,
+    generation: u64,
+) -> Option<MonitorEntry> {
+    if !state.pool.is_current_generation(generation) {
+        return None;
+    }
     let entries = state.entries.lock().ok()?;
     let cached = entries.get(&name.to_ascii_lowercase())?;
-    (cached.sampled_at.elapsed() <= MAX_UI_CACHE_AGE).then(|| cached.entry.clone())
+    (cached.sampled_at.elapsed() <= MAX_UI_CACHE_AGE
+        && state.pool.is_current_generation(generation))
+    .then(|| cached.entry.clone())
 }
 
 fn collect_monitored_printers(state: &MonitorState) -> Result<Vec<MonitorEntry>, CommandError> {
@@ -2503,7 +2512,7 @@ mod tests {
         net::TcpListener,
         sync::mpsc,
         thread,
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     use polimero_core::{
@@ -2512,9 +2521,9 @@ mod tests {
     };
 
     use super::{
-        DesktopPrinter, MonitorEntry, MonitorState, Profile, cached_monitor_entry_at,
-        camera_preview_request, ensure_state, extract_3mf_thumbnail, load_status_cache_from,
-        operation_error, save_status_cache_to,
+        CachedMonitor, DesktopPrinter, MonitorEntry, MonitorState, Profile,
+        cached_monitor_entry_at, cached_ui_monitor_entry, camera_preview_request, ensure_state,
+        extract_3mf_thumbnail, load_status_cache_from, operation_error, save_status_cache_to,
     };
 
     const TOKEN: &str = "/stream/0123456789abcdef0123456789abcdef";
@@ -2545,6 +2554,32 @@ mod tests {
 
         let cached = load_status_cache_from(dir.path()).unwrap();
         assert_eq!(cached, serde_json::to_value(&entries).unwrap());
+    }
+
+    #[test]
+    fn cached_status_rejects_an_invalidated_generation() {
+        let state = MonitorState::default();
+        let generation = state.pool.lifecycle_generation();
+        let now = Instant::now();
+        state.entries.lock().unwrap().insert(
+            "printer".into(),
+            CachedMonitor {
+                next_poll: now + Duration::from_secs(5),
+                sampled_at: now,
+                backoff: polimero_core::monitor::Backoff::new(Duration::from_secs(5)),
+                entry: MonitorEntry {
+                    name: "printer".into(),
+                    driver: "moonraker".into(),
+                    status: None,
+                    error: None,
+                },
+            },
+        );
+
+        state.pool.remove("printer");
+
+        assert!(cached_ui_monitor_entry(&state, "printer", generation).is_none());
+        assert!(state.entries.lock().unwrap().contains_key("printer"));
     }
 
     #[test]
