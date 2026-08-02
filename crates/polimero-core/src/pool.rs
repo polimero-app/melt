@@ -311,21 +311,22 @@ impl ConnectionPool {
         name: &str,
         profile: &moonraker::Profile,
     ) -> Result<Arc<moonraker::Client>, drivers::DriverError> {
+        let name = canonical_name(name);
         let identity = profile.connection_identity();
         let mut clients = self
             .moonraker
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let replace = clients
-            .get(name)
+            .get(&name)
             .is_none_or(|session| session.identity != identity);
         if replace {
             let client = Arc::new(
                 moonraker::Client::new(profile.clone()).map_err(drivers::DriverError::Moonraker)?,
             );
-            clients.insert(name.to_string(), MoonrakerSession { identity, client });
+            clients.insert(name.clone(), MoonrakerSession { identity, client });
         }
-        Ok(clients[name].client.clone())
+        Ok(clients[&name].client.clone())
     }
 
     fn bambu_session(
@@ -335,9 +336,10 @@ impl ConnectionPool {
         access_code: Option<&str>,
         tls_fingerprint: Option<&str>,
     ) -> Arc<Mutex<BambuSession>> {
+        let name = canonical_name(name);
         let identity = profile.connection_identity(access_code, tls_fingerprint);
         let mut sessions = self.bambu.lock().unwrap_or_else(|error| error.into_inner());
-        let replace = sessions.get(name).is_none_or(|session| {
+        let replace = sessions.get(&name).is_none_or(|session| {
             session
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
@@ -346,14 +348,14 @@ impl ConnectionPool {
         });
         if replace {
             sessions.insert(
-                name.to_string(),
+                name.clone(),
                 Arc::new(Mutex::new(BambuSession {
                     identity,
                     client: bambu::Client::new(profile.clone()),
                 })),
             );
         }
-        sessions[name].clone()
+        sessions[&name].clone()
     }
 
     fn with_bambu<T>(
@@ -378,6 +380,10 @@ impl ConnectionPool {
             sessions.retain(|name, _| keep(name));
         }
     }
+}
+
+fn canonical_name(name: &str) -> String {
+    name.to_ascii_lowercase()
 }
 
 #[cfg(test)]
@@ -456,13 +462,26 @@ mod tests {
         let profile = bambu::Profile::new("printer.local", "SN001", true).unwrap();
         let pool = ConnectionPool::default();
         let first = pool.bambu_session("printer", &profile, Some("old-code"), None);
-        let reused = pool.bambu_session("printer", &profile, Some("old-code"), None);
+        let reused = pool.bambu_session("PRINTER", &profile, Some("old-code"), None);
         let replaced = pool.bambu_session("printer", &profile, Some("new-code"), None);
 
         assert!(Arc::ptr_eq(&first, &reused));
         assert!(!Arc::ptr_eq(&first, &replaced));
         pool.retain(|_| false);
         assert!(pool.bambu.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn moonraker_names_are_canonicalized_for_connection_reuse() {
+        let profile =
+            moonraker::Profile::new("http://printer.local", false, Duration::from_secs(2)).unwrap();
+        let pool = ConnectionPool::default();
+
+        let first = pool.moonraker_client("Printer", &profile).unwrap();
+        let reused = pool.moonraker_client("printer", &profile).unwrap();
+
+        assert!(Arc::ptr_eq(&first, &reused));
+        assert_eq!(pool.moonraker.lock().unwrap().len(), 1);
     }
 
     fn status_server(state: &'static str) -> (String, thread::JoinHandle<()>) {
