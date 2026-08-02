@@ -1031,6 +1031,7 @@ struct MqttConnection {
     topics: MqttTopics,
     deadline: Instant,
     pending: Vec<u8>,
+    connected: bool,
 }
 
 impl MqttConnection {
@@ -1040,6 +1041,7 @@ impl MqttConnection {
             topics,
             deadline,
             pending: Vec::new(),
+            connected: false,
         }
     }
 
@@ -1062,7 +1064,10 @@ impl MqttConnection {
             return Err(Error::InvalidResponse);
         }
         match packet.payload[1] {
-            0 => Ok(()),
+            0 => {
+                self.connected = true;
+                Ok(())
+            }
             4 | 5 => Err(Error::Authentication),
             _ => Err(Error::InvalidResponse),
         }
@@ -1227,7 +1232,20 @@ impl MqttConnection {
     }
 
     fn disconnect(&mut self) {
+        if !self.connected {
+            return;
+        }
+        self.connected = false;
+        // An eviction must not hold a pool lock until the operation deadline.
+        // Give the best-effort MQTT DISCONNECT a small, independent budget.
+        self.deadline = Instant::now() + Duration::from_millis(100);
         let _ = self.write_packet(0xe0, &[]);
+    }
+}
+
+impl Drop for MqttConnection {
+    fn drop(&mut self) {
+        self.disconnect();
     }
 }
 
@@ -2818,6 +2836,38 @@ mod tests {
         assert_eq!(credentials.recv().unwrap(), "access-code");
         assert_eq!(status.state, PrinterState::Idle);
         assert!(is_valid_tls_fingerprint(&fingerprint));
+    }
+
+    #[test]
+    fn dropping_an_authenticated_mqtt_session_sends_disconnect() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let acceptor = test_acceptor();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            assert_eq!(read_test_packet(&mut stream).kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            stream.flush().unwrap();
+            assert_eq!(read_test_packet(&mut stream).kind, 0xe0);
+        });
+
+        let profile = Profile::with_timeout(
+            address.ip().to_string(),
+            "SN001",
+            true,
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) =
+            open_tls(&connector, &profile, address.port(), None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+
+        drop(mqtt);
+        server.join().unwrap();
     }
 
     #[test]

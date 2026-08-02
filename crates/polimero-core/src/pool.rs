@@ -409,13 +409,15 @@ impl ConnectionPool {
             Ok(client) => Arc::new(client),
             Err(error) => return Some(Err(drivers::DriverError::Moonraker(error))),
         };
-        sessions.insert(
+        let replaced = sessions.insert(
             name,
             PooledSession::Moonraker {
                 identity,
                 client: client.clone(),
             },
         );
+        drop(sessions);
+        drop(replaced);
         Some(Ok(client))
     }
 
@@ -456,13 +458,15 @@ impl ConnectionPool {
             return Some(client.clone());
         }
         let client = Arc::new(bambu::Client::new(profile.clone()));
-        sessions.insert(
+        let replaced = sessions.insert(
             name,
             PooledSession::Bambu {
                 identity,
                 client: client.clone(),
             },
         );
+        drop(sessions);
+        drop(replaced);
         Some(client)
     }
 
@@ -484,7 +488,16 @@ impl ConnectionPool {
             .sessions
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        sessions.retain(|name, _| keep(name));
+        let removed = sessions
+            .keys()
+            .filter(|name| !keep(name))
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter_map(|name| sessions.remove(&name))
+            .collect::<Vec<_>>();
+        drop(sessions);
+        drop(removed);
     }
 
     /// Immediately drops the pooled connection for one configured printer.
@@ -498,7 +511,9 @@ impl ConnectionPool {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         self.lifecycle.fetch_add(1, Ordering::AcqRel);
-        sessions.remove(&canonical_name(name));
+        let removed = sessions.remove(&canonical_name(name));
+        drop(sessions);
+        drop(removed);
     }
 }
 
