@@ -561,10 +561,27 @@ impl Client {
         payload: String,
         predicate: impl Fn(&Value) -> bool,
     ) -> Result<Vec<u8>, Error> {
+        self.exchange_fresh_on_port(
+            access_code,
+            fingerprint,
+            super::MQTT_PORT,
+            payload,
+            predicate,
+        )
+    }
+
+    fn exchange_fresh_on_port(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        port: u16,
+        payload: String,
+        predicate: impl Fn(&Value) -> bool,
+    ) -> Result<Vec<u8>, Error> {
         let started = Instant::now();
         let label = format!("publish {}", self.profile.mqtt_topics().request);
         self.trace(TraceEvent::request("mqtt", label.as_str()).with_bytes(payload.len() as u64));
-        let result = self.with_fresh_mqtt(access_code, fingerprint, |mqtt| {
+        let result = self.with_fresh_mqtt_on_port(access_code, fingerprint, port, |mqtt| {
             mqtt.exchange(payload, predicate)
         });
         match &result {
@@ -786,24 +803,18 @@ impl Client {
         }
     }
 
-    fn with_fresh_mqtt<T>(
+    fn with_fresh_mqtt_on_port<T>(
         &self,
         access_code: Option<&str>,
         fingerprint: Option<&str>,
+        port: u16,
         operation: impl FnOnce(&mut MqttConnection) -> Result<T, Error>,
     ) -> Result<T, Error> {
         let deadline = deadline_after(self.profile.timeout())?;
         let access_code = valid_access_code(access_code)?;
         validate_pin(&self.profile, fingerprint)?;
         let connector = tls_connector()?;
-        let (stream, _) = open_tls(
-            &connector,
-            &self.profile,
-            super::MQTT_PORT,
-            fingerprint,
-            true,
-            deadline,
-        )?;
+        let (stream, _) = open_tls(&connector, &self.profile, port, fingerprint, true, deadline)?;
         let mut mqtt = MqttConnection::new(stream, self.profile.mqtt_topics(), deadline);
         if let Err(error) = mqtt.connect(access_code).and_then(|_| mqtt.subscribe()) {
             mqtt.disconnect();
@@ -3071,6 +3082,77 @@ mod tests {
         assert!(result.is_err());
         assert!(started.elapsed() < Duration::from_millis(80));
         thread.join().unwrap();
+    }
+
+    #[test]
+    fn emergency_stop_succeeds_while_the_reusable_session_is_locked() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let host = address.ip().to_string();
+        let port = address.port();
+        let acceptor = test_acceptor();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            assert_eq!(read_test_packet(&mut stream).kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            stream.flush().unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+
+            let command = read_test_packet(&mut stream);
+            let command_payload = mqtt_publish_payload(command.kind, &command.payload).unwrap();
+            assert!(String::from_utf8_lossy(&command_payload).contains("M112"));
+            let sequence = payload_sequence_id(&command_payload).unwrap();
+            let refresh = read_test_packet(&mut stream);
+            assert!(is_pushall_payload(
+                &mqtt_publish_payload(refresh.kind, &refresh.payload).unwrap()
+            ));
+            write_test_report(
+                &mut stream,
+                &json!({"print": {
+                    "sequence_id": sequence,
+                    "gcode_state": "IDLE",
+                    "mc_percent": 0
+                }}),
+            );
+        });
+
+        let profile = Profile::with_timeout(host, "SN001", true, Duration::from_secs(2)).unwrap();
+        let client = Arc::new(Client::new(profile));
+        let holder = client.clone();
+        let (locked_tx, locked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let lock_holder = thread::spawn(move || {
+            let _guard = holder.mqtt.lock().unwrap();
+            locked_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        locked_rx.recv().unwrap();
+
+        let stopping_client = client.clone();
+        let (result_tx, result_rx) = mpsc::channel();
+        let stop = thread::spawn(move || {
+            let result = stopping_client
+                .exchange_fresh_on_port(
+                    Some("access-code"),
+                    None,
+                    port,
+                    gcode_payload("M112"),
+                    is_full_report,
+                )
+                .map(|_| ());
+            result_tx.send(result).unwrap();
+        });
+        let result = result_rx.recv_timeout(Duration::from_secs(2));
+        release_tx.send(()).unwrap();
+        lock_holder.join().unwrap();
+        stop.join().unwrap();
+
+        result.unwrap().unwrap();
+        server.join().unwrap();
     }
 
     #[test]
