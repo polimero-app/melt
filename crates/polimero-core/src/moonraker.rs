@@ -1952,7 +1952,8 @@ mod tests {
 
     #[test]
     fn confirmation_loops_do_not_start_requests_after_the_operation_deadline() {
-        let cases: [(&str, fn(&Client) -> Result<(), Error>); 4] = [
+        type ConfirmationOperation = fn(&Client) -> Result<(), Error>;
+        let cases: [(&str, ConfirmationOperation); 4] = [
             (
                 r#"{"result":{"status":{"print_stats":{"state":"standby"}}}}"#,
                 |client| {
