@@ -1137,6 +1137,12 @@ impl MqttConnection {
                         if report_matches_sequence(&value, command_sequence.as_deref()) {
                             return Ok(report);
                         }
+                        // A sequence-bearing report belongs to another request
+                        // and must never advance or complete the freshness
+                        // barrier. Only sequence-less firmware needs it.
+                        if report_sequence_id(&value).is_some() {
+                            continue;
+                        }
                         if !status_barrier_crossed {
                             status_barrier_crossed = true;
                             refresh = pushall_payload(next_sequence());
@@ -1321,6 +1327,13 @@ fn command_rejection(report: &Value, sequence: Option<&str>) -> Result<(), Error
 
 fn report_matches_sequence(report: &Value, sequence: Option<&str>) -> bool {
     matching_command_envelope(report, sequence).is_some()
+}
+
+fn report_sequence_id(report: &Value) -> Option<&str> {
+    ["print", "system", "pushing"]
+        .into_iter()
+        .filter_map(|key| report.get(key).and_then(Value::as_object))
+        .find_map(|command| command.get("sequence_id").and_then(Value::as_str))
 }
 
 fn matching_command_envelope<'a>(
@@ -2880,21 +2893,42 @@ mod tests {
             stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
             stream.flush().unwrap();
 
-            for state in ["PRINTING", "IDLE"] {
-                let publish = read_test_packet(&mut stream);
-                assert!(is_pushall_payload(
-                    &mqtt_publish_payload(publish.kind, &publish.payload).unwrap()
-                ));
-                let report = json!({"print": {"gcode_state": state, "mc_percent": 0}});
-                let mut payload = Vec::new();
-                mqtt_string(&mut payload, "device/SN001/report").unwrap();
-                payload.extend_from_slice(report.to_string().as_bytes());
-                let mut packet = vec![0x30];
-                mqtt_remaining_length(&mut packet, payload.len()).unwrap();
-                packet.extend_from_slice(&payload);
-                stream.write_all(&packet).unwrap();
-                stream.flush().unwrap();
-            }
+            let first = read_test_packet(&mut stream);
+            let first_payload = mqtt_publish_payload(first.kind, &first.payload).unwrap();
+            assert!(is_pushall_payload(&first_payload));
+            let first_sequence = payload_sequence_id(&first_payload).unwrap();
+            write_test_report(
+                &mut stream,
+                &json!({"print": {
+                    "sequence_id": "older-request",
+                    "gcode_state": "PRINTING",
+                    "mc_percent": 75
+                }}),
+            );
+            write_test_report(
+                &mut stream,
+                &json!({"print": {"gcode_state": "PRINTING", "mc_percent": 75}}),
+            );
+
+            let second = read_test_packet(&mut stream);
+            let second_payload = mqtt_publish_payload(second.kind, &second.payload).unwrap();
+            assert!(is_pushall_payload(&second_payload));
+            assert_ne!(
+                payload_sequence_id(&second_payload).unwrap(),
+                first_sequence
+            );
+            write_test_report(
+                &mut stream,
+                &json!({"print": {
+                    "sequence_id": first_sequence,
+                    "gcode_state": "PRINTING",
+                    "mc_percent": 75
+                }}),
+            );
+            write_test_report(
+                &mut stream,
+                &json!({"print": {"gcode_state": "IDLE", "mc_percent": 0}}),
+            );
         });
 
         let profile = Profile::with_timeout(host, "SN001", true, Duration::from_secs(2)).unwrap();
@@ -3138,6 +3172,17 @@ mod tests {
             assert!(read > 0, "stream closed mid-packet");
             pending.extend_from_slice(&chunk[..read]);
         }
+    }
+
+    fn write_test_report(stream: &mut impl Write, report: &Value) {
+        let mut payload = Vec::new();
+        mqtt_string(&mut payload, "device/SN001/report").unwrap();
+        payload.extend_from_slice(report.to_string().as_bytes());
+        let mut packet = vec![0x30];
+        mqtt_remaining_length(&mut packet, payload.len()).unwrap();
+        packet.extend_from_slice(&payload);
+        stream.write_all(&packet).unwrap();
+        stream.flush().unwrap();
     }
 
     /// The printer's FTP server refuses a data connection whose TLS session was
