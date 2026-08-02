@@ -272,12 +272,21 @@ impl Client {
         device_path: &str,
         options: JobStartOptions,
     ) -> Result<JobResult, Error> {
-        let (storage, path) = storage_location(&self.profile, device_path)?;
+        let (mut storage, path) = storage_location(&self.profile, device_path)?;
         if path == "/" {
             return Err(Error::InvalidDevicePath);
         }
         validate_job_options(&self.profile, &options)?;
-        let payload = job_start_payload(storage, &path, options)?;
+        if self.profile.default_capabilities().storage_transport
+            != super::StorageTransport::Tunnel6000
+        {
+            let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
+            storage = ftp.resolve_mount(storage)?.0;
+            ftp.quit();
+        }
+        let tunnel_storage = self.profile.default_capabilities().storage_transport
+            == super::StorageTransport::Tunnel6000;
+        let payload = job_start_payload(storage, &path, tunnel_storage, options)?;
         let report = self.exchange(access_code, fingerprint, payload, |report| {
             report_state_is(report, &[PrinterState::Printing])
         })?;
@@ -557,14 +566,7 @@ impl Client {
             return tunnel::Connection::open(&self.profile, access_code, fingerprint)?.roots();
         }
         let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
-        let result = vec![FileRoot {
-            name: FILE_ROOT,
-            description: "SD card",
-            writable: true,
-            capacity_bytes: None,
-            free_bytes: None,
-            metadata: BTreeMap::new(),
-        }];
+        let result = ftp.storage_roots()?;
         ftp.quit();
         Ok(result)
     }
@@ -587,10 +589,12 @@ impl Client {
                 .list(storage, &path);
         }
         let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
+        let logical_path = path;
+        let (_, path) = ftp.resolve_path(storage, &logical_path)?;
         let result = if recursive {
-            ftp.list_recursive(&path)
+            ftp.list_recursive(&path, &logical_path, storage)
         } else {
-            ftp.list(&path)
+            ftp.list(&path, &logical_path, storage)
         }
         .map(|entries| FileList { entries });
         ftp.quit();
@@ -651,7 +655,7 @@ impl Client {
         device_path: &str,
         destination: &mut dyn Write,
     ) -> Result<u64, Error> {
-        let (_storage, path) = storage_location(&self.profile, device_path)?;
+        let (storage, path) = storage_location(&self.profile, device_path)?;
         if path == "/" {
             return Err(Error::InvalidDevicePath);
         }
@@ -662,6 +666,7 @@ impl Client {
                 .download(&path, destination);
         }
         let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
+        let (_, path) = ftp.resolve_path(storage, &path)?;
         let result = ftp.download(&path, destination);
         ftp.quit();
         self.trace_ftps("RETR", &path, result.as_ref().err());
@@ -728,6 +733,7 @@ impl Client {
             return connection.upload(storage, source, path.trim_start_matches('/'));
         }
         let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
+        let (_, path) = ftp.resolve_path(storage, &path)?;
         let result = (|| {
             if !overwrite && ftp.file_exists(&path)? {
                 return Err(Error::FileAlreadyExists);
@@ -757,6 +763,7 @@ impl Client {
                 .delete(storage, path.trim_start_matches('/'));
         }
         let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
+        let (_, path) = ftp.resolve_path(storage, &path)?;
         let result = ftp.command(&format!("DELE {path}")).and_then(|reply| {
             if matches!(reply.code, 250 | 251) {
                 Ok(())
@@ -1526,7 +1533,12 @@ fn ledctrl_payload(node: &str, state: LightState) -> String {
     .to_string()
 }
 
-fn job_start_payload(storage: &str, path: &str, options: JobStartOptions) -> Result<String, Error> {
+fn job_start_payload(
+    storage: &str,
+    path: &str,
+    tunnel_storage: bool,
+    options: JobStartOptions,
+) -> Result<String, Error> {
     let filename = path
         .rsplit('/')
         .next()
@@ -1573,7 +1585,10 @@ fn job_start_payload(storage: &str, path: &str, options: JobStartOptions) -> Res
             "file".into(),
             Value::String(path.trim_start_matches('/').into()),
         );
-        print.insert("url".into(), Value::String(job_file_url(storage, path)));
+        print.insert(
+            "url".into(),
+            Value::String(job_file_url(storage, path, tunnel_storage)),
+        );
         print.insert("md5".into(), Value::String(String::new()));
         print.insert("ams_mapping".into(), json!(options.ams_mapping));
         print.insert("ams_mapping2".into(), json!(options.ams_mapping2));
@@ -2209,9 +2224,13 @@ fn storage_location(profile: &Profile, value: &str) -> Result<(&'static str, Str
     Ok((storage, normalize_device_path(path)?))
 }
 
-fn job_file_url(storage: &str, path: &str) -> String {
-    if matches!(storage, "emmc" | "udisk") {
+fn job_file_url(storage: &str, path: &str, tunnel_storage: bool) -> String {
+    if tunnel_storage && matches!(storage, "emmc" | "udisk") {
         format!("brtc://{storage}/{}", path.trim_start_matches('/'))
+    } else if storage == "udisk" {
+        format!("file:///usb{path}")
+    } else if storage == "root" {
+        format!("ftp://{}", path.trim_start_matches('/'))
     } else {
         format!("file:///{storage}{path}")
     }
@@ -2294,7 +2313,78 @@ impl FtpsConnection {
         Ok(connection)
     }
 
-    fn list(&mut self, path: &str) -> Result<Vec<FileEntry>, Error> {
+    fn storage_roots(&mut self) -> Result<Vec<FileRoot>, Error> {
+        let sdcard = self.directory_exists("/sdcard")?;
+        let usb = self.directory_exists("/usb")?;
+        let mut roots = Vec::new();
+        if sdcard || !usb {
+            roots.push(FileRoot {
+                name: "sdcard",
+                description: if sdcard { "SD card" } else { "Printer storage" },
+                writable: true,
+                capacity_bytes: None,
+                free_bytes: None,
+                metadata: BTreeMap::new(),
+            });
+        }
+        if usb {
+            roots.push(FileRoot {
+                name: "udisk",
+                description: "USB storage",
+                writable: true,
+                capacity_bytes: None,
+                free_bytes: None,
+                metadata: BTreeMap::new(),
+            });
+        }
+        Ok(roots)
+    }
+
+    fn directory_exists(&mut self, path: &str) -> Result<bool, Error> {
+        let reply = self.command(&format!("CWD {path}"))?;
+        match reply.code {
+            250 => {
+                if path != "/" {
+                    self.expect_command("CWD /", &[250])?;
+                }
+                Ok(true)
+            }
+            550 => Ok(false),
+            _ => Err(Error::FileTransfer),
+        }
+    }
+
+    /// Resolves logical storage to the mount layout exposed by this firmware.
+    /// Some printers expose `/sdcard`/`/usb`; others make that mount `/`.
+    fn resolve_mount(&mut self, storage: &str) -> Result<(&'static str, &'static str), Error> {
+        let candidates: &[(&str, &str)] = match storage {
+            "udisk" => &[("udisk", "/usb"), ("sdcard", "/sdcard"), ("root", "/")],
+            _ => &[("sdcard", "/sdcard"), ("udisk", "/usb"), ("root", "/")],
+        };
+        for &(name, mount) in candidates {
+            if self.directory_exists(mount)? {
+                return Ok((name, mount));
+            }
+        }
+        Err(Error::FileTransfer)
+    }
+
+    fn resolve_path(&mut self, storage: &str, path: &str) -> Result<(&'static str, String), Error> {
+        let (mount_name, mount) = self.resolve_mount(storage)?;
+        let path = if mount == "/" {
+            path.to_owned()
+        } else {
+            format!("{mount}/{}", path.trim_start_matches('/'))
+        };
+        Ok((mount_name, path))
+    }
+
+    fn list(
+        &mut self,
+        path: &str,
+        logical_parent: &str,
+        root: &'static str,
+    ) -> Result<Vec<FileEntry>, Error> {
         let socket = self.passive_socket()?;
         let reply = self.command(&format!("LIST {path}"))?;
         if !matches!(reply.code, 125 | 150) {
@@ -2304,22 +2394,28 @@ impl FtpsConnection {
         let bytes = read_data(&mut data, self.timeout)?;
         drop(data);
         self.expect(&[226, 250])?;
-        let mut entries = parse_ftp_listing(&bytes, path);
+        let mut entries = parse_ftp_listing(&bytes, logical_parent, root);
         entries.sort_by(|left, right| left.path.cmp(&right.path));
         Ok(entries)
     }
 
-    fn list_recursive(&mut self, path: &str) -> Result<Vec<FileEntry>, Error> {
-        let mut queue = VecDeque::from([(path.to_owned(), 0_u8)]);
+    fn list_recursive(
+        &mut self,
+        path: &str,
+        logical_path: &str,
+        root: &'static str,
+    ) -> Result<Vec<FileEntry>, Error> {
+        let mut queue = VecDeque::from([(path.to_owned(), logical_path.to_owned(), 0_u8)]);
         let mut all = Vec::new();
-        while let Some((directory, depth)) = queue.pop_front() {
+        while let Some((directory, logical_directory, depth)) = queue.pop_front() {
             if depth > MAX_LIST_DEPTH {
                 return Err(Error::FileTransfer);
             }
-            let entries = self.list(&directory)?;
+            let entries = self.list(&directory, &logical_directory, root)?;
             for entry in entries {
                 if entry.entry_type == FileEntryType::Directory {
-                    queue.push_back((entry.path.clone(), depth.saturating_add(1)));
+                    let actual = format!("{}/{}", directory.trim_end_matches('/'), entry.name);
+                    queue.push_back((actual, entry.path.clone(), depth.saturating_add(1)));
                 }
                 all.push(entry);
             }
@@ -2599,7 +2695,7 @@ fn copy_data(source: &mut dyn Read, destination: &mut dyn Write) -> Result<u64, 
     }
 }
 
-fn parse_ftp_listing(bytes: &[u8], parent: &str) -> Vec<FileEntry> {
+fn parse_ftp_listing(bytes: &[u8], parent: &str, root: &'static str) -> Vec<FileEntry> {
     let Ok(listing) = std::str::from_utf8(bytes) else {
         return Vec::new();
     };
@@ -2621,8 +2717,8 @@ fn parse_ftp_listing(bytes: &[u8], parent: &str) -> Vec<FileEntry> {
             };
             FileEntry {
                 name: entry.name,
-                root: FILE_ROOT,
-                device_path: format!("{FILE_ROOT}:{path}"),
+                root,
+                device_path: format!("{root}:{path}"),
                 path,
                 entry_type: entry.entry_type,
                 size_bytes: entry.size_bytes,
@@ -2789,6 +2885,7 @@ mod tests {
         let entries = parse_ftp_listing(
             b"drwxr-xr-x 1 root root 0 Jan 01 12:00 models\r\n-rw-r--r--   1 root root    12 Jan 01 12:00 big  cube.3mf\r\n",
             "/",
+            "sdcard",
         );
 
         assert_eq!(entries.len(), 2);
@@ -2919,7 +3016,13 @@ mod tests {
     #[test]
     fn starts_project_files_from_the_printer_sd_card() {
         let payload: Value = serde_json::from_str(
-            &job_start_payload("sdcard", "/models/cube.3mf", JobStartOptions::default()).unwrap(),
+            &job_start_payload(
+                "sdcard",
+                "/models/cube.3mf",
+                false,
+                JobStartOptions::default(),
+            )
+            .unwrap(),
         )
         .unwrap();
 
@@ -2942,9 +3045,10 @@ mod tests {
             nozzle_offset_calibration: true,
             ..Default::default()
         };
-        let payload: Value =
-            serde_json::from_str(&job_start_payload("emmc", "/models/dual.3mf", options).unwrap())
-                .unwrap();
+        let payload: Value = serde_json::from_str(
+            &job_start_payload("emmc", "/models/dual.3mf", true, options).unwrap(),
+        )
+        .unwrap();
 
         assert_eq!(payload["print"]["param"], "Metadata/plate_2.gcode");
         assert_eq!(payload["print"]["bed_type"], "textured_plate");
@@ -2977,6 +3081,15 @@ mod tests {
         assert_eq!(
             storage_location(&h2, "usb:/cube.3mf").unwrap(),
             ("udisk", "/cube.3mf".into())
+        );
+        assert_eq!(job_file_url("root", "/cube.3mf", false), "ftp://cube.3mf");
+        assert_eq!(
+            job_file_url("udisk", "/cube.3mf", false),
+            "file:///usb/cube.3mf"
+        );
+        assert_eq!(
+            job_file_url("udisk", "/cube.3mf", true),
+            "brtc://udisk/cube.3mf"
         );
     }
 
