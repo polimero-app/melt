@@ -2234,12 +2234,15 @@ fn ensure_state(
         return check_allowed_state(status.state, allowed, operation);
     }
 
-    let status = drivers::status(
-        &printer.driver,
-        printer.access_code.as_deref(),
-        printer.tls_fingerprint.as_deref(),
-    )
-    .map_err(|error| operation_error(error, operation))?;
+    let status = state
+        .pool
+        .status(
+            &printer.name,
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+        )
+        .map_err(|error| operation_error(error, operation))?;
     check_allowed_state(status.state, allowed, operation)
 }
 
@@ -2415,9 +2418,21 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        io::{BufRead, BufReader, Write},
+        net::TcpListener,
+        thread,
+        time::Duration,
+    };
+
+    use polimero_core::{
+        drivers::{self, Operation},
+        moonraker,
+    };
+
     use super::{
-        MonitorEntry, camera_preview_request, extract_3mf_thumbnail, load_status_cache_from,
-        save_status_cache_to,
+        DesktopPrinter, MonitorEntry, MonitorState, camera_preview_request, ensure_state,
+        extract_3mf_thumbnail, load_status_cache_from, save_status_cache_to,
     };
 
     const TOKEN: &str = "/stream/0123456789abcdef0123456789abcdef";
@@ -2437,6 +2452,64 @@ mod tests {
 
         let cached = load_status_cache_from(dir.path()).unwrap();
         assert_eq!(cached, serde_json::to_value(&entries).unwrap());
+    }
+
+    #[test]
+    fn stale_command_state_checks_reuse_the_pooled_client() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            for body in [
+                r#"{"result":{"status":{"print_stats":{"state":"standby"}}}}"#,
+                r#"{"result":{}}"#,
+            ] {
+                loop {
+                    let mut line = String::new();
+                    assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+                stream.flush().unwrap();
+            }
+        });
+        let profile =
+            moonraker::Profile::new(&format!("http://{address}"), false, Duration::from_secs(2))
+                .unwrap();
+        let printer = DesktopPrinter {
+            name: "printer".into(),
+            driver: drivers::Profile::Moonraker(profile),
+            access_code: None,
+            tls_fingerprint: None,
+        };
+        let state = MonitorState::default();
+
+        ensure_state(
+            &state,
+            &printer,
+            &[moonraker::PrinterState::Idle],
+            Operation::EmergencyStop,
+        )
+        .unwrap();
+        state
+            .pool
+            .emergency_stop(
+                &printer.name,
+                &printer.driver,
+                printer.access_code.as_deref(),
+                printer.tls_fingerprint.as_deref(),
+            )
+            .unwrap();
+
+        server.join().unwrap();
     }
 
     fn zip_with_entries(entries: &[(&str, &[u8])]) -> Vec<u8> {
