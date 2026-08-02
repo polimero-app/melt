@@ -764,15 +764,21 @@ fn printer_status(
     name: String,
     state: tauri::State<'_, MonitorState>,
 ) -> Result<MonitorEntry, CommandError> {
-    let config = Config::load().map_err(|_| unreadable_config())?;
-    let profile = config
-        .get_profile(&name.to_ascii_lowercase())
-        .ok_or_else(|| CommandError::new("profileNotFound"))?
-        .clone();
-    if let Some(entry) = cached_ui_monitor_entry(&state, &name) {
-        return Ok(entry);
+    for _ in 0..2 {
+        let generation = state.pool.lifecycle_generation();
+        let config = Config::load().map_err(|_| unreadable_config())?;
+        let profile = config
+            .get_profile(&name.to_ascii_lowercase())
+            .ok_or_else(|| CommandError::new("profileNotFound"))?
+            .clone();
+        if let Some(entry) = cached_ui_monitor_entry(&state, &name) {
+            return Ok(entry);
+        }
+        if let Some(entry) = cached_monitor_entry_at(&state, name.clone(), profile, generation) {
+            return Ok(entry);
+        }
     }
-    Ok(cached_monitor_entry(&state, name, profile))
+    Err(CommandError::new("monitorUnavailable"))
 }
 
 /// Printer selection should repaint from the last known state immediately.
@@ -785,6 +791,7 @@ fn cached_ui_monitor_entry(state: &MonitorState, name: &str) -> Option<MonitorEn
 }
 
 fn collect_monitored_printers(state: &MonitorState) -> Result<Vec<MonitorEntry>, CommandError> {
+    let generation = state.pool.lifecycle_generation();
     let config = Config::load().map_err(|_| unreadable_config())?;
     let profiles = config.sorted_profiles();
     let mut entries = state
@@ -799,15 +806,23 @@ fn collect_monitored_printers(state: &MonitorState) -> Result<Vec<MonitorEntry>,
 
     // ponytail: fan out one thread per printer instead of `monitor::DEFAULT_WORKERS`-bounded
     // pool; printer counts are small (single-digit) so a cap isn't worth the complexity yet.
-    Ok(thread::scope(|scope| {
+    let collected = thread::scope(|scope| {
         profiles
             .into_iter()
-            .map(|named| scope.spawn(|| cached_monitor_entry(state, named.name, named.profile)))
+            .map(|named| {
+                scope
+                    .spawn(|| cached_monitor_entry_at(state, named.name, named.profile, generation))
+            })
             .collect::<Vec<_>>()
             .into_iter()
             .map(|handle| handle.join().expect("monitor thread panicked"))
+            .flatten()
             .collect()
-    }))
+    });
+    if !state.pool.is_current_generation(generation) {
+        return Err(CommandError::new("monitorUnavailable"));
+    }
+    Ok(collected)
 }
 
 const STATUS_CACHE_FILE: &str = "polimero-status-cache.json";
@@ -929,16 +944,33 @@ fn emit_status_notifications(app: &tauri::AppHandle, state: &MonitorState) {
     *previous = current;
 }
 
-fn cached_monitor_entry(state: &MonitorState, name: String, profile: Profile) -> MonitorEntry {
+fn cached_monitor_entry_at(
+    state: &MonitorState,
+    name: String,
+    profile: Profile,
+    generation: u64,
+) -> Option<MonitorEntry> {
+    if !state.pool.is_current_generation(generation) {
+        return None;
+    }
     let now = Instant::now();
     if let Ok(entries) = state.entries.lock() {
         if let Some(cached) = entries.get(&name).filter(|cached| cached.next_poll > now) {
-            return cached.entry.clone();
+            return state
+                .pool
+                .is_current_generation(generation)
+                .then(|| cached.entry.clone());
         }
     }
 
-    let entry = monitor_printer(&state.pool, name.clone(), profile);
+    let entry = monitor_printer(&state.pool, name.clone(), profile, generation)?;
+    if !state.pool.is_current_generation(generation) {
+        return None;
+    }
     if let Ok(mut entries) = state.entries.lock() {
+        if !state.pool.is_current_generation(generation) {
+            return None;
+        }
         let cached = entries.entry(name).or_insert_with(|| CachedMonitor {
             next_poll: now,
             sampled_at: now,
@@ -950,59 +982,66 @@ fn cached_monitor_entry(state: &MonitorState, name: String, profile: Profile) ->
         cached.sampled_at = Instant::now();
         cached.entry = entry.clone();
     }
-    entry
+    Some(entry)
 }
 
-fn monitor_printer(pool: &ConnectionPool, name: String, profile: Profile) -> MonitorEntry {
+fn monitor_printer(
+    pool: &ConnectionPool,
+    name: String,
+    profile: Profile,
+    generation: u64,
+) -> Option<MonitorEntry> {
     let driver = profile.driver.clone();
     let driver_profile = match drivers::profile(&profile) {
         Ok(profile) => profile,
         Err(_) => {
-            return MonitorEntry {
+            return Some(MonitorEntry {
                 name,
                 driver,
                 status: None,
                 error: Some(CommandError::new("profileInvalid")),
-            };
+            });
         }
     };
     let kind = driver_profile.driver();
     if !kind.supports(Operation::Status) {
-        return MonitorEntry {
+        return Some(MonitorEntry {
             name,
             driver,
             status: None,
             error: Some(CommandError::of("driverUnsupported", Operation::Status)),
-        };
+        });
     }
     let access_code = match access_code(&profile.driver, &name, kind) {
         Ok(access_code) => access_code,
         Err(error) => {
-            return MonitorEntry {
+            return Some(MonitorEntry {
                 name,
                 driver,
                 status: None,
                 error: Some(error),
-            };
+            });
         }
     };
     let tls_fingerprint = match tls_fingerprint(&profile.driver, &name, kind, profile.insecure) {
         Ok(fingerprint) => fingerprint,
         Err(error) => {
-            return MonitorEntry {
+            return Some(MonitorEntry {
                 name,
                 driver,
                 status: None,
                 error: Some(error),
-            };
+            });
         }
     };
-    match pool.status(
+    let status = pool.status_if_current(
+        generation,
         &name,
         &driver_profile,
         access_code.as_deref(),
         tls_fingerprint.as_deref(),
-    ) {
+    )?;
+    Some(match status {
         Ok(status) => MonitorEntry {
             name,
             driver,
@@ -1015,7 +1054,7 @@ fn monitor_printer(pool: &ConnectionPool, name: String, profile: Profile) -> Mon
             status: None,
             error: Some(operation_error(error, Operation::Status)),
         },
-    }
+    })
 }
 
 #[tauri::command(async)]
@@ -1049,13 +1088,18 @@ fn create_error(error: profiles::ProfileError) -> CommandError {
 #[tauri::command(async)]
 fn refresh_printer_tls(
     request: TlsRefreshRequest,
+    state: tauri::State<'_, MonitorState>,
 ) -> Result<profiles::TlsRefreshResult, CommandError> {
     if !request.confirmed {
         return Err(CommandError::new("tlsUnconfirmed"));
     }
     let dir = config_dir().map_err(|_| unreadable_config())?;
-    profiles::store_tls_fingerprint(dir, &SystemKeychain, &request.name, &request.fingerprint)
-        .map_err(create_error)
+    let result =
+        profiles::store_tls_fingerprint(dir, &SystemKeychain, &request.name, &request.fingerprint)
+            .map_err(create_error)?;
+    state.pool.remove(&request.name);
+    invalidate(&state, &request.name);
+    Ok(result)
 }
 
 #[tauri::command(async)]
@@ -2422,6 +2466,7 @@ mod tests {
     use std::{
         io::{BufRead, BufReader, Write},
         net::TcpListener,
+        sync::mpsc,
         thread,
         time::Duration,
     };
@@ -2432,8 +2477,9 @@ mod tests {
     };
 
     use super::{
-        DesktopPrinter, MonitorEntry, MonitorState, camera_preview_request, ensure_state,
-        extract_3mf_thumbnail, load_status_cache_from, operation_error, save_status_cache_to,
+        DesktopPrinter, MonitorEntry, MonitorState, Profile, cached_monitor_entry_at,
+        camera_preview_request, ensure_state, extract_3mf_thumbnail, load_status_cache_from,
+        operation_error, save_status_cache_to,
     };
 
     const TOKEN: &str = "/stream/0123456789abcdef0123456789abcdef";
@@ -2464,6 +2510,57 @@ mod tests {
 
         let cached = load_status_cache_from(dir.path()).unwrap();
         assert_eq!(cached, serde_json::to_value(&entries).unwrap());
+    }
+
+    #[test]
+    fn removed_printer_discards_an_in_flight_monitor_result() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = mpsc::channel();
+        let (respond_tx, respond_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            request_tx.send(()).unwrap();
+            respond_rx.recv().unwrap();
+            let body = r#"{"result":{"status":{"print_stats":{"state":"standby"}}}}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        let state = MonitorState::default();
+        let generation = state.pool.lifecycle_generation();
+        let profile = Profile {
+            driver: "moonraker".into(),
+            host: format!("http://{address}"),
+            serial: String::new(),
+            timeout: "2s".into(),
+            insecure: false,
+            created: String::new(),
+            updated: String::new(),
+        };
+        let monitor_state = state.clone();
+        let monitor = thread::spawn(move || {
+            cached_monitor_entry_at(&monitor_state, "printer".into(), profile, generation)
+        });
+        request_rx.recv().unwrap();
+
+        state.pool.remove("printer");
+        respond_tx.send(()).unwrap();
+
+        assert!(monitor.join().unwrap().is_none());
+        server.join().unwrap();
+        assert!(state.entries.lock().unwrap().is_empty());
     }
 
     #[test]

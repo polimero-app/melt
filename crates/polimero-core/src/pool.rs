@@ -7,7 +7,10 @@
 //! authenticated MQTT session for Bambu status and commands.
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use crate::{bambu, drivers, moonraker};
@@ -26,9 +29,18 @@ enum PooledSession {
 #[derive(Default)]
 pub struct ConnectionPool {
     sessions: Mutex<HashMap<String, PooledSession>>,
+    lifecycle: AtomicU64,
 }
 
 impl ConnectionPool {
+    pub fn lifecycle_generation(&self) -> u64 {
+        self.lifecycle.load(Ordering::Acquire)
+    }
+
+    pub fn is_current_generation(&self, generation: u64) -> bool {
+        self.lifecycle_generation() == generation
+    }
+
     pub fn status(
         &self,
         name: &str,
@@ -36,24 +48,63 @@ impl ConnectionPool {
         access_code: Option<&str>,
         tls_fingerprint: Option<&str>,
     ) -> Result<moonraker::Status, drivers::DriverError> {
+        self.status_at(None, name, profile, access_code, tls_fingerprint)
+            .expect("an unconstrained pool operation is always current")
+    }
+
+    pub fn status_if_current(
+        &self,
+        generation: u64,
+        name: &str,
+        profile: &drivers::Profile,
+        access_code: Option<&str>,
+        tls_fingerprint: Option<&str>,
+    ) -> Option<Result<moonraker::Status, drivers::DriverError>> {
+        self.status_at(
+            Some(generation),
+            name,
+            profile,
+            access_code,
+            tls_fingerprint,
+        )
+    }
+
+    fn status_at(
+        &self,
+        generation: Option<u64>,
+        name: &str,
+        profile: &drivers::Profile,
+        access_code: Option<&str>,
+        tls_fingerprint: Option<&str>,
+    ) -> Option<Result<moonraker::Status, drivers::DriverError>> {
         match profile {
             drivers::Profile::Moonraker(profile) => {
-                let client = self.moonraker_client(name, profile)?;
-                client
-                    .status_with_timeout(
-                        access_code,
-                        profile.timeout().min(drivers::STATUS_POLL_TIMEOUT),
-                    )
-                    .map_err(drivers::DriverError::Moonraker)
-            }
-            drivers::Profile::Bambu(profile) => self
-                .bambu_client(name, profile, access_code, tls_fingerprint)
-                .poll_status(
-                    access_code,
-                    tls_fingerprint,
-                    profile.timeout().min(drivers::STATUS_POLL_TIMEOUT),
+                let client = match self.moonraker_client_at(generation, name, profile)? {
+                    Ok(client) => client,
+                    Err(error) => return Some(Err(error)),
+                };
+                Some(
+                    client
+                        .status_with_timeout(
+                            access_code,
+                            profile.timeout().min(drivers::STATUS_POLL_TIMEOUT),
+                        )
+                        .map_err(drivers::DriverError::Moonraker),
                 )
-                .map_err(drivers::DriverError::Bambu),
+            }
+            drivers::Profile::Bambu(profile) => {
+                let client =
+                    self.bambu_client_at(generation, name, profile, access_code, tls_fingerprint)?;
+                Some(
+                    client
+                        .poll_status(
+                            access_code,
+                            tls_fingerprint,
+                            profile.timeout().min(drivers::STATUS_POLL_TIMEOUT),
+                        )
+                        .map_err(drivers::DriverError::Bambu),
+                )
+            }
         }
     }
 
@@ -307,23 +358,37 @@ impl ConnectionPool {
         name: &str,
         profile: &moonraker::Profile,
     ) -> Result<Arc<moonraker::Client>, drivers::DriverError> {
+        self.moonraker_client_at(None, name, profile)
+            .expect("an unconstrained pool operation is always current")
+    }
+
+    fn moonraker_client_at(
+        &self,
+        generation: Option<u64>,
+        name: &str,
+        profile: &moonraker::Profile,
+    ) -> Option<Result<Arc<moonraker::Client>, drivers::DriverError>> {
         let name = canonical_name(name);
         let identity = profile.connection_identity();
         let mut sessions = self
             .sessions
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        if generation.is_some_and(|generation| generation != self.lifecycle_generation()) {
+            return None;
+        }
         if let Some(PooledSession::Moonraker {
             identity: current,
             client,
         }) = sessions.get(&name)
             && current == &identity
         {
-            return Ok(client.clone());
+            return Some(Ok(client.clone()));
         }
-        let client = Arc::new(
-            moonraker::Client::new(profile.clone()).map_err(drivers::DriverError::Moonraker)?,
-        );
+        let client = match moonraker::Client::new(profile.clone()) {
+            Ok(client) => Arc::new(client),
+            Err(error) => return Some(Err(drivers::DriverError::Moonraker(error))),
+        };
         sessions.insert(
             name,
             PooledSession::Moonraker {
@@ -331,7 +396,7 @@ impl ConnectionPool {
                 client: client.clone(),
             },
         );
-        Ok(client)
+        Some(Ok(client))
     }
 
     fn bambu_client(
@@ -341,19 +406,34 @@ impl ConnectionPool {
         access_code: Option<&str>,
         tls_fingerprint: Option<&str>,
     ) -> Arc<bambu::Client> {
+        self.bambu_client_at(None, name, profile, access_code, tls_fingerprint)
+            .expect("an unconstrained pool operation is always current")
+    }
+
+    fn bambu_client_at(
+        &self,
+        generation: Option<u64>,
+        name: &str,
+        profile: &bambu::Profile,
+        access_code: Option<&str>,
+        tls_fingerprint: Option<&str>,
+    ) -> Option<Arc<bambu::Client>> {
         let name = canonical_name(name);
         let identity = profile.connection_identity(access_code, tls_fingerprint);
         let mut sessions = self
             .sessions
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        if generation.is_some_and(|generation| generation != self.lifecycle_generation()) {
+            return None;
+        }
         if let Some(PooledSession::Bambu {
             identity: current,
             client,
         }) = sessions.get(&name)
             && current == &identity
         {
-            return client.clone();
+            return Some(client.clone());
         }
         let client = Arc::new(bambu::Client::new(profile.clone()));
         sessions.insert(
@@ -363,7 +443,7 @@ impl ConnectionPool {
                 client: client.clone(),
             },
         );
-        client
+        Some(client)
     }
 
     fn with_bambu<T>(
@@ -389,10 +469,12 @@ impl ConnectionPool {
 
     /// Immediately drops the pooled connection for one configured printer.
     pub fn remove(&self, name: &str) {
-        self.sessions
+        let mut sessions = self
+            .sessions
             .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .remove(&canonical_name(name));
+            .unwrap_or_else(|error| error.into_inner());
+        self.lifecycle.fetch_add(1, Ordering::AcqRel);
+        sessions.remove(&canonical_name(name));
     }
 }
 
@@ -577,6 +659,37 @@ mod tests {
 
         assert!(pool.sessions.lock().unwrap().is_empty());
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn removed_generation_cannot_reinsert_an_old_monitor_session() {
+        let profile = bambu::Profile::new("printer.local", "SN001", true).unwrap();
+        let pool = ConnectionPool::default();
+        let old_generation = pool.lifecycle_generation();
+
+        pool.remove("printer");
+
+        assert!(
+            pool.bambu_client_at(
+                Some(old_generation),
+                "printer",
+                &profile,
+                Some("access-code"),
+                None,
+            )
+            .is_none()
+        );
+        assert!(pool.sessions.lock().unwrap().is_empty());
+        assert!(
+            pool.bambu_client_at(
+                Some(pool.lifecycle_generation()),
+                "printer",
+                &profile,
+                Some("access-code"),
+                None,
+            )
+            .is_some()
+        );
     }
 
     #[test]
