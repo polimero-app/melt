@@ -12,20 +12,20 @@ use std::{
 
 use crate::{bambu, drivers, moonraker};
 
-struct BambuSession {
-    identity: [u8; 32],
-    client: bambu::Client,
-}
-
-struct MoonrakerSession {
-    identity: String,
-    client: Arc<moonraker::Client>,
+enum PooledSession {
+    Moonraker {
+        identity: String,
+        client: Arc<moonraker::Client>,
+    },
+    Bambu {
+        identity: [u8; 32],
+        client: Arc<bambu::Client>,
+    },
 }
 
 #[derive(Default)]
 pub struct ConnectionPool {
-    moonraker: Mutex<HashMap<String, MoonrakerSession>>,
-    bambu: Mutex<HashMap<String, Arc<Mutex<BambuSession>>>>,
+    sessions: Mutex<HashMap<String, PooledSession>>,
 }
 
 impl ConnectionPool {
@@ -46,18 +46,14 @@ impl ConnectionPool {
                     )
                     .map_err(drivers::DriverError::Moonraker)
             }
-            drivers::Profile::Bambu(profile) => {
-                let session = self.bambu_session(name, profile, access_code, tls_fingerprint);
-                let session = &mut *session.lock().unwrap_or_else(|error| error.into_inner());
-                session
-                    .client
-                    .poll_status(
-                        access_code,
-                        tls_fingerprint,
-                        profile.timeout().min(drivers::STATUS_POLL_TIMEOUT),
-                    )
-                    .map_err(drivers::DriverError::Bambu)
-            }
+            drivers::Profile::Bambu(profile) => self
+                .bambu_client(name, profile, access_code, tls_fingerprint)
+                .poll_status(
+                    access_code,
+                    tls_fingerprint,
+                    profile.timeout().min(drivers::STATUS_POLL_TIMEOUT),
+                )
+                .map_err(drivers::DriverError::Bambu),
         }
     }
 
@@ -313,49 +309,61 @@ impl ConnectionPool {
     ) -> Result<Arc<moonraker::Client>, drivers::DriverError> {
         let name = canonical_name(name);
         let identity = profile.connection_identity();
-        let mut clients = self
-            .moonraker
+        let mut sessions = self
+            .sessions
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let replace = clients
-            .get(&name)
-            .is_none_or(|session| session.identity != identity);
-        if replace {
-            let client = Arc::new(
-                moonraker::Client::new(profile.clone()).map_err(drivers::DriverError::Moonraker)?,
-            );
-            clients.insert(name.clone(), MoonrakerSession { identity, client });
+        if let Some(PooledSession::Moonraker {
+            identity: current,
+            client,
+        }) = sessions.get(&name)
+            && current == &identity
+        {
+            return Ok(client.clone());
         }
-        Ok(clients[&name].client.clone())
+        let client = Arc::new(
+            moonraker::Client::new(profile.clone()).map_err(drivers::DriverError::Moonraker)?,
+        );
+        sessions.insert(
+            name,
+            PooledSession::Moonraker {
+                identity,
+                client: client.clone(),
+            },
+        );
+        Ok(client)
     }
 
-    fn bambu_session(
+    fn bambu_client(
         &self,
         name: &str,
         profile: &bambu::Profile,
         access_code: Option<&str>,
         tls_fingerprint: Option<&str>,
-    ) -> Arc<Mutex<BambuSession>> {
+    ) -> Arc<bambu::Client> {
         let name = canonical_name(name);
         let identity = profile.connection_identity(access_code, tls_fingerprint);
-        let mut sessions = self.bambu.lock().unwrap_or_else(|error| error.into_inner());
-        let replace = sessions.get(&name).is_none_or(|session| {
-            session
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .identity
-                != identity
-        });
-        if replace {
-            sessions.insert(
-                name.clone(),
-                Arc::new(Mutex::new(BambuSession {
-                    identity,
-                    client: bambu::Client::new(profile.clone()),
-                })),
-            );
+        let mut sessions = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(PooledSession::Bambu {
+            identity: current,
+            client,
+        }) = sessions.get(&name)
+            && current == &identity
+        {
+            return client.clone();
         }
-        sessions[&name].clone()
+        let client = Arc::new(bambu::Client::new(profile.clone()));
+        sessions.insert(
+            name,
+            PooledSession::Bambu {
+                identity,
+                client: client.clone(),
+            },
+        );
+        client
     }
 
     fn with_bambu<T>(
@@ -366,17 +374,13 @@ impl ConnectionPool {
         tls_fingerprint: Option<&str>,
         operation: impl FnOnce(&bambu::Client) -> Result<T, bambu::TransportError>,
     ) -> Result<T, drivers::DriverError> {
-        let session = self.bambu_session(name, profile, access_code, tls_fingerprint);
-        let session = session.lock().unwrap_or_else(|error| error.into_inner());
-        operation(&session.client).map_err(drivers::DriverError::Bambu)
+        let client = self.bambu_client(name, profile, access_code, tls_fingerprint);
+        operation(&client).map_err(drivers::DriverError::Bambu)
     }
 
     /// Drops pooled connections for printers no longer present in the config.
     pub fn retain(&self, keep: impl Fn(&str) -> bool) {
-        if let Ok(mut clients) = self.moonraker.lock() {
-            clients.retain(|name, _| keep(name));
-        }
-        if let Ok(mut sessions) = self.bambu.lock() {
+        if let Ok(mut sessions) = self.sessions.lock() {
             sessions.retain(|name, _| keep(name));
         }
     }
@@ -461,14 +465,14 @@ mod tests {
     fn bambu_credentials_replace_and_retain_evicts_pooled_sessions() {
         let profile = bambu::Profile::new("printer.local", "SN001", true).unwrap();
         let pool = ConnectionPool::default();
-        let first = pool.bambu_session("printer", &profile, Some("old-code"), None);
-        let reused = pool.bambu_session("PRINTER", &profile, Some("old-code"), None);
-        let replaced = pool.bambu_session("printer", &profile, Some("new-code"), None);
+        let first = pool.bambu_client("printer", &profile, Some("old-code"), None);
+        let reused = pool.bambu_client("PRINTER", &profile, Some("old-code"), None);
+        let replaced = pool.bambu_client("printer", &profile, Some("new-code"), None);
 
         assert!(Arc::ptr_eq(&first, &reused));
         assert!(!Arc::ptr_eq(&first, &replaced));
         pool.retain(|_| false);
-        assert!(pool.bambu.lock().unwrap().is_empty());
+        assert!(pool.sessions.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -481,7 +485,27 @@ mod tests {
         let reused = pool.moonraker_client("printer", &profile).unwrap();
 
         assert!(Arc::ptr_eq(&first, &reused));
-        assert_eq!(pool.moonraker.lock().unwrap().len(), 1);
+        assert_eq!(pool.sessions.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn changing_drivers_replaces_the_previous_pooled_client() {
+        let moonraker =
+            moonraker::Profile::new("http://printer.local", false, Duration::from_secs(2)).unwrap();
+        let bambu = bambu::Profile::new("printer.local", "SN001", true).unwrap();
+        let pool = ConnectionPool::default();
+
+        let moonraker_client = pool.moonraker_client("printer", &moonraker).unwrap();
+        let old_moonraker = Arc::downgrade(&moonraker_client);
+        drop(moonraker_client);
+        let bambu_client = pool.bambu_client("printer", &bambu, Some("access-code"), None);
+        assert!(old_moonraker.upgrade().is_none());
+
+        let old_bambu = Arc::downgrade(&bambu_client);
+        drop(bambu_client);
+        let _moonraker_client = pool.moonraker_client("printer", &moonraker).unwrap();
+        assert!(old_bambu.upgrade().is_none());
+        assert_eq!(pool.sessions.lock().unwrap().len(), 1);
     }
 
     fn status_server(state: &'static str) -> (String, thread::JoinHandle<()>) {
