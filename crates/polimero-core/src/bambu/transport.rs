@@ -1157,18 +1157,10 @@ fn mqtt_publish_payload(header: u8, payload: &[u8]) -> Result<Vec<u8>, Error> {
 
 /// Fails the exchange when the printer refuses the command we just sent.
 fn command_rejection(report: &Value, sequence: Option<&str>) -> Result<(), Error> {
-    let Some(sequence) = sequence else {
+    let Some(command) = matching_command_envelope(report, sequence) else {
         return Ok(());
     };
-    let command = ["print", "system"]
-        .into_iter()
-        .find_map(|key| report.get(key).and_then(Value::as_object));
-    let Some(command) = command else {
-        return Ok(());
-    };
-    if string(command.get("sequence_id")).as_deref() != Some(sequence)
-        || !string(command.get("result")).is_some_and(|result| result.eq_ignore_ascii_case("fail"))
-    {
+    if !string(command.get("result")).is_some_and(|result| result.eq_ignore_ascii_case("fail")) {
         return Ok(());
     }
     let reason = string(command.get("reason")).unwrap_or_default();
@@ -1182,17 +1174,18 @@ fn command_rejection(report: &Value, sequence: Option<&str>) -> Result<(), Error
 }
 
 fn report_matches_sequence(report: &Value, sequence: Option<&str>) -> bool {
-    let Some(sequence) = sequence else {
-        return false;
-    };
-    ["print", "system", "pushing"].into_iter().any(|key| {
-        report
-            .get(key)
-            .and_then(Value::as_object)
-            .and_then(|command| string(command.get("sequence_id")))
-            .as_deref()
-            == Some(sequence)
-    })
+    matching_command_envelope(report, sequence).is_some()
+}
+
+fn matching_command_envelope<'a>(
+    report: &'a Value,
+    sequence: Option<&str>,
+) -> Option<&'a Map<String, Value>> {
+    let sequence = sequence?;
+    ["print", "system", "pushing"]
+        .into_iter()
+        .filter_map(|key| report.get(key).and_then(Value::as_object))
+        .find(|command| command.get("sequence_id").and_then(Value::as_str) == Some(sequence))
 }
 
 fn next_sequence_id() -> String {
@@ -2478,6 +2471,25 @@ mod tests {
             Err(Error::UnsignedCommand)
         ));
         assert!(command_rejection(&rejection, Some("other")).is_ok());
+    }
+
+    #[test]
+    fn command_rejections_select_the_envelope_with_the_active_sequence() {
+        let report = json!({
+            "print": {"sequence_id": "unrelated", "gcode_state": "IDLE"},
+            "system": {
+                "sequence_id": "active",
+                "result": "fail",
+                "reason": "verification failed"
+            }
+        });
+
+        assert!(matches!(
+            command_rejection(&report, Some("active")),
+            Err(Error::UnsignedCommand)
+        ));
+        assert!(report_matches_sequence(&report, Some("active")));
+        assert!(!report_matches_sequence(&report, Some("missing")));
     }
 
     #[test]
