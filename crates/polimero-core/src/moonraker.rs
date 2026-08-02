@@ -205,7 +205,7 @@ impl Client {
             access_code,
             Some(timeout),
         )?;
-        let body = read_response(response)?;
+        let body = self.read_response(response, "GET printer/objects/query")?;
         let envelope: Envelope =
             serde_json::from_slice(&body).map_err(|_| Error::InvalidResponse)?;
         if envelope.error.as_ref().is_some_and(|error| {
@@ -286,14 +286,30 @@ impl Client {
         if relative.is_empty() {
             return Err(Error::InvalidDevicePath);
         }
+        let endpoint = format!("server/files/gcodes/{relative}");
         let mut response = self.response(
             &self.transfer_http,
             Method::GET,
-            &format!("server/files/gcodes/{relative}"),
+            &endpoint,
             &[],
             access_code,
         )?;
-        std::io::copy(&mut response, destination).map_err(Error::LocalIo)
+        let label = format!("GET {endpoint}");
+        let status = response.status();
+        match std::io::copy(&mut response, destination) {
+            Ok(bytes) => {
+                self.trace(
+                    TraceEvent::response("http", label)
+                        .with_outcome(status.as_str())
+                        .with_bytes(bytes),
+                );
+                Ok(bytes)
+            }
+            Err(error) => {
+                self.trace_body_error(&label, &error);
+                Err(map_body_error(error, Error::LocalIo))
+            }
+        }
     }
 
     pub fn upload_file(
@@ -356,14 +372,26 @@ impl Client {
                 return Err(map_request_error(error));
             }
         };
-        self.trace(TraceEvent::response("http", label).with_outcome(response.status().as_str()));
         match response.status() {
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => return Err(Error::Authentication),
-            status if !status.is_success() => return Err(Error::HttpStatus(status)),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                self.trace(
+                    TraceEvent::response("http", label).with_outcome(response.status().as_str()),
+                );
+                return Err(Error::Authentication);
+            }
+            status if !status.is_success() => {
+                self.trace(TraceEvent::response("http", label).with_outcome(status.as_str()));
+                return Err(Error::HttpStatus(status));
+            }
             StatusCode::CREATED => {}
-            _ => return Err(Error::UnexpectedUploadStatus),
+            _ => {
+                self.trace(
+                    TraceEvent::response("http", label).with_outcome(response.status().as_str()),
+                );
+                return Err(Error::UnexpectedUploadStatus);
+            }
         }
-        let body = read_response(response)?;
+        let body = self.read_response(response, label)?;
         let envelope: Envelope =
             serde_json::from_slice(&body).map_err(|_| Error::InvalidResponse)?;
         if envelope.error.as_ref().is_some_and(|error| {
@@ -385,14 +413,9 @@ impl Client {
         if relative.is_empty() {
             return Err(Error::InvalidDevicePath);
         }
-        let response = self.response(
-            &self.http,
-            Method::DELETE,
-            &format!("server/files/gcodes/{relative}"),
-            &[],
-            access_code,
-        )?;
-        let _ = read_response(response)?;
+        let endpoint = format!("server/files/gcodes/{relative}");
+        let response = self.response(&self.http, Method::DELETE, &endpoint, &[], access_code)?;
+        let _ = self.read_response(response, &format!("DELETE {endpoint}"))?;
         Ok(())
     }
 
@@ -701,8 +724,9 @@ impl Client {
         query: &[(&str, String)],
         access_code: Option<&str>,
     ) -> Result<T, Error> {
+        let label = format!("{method} {endpoint}");
         let response = self.response(&self.http, method, endpoint, query, access_code)?;
-        let body = read_response(response)?;
+        let body = self.read_response(response, &label)?;
         let envelope: Envelope =
             serde_json::from_slice(&body).map_err(|_| Error::InvalidResponse)?;
         if envelope.error.as_ref().is_some_and(|error| {
@@ -768,16 +792,59 @@ impl Client {
             }
         };
         let status = response.status();
-        self.trace(
-            TraceEvent::response("http", label.as_str())
-                .with_outcome(status.as_str())
-                .with_bytes(response.content_length().unwrap_or_default()),
-        );
         match status {
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(Error::Authentication),
-            status if !status.is_success() => Err(Error::HttpStatus(status)),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                self.trace(TraceEvent::response("http", label).with_outcome(status.as_str()));
+                Err(Error::Authentication)
+            }
+            status if !status.is_success() => {
+                self.trace(TraceEvent::response("http", label).with_outcome(status.as_str()));
+                Err(Error::HttpStatus(status))
+            }
             _ => Ok(response),
         }
+    }
+
+    fn read_response(
+        &self,
+        response: reqwest::blocking::Response,
+        label: &str,
+    ) -> Result<Vec<u8>, Error> {
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_JSON_RESPONSE_BYTES)
+        {
+            self.trace(TraceEvent::response("http", label).with_outcome("response_too_large"));
+            return Err(Error::ResponseTooLarge);
+        }
+        let status = response.status();
+        let mut body = Vec::new();
+        if let Err(error) = response
+            .take(MAX_JSON_RESPONSE_BYTES + 1)
+            .read_to_end(&mut body)
+        {
+            self.trace_body_error(label, &error);
+            return Err(map_body_error(error, |_| Error::InvalidResponse));
+        }
+        if body.len() as u64 > MAX_JSON_RESPONSE_BYTES {
+            self.trace(TraceEvent::response("http", label).with_outcome("response_too_large"));
+            return Err(Error::ResponseTooLarge);
+        }
+        self.trace(
+            TraceEvent::response("http", label)
+                .with_outcome(status.as_str())
+                .with_bytes(body.len() as u64),
+        );
+        Ok(body)
+    }
+
+    fn trace_body_error(&self, label: &str, error: &std::io::Error) {
+        let outcome = if body_error_is_timeout(error) {
+            "timeout"
+        } else {
+            "transport_error"
+        };
+        self.trace(TraceEvent::response("http", label).with_outcome(outcome));
     }
 
     fn trace(&self, event: TraceEvent) {
@@ -806,22 +873,19 @@ fn map_request_error(error: reqwest::Error) -> Error {
     }
 }
 
-fn read_response(response: reqwest::blocking::Response) -> Result<Vec<u8>, Error> {
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_JSON_RESPONSE_BYTES)
-    {
-        return Err(Error::ResponseTooLarge);
+fn body_error_is_timeout(error: &std::io::Error) -> bool {
+    error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<reqwest::Error>())
+        .is_some_and(reqwest::Error::is_timeout)
+}
+
+fn map_body_error(error: std::io::Error, otherwise: impl FnOnce(std::io::Error) -> Error) -> Error {
+    if body_error_is_timeout(&error) {
+        Error::Timeout
+    } else {
+        otherwise(error)
     }
-    let mut body = Vec::new();
-    response
-        .take(MAX_JSON_RESPONSE_BYTES + 1)
-        .read_to_end(&mut body)
-        .map_err(|_| Error::InvalidResponse)?;
-    if body.len() as u64 > MAX_JSON_RESPONSE_BYTES {
-        return Err(Error::ResponseTooLarge);
-    }
-    Ok(body)
 }
 
 #[derive(Deserialize)]
@@ -1862,11 +1926,46 @@ mod tests {
         server.join().unwrap();
     }
 
+    #[test]
+    fn response_body_timeout_is_classified_and_traced_as_timeout() {
+        let (host, server) = body_stalling_server();
+        let tracer = std::sync::Arc::new(RecordingTracer::default());
+        let profile = Profile::new(&host, false, Duration::from_millis(20))
+            .unwrap()
+            .with_tracer(tracer.clone());
+        let client = Client::new(profile).unwrap();
+
+        assert!(matches!(client.status(None), Err(Error::Timeout)));
+        server.join().unwrap();
+
+        let events = tracer.0.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].outcome.as_deref(), Some("timeout"));
+    }
+
     fn stalling_server() -> (String, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let host = format!("http://{}", listener.local_addr().unwrap());
         let server = thread::spawn(move || {
             let (_stream, _) = listener.accept().unwrap();
+            thread::sleep(Duration::from_millis(100));
+        });
+        (host, server)
+    }
+
+    fn body_stalling_server() -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let host = format!("http://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request).unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+            stream.flush().unwrap();
             thread::sleep(Duration::from_millis(100));
         });
         (host, server)
