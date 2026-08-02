@@ -2336,6 +2336,7 @@ fn remove_configured_printer(
 ) -> Result<profiles::RemoveResult, CommandError> {
     let dir = config_dir().map_err(|_| unreadable_config())?;
     let result = profiles::remove(dir, &SystemKeychain, &name).map_err(create_error)?;
+    state.pool.remove(&name);
     invalidate(&state, &name);
     Ok(result)
 }

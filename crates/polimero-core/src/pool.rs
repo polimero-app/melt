@@ -386,6 +386,14 @@ impl ConnectionPool {
             .unwrap_or_else(|error| error.into_inner());
         sessions.retain(|name, _| keep(name));
     }
+
+    /// Immediately drops the pooled connection for one configured printer.
+    pub fn remove(&self, name: &str) {
+        self.sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&canonical_name(name));
+    }
 }
 
 fn canonical_name(name: &str) -> String {
@@ -508,6 +516,21 @@ mod tests {
         let _moonraker_client = pool.moonraker_client("printer", &moonraker).unwrap();
         assert!(old_bambu.upgrade().is_none());
         assert_eq!(pool.sessions.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn remove_canonicalizes_names_and_releases_the_pooled_client() {
+        let profile =
+            moonraker::Profile::new("http://printer.local", false, Duration::from_secs(2)).unwrap();
+        let pool = ConnectionPool::default();
+        let client = pool.moonraker_client("Workshop", &profile).unwrap();
+        let weak = Arc::downgrade(&client);
+        drop(client);
+
+        pool.remove("WORKSHOP");
+
+        assert!(pool.sessions.lock().unwrap().is_empty());
+        assert!(weak.upgrade().is_none());
     }
 
     #[test]
