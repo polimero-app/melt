@@ -290,7 +290,7 @@ impl Client {
         access_code: Option<&str>,
         fingerprint: Option<&str>,
     ) -> Result<(), Error> {
-        self.exchange(
+        self.exchange_fresh(
             access_code,
             fingerprint,
             gcode_payload("M112"),
@@ -555,6 +555,35 @@ impl Client {
         result
     }
 
+    fn exchange_fresh(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        payload: String,
+        predicate: impl Fn(&Value) -> bool,
+    ) -> Result<Vec<u8>, Error> {
+        let started = Instant::now();
+        let label = format!("publish {}", self.profile.mqtt_topics().request);
+        self.trace(TraceEvent::request("mqtt", label.as_str()).with_bytes(payload.len() as u64));
+        let result = self.with_fresh_mqtt(access_code, fingerprint, |mqtt| {
+            mqtt.exchange(payload, predicate)
+        });
+        match &result {
+            Ok(report) => self.trace(
+                TraceEvent::response("mqtt", label.as_str())
+                    .with_outcome("ok")
+                    .with_bytes(report.len() as u64)
+                    .with_elapsed_ms(started.elapsed().as_millis() as u64),
+            ),
+            Err(error) => self.trace(
+                TraceEvent::response("mqtt", label.as_str())
+                    .with_outcome(error.to_string())
+                    .with_elapsed_ms(started.elapsed().as_millis() as u64),
+            ),
+        }
+        result
+    }
+
     pub fn download_to(
         &self,
         access_code: Option<&str>,
@@ -756,6 +785,34 @@ impl Client {
                 Err(error)
             }
         }
+    }
+
+    fn with_fresh_mqtt<T>(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        operation: impl FnOnce(&mut MqttConnection) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let deadline = deadline_after(self.profile.timeout())?;
+        let access_code = valid_access_code(access_code)?;
+        validate_pin(&self.profile, fingerprint)?;
+        let connector = tls_connector()?;
+        let (stream, _) = open_tls(
+            &connector,
+            &self.profile,
+            super::MQTT_PORT,
+            fingerprint,
+            true,
+            deadline,
+        )?;
+        let mut mqtt = MqttConnection::new(stream, self.profile.mqtt_topics(), deadline);
+        if let Err(error) = mqtt.connect(access_code).and_then(|_| mqtt.subscribe()) {
+            mqtt.disconnect();
+            return Err(error);
+        }
+        let result = operation(&mut mqtt);
+        mqtt.disconnect();
+        result
     }
 
     fn lock_mqtt_until(
@@ -2800,6 +2857,28 @@ mod tests {
     }
 
     #[test]
+    fn emergency_stop_does_not_wait_for_the_reusable_session_lock() {
+        let profile =
+            Profile::with_timeout("127.0.0.1", "SN001", true, Duration::from_millis(20)).unwrap();
+        let client = Arc::new(Client::new(profile));
+        let holder = client.clone();
+        let (locked_tx, locked_rx) = mpsc::channel();
+        let thread = thread::spawn(move || {
+            let _guard = holder.mqtt.lock().unwrap();
+            locked_tx.send(()).unwrap();
+            thread::sleep(Duration::from_millis(100));
+        });
+        locked_rx.recv().unwrap();
+
+        let started = Instant::now();
+        let result = client.emergency_stop(Some("access-code"), None);
+
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_millis(80));
+        thread.join().unwrap();
+    }
+
+    #[test]
     fn cached_status_retry_shares_one_deadline() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -2893,8 +2972,12 @@ mod tests {
         let client = Client::new(profile);
         *client.mqtt.lock().unwrap() = Some(CachedConnection { identity, mqtt });
 
-        client.emergency_stop(Some("access-code"), None).unwrap();
-        client.emergency_stop(Some("access-code"), None).unwrap();
+        client
+            .motion_home(Some("access-code"), None, &[crate::moonraker::Axis::X])
+            .unwrap();
+        client
+            .motion_home(Some("access-code"), None, &[crate::moonraker::Axis::X])
+            .unwrap();
 
         server.join().unwrap();
         assert!(client.mqtt.lock().unwrap().is_some());
