@@ -21,6 +21,7 @@ mod identity;
 mod mapping;
 mod names;
 mod package;
+mod presence;
 mod quirks;
 mod rtsp;
 mod transport;
@@ -37,6 +38,7 @@ pub use package::{
     FilamentRequirement, PackageError, PackageIssue, PackageIssueSeverity, PlateManifest,
     PrintPackage, inspect_print_package,
 };
+pub use presence::{PresenceCache, PrinterPresence};
 pub use quirks::{
     Qualification as QuirkQualification, QuirkEffect, QuirkEntry, applicable as applicable_quirks,
     registry as quirk_registry,

@@ -24,6 +24,12 @@ pub struct DiscoveredPrinter {
     pub serial: String,
     pub model: String,
     pub name: String,
+    pub firmware: Option<String>,
+    pub schema_version: Option<String>,
+    pub connect_mode: Option<String>,
+    pub bind_state: Option<String>,
+    pub security_mode: Option<String>,
+    pub interface: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -103,6 +109,18 @@ struct Announcement {
     ip: String,
     #[serde(default)]
     dev_product_name: String,
+    #[serde(default)]
+    dev_ver: Option<String>,
+    #[serde(default)]
+    dev_schema: Option<String>,
+    #[serde(default)]
+    connect: Option<String>,
+    #[serde(default)]
+    bind: Option<String>,
+    #[serde(default)]
+    security: Option<String>,
+    #[serde(default, rename = "ifname")]
+    interface: Option<String>,
 }
 
 fn parse_udp_announcement(payload: &[u8], source: IpAddr) -> Option<DiscoveredPrinter> {
@@ -116,12 +134,19 @@ fn parse_udp_announcement(payload: &[u8], source: IpAddr) -> Option<DiscoveredPr
     } else {
         source
     };
-    Some(printer(
+    let mut printer = printer(
         host,
         announcement.sn,
         announcement.dev_product_name,
         announcement.dev_name,
-    ))
+    );
+    printer.firmware = announcement.dev_ver;
+    printer.schema_version = announcement.dev_schema;
+    printer.connect_mode = announcement.connect;
+    printer.bind_state = announcement.bind;
+    printer.security_mode = announcement.security;
+    printer.interface = announcement.interface;
+    Some(printer)
 }
 
 fn parse_ssdp_response(payload: &[u8], source: IpAddr) -> Option<DiscoveredPrinter> {
@@ -170,6 +195,12 @@ fn printer(host: String, serial: String, model: String, name: String) -> Discove
         serial,
         model,
         name,
+        firmware: None,
+        schema_version: None,
+        connect_mode: None,
+        bind_state: None,
+        security_mode: None,
+        interface: None,
     }
 }
 
