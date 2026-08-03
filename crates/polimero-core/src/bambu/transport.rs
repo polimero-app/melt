@@ -122,6 +122,7 @@ pub struct Client {
     profile: Profile,
     mqtt: Mutex<Option<CachedConnection>>,
     capabilities: Mutex<Option<RuntimeCapabilities>>,
+    observed_storage: Mutex<Option<StorageTransport>>,
 }
 
 impl Client {
@@ -130,6 +131,7 @@ impl Client {
             profile,
             mqtt: Mutex::new(None),
             capabilities: Mutex::new(None),
+            observed_storage: Mutex::new(None),
         }
     }
 
@@ -215,7 +217,72 @@ impl Client {
     }
 
     fn storage_transport(&self) -> StorageTransport {
-        self.effective_capabilities().storage_transport
+        self.observed_storage
+            .lock()
+            .ok()
+            .and_then(|transport| *transport)
+            .unwrap_or_else(|| self.effective_capabilities().storage_transport)
+    }
+
+    fn remember_storage_transport(&self, transport: StorageTransport) {
+        if let Ok(mut observed) = self.observed_storage.lock() {
+            *observed = Some(transport);
+        }
+        if let Ok(mut capabilities) = self.capabilities.lock() {
+            let capabilities =
+                capabilities.get_or_insert_with(|| self.profile.default_capabilities());
+            capabilities.storage_transport = transport;
+        }
+    }
+
+    fn ensure_storage_transport(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+    ) -> Result<StorageTransport, Error> {
+        if let Some(transport) = self.observed_storage.lock().ok().and_then(|value| *value) {
+            return Ok(transport);
+        }
+        let preferred = self.storage_transport();
+        match self.probe_storage_transport(preferred, access_code, fingerprint) {
+            Ok(()) => {
+                self.remember_storage_transport(preferred);
+                Ok(preferred)
+            }
+            Err(error) if storage_fallback_allowed(&error) => {
+                let fallback = match preferred {
+                    StorageTransport::Tunnel6000 => StorageTransport::Ftps,
+                    StorageTransport::Ftps => StorageTransport::Tunnel6000,
+                    StorageTransport::Unknown => StorageTransport::Ftps,
+                };
+                self.probe_storage_transport(fallback, access_code, fingerprint)?;
+                self.remember_storage_transport(fallback);
+                Ok(fallback)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn probe_storage_transport(
+        &self,
+        transport: StorageTransport,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+    ) -> Result<(), Error> {
+        match transport {
+            StorageTransport::Tunnel6000 => {
+                tunnel::Connection::open(&self.profile, access_code, fingerprint)?
+                    .roots()
+                    .map(drop)
+            }
+            StorageTransport::Ftps => {
+                let mut connection = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
+                let result = connection.storage_roots().map(drop);
+                connection.quit();
+                result
+            }
+            StorageTransport::Unknown => Err(Error::Unsupported("printer storage transport")),
+        }
     }
 
     /// Like [`status`](Self::status), but reuses a live MQTT session across
@@ -330,7 +397,7 @@ impl Client {
         device_path: &str,
         options: JobStartOptions,
     ) -> Result<JobResult, Error> {
-        let transport = self.storage_transport();
+        let transport = self.ensure_storage_transport(access_code, fingerprint)?;
         let (mut storage, path) = storage_location(transport, device_path)?;
         if path == "/" {
             return Err(Error::InvalidDevicePath);
@@ -713,7 +780,8 @@ impl Client {
         access_code: Option<&str>,
         fingerprint: Option<&str>,
     ) -> Result<Vec<FileRoot>, Error> {
-        if self.storage_transport() == super::StorageTransport::Tunnel6000 {
+        let transport = self.ensure_storage_transport(access_code, fingerprint)?;
+        if transport == super::StorageTransport::Tunnel6000 {
             return tunnel::Connection::open(&self.profile, access_code, fingerprint)?.roots();
         }
         let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
@@ -729,7 +797,7 @@ impl Client {
         device_path: &str,
         recursive: bool,
     ) -> Result<FileList, Error> {
-        let transport = self.storage_transport();
+        let transport = self.ensure_storage_transport(access_code, fingerprint)?;
         let (storage, path) = storage_location(transport, device_path)?;
         if transport == super::StorageTransport::Tunnel6000 {
             if recursive && path != "/" {
@@ -805,7 +873,7 @@ impl Client {
         device_path: &str,
         destination: &mut dyn Write,
     ) -> Result<u64, Error> {
-        let transport = self.storage_transport();
+        let transport = self.ensure_storage_transport(access_code, fingerprint)?;
         let (storage, path) = storage_location(transport, device_path)?;
         if path == "/" {
             return Err(Error::InvalidDevicePath);
@@ -830,7 +898,7 @@ impl Client {
         plate: u32,
         destination: &mut dyn Write,
     ) -> Result<u64, Error> {
-        let transport = self.storage_transport();
+        let transport = self.ensure_storage_transport(access_code, fingerprint)?;
         if transport != super::StorageTransport::Tunnel6000 {
             return Err(Error::Unsupported(":6000 SUB_FILE thumbnail"));
         }
@@ -860,7 +928,7 @@ impl Client {
         if !metadata.is_file() {
             return Err(Error::LocalIo);
         }
-        let transport = self.storage_transport();
+        let transport = self.ensure_storage_transport(access_code, fingerprint)?;
         let (storage, path) = storage_location(transport, device_path)?;
         if path == "/" {
             return Err(Error::DirectoryDestination);
@@ -899,7 +967,7 @@ impl Client {
         fingerprint: Option<&str>,
         device_path: &str,
     ) -> Result<(), Error> {
-        let transport = self.storage_transport();
+        let transport = self.ensure_storage_transport(access_code, fingerprint)?;
         let (storage, path) = storage_location(transport, device_path)?;
         if path == "/" {
             return Err(Error::InvalidDevicePath);
@@ -2863,6 +2931,13 @@ fn normalize_device_path(value: &str) -> Result<String, Error> {
     Ok(format!("/{}", segments.join("/")))
 }
 
+fn storage_fallback_allowed(error: &Error) -> bool {
+    matches!(
+        error,
+        Error::Connection | Error::Timeout | Error::InvalidResponse | Error::Unsupported(_)
+    )
+}
+
 fn destination_path(root: &str, filename: &str) -> Result<String, Error> {
     if root.is_empty() || filename.is_empty() || filename.contains(['/', '\\']) {
         return Err(Error::InvalidDevicePath);
@@ -3825,6 +3900,17 @@ mod tests {
             "emmc:customer_part.gcode.3mf"
         );
         assert!(destination_path("sdcard:/cache", "../part.3mf").is_err());
+    }
+
+    #[test]
+    fn storage_fallback_never_masks_security_or_collision_failures() {
+        assert!(storage_fallback_allowed(&Error::Connection));
+        assert!(storage_fallback_allowed(&Error::Timeout));
+        assert!(!storage_fallback_allowed(&Error::Authentication));
+        assert!(!storage_fallback_allowed(&Error::Pin(
+            TlsPinError::Mismatch
+        )));
+        assert!(!storage_fallback_allowed(&Error::FileAlreadyExists));
     }
 
     #[test]
