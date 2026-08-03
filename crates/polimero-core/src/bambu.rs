@@ -15,12 +15,14 @@ use thiserror::Error;
 use crate::trace::{SharedTracer, next_tracer_generation};
 
 mod discovery;
+mod names;
 mod package;
 mod rtsp;
 mod transport;
 mod tunnel;
 
 pub use discovery::{DiscoveredPrinter, DiscoveryError, discover};
+pub use names::{JobNames, NameError, derive_job_names, validate_remote_filename};
 pub use package::{
     FilamentRequirement, PackageError, PackageIssue, PackageIssueSeverity, PlateManifest,
     PrintPackage, inspect_print_package,
