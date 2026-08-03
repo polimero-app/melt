@@ -304,6 +304,7 @@ export type MessageKey =
   | "errors.actionUnconfirmed"
   | "errors.actionUnsupported"
   | "errors.jobFileMissing"
+  | "errors.jobFileInvalid"
   | "errors.temperatureTargetMissing"
   | "errors.driverUnsupported"
   | "errors.printerAuthFailed"
@@ -660,6 +661,7 @@ const messages: Record<Locale, Messages> = {
     "errors.actionUnconfirmed": "Confirm this printer action before sending it.",
     "errors.actionUnsupported": "Unsupported printer action.",
     "errors.jobFileMissing": "Choose a printer file before starting a job.",
+    "errors.jobFileInvalid": "This 3MF is not sliced or does not contain a printable plate.",
     "errors.temperatureTargetMissing": "Choose a temperature target first.",
     "errors.driverUnsupported": "This driver does not support {operation}.",
     "errors.printerAuthFailed": "Printer authentication failed.",
@@ -1013,6 +1015,7 @@ const messages: Record<Locale, Messages> = {
     "errors.actionUnconfirmed": "Confirme esta ação antes de enviá-la à impressora.",
     "errors.actionUnsupported": "Ação de impressora não suportada.",
     "errors.jobFileMissing": "Escolha um arquivo antes de iniciar uma impressão.",
+    "errors.jobFileInvalid": "Este 3MF não está fatiado ou não contém uma mesa imprimível.",
     "errors.temperatureTargetMissing": "Escolha primeiro uma temperatura alvo.",
     "errors.driverUnsupported": "Este driver não suporta {operation}.",
     "errors.printerAuthFailed": "A autenticação da impressora falhou.",

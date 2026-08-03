@@ -130,13 +130,21 @@ type Temperature = {
 
 type AmsTrayStatus = {
   slot: number
+  trayIndex?: number
+  trayInfoId?: string
+  settingId?: string
+  tagUid?: string
   filamentType?: string
   color?: string
   remainingPercent?: number
+  remainingGrams?: number
+  nominalWeightGrams?: number
+  diameterMm?: number
 }
 
 type AmsUnitStatus = {
   id: number
+  kind?: string
   humidityRange?: string
   humidityLevel?: string
   temperature?: number
@@ -168,6 +176,7 @@ type MonitorEntry = {
 
 type NotificationEvent = { kind: 'completion' | 'failure' | 'disconnection'; printer: string }
 type TransferProgress = { transferId: string; bytesTransferred: number; totalBytes?: number; complete: boolean }
+type PrintStageEvent = { stage: string; percent?: number; bytesTransferred?: number; detail?: string }
 
 type FileEntry = {
   name: string
@@ -228,6 +237,7 @@ interface MaterialSlot {
   name: string
   color: string
   remainingPercent?: number
+  remainingGrams?: number
 }
 
 interface MaterialSystemView {
@@ -303,6 +313,7 @@ const libraryParent = ref<string>()
 const libraryBreadcrumbs = ref<LibraryBreadcrumb[]>([])
 const printTarget = ref<FileEntry>()
 const printBusy = ref(false)
+const printStage = ref<PrintStageEvent>()
 const loadError = ref<string>()
 const profileError = ref<string>()
 const adding = ref(false)
@@ -332,6 +343,7 @@ const cameraError = ref<string>()
 let monitorUnlisten: UnlistenFn | undefined
 let notificationUnlisten: UnlistenFn | undefined
 let transferUnlisten: UnlistenFn | undefined
+let printStageUnlisten: UnlistenFn | undefined
 let fileQueryTimer: number | undefined
 let selectionRequest = 0
 let cameraRequest = 0
@@ -476,6 +488,7 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
       name: tray.filamentType ?? '—',
       color: tray.color ? `#${tray.color}` : '#9ca3af',
       remainingPercent: tray.remainingPercent,
+      remainingGrams: tray.remainingGrams,
     })),
   }))
 })
@@ -1418,6 +1431,7 @@ async function printToPrinter(name: string) {
   const file = printTarget.value
   if (!file || printBusy.value) return
   printBusy.value = true
+  printStage.value = { stage: 'inspect', percent: 0 }
   try {
     await invoke('print_library_file', { request: { printer: name, path: file.devicePath } })
     printTarget.value = undefined
@@ -1426,6 +1440,7 @@ async function printToPrinter(name: string) {
     showToast(message(reason))
   } finally {
     printBusy.value = false
+    printStage.value = undefined
   }
 }
 
@@ -1458,6 +1473,11 @@ onMounted(() => {
   }).then((unlisten) => {
     transferUnlisten = unlisten
   })
+  void listen<PrintStageEvent>('print-stage', (event) => {
+    printStage.value = event.payload
+  }).then((unlisten) => {
+    printStageUnlisten = unlisten
+  })
 })
 
 onUnmounted(() => {
@@ -1466,6 +1486,7 @@ onUnmounted(() => {
   monitorUnlisten?.()
   notificationUnlisten?.()
   transferUnlisten?.()
+  printStageUnlisten?.()
   if (fileQueryTimer !== undefined) window.clearTimeout(fileQueryTimer)
   if (toastTimer !== undefined) window.clearTimeout(toastTimer)
   Object.values(temperatureTimers).forEach((timer) => {
@@ -1874,6 +1895,7 @@ onUnmounted(() => {
                       <span class="relative z-10 flex h-full flex-col items-center justify-center gap-1 p-1 text-center font-mono" :style="{ color: textColorFor(material.color) }">
                         <span class="text-xs font-bold">{{ material.slot }}</span>
                         <span v-if="material.type !== '—'" class="text-[9px] font-semibold tracking-wide uppercase wrap-anywhere">{{ material.type }}</span>
+                        <span v-if="material.remainingGrams !== undefined" class="text-[8px] font-medium">{{ material.remainingGrams }} g</span>
                       </span>
                     </div>
                   </div>
@@ -2271,6 +2293,15 @@ onUnmounted(() => {
           >{{ t('dashboard.print') }}</Button>
         </li>
       </ul>
+      <div v-if="printBusy" class="mt-4 space-y-2">
+        <div class="flex justify-between text-xs text-gray-500 dark:text-gray-400">
+          <span>{{ t('common.sending') }}</span>
+          <span>{{ printStage?.percent ?? 0 }}%</span>
+        </div>
+        <div class="h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-white/10">
+          <div class="h-full rounded-full bg-cyan-600 transition-[width]" :style="{ width: `${printStage?.percent ?? 0}%` }"></div>
+        </div>
+      </div>
       <p v-else class="text-sm text-gray-500 dark:text-gray-400">{{ t('filesView.noPrinters') }}</p>
       <template #footer>
         <Button :disabled="printBusy" @click="printTarget = undefined">{{ t('common.cancel') }}</Button>

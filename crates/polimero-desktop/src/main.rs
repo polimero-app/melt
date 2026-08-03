@@ -1458,15 +1458,48 @@ fn set_library_path(
 fn print_library_file(
     request: LibraryPrintRequest,
     state: tauri::State<'_, MonitorState>,
+    app: tauri::AppHandle,
 ) -> Result<moonraker::JobResult, CommandError> {
     let absolute = resolve_absolute_path(&request.path)?;
-    let filename = absolute
+    let source_filename = absolute
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| CommandError::new("libraryPathInvalid"))?;
     let (generation, printer) =
         pooled_desktop_printer(&state, &request.printer, Operation::FileUpload)?;
-    let device_path = format!("/{filename}");
+    let mut options = polimero_core::bambu::JobStartOptions::default();
+    let device_path = if printer.driver.driver() == drivers::Driver::BambuLan
+        && source_filename.to_ascii_lowercase().ends_with(".3mf")
+    {
+        let preflight = polimero_core::bambu::preflight_print_package(&absolute, None, None, None)
+            .map_err(|_| CommandError::new("jobFileInvalid"))?;
+        if !preflight.ready {
+            return Err(CommandError::new("jobFileInvalid"));
+        }
+        options.plate = Some(preflight.selected_plate.index);
+        options.display_name = Some(preflight.names.display_name.clone());
+        let _ = app.emit(
+            "print-stage",
+            polimero_core::bambu::PrintStageEvent {
+                stage: polimero_core::bambu::PrintStage::Inspect,
+                percent: Some(10),
+                bytes_transferred: None,
+                detail: Some(preflight.names.display_name),
+            },
+        );
+        format!("/{}", preflight.names.remote_filename)
+    } else {
+        format!("/{source_filename}")
+    };
+    let _ = app.emit(
+        "print-stage",
+        polimero_core::bambu::PrintStageEvent {
+            stage: polimero_core::bambu::PrintStage::Upload,
+            percent: Some(30),
+            bytes_transferred: Some(0),
+            detail: Some(device_path.clone()),
+        },
+    );
     drivers::upload_file(
         &printer.driver,
         printer.access_code.as_deref(),
@@ -1476,6 +1509,15 @@ fn print_library_file(
         true,
     )
     .map_err(|error| operation_error(error, Operation::FileUpload))?;
+    let _ = app.emit(
+        "print-stage",
+        polimero_core::bambu::PrintStageEvent {
+            stage: polimero_core::bambu::PrintStage::SendCommand,
+            percent: Some(80),
+            bytes_transferred: None,
+            detail: None,
+        },
+    );
     ensure_state(
         &state,
         generation,
@@ -1490,10 +1532,21 @@ fn print_library_file(
             printer.access_code.as_deref(),
             printer.tls_fingerprint.as_deref(),
             &device_path,
-            polimero_core::bambu::JobStartOptions::default(),
+            options,
         )
     });
     invalidate(&state, &request.printer);
+    if result.is_ok() {
+        let _ = app.emit(
+            "print-stage",
+            polimero_core::bambu::PrintStageEvent {
+                stage: polimero_core::bambu::PrintStage::Finished,
+                percent: Some(100),
+                bytes_transferred: None,
+                detail: None,
+            },
+        );
+    }
     result
 }
 
