@@ -106,6 +106,12 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
         flags: "  -h, --help                    help for pause\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
     },
     LeafCommand {
+        path: &["jobs", "preflight"],
+        short: "Inspect and validate a local sliced 3MF package",
+        args: "<local-path> [flags]",
+        flags: "      --display-name string   job name shown by the printer\n  -h, --help                  help for preflight\n      --plate int             plate index within the sliced package",
+    },
+    LeafCommand {
         path: &["jobs", "resume"],
         short: "Resume a paused print job",
         args: "<printer> [flags]",
@@ -252,6 +258,10 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
         commands: &[
             ("cancel", "Cancel the active or paused print job"),
             ("pause", "Pause the active print job"),
+            (
+                "preflight",
+                "Inspect and validate a local sliced 3MF package",
+            ),
             ("resume", "Resume a paused print job"),
             ("start", "Start a print job from a file on printer storage"),
         ],
@@ -482,6 +492,11 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                 && matches!(action.as_str(), "start" | "pause" | "resume" | "cancel") =>
         {
             job_action(invocation.format, action, rest, out, err)
+        }
+        [jobs, preflight, rest @ ..]
+            if jobs.as_str() == "jobs" && preflight.as_str() == "preflight" =>
+        {
+            jobs_preflight(invocation.format, rest, out, err)
         }
         [emergency_stop, rest @ ..] if emergency_stop.as_str() == "emergency-stop" => {
             emergency_stop_command(invocation.format, rest, out, err)
@@ -2864,6 +2879,100 @@ struct FileTransferData {
     bytes_transferred: u64,
     warnings: Vec<String>,
     capabilities: FileCapabilities,
+}
+
+fn jobs_preflight(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) = match parse_options(args, &[], &["display-name", "plate"]) {
+        Ok(value) => value,
+        Err(error) => {
+            return write_error("jobs preflight", format, AppError::usage(error), out, err);
+        }
+    };
+    let source = match positionals.as_slice() {
+        [source] => PathBuf::from(source),
+        _ => {
+            return write_error(
+                "jobs preflight",
+                format,
+                AppError::usage("jobs preflight requires one local 3MF path"),
+                out,
+                err,
+            );
+        }
+    };
+    let plate = match options.value("plate") {
+        Some(value) => match value.parse::<u32>() {
+            Ok(0) | Err(_) => {
+                return write_error(
+                    "jobs preflight",
+                    format,
+                    AppError::usage("--plate must be a positive integer"),
+                    out,
+                    err,
+                );
+            }
+            Ok(value) => Some(value),
+        },
+        None => None,
+    };
+    let preflight = match polimero_core::bambu::preflight_print_package(
+        &source,
+        options.value("display-name"),
+        plate,
+        None,
+    ) {
+        Ok(preflight) => preflight,
+        Err(error) => {
+            return write_error(
+                "jobs preflight",
+                format,
+                AppError {
+                    exit_code: 4,
+                    code: "print_package_invalid",
+                    message: error.to_string(),
+                },
+                out,
+                err,
+            );
+        }
+    };
+    let human = preflight.clone();
+    write_success(
+        "jobs preflight",
+        format,
+        preflight,
+        |out| {
+            writeln!(out, "Source: {}", sanitize(&human.package.source_file_name))?;
+            writeln!(
+                out,
+                "Remote name: {}",
+                sanitize(&human.names.remote_filename)
+            )?;
+            writeln!(out, "Plate: {}", human.selected_plate.index)?;
+            writeln!(
+                out,
+                "G-code: {}",
+                sanitize(&human.selected_plate.gcode_path)
+            )?;
+            writeln!(out, "Ready: {}", human.ready)?;
+            for issue in &human.issues {
+                writeln!(
+                    out,
+                    "{:?}: {}: {}",
+                    issue.severity,
+                    issue.code,
+                    sanitize(&issue.message)
+                )?;
+            }
+            Ok(())
+        },
+        out,
+    )
 }
 
 fn job_action(
