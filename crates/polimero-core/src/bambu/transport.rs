@@ -28,10 +28,10 @@ use thiserror::Error;
 use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rfc3339};
 
 use super::{
-    BedLevelingSupport, MQTT_USERNAME, MappingStatus, MqttTopics, PrintStage, PrintStageEvent,
-    Profile, RuntimeCapabilities, StorageTransport, StorageVolume, TlsPinError, is_pushall_payload,
-    is_valid_tls_fingerprint, payload_sequence_id, preflight_print_package, pushall_payload,
-    tls_fingerprint, tunnel, verify_tls_fingerprint,
+    BedLevelingSupport, FirmwareInventory, MQTT_USERNAME, MappingStatus, MqttTopics, PrintStage,
+    PrintStageEvent, Profile, RuntimeCapabilities, StorageTransport, StorageVolume, TlsPinError,
+    is_pushall_payload, is_valid_tls_fingerprint, payload_sequence_id, preflight_print_package,
+    pushall_payload, tls_fingerprint, tunnel, verify_tls_fingerprint,
 };
 
 const FTP_PORT: u16 = 990;
@@ -2155,16 +2155,6 @@ fn version_info(report: &Value) -> Option<Value> {
     Some(Value::Object(info.clone()))
 }
 
-fn module_firmware_version(info: &Value) -> Option<String> {
-    info.get("module")?
-        .as_array()?
-        .iter()
-        .filter_map(Value::as_object)
-        .find(|module| string(module.get("name")).as_deref() == Some("ota"))
-        .and_then(|module| string(module.get("sw_ver")))
-        .filter(|version| !version.is_empty())
-}
-
 fn refine_runtime_capabilities(
     mut capabilities: RuntimeCapabilities,
     status: Option<&Value>,
@@ -2222,8 +2212,11 @@ fn refine_runtime_capabilities(
         }
         capabilities.firmware_version = firmware_version(print).or(capabilities.firmware_version);
     }
-    if let Some(version) = info.and_then(module_firmware_version) {
-        capabilities.firmware_version = Some(version);
+    if let Some(info) = info {
+        capabilities.firmware = FirmwareInventory::from_version_info(info);
+        if let Some(version) = capabilities.firmware.software("ota") {
+            capabilities.firmware_version = Some(version.raw.clone());
+        }
     }
     capabilities
 }

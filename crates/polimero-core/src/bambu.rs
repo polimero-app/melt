@@ -15,6 +15,8 @@ use thiserror::Error;
 use crate::trace::{SharedTracer, next_tracer_generation};
 
 mod discovery;
+mod firmware;
+mod identity;
 mod mapping;
 mod names;
 mod package;
@@ -24,6 +26,8 @@ mod tunnel;
 mod workflow;
 
 pub use discovery::{DiscoveredPrinter, DiscoveryError, discover};
+pub use firmware::{FirmwareInventory, FirmwareModule, FirmwareVersion};
+pub use identity::{CanonicalModel, ModelIdentity};
 pub use mapping::{FilamentAssignment, FilamentMapping, MappingStatus, reconcile_filaments};
 pub use names::{JobNames, NameError, derive_job_names, validate_remote_filename};
 pub use package::{
@@ -246,6 +250,8 @@ pub enum BedLevelingSupport {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeCapabilities {
+    pub identity: ModelIdentity,
+    pub firmware: FirmwareInventory,
     pub model_family: ModelFamily,
     pub authorization: AuthorizationMode,
     pub camera: CameraTransport,
@@ -266,6 +272,7 @@ pub struct RuntimeCapabilities {
 
 impl RuntimeCapabilities {
     pub fn for_model(model: &str) -> Self {
+        let identity = ModelIdentity::parse(model);
         let normalized = model
             .trim()
             .to_ascii_uppercase()
@@ -314,6 +321,8 @@ impl RuntimeCapabilities {
             ),
         };
         Self {
+            identity,
+            firmware: FirmwareInventory::default(),
             model_family,
             authorization: AuthorizationMode::Unknown,
             camera,
