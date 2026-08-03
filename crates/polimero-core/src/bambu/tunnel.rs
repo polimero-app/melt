@@ -9,6 +9,7 @@ use std::{
 
 use openssl::{hash::MessageDigest, ssl::SslStream};
 use serde_json::{Value, json};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::moonraker::{FileEntry, FileEntryType, FileList, FileRoot};
 
@@ -95,16 +96,7 @@ impl Connection {
             .ok_or(Error::InvalidResponse)?;
         let roots = storages
             .iter()
-            .filter_map(Value::as_str)
-            .filter_map(storage_root)
-            .map(|(name, description)| FileRoot {
-                name,
-                description,
-                writable: true,
-                capacity_bytes: None,
-                free_bytes: None,
-                metadata: Default::default(),
-            })
+            .filter_map(storage_entry)
             .collect::<Vec<_>>();
         (!roots.is_empty())
             .then_some(roots)
@@ -148,6 +140,20 @@ impl Connection {
                     return None;
                 }
                 let path = format!("/{}", wire_path.trim_start_matches('/'));
+                let mut metadata = std::collections::BTreeMap::new();
+                metadata.insert("mediaType".into(), Value::String("model".into()));
+                for (source, target) in [
+                    ("plate_count", "plateCount"),
+                    ("plate_idx", "plateIndex"),
+                    ("thumbnail", "thumbnail"),
+                    ("thumbnail_path", "thumbnailPath"),
+                ] {
+                    if let Some(value) = item.get(source).filter(|value| {
+                        value.is_string() || value.is_number() || value.is_boolean()
+                    }) {
+                        metadata.insert(target.into(), value.clone());
+                    }
+                }
                 Some(FileEntry {
                     name: name.to_owned(),
                     root,
@@ -155,8 +161,8 @@ impl Connection {
                     path,
                     entry_type: FileEntryType::File,
                     size_bytes: item.get("size").and_then(|value| integer(Some(value))),
-                    modified_at: None,
-                    metadata: Default::default(),
+                    modified_at: item.get("time").and_then(timestamp),
+                    metadata,
                 })
             })
             .collect();
@@ -397,6 +403,43 @@ impl Connection {
     }
 }
 
+fn storage_entry(value: &Value) -> Option<FileRoot> {
+    let wire_name = value
+        .as_str()
+        .or_else(|| value.get("name").and_then(Value::as_str))
+        .or_else(|| value.get("storage").and_then(Value::as_str))?;
+    let (name, description) = storage_root(wire_name)?;
+    let total = value
+        .get("total")
+        .or_else(|| value.get("capacity"))
+        .and_then(|value| integer(Some(value)))
+        .and_then(|value| value.try_into().ok());
+    let free = value
+        .get("free")
+        .or_else(|| value.get("available"))
+        .and_then(|value| integer(Some(value)))
+        .and_then(|value| value.try_into().ok());
+    Some(FileRoot {
+        name,
+        description,
+        writable: value
+            .get("writable")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        capacity_bytes: total,
+        free_bytes: free,
+        metadata: Default::default(),
+    })
+}
+
+fn timestamp(value: &Value) -> Option<String> {
+    let seconds = integer(Some(value))?;
+    OffsetDateTime::from_unix_timestamp(seconds)
+        .ok()?
+        .format(&Rfc3339)
+        .ok()
+}
+
 fn split_payload(payload: &[u8]) -> Result<(&[u8], &[u8]), Error> {
     let mut depth = 0_i32;
     let mut quoted = false;
@@ -482,5 +525,24 @@ mod tests {
         assert_eq!(storage_root("internal").unwrap().0, "emmc");
         assert_eq!(storage_root("usb").unwrap().0, "udisk");
         assert!(storage_root("future").is_none());
+    }
+
+    #[test]
+    fn preserves_storage_capacity_and_file_timestamps() {
+        let root = storage_entry(&json!({
+            "name": "internal",
+            "capacity": 1_000_000,
+            "available": 250_000,
+            "writable": false
+        }))
+        .unwrap();
+        assert_eq!(root.name, "emmc");
+        assert_eq!(root.capacity_bytes, Some(1_000_000));
+        assert_eq!(root.free_bytes, Some(250_000));
+        assert!(!root.writable);
+        assert_eq!(
+            timestamp(&json!(0)).as_deref(),
+            Some("1970-01-01T00:00:00Z")
+        );
     }
 }
