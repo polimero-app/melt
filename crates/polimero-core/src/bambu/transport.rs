@@ -46,6 +46,7 @@ const STATUS_STREAM_SILENCE: Duration = Duration::from_secs(15);
 const STATUS_STREAM_START_AFTER: Duration = Duration::from_secs(20);
 const STATUS_STREAM_OFFLINE_AFTER: Duration = Duration::from_secs(30);
 const STATUS_FULL_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const STATUS_DECODE_ERROR_BUDGET: u8 = 5;
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Error)]
@@ -1133,6 +1134,8 @@ struct MqttConnection {
     full_status_observed_at: Option<Instant>,
     last_pushall_at: Option<Instant>,
     last_pushing_start_at: Option<Instant>,
+    status_decode_errors: u8,
+    status_resync_required: bool,
 }
 
 impl MqttConnection {
@@ -1148,6 +1151,8 @@ impl MqttConnection {
             full_status_observed_at: None,
             last_pushall_at: None,
             last_pushing_start_at: None,
+            status_decode_errors: 0,
+            status_resync_required: false,
         }
     }
 
@@ -1235,12 +1240,13 @@ impl MqttConnection {
                     // Unrelated or malformed reports are ignored rather than
                     // failing the exchange, matching payload_sequence_id.
                     let Ok(value) = serde_json::from_slice::<Value>(&report) else {
+                        self.record_status_decode_failure();
                         continue;
                     };
-                    self.accumulate_status(&value);
+                    let accumulated = self.accumulate_status(&value);
                     command_rejection(&value, command_sequence.as_deref())?;
                     acknowledged |= report_matches_sequence(&value, command_sequence.as_deref());
-                    if is_status_poll && predicate(&value) {
+                    if is_status_poll && accumulated && predicate(&value) {
                         // `print.push_status` owns its sequence namespace and
                         // is not an acknowledgement of `pushing.pushall`.
                         return Ok(report);
@@ -1267,6 +1273,7 @@ impl MqttConnection {
                 Some(packet) if packet.kind >> 4 == 3 => {
                     let report = mqtt_publish_payload(packet.kind, &packet.payload)?;
                     let Ok(value) = serde_json::from_slice::<Value>(&report) else {
+                        self.record_status_decode_failure();
                         continue;
                     };
                     updated |= self.accumulate_status(&value);
@@ -1274,6 +1281,15 @@ impl MqttConnection {
                 Some(_) => {}
                 None => break,
             }
+        }
+
+        if self.status_resync_required {
+            self.publish_pushall_if_due(&recovery)?;
+            return if self.status_document.is_some() {
+                Ok(StreamPoll::Recovering)
+            } else {
+                Err(Error::InvalidResponse)
+            };
         }
 
         if updated
@@ -1350,20 +1366,35 @@ impl MqttConnection {
         let Some(kind) = status_report_kind(report) else {
             return false;
         };
-        match kind {
-            StatusReportKind::Full => {
-                self.status_document = Some(report.clone());
-                self.full_status_observed_at = Some(Instant::now());
-            }
+        let candidate = match kind {
+            StatusReportKind::Full => report.clone(),
             StatusReportKind::Delta => {
-                let Some(document) = self.status_document.as_mut() else {
+                let Some(mut document) = self.status_document.clone() else {
                     return false;
                 };
-                merge_status_delta(document, report);
+                merge_status_delta(&mut document, report);
+                document
             }
+        };
+        if parse_status_value(&candidate).is_err() {
+            self.record_status_decode_failure();
+            return false;
         }
+        self.status_document = Some(candidate);
+        if kind == StatusReportKind::Full {
+            self.full_status_observed_at = Some(Instant::now());
+        }
+        self.status_decode_errors = 0;
+        self.status_resync_required = false;
         self.status_observed_at = Some(Instant::now());
         true
+    }
+
+    fn record_status_decode_failure(&mut self) {
+        self.status_decode_errors = self.status_decode_errors.saturating_add(1);
+        if self.status_decode_errors > STATUS_DECODE_ERROR_BUDGET {
+            self.status_resync_required = true;
+        }
     }
 
     fn status_snapshot(&self) -> Result<Vec<u8>, Error> {
@@ -3513,6 +3544,28 @@ mod tests {
             "msg": 0,
             "gcode_state": "IDLE"
         }}));
+        let invalid_delta = json!({"print": {
+            "command": "push_status",
+            "msg": 1,
+            "gcode_state": []
+        }});
+        for _ in 0..STATUS_DECODE_ERROR_BUDGET {
+            assert!(!mqtt.accumulate_status(&invalid_delta));
+            assert!(!mqtt.status_resync_required);
+        }
+        assert!(!mqtt.accumulate_status(&invalid_delta));
+        assert!(mqtt.status_resync_required);
+        assert_eq!(
+            mqtt.status_document.as_ref().unwrap()["print"]["gcode_state"],
+            "IDLE"
+        );
+        assert!(mqtt.accumulate_status(&json!({"print": {
+            "command": "push_status",
+            "msg": 0,
+            "gcode_state": "IDLE"
+        }})));
+        assert_eq!(mqtt.status_decode_errors, 0);
+        assert!(!mqtt.status_resync_required);
         mqtt.status_observed_at = Some(Instant::now() - Duration::from_secs(21));
 
         assert!(matches!(
