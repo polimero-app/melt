@@ -1081,10 +1081,18 @@ pub struct GcodePosition {
     pub total_lines: i64,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AmsTray {
     pub slot: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tray_index: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tray_info_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub setting_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag_uid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filament_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1092,15 +1100,27 @@ pub struct AmsTray {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remaining_percent: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_grams: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nominal_weight_grams: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diameter_mm: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pressure_advance_k: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pressure_advance_n: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub nozzle_temp_min: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nozzle_temp_max: Option<i32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AmsUnit {
     pub id: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub humidity_range: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]

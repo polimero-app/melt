@@ -2449,6 +2449,7 @@ fn ams_unit(unit: &Value) -> AmsUnit {
         id: integer(unit.get("id"))
             .and_then(|value| value.try_into().ok())
             .unwrap_or_default(),
+        kind: string(unit.get("ams_type")).filter(|value| !value.is_empty()),
         humidity_range: humidity.map(|(range, _)| range),
         humidity_level: humidity.map(|(_, level)| level),
         temperature: number(unit.get("temp")).filter(|value| *value > 0.0),
@@ -2462,11 +2463,29 @@ fn ams_unit(unit: &Value) -> AmsUnit {
                         slot: integer(tray.get("id"))
                             .and_then(|value| value.try_into().ok())
                             .unwrap_or_default(),
+                        tray_index: canonical_tray_index(unit, tray),
+                        tray_info_id: string(tray.get("tray_info_idx"))
+                            .filter(|value| !value.is_empty()),
+                        setting_id: string(tray.get("setting_id"))
+                            .filter(|value| !value.is_empty()),
+                        tag_uid: string(tray.get("tag_uid")).filter(|value| !value.is_empty()),
                         filament_type: string(tray.get("tray_type"))
                             .filter(|value| !value.is_empty()),
                         color: string(tray.get("tray_color")).filter(|value| !value.is_empty()),
                         remaining_percent: integer(tray.get("remain"))
                             .and_then(|value| value.try_into().ok()),
+                        remaining_grams: integer(tray.get("remain_g"))
+                            .filter(|value| *value >= 0)
+                            .and_then(|value| value.try_into().ok()),
+                        nominal_weight_grams: integer(tray.get("tray_weight"))
+                            .or_else(|| integer(tray.get("weight")))
+                            .filter(|value| *value > 0)
+                            .and_then(|value| value.try_into().ok()),
+                        diameter_mm: number(tray.get("tray_diameter"))
+                            .or_else(|| number(tray.get("diameter")))
+                            .filter(|value| *value > 0.0),
+                        pressure_advance_k: number(tray.get("k")).filter(|value| *value >= 0.0),
+                        pressure_advance_n: number(tray.get("n")).filter(|value| *value >= 0.0),
                         nozzle_temp_min: integer(tray.get("nozzle_temp_min"))
                             .and_then(|value| value.try_into().ok()),
                         nozzle_temp_max: integer(tray.get("nozzle_temp_max"))
@@ -2501,16 +2520,35 @@ fn virtual_tray_units(print: &Map<String, Value>) -> Vec<AmsUnit> {
             id: integer(tray.get("id"))
                 .and_then(|value| value.try_into().ok())
                 .unwrap_or(254),
+            kind: Some("external".into()),
             humidity_range: None,
             humidity_level: None,
             temperature: None,
             trays: vec![AmsTray {
                 slot: 0,
+                tray_index: integer(tray.get("id"))
+                    .and_then(|value| value.try_into().ok())
+                    .or(Some(254)),
+                tray_info_id: string(tray.get("tray_info_idx")).filter(|value| !value.is_empty()),
+                setting_id: string(tray.get("setting_id")).filter(|value| !value.is_empty()),
+                tag_uid: string(tray.get("tag_uid")).filter(|value| !value.is_empty()),
                 filament_type: string(tray.get("tray_type")).filter(|value| !value.is_empty()),
                 color: virtual_tray_color(tray),
                 remaining_percent: integer(tray.get("remain"))
                     .filter(|value| *value > 0)
                     .and_then(|value| value.try_into().ok()),
+                remaining_grams: integer(tray.get("remain_g"))
+                    .filter(|value| *value >= 0)
+                    .and_then(|value| value.try_into().ok()),
+                nominal_weight_grams: integer(tray.get("tray_weight"))
+                    .or_else(|| integer(tray.get("weight")))
+                    .filter(|value| *value > 0)
+                    .and_then(|value| value.try_into().ok()),
+                diameter_mm: number(tray.get("tray_diameter"))
+                    .or_else(|| number(tray.get("diameter")))
+                    .filter(|value| *value > 0.0),
+                pressure_advance_k: number(tray.get("k")).filter(|value| *value >= 0.0),
+                pressure_advance_n: number(tray.get("n")).filter(|value| *value >= 0.0),
                 nozzle_temp_min: integer(tray.get("nozzle_temp_min"))
                     .filter(|value| *value > 0)
                     .and_then(|value| value.try_into().ok()),
@@ -2520,6 +2558,20 @@ fn virtual_tray_units(print: &Map<String, Value>) -> Vec<AmsUnit> {
             }],
         })
         .collect()
+}
+
+fn canonical_tray_index(unit: &Value, tray: &Value) -> Option<i32> {
+    if let Some(index) = integer(tray.get("tray_id")).and_then(|value| value.try_into().ok()) {
+        return Some(index);
+    }
+    let unit_id = integer(unit.get("id"))?;
+    let slot = integer(tray.get("id"))?;
+    let index = if unit_id >= 128 {
+        unit_id
+    } else {
+        unit_id.checked_mul(4)?.checked_add(slot)?
+    };
+    index.try_into().ok()
 }
 
 fn virtual_tray_color(tray: &Value) -> Option<String> {

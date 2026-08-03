@@ -4220,6 +4220,7 @@ mod tests {
                                     remaining_percent: Some(42),
                                     nozzle_temp_min: None,
                                     nozzle_temp_max: None,
+                                    ..Default::default()
                                 },
                                 moonraker::AmsTray {
                                     slot: 1,
@@ -4228,8 +4229,10 @@ mod tests {
                                     remaining_percent: None,
                                     nozzle_temp_min: None,
                                     nozzle_temp_max: None,
+                                    ..Default::default()
                                 },
                             ],
+                            ..Default::default()
                         }],
                     }),
                     sd_card_state: Some("normal"),

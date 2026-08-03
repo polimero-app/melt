@@ -15,6 +15,7 @@ use thiserror::Error;
 use crate::trace::{SharedTracer, next_tracer_generation};
 
 mod discovery;
+mod mapping;
 mod names;
 mod package;
 mod rtsp;
@@ -22,6 +23,7 @@ mod transport;
 mod tunnel;
 
 pub use discovery::{DiscoveredPrinter, DiscoveryError, discover};
+pub use mapping::{FilamentAssignment, FilamentMapping, MappingStatus, reconcile_filaments};
 pub use names::{JobNames, NameError, derive_job_names, validate_remote_filename};
 pub use package::{
     FilamentRequirement, PackageError, PackageIssue, PackageIssueSeverity, PlateManifest,
