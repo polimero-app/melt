@@ -1175,6 +1175,8 @@ fn matching_cached_connection(
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum StatusTransport {
     Lan,
+    // The arbitration path is ready before the optional cloud connector.
+    #[allow(dead_code)]
     Cloud,
 }
 
