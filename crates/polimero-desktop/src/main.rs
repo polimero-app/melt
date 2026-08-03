@@ -1382,12 +1382,14 @@ fn library_files(
             moonraker::FileEntryType::File
         };
         let path = entry.path().to_string_lossy().into_owned();
+        let media_type = moonraker::infer_file_media_type(&path);
         entries.push(moonraker::FileEntry {
             name,
             root: "library",
             device_path: path.clone(),
             path,
             entry_type,
+            media_type,
             size_bytes: (!metadata.is_dir()).then_some(metadata.len() as i64),
             modified_at: metadata.modified().ok().and_then(format_modified),
             metadata: BTreeMap::new(),

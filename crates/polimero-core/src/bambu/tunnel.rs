@@ -11,6 +11,7 @@ use openssl::{hash::MessageDigest, ssl::SslStream};
 use serde_json::{Value, json};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
+use crate::moonraker::infer_file_media_type;
 use crate::moonraker::{FileEntry, FileEntryType, FileList, FileRoot};
 
 use super::{MQTT_USERNAME, Profile, transport};
@@ -154,12 +155,14 @@ impl Connection {
                         metadata.insert(target.into(), value.clone());
                     }
                 }
+                let media_type = infer_file_media_type(&path);
                 Some(FileEntry {
                     name: name.to_owned(),
                     root,
                     device_path: format!("{root}:{path}"),
                     path,
                     entry_type: FileEntryType::File,
+                    media_type,
                     size_bytes: item.get("size").and_then(|value| integer(Some(value))),
                     modified_at: item.get("time").and_then(timestamp),
                     metadata,

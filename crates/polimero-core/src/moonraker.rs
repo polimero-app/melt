@@ -1271,6 +1271,35 @@ pub enum FileEntryType {
     Directory,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FileMediaType {
+    Model,
+    Timelapse,
+    Video,
+    Other,
+}
+
+#[must_use]
+pub fn infer_file_media_type(path: &str) -> FileMediaType {
+    let normalized = path.to_ascii_lowercase();
+    if normalized.contains("timelapse") {
+        FileMediaType::Timelapse
+    } else if [".3mf", ".gcode", ".stl", ".obj"]
+        .iter()
+        .any(|extension| normalized.ends_with(extension))
+    {
+        FileMediaType::Model
+    } else if [".mp4", ".avi", ".mkv", ".mov"]
+        .iter()
+        .any(|extension| normalized.ends_with(extension))
+    {
+        FileMediaType::Video
+    } else {
+        FileMediaType::Other
+    }
+}
+
 impl FileEntryType {
     #[must_use]
     pub fn as_str(self) -> &'static str {
@@ -1290,6 +1319,7 @@ pub struct FileEntry {
     pub device_path: String,
     #[serde(rename = "type")]
     pub entry_type: FileEntryType,
+    pub media_type: FileMediaType,
     pub size_bytes: Option<i64>,
     pub modified_at: Option<String>,
     pub metadata: BTreeMap<String, serde_json::Value>,
@@ -1522,12 +1552,14 @@ fn file_entry(
         .and_then(json_i64)
         .and_then(|seconds| OffsetDateTime::from_unix_timestamp(seconds).ok())
         .and_then(|time| time.format(&Rfc3339).ok());
+    let media_type = infer_file_media_type(&path);
     Some(FileEntry {
         name,
         root: "gcodes",
         device_path: format!("gcodes:{path}"),
         path,
         entry_type,
+        media_type,
         size_bytes,
         modified_at,
         metadata: BTreeMap::new(),
@@ -1872,6 +1904,23 @@ mod tests {
                 message: "temperature data unavailable",
             },]
         );
+    }
+
+    #[test]
+    fn classifies_file_media_without_frontend_specific_rules() {
+        assert_eq!(
+            infer_file_media_type("cube.gcode.3mf"),
+            FileMediaType::Model
+        );
+        assert_eq!(
+            infer_file_media_type("/timelapse/2026-08-03.mp4"),
+            FileMediaType::Timelapse
+        );
+        assert_eq!(
+            infer_file_media_type("camera/clip.mp4"),
+            FileMediaType::Video
+        );
+        assert_eq!(infer_file_media_type("notes.txt"), FileMediaType::Other);
     }
 
     #[test]

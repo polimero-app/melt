@@ -184,6 +184,7 @@ type FileEntry = {
   path: string
   devicePath: string
   type: 'file' | 'directory'
+  mediaType: 'model' | 'timelapse' | 'video' | 'other'
   sizeBytes?: number
   modifiedAt?: string
 }
@@ -1383,7 +1384,7 @@ const visibleDirectories = computed(() => libraryFiles.value.filter((file) => fi
 const visibleFiles = computed(() => libraryFiles.value.filter((file) => file.type === 'file' && matchesSearch(file)))
 const printerFiles = computed(() => files.value.filter((file) => file.type === 'file'))
 const enabledSlicers = computed(() => slicers.value.filter((slicer) => slicer.enabled))
-const isModelFile = (file: FileEntry) => /\.(3mf|stl|obj)$/i.test(file.name)
+const isModelFile = (file: FileEntry) => file.mediaType === 'model' && /\.(3mf|stl|obj)$/i.test(file.name)
 
 const printerActionItems = computed<ActionMenuItem[]>(() => {
   if (!activePrinter.value) return []

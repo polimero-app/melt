@@ -3477,12 +3477,14 @@ fn parse_ftp_listing(bytes: &[u8], parent: &str, root: &'static str) -> Vec<File
             } else {
                 format!("{}/{}", parent.trim_end_matches('/'), entry.name)
             };
+            let media_type = crate::moonraker::infer_file_media_type(&path);
             FileEntry {
                 name: entry.name,
                 root,
                 device_path: format!("{root}:{path}"),
                 path,
                 entry_type: entry.entry_type,
+                media_type,
                 size_bytes: entry.size_bytes,
                 modified_at: entry.modified_at,
                 metadata: BTreeMap::new(),
