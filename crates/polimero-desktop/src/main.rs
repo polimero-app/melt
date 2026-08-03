@@ -1065,7 +1065,12 @@ fn cached_monitor_entry_at(
             });
     }
 
-    let mut entry = monitor_printer(&state.pool, name.clone(), profile, generation)?;
+    let Some(mut entry) = monitor_printer(&state.pool, name.clone(), profile, generation) else {
+        if let Ok(mut entries) = state.entries.lock() {
+            entries.remove(&name);
+        }
+        return None;
+    };
     if !state.pool.is_current_generation(generation) {
         return None;
     }
