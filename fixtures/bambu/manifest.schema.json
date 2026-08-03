@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "capturedAt", "transport", "direction", "printer", "provenance", "confidence", "sanitization", "assertion", "qualification", "removalCondition"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]+$" },
+    "capturedAt": { "type": "string", "format": "date-time" },
+    "transport": { "enum": ["discovery", "mqtt", "tunnel-6000", "ftps", "camera"] },
+    "direction": { "enum": ["printer-to-client", "client-to-printer", "bidirectional"] },
+    "printer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["modelRaw", "modules"],
+      "properties": {
+        "modelRaw": { "type": "string" },
+        "hardwareRevision": { "type": ["string", "null"] },
+        "modules": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "provenance": { "enum": ["physical-capture", "executable-test", "source", "documentation", "report"] },
+    "sourceUrl": { "type": ["string", "null"], "format": "uri" },
+    "sourceRevision": { "type": ["string", "null"] },
+    "confidence": { "enum": ["provisional", "qualified", "confirmed"] },
+    "sanitization": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "assertion": { "type": "string", "minLength": 1 },
+    "qualification": { "type": "string", "minLength": 1 },
+    "removalCondition": { "type": "string", "minLength": 1 },
+    "conflictsWith": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "files": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+  }
+}

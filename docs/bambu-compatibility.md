@@ -1,5 +1,10 @@
 # Bambu compatibility and qualification
 
+Undocumented behavior and physical-printer captures follow the
+[protocol evidence policy](bambu-protocol-evidence.md). Live observations and
+safe probes outrank defaults; unresolved conflicts never become unconditional
+model rules.
+
 Polimero treats a reported Bambu model as a capability hint, not a complete
 contract. Runtime observations and safe protocol probes take precedence over
 the model family. Unknown models and unknown fields remain distinct from an
