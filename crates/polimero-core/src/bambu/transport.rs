@@ -41,6 +41,7 @@ const MAX_LIST_DEPTH: u8 = 32;
 const MAX_LIST_ENTRIES: usize = 50_000;
 const PUSHALL_INTERVAL: Duration = Duration::from_secs(3);
 const MQTT_DRAIN_QUIET_WINDOW: Duration = Duration::from_millis(5);
+const STATUS_STREAM_SILENCE: Duration = Duration::from_secs(15);
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Error)]
@@ -223,7 +224,7 @@ impl Client {
 
         if let Some(mqtt) = matching_cached_connection(&mut cached, identity) {
             mqtt.deadline = deadline;
-            match mqtt.exchange_reused_status(payload.clone()) {
+            match mqtt.poll_stream_status(payload.clone()) {
                 Ok(report) => return Ok(report),
                 Err(_) => *cached = None,
             }
@@ -242,6 +243,7 @@ impl Client {
         let mut mqtt = MqttConnection::new(stream, self.profile.mqtt_topics(), deadline);
         mqtt.connect(access_code).and_then(|_| mqtt.subscribe())?;
         let report = mqtt.exchange(payload, is_full_report)?;
+        let report = mqtt.status_snapshot().unwrap_or(report);
         *cached = Some(CachedConnection { identity, mqtt });
         Ok(report)
     }
@@ -1121,6 +1123,8 @@ struct MqttConnection {
     deadline: Instant,
     pending: Vec<u8>,
     connected: bool,
+    status_document: Option<Value>,
+    status_observed_at: Option<Instant>,
 }
 
 impl MqttConnection {
@@ -1131,6 +1135,8 @@ impl MqttConnection {
             deadline,
             pending: Vec::new(),
             connected: false,
+            status_document: None,
+            status_observed_at: None,
         }
     }
 
@@ -1193,34 +1199,20 @@ impl MqttConnection {
         command: String,
         predicate: impl Fn(&Value) -> bool,
     ) -> Result<Vec<u8>, Error> {
-        self.exchange_with_status_barrier(command, predicate, false)
-    }
-
-    fn exchange_reused_status(&mut self, command: String) -> Result<Vec<u8>, Error> {
-        self.exchange_with_status_barrier(command, is_full_report, true)
-    }
-
-    fn exchange_with_status_barrier(
-        &mut self,
-        command: String,
-        predicate: impl Fn(&Value) -> bool,
-        require_status_barrier: bool,
-    ) -> Result<Vec<u8>, Error> {
-        let mut command_sequence = payload_sequence_id(command.as_bytes());
+        let command_sequence = payload_sequence_id(command.as_bytes());
         let is_status_poll = is_pushall_payload(command.as_bytes());
         if is_status_poll {
             self.drain_stale_packets()?;
         }
         let mut acknowledged = is_status_poll;
         self.publish(&command)?;
-        let mut refresh = if is_status_poll {
+        let refresh = if is_status_poll {
             command
         } else {
             let refresh = pushall_payload(next_sequence());
             self.publish(&refresh)?;
             refresh
         };
-        let mut status_barrier_crossed = !require_status_barrier;
         let mut retry_at = Instant::now() + PUSHALL_INTERVAL;
 
         loop {
@@ -1233,26 +1225,12 @@ impl MqttConnection {
                     let Ok(value) = serde_json::from_slice::<Value>(&report) else {
                         continue;
                     };
+                    self.accumulate_status(&value);
                     command_rejection(&value, command_sequence.as_deref())?;
                     acknowledged |= report_matches_sequence(&value, command_sequence.as_deref());
                     if is_status_poll && predicate(&value) {
-                        if report_matches_sequence(&value, command_sequence.as_deref()) {
-                            return Ok(report);
-                        }
-                        // A sequence-bearing report belongs to another request
-                        // and must never advance or complete the freshness
-                        // barrier. Only sequence-less firmware needs it.
-                        if report_sequence_id(&value).is_some() {
-                            continue;
-                        }
-                        if !status_barrier_crossed {
-                            status_barrier_crossed = true;
-                            refresh = pushall_payload(next_sequence());
-                            command_sequence = payload_sequence_id(refresh.as_bytes());
-                            self.publish(&refresh)?;
-                            retry_at = Instant::now() + PUSHALL_INTERVAL;
-                            continue;
-                        }
+                        // `print.push_status` owns its sequence namespace and
+                        // is not an acknowledgement of `pushing.pushall`.
                         return Ok(report);
                     }
                     if acknowledged && predicate(&value) {
@@ -1267,6 +1245,61 @@ impl MqttConnection {
                 }
             }
         }
+    }
+
+    fn poll_stream_status(&mut self, recovery: String) -> Result<Vec<u8>, Error> {
+        let quiet_until = self.deadline.min(Instant::now() + MQTT_DRAIN_QUIET_WINDOW);
+        let mut updated = false;
+        loop {
+            match self.read_packet_until(quiet_until)? {
+                Some(packet) if packet.kind >> 4 == 3 => {
+                    let report = mqtt_publish_payload(packet.kind, &packet.payload)?;
+                    let Ok(value) = serde_json::from_slice::<Value>(&report) else {
+                        continue;
+                    };
+                    updated |= self.accumulate_status(&value);
+                }
+                Some(_) => {}
+                None => break,
+            }
+        }
+
+        if updated
+            || self.status_observed_at.is_some_and(|observed| {
+                Instant::now().saturating_duration_since(observed) < STATUS_STREAM_SILENCE
+            })
+        {
+            return self.status_snapshot();
+        }
+
+        self.exchange(recovery, is_full_report)?;
+        self.status_snapshot()
+    }
+
+    fn accumulate_status(&mut self, report: &Value) -> bool {
+        let Some(kind) = status_report_kind(report) else {
+            return false;
+        };
+        match kind {
+            StatusReportKind::Full => self.status_document = Some(report.clone()),
+            StatusReportKind::Delta => {
+                let Some(document) = self.status_document.as_mut() else {
+                    return false;
+                };
+                merge_status_delta(document, report);
+            }
+        }
+        self.status_observed_at = Some(Instant::now());
+        true
+    }
+
+    fn status_snapshot(&self) -> Result<Vec<u8>, Error> {
+        let document = self
+            .status_document
+            .as_ref()
+            .ok_or(Error::InvalidResponse)?;
+        parse_status_value(document)?;
+        serde_json::to_vec(document).map_err(|_| Error::InvalidResponse)
     }
 
     /// Clears reports received before a new status request is published. Bambu
@@ -1444,13 +1477,6 @@ fn report_matches_sequence(report: &Value, sequence: Option<&str>) -> bool {
     matching_command_envelope(report, sequence).is_some()
 }
 
-fn report_sequence_id(report: &Value) -> Option<&str> {
-    ["print", "system", "pushing"]
-        .into_iter()
-        .filter_map(|key| report.get(key).and_then(Value::as_object))
-        .find_map(|command| command.get("sequence_id").and_then(Value::as_str))
-}
-
 fn matching_command_envelope<'a>(
     report: &'a Value,
     sequence: Option<&str>,
@@ -1617,12 +1643,53 @@ fn validate_job_options(profile: &Profile, options: &JobStartOptions) -> Result<
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StatusReportKind {
+    Full,
+    Delta,
+}
+
+fn status_report_kind(report: &Value) -> Option<StatusReportKind> {
+    let print = report.get("print")?.as_object()?;
+    if let Some(command) = string(print.get("command"))
+        && command != "push_status"
+    {
+        return None;
+    }
+    match integer(print.get("msg")) {
+        Some(0) => Some(StatusReportKind::Full),
+        Some(1) => Some(StatusReportKind::Delta),
+        Some(_) => None,
+        None if print.contains_key("gcode_state") => Some(StatusReportKind::Full),
+        None if string(print.get("command")).as_deref() == Some("push_status") => {
+            Some(StatusReportKind::Full)
+        }
+        None => None,
+    }
+}
+
 fn is_full_report(report: &Value) -> bool {
-    report
-        .get("print")
-        .and_then(Value::as_object)
-        .and_then(|print| string(print.get("gcode_state")))
-        .is_some()
+    status_report_kind(report) == Some(StatusReportKind::Full)
+}
+
+/// Mirrors Bambu Studio's `json_diff::diff2all`: omitted object keys retain
+/// their baseline values, nested objects merge recursively, and present
+/// scalars/arrays/nulls replace the previous value.
+fn merge_status_delta(base: &mut Value, delta: &Value) {
+    let (Some(base), Some(delta)) = (base.as_object_mut(), delta.as_object()) else {
+        *base = delta.clone();
+        return;
+    };
+    for (key, value) in delta {
+        match base.get_mut(key) {
+            Some(previous) if previous.is_object() && value.is_object() => {
+                merge_status_delta(previous, value);
+            }
+            _ => {
+                base.insert(key.clone(), value.clone());
+            }
+        }
+    }
 }
 
 fn report_state_is(report: &Value, states: &[PrinterState]) -> bool {
@@ -3228,6 +3295,98 @@ mod tests {
     }
 
     #[test]
+    fn fresh_status_accepts_a_firmware_sequence_that_differs_from_the_request() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let acceptor = test_acceptor();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            assert_eq!(read_test_packet(&mut stream).kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            stream.flush().unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+
+            let publish = read_test_packet(&mut stream);
+            let request = mqtt_publish_payload(publish.kind, &publish.payload).unwrap();
+            assert!(is_pushall_payload(&request));
+            assert_ne!(
+                payload_sequence_id(&request).as_deref(),
+                Some("firmware-sequence")
+            );
+            write_test_report(
+                &mut stream,
+                &json!({"print": {
+                    "sequence_id": "firmware-sequence",
+                    "gcode_state": "IDLE",
+                    "mc_percent": 0
+                }}),
+            );
+        });
+
+        let profile = Profile::with_timeout(
+            address.ip().to_string(),
+            "SN001",
+            true,
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) =
+            open_tls(&connector, &profile, address.port(), None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+        mqtt.subscribe().unwrap();
+        let report = mqtt
+            .exchange(pushall_payload(next_sequence()), is_full_report)
+            .unwrap();
+
+        server.join().unwrap();
+        assert_eq!(parse_status(&report).unwrap().state, PrinterState::Idle);
+    }
+
+    #[test]
+    fn status_deltas_retain_omitted_fields_and_replace_present_arrays() {
+        let mut status = json!({"print": {
+            "command": "push_status",
+            "msg": 0,
+            "gcode_state": "PRINTING",
+            "mc_percent": 40,
+            "nozzle_temper": 220,
+            "device": {"extruder": {"info": [{"id": 0}, {"id": 1}]}},
+            "hms": [{"attr": 3, "code": 1}]
+        }});
+        let delta = json!({"print": {
+            "command": "push_status",
+            "msg": 1,
+            "mc_percent": 41,
+            "device": {"extruder": {"state": "ready"}},
+            "hms": []
+        }});
+
+        assert_eq!(status_report_kind(&status), Some(StatusReportKind::Full));
+        assert_eq!(status_report_kind(&delta), Some(StatusReportKind::Delta));
+        merge_status_delta(&mut status, &delta);
+
+        assert_eq!(status["print"]["gcode_state"], "PRINTING");
+        assert_eq!(status["print"]["nozzle_temper"], 220);
+        assert_eq!(status["print"]["mc_percent"], 41);
+        assert_eq!(
+            status["print"]["device"]["extruder"]["info"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(status["print"]["device"]["extruder"]["state"], "ready");
+        assert!(status["print"]["hms"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
     fn dropping_an_authenticated_mqtt_session_sends_disconnect() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -3261,14 +3420,15 @@ mod tests {
 
     #[test]
     fn poll_status_reuses_a_cached_session_instead_of_reconnecting() {
-        // The server accepts exactly one TCP connection and answers two
-        // status exchanges over it — a `poll_status` that reconnected on the
-        // second call would hang waiting on a connection nothing accepts.
+        // The server accepts one TCP connection and streams a full snapshot
+        // followed by a delta. Neither poll should publish another pushall or
+        // reconnect while that accumulated status remains fresh.
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let host = address.ip().to_string();
         let port = address.port();
         let acceptor = test_acceptor();
+        let (release_tx, release_rx) = mpsc::channel();
         let server = thread::spawn(move || {
             let (socket, _) = listener.accept().unwrap();
             let mut stream = acceptor.accept(socket).unwrap();
@@ -3279,29 +3439,27 @@ mod tests {
             let subscribe = read_test_packet(&mut stream);
             assert_eq!(subscribe.kind, 0x82);
             let id = &subscribe.payload[..2];
-            let stale_report = br#"{"print":{"gcode_state":"PRINTING","mc_percent":75}}"#;
-            let mut stale_payload = Vec::new();
-            mqtt_string(&mut stale_payload, "device/SN001/report").unwrap();
-            stale_payload.extend_from_slice(stale_report);
-            let mut subscribe_and_stale = vec![0x90, 0x03, id[0], id[1], 0, 0x30];
-            mqtt_remaining_length(&mut subscribe_and_stale, stale_payload.len()).unwrap();
-            subscribe_and_stale.extend_from_slice(&stale_payload);
-            stream.write_all(&subscribe_and_stale).unwrap();
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
             stream.flush().unwrap();
-
-            for _ in 0..4 {
-                let publish = read_test_packet(&mut stream);
-                assert_eq!(publish.kind, 0x30);
-                let report = br#"{"print":{"gcode_state":"IDLE","mc_percent":0}}"#;
-                let mut payload = Vec::new();
-                mqtt_string(&mut payload, "device/SN001/report").unwrap();
-                payload.extend_from_slice(report);
-                let mut packet = vec![0x30];
-                mqtt_remaining_length(&mut packet, payload.len()).unwrap();
-                packet.extend_from_slice(&payload);
-                stream.write_all(&packet).unwrap();
-                stream.flush().unwrap();
-            }
+            write_test_report(
+                &mut stream,
+                &json!({"print": {
+                    "command": "push_status",
+                    "msg": 0,
+                    "gcode_state": "IDLE",
+                    "mc_percent": 0,
+                    "nozzle_temper": 25
+                }}),
+            );
+            write_test_report(
+                &mut stream,
+                &json!({"print": {
+                    "command": "push_status",
+                    "msg": 1,
+                    "mc_percent": 1
+                }}),
+            );
+            release_rx.recv().unwrap();
         });
 
         let profile = Profile::with_timeout(host, "SN001", true, Duration::from_secs(2)).unwrap();
@@ -3325,9 +3483,15 @@ mod tests {
             .poll_status(Some("access-code"), None, Duration::from_secs(2))
             .unwrap();
 
+        release_tx.send(()).unwrap();
         server.join().unwrap();
         assert_eq!(first.state, PrinterState::Idle);
         assert_eq!(second.state, PrinterState::Idle);
+        assert_eq!(second.progress.unwrap().percent, 1);
+        assert_eq!(
+            second.temperatures.unwrap().nozzle.unwrap().current_celsius,
+            25.0
+        );
         let changed_access_code = client
             .profile
             .connection_identity(Some("different-access-code"), None);
@@ -3356,14 +3520,12 @@ mod tests {
             stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
             stream.flush().unwrap();
 
-            for _ in 0..2 {
-                let publish = read_test_packet(&mut stream);
-                assert_eq!(publish.kind, 0x30);
-                write_test_report(
-                    &mut stream,
-                    &json!({"print": {"gcode_state": "IDLE", "mc_percent": 0}}),
-                );
-            }
+            let publish = read_test_packet(&mut stream);
+            assert_eq!(publish.kind, 0x30);
+            write_test_report(
+                &mut stream,
+                &json!({"print": {"msg": 0, "gcode_state": "IDLE", "mc_percent": 0}}),
+            );
         });
 
         let (trace_started_tx, trace_started_rx) = mpsc::channel();
@@ -3400,81 +3562,6 @@ mod tests {
 
         assert_eq!(poll.join().unwrap().unwrap().state, PrinterState::Idle);
         server.join().unwrap();
-    }
-
-    #[test]
-    fn delayed_stale_report_cannot_satisfy_a_reused_status_poll() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let host = address.ip().to_string();
-        let port = address.port();
-        let acceptor = test_acceptor();
-        let server = thread::spawn(move || {
-            let (socket, _) = listener.accept().unwrap();
-            let mut stream = acceptor.accept(socket).unwrap();
-            assert_eq!(read_test_packet(&mut stream).kind, 0x10);
-            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
-            stream.flush().unwrap();
-            let subscribe = read_test_packet(&mut stream);
-            let id = &subscribe.payload[..2];
-            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
-            stream.flush().unwrap();
-
-            let first = read_test_packet(&mut stream);
-            let first_payload = mqtt_publish_payload(first.kind, &first.payload).unwrap();
-            assert!(is_pushall_payload(&first_payload));
-            let first_sequence = payload_sequence_id(&first_payload).unwrap();
-            write_test_report(
-                &mut stream,
-                &json!({"print": {
-                    "sequence_id": "older-request",
-                    "gcode_state": "PRINTING",
-                    "mc_percent": 75
-                }}),
-            );
-            write_test_report(
-                &mut stream,
-                &json!({"print": {"gcode_state": "PRINTING", "mc_percent": 75}}),
-            );
-
-            let second = read_test_packet(&mut stream);
-            let second_payload = mqtt_publish_payload(second.kind, &second.payload).unwrap();
-            assert!(is_pushall_payload(&second_payload));
-            assert_ne!(
-                payload_sequence_id(&second_payload).unwrap(),
-                first_sequence
-            );
-            write_test_report(
-                &mut stream,
-                &json!({"print": {
-                    "sequence_id": first_sequence,
-                    "gcode_state": "PRINTING",
-                    "mc_percent": 75
-                }}),
-            );
-            write_test_report(
-                &mut stream,
-                &json!({"print": {"gcode_state": "IDLE", "mc_percent": 0}}),
-            );
-        });
-
-        let profile = Profile::with_timeout(host, "SN001", true, Duration::from_secs(2)).unwrap();
-        let connector = tls_connector().unwrap();
-        let deadline = deadline_after(profile.timeout()).unwrap();
-        let (stream, _) = open_tls(&connector, &profile, port, None, false, deadline).unwrap();
-        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
-        mqtt.connect("access-code").unwrap();
-        mqtt.subscribe().unwrap();
-        let identity = profile.connection_identity(Some("access-code"), None);
-        let client = Client::new(profile);
-        *client.mqtt.lock().unwrap() = Some(CachedConnection { identity, mqtt });
-
-        let status = client
-            .poll_status(Some("access-code"), None, Duration::from_secs(2))
-            .unwrap();
-
-        server.join().unwrap();
-        assert_eq!(status.state, PrinterState::Idle);
     }
 
     #[test]

@@ -116,6 +116,7 @@ export type MessageKey =
   | "status.idle"
   | "status.onlineIdle"
   | "status.onlineBusy"
+  | "status.reconnecting"
   | "status.offlineLabel"
   | "control.printerActions"
   | "control.signalExcellent"
@@ -470,6 +471,7 @@ const messages: Record<Locale, Messages> = {
     "status.idle": "Idle",
     "status.onlineIdle": "Online · idle",
     "status.onlineBusy": "Online · busy",
+    "status.reconnecting": "Reconnecting",
     "status.offlineLabel": "Offline",
     "control.printerActions": "Printer actions",
     "control.signalExcellent": "Excellent signal",
@@ -821,6 +823,7 @@ const messages: Record<Locale, Messages> = {
     "status.idle": "Ociosa",
     "status.onlineIdle": "Online · ociosa",
     "status.onlineBusy": "Online · ocupada",
+    "status.reconnecting": "Reconectando",
     "status.offlineLabel": "Offline",
     "control.printerActions": "Ações da impressora",
     "control.signalExcellent": "Sinal excelente",

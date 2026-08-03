@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog'
 import { locales, preferredLocale, translate, type Locale, type MessageKey } from './i18n'
+import { monitorBadge, type PrinterBadge } from './monitoring'
 import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
 import SlideOver from './components/SlideOver.vue'
@@ -61,7 +62,6 @@ import {
 } from '@phosphor-icons/vue'
 
 type View = 'control' | 'printers' | 'settings' | 'files'
-type PrinterBadge = 'idle' | 'busy' | 'offline' | 'unknown'
 type ModelTone = 'cyan' | 'amber' | 'rose' | 'violet'
 
 type AppInfo = {
@@ -161,6 +161,8 @@ type MonitorEntry = {
   driver: string
   status?: PrinterStatus
   error?: CommandError
+  stale: boolean
+  observedAt?: string
 }
 
 type NotificationEvent = { kind: 'completion' | 'failure' | 'disconnection'; printer: string }
@@ -255,6 +257,7 @@ type BackendPreferences = {
 const statusDotClasses: Record<PrinterBadge, string> = {
   idle: 'bg-green-500 ring-green-500/10',
   busy: 'bg-yellow-500 ring-yellow-500/10',
+  reconnecting: 'bg-amber-500 ring-amber-500/10',
   offline: 'bg-red-500 ring-red-500/10',
   unknown: 'bg-gray-400 ring-gray-400/10',
 }
@@ -406,17 +409,16 @@ const selectedStatus = computed(() => selectedMonitor.value?.status)
 
 function badgeFor(name: string): PrinterBadge {
   const entry = monitoring.value.find((candidate) => candidate.name === name)
-  if (!entry) return 'unknown'
-  if (entry.error || entry.status === undefined || ['error', 'unknown'].includes(entry.status.state)) return 'offline'
-  return ['printing', 'paused'].includes(entry.status.state) ? 'busy' : 'idle'
+  return monitorBadge(entry)
 }
 
 const activeBadge = computed<PrinterBadge>(() => (activePrinter.value ? badgeFor(activePrinter.value.name) : 'offline'))
 const isReachable = (badge: PrinterBadge) => badge === 'idle' || badge === 'busy'
-const activeReachable = computed(() => isReachable(activeBadge.value))
+const activeHasStatus = computed(() => isReachable(activeBadge.value) || activeBadge.value === 'reconnecting')
 const badgeMessageKeys: Record<PrinterBadge, MessageKey> = {
   idle: 'status.onlineIdle',
   busy: 'status.onlineBusy',
+  reconnecting: 'status.reconnecting',
   offline: 'status.offlineLabel',
   unknown: 'status.unknownLabel',
 }
@@ -1588,7 +1590,7 @@ onUnmounted(() => {
 
         <!-- Empty state -->
         <div
-          v-if="!activeReachable"
+          v-if="!activeHasStatus"
           class="mx-4 flex min-h-140 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-center sm:mx-0 dark:border-white/15"
         >
           <PhWarning class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />
@@ -1597,7 +1599,15 @@ onUnmounted(() => {
           <Button class="mt-6" variant="primary" :disabled="refreshing" @click="refreshMonitoring"><PhArrowsClockwise class="size-4" /> {{ t('control.refreshConnection') }}</Button>
         </div>
 
-        <div v-show="activeReachable">
+        <div v-show="activeHasStatus">
+          <div
+            v-if="activeBadge === 'reconnecting'"
+            class="mb-5 flex items-center justify-between gap-4 rounded-lg border border-amber-300/70 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200"
+            role="status"
+          >
+            <span class="flex items-center gap-2"><PhArrowsClockwise class="size-4 shrink-0" aria-hidden="true" />{{ t('control.reconnecting') }}</span>
+            <Button variant="secondary" :disabled="refreshing" @click="refreshMonitoring">{{ t('control.refreshConnection') }}</Button>
+          </div>
           <section class="grid gap-5 xl:grid-cols-4">
             <Card class="overflow-hidden xl:col-span-3">
               <CardHeader :title="t('camera.title')" :icon="PhVideoCamera">
