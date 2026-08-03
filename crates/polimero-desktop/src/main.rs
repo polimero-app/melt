@@ -277,13 +277,28 @@ struct MonitorEntry {
     /// True when `status` is the last successful sample retained across a
     /// failed refresh rather than a result from the current attempt.
     stale: bool,
+    connection_state: MonitorConnectionState,
     #[serde(skip_serializing_if = "Option::is_none")]
     observed_at: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum MonitorConnectionState {
+    Connecting,
+    Synchronizing,
+    Live,
+    Recovering,
+    Offline,
+}
+
+const MONITOR_OFFLINE_AFTER: Duration = Duration::from_secs(30);
+
 struct CachedMonitor {
     next_poll: Instant,
     sampled_at: Instant,
+    started_at: Instant,
+    observed_at: Option<Instant>,
     backoff: monitor::Backoff,
     entry: MonitorEntry,
 }
@@ -1029,6 +1044,27 @@ fn cached_monitor_entry_at(
         }
     }
 
+    if let Ok(mut entries) = state.entries.lock() {
+        entries
+            .entry(name.clone())
+            .or_insert_with(|| CachedMonitor {
+                next_poll: now,
+                sampled_at: now,
+                started_at: now,
+                observed_at: None,
+                backoff: monitor::Backoff::new(monitor::DEFAULT_INTERVAL),
+                entry: MonitorEntry {
+                    name: name.clone(),
+                    driver: profile.driver.clone(),
+                    status: None,
+                    error: None,
+                    stale: true,
+                    connection_state: MonitorConnectionState::Connecting,
+                    observed_at: None,
+                },
+            });
+    }
+
     let mut entry = monitor_printer(&state.pool, name.clone(), profile, generation)?;
     if !state.pool.is_current_generation(generation) {
         return None;
@@ -1037,26 +1073,59 @@ fn cached_monitor_entry_at(
         if !state.pool.is_current_generation(generation) {
             return None;
         }
+        let previous = entries.get(&name);
         if entry.status.is_none()
-            && let Some(previous) = entries.get(&name)
+            && let Some(previous) = previous
             && let Some(status) = previous.entry.status.clone()
         {
             entry.status = Some(status);
             entry.observed_at = previous.entry.observed_at.clone();
             entry.stale = true;
         }
+        let started_at = previous.map_or(now, |cached| cached.started_at);
+        let observed_at = if entry.error.is_none() {
+            Some(now)
+        } else {
+            previous.and_then(|cached| cached.observed_at)
+        };
+        entry.connection_state =
+            monitor_connection_state(now, started_at, observed_at, entry.error.is_some());
         let cached = entries.entry(name).or_insert_with(|| CachedMonitor {
             next_poll: now,
             sampled_at: now,
+            started_at,
+            observed_at,
             backoff: monitor::Backoff::new(monitor::DEFAULT_INTERVAL),
             entry: entry.clone(),
         });
         let delay = cached.backoff.after_result(entry.error.is_none());
         cached.next_poll = now + delay;
         cached.sampled_at = Instant::now();
+        cached.observed_at = observed_at;
         cached.entry = entry.clone();
     }
     Some(entry)
+}
+
+fn monitor_connection_state(
+    now: Instant,
+    started_at: Instant,
+    observed_at: Option<Instant>,
+    failed: bool,
+) -> MonitorConnectionState {
+    if !failed {
+        return MonitorConnectionState::Live;
+    }
+    match observed_at {
+        Some(observed) if now.saturating_duration_since(observed) < MONITOR_OFFLINE_AFTER => {
+            MonitorConnectionState::Recovering
+        }
+        Some(_) => MonitorConnectionState::Offline,
+        None if now.saturating_duration_since(started_at) < MONITOR_OFFLINE_AFTER => {
+            MonitorConnectionState::Synchronizing
+        }
+        None => MonitorConnectionState::Offline,
+    }
 }
 
 fn monitor_printer(
@@ -1075,6 +1144,7 @@ fn monitor_printer(
                 status: None,
                 error: Some(CommandError::new("profileInvalid")),
                 stale: true,
+                connection_state: MonitorConnectionState::Offline,
                 observed_at: None,
             });
         }
@@ -1087,6 +1157,7 @@ fn monitor_printer(
             status: None,
             error: Some(CommandError::of("driverUnsupported", Operation::Status)),
             stale: true,
+            connection_state: MonitorConnectionState::Offline,
             observed_at: None,
         });
     }
@@ -1099,6 +1170,7 @@ fn monitor_printer(
                 status: None,
                 error: Some(error),
                 stale: true,
+                connection_state: MonitorConnectionState::Offline,
                 observed_at: None,
             });
         }
@@ -1112,6 +1184,7 @@ fn monitor_printer(
                 status: None,
                 error: Some(error),
                 stale: true,
+                connection_state: MonitorConnectionState::Offline,
                 observed_at: None,
             });
         }
@@ -1130,6 +1203,7 @@ fn monitor_printer(
             status: Some(status),
             error: None,
             stale: false,
+            connection_state: MonitorConnectionState::Live,
             observed_at: time::OffsetDateTime::now_utc()
                 .format(&time::format_description::well_known::Rfc3339)
                 .ok(),
@@ -1140,6 +1214,7 @@ fn monitor_printer(
             status: None,
             error: Some(operation_error(error, Operation::Status)),
             stale: true,
+            connection_state: MonitorConnectionState::Synchronizing,
             observed_at: None,
         },
     })
@@ -2661,9 +2736,10 @@ mod tests {
     };
 
     use super::{
-        CachedMonitor, DesktopPrinter, MonitorEntry, MonitorState, Profile,
+        CachedMonitor, DesktopPrinter, MonitorConnectionState, MonitorEntry, MonitorState, Profile,
         cached_monitor_entry_at, cached_ui_monitor_entry, camera_preview_request, ensure_state,
-        extract_3mf_thumbnail, load_status_cache_from, operation_error, save_status_cache_to,
+        extract_3mf_thumbnail, load_status_cache_from, monitor_connection_state, operation_error,
+        save_status_cache_to,
     };
 
     const TOKEN: &str = "/stream/0123456789abcdef0123456789abcdef";
@@ -2700,12 +2776,41 @@ mod tests {
             status: None,
             error: None,
             stale: false,
+            connection_state: MonitorConnectionState::Connecting,
             observed_at: None,
         }];
         save_status_cache_to(dir.path(), &entries);
 
         let cached = load_status_cache_from(dir.path()).unwrap();
         assert_eq!(cached, serde_json::to_value(&entries).unwrap());
+    }
+
+    #[test]
+    fn monitor_lifecycle_expires_recovery_and_initial_synchronization() {
+        let started = Instant::now();
+        let recent = started + Duration::from_secs(20);
+        let expired = started + Duration::from_secs(31);
+
+        assert_eq!(
+            monitor_connection_state(recent, started, Some(started), true),
+            MonitorConnectionState::Recovering
+        );
+        assert_eq!(
+            monitor_connection_state(expired, started, Some(started), true),
+            MonitorConnectionState::Offline
+        );
+        assert_eq!(
+            monitor_connection_state(recent, started, None, true),
+            MonitorConnectionState::Synchronizing
+        );
+        assert_eq!(
+            monitor_connection_state(expired, started, None, true),
+            MonitorConnectionState::Offline
+        );
+        assert_eq!(
+            monitor_connection_state(expired, started, Some(started), false),
+            MonitorConnectionState::Live
+        );
     }
 
     #[test]
@@ -2718,6 +2823,8 @@ mod tests {
             CachedMonitor {
                 next_poll: now + Duration::from_secs(5),
                 sampled_at: now,
+                started_at: now,
+                observed_at: None,
                 backoff: polimero_core::monitor::Backoff::new(Duration::from_secs(5)),
                 entry: MonitorEntry {
                     name: "printer".into(),
@@ -2725,6 +2832,7 @@ mod tests {
                     status: None,
                     error: None,
                     stale: false,
+                    connection_state: MonitorConnectionState::Connecting,
                     observed_at: None,
                 },
             },

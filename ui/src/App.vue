@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog'
 import { locales, preferredLocale, translate, type Locale, type MessageKey } from './i18n'
-import { monitorBadge, type PrinterBadge } from './monitoring'
+import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
 import SlideOver from './components/SlideOver.vue'
@@ -162,6 +162,7 @@ type MonitorEntry = {
   status?: PrinterStatus
   error?: CommandError
   stale: boolean
+  connectionState: ConnectionState
   observedAt?: string
 }
 
@@ -258,6 +259,8 @@ const statusDotClasses: Record<PrinterBadge, string> = {
   idle: 'bg-green-500 ring-green-500/10',
   busy: 'bg-yellow-500 ring-yellow-500/10',
   reconnecting: 'bg-amber-500 ring-amber-500/10',
+  connecting: 'bg-gray-400 ring-gray-400/10',
+  synchronizing: 'bg-cyan-500 ring-cyan-500/10',
   offline: 'bg-red-500 ring-red-500/10',
   unknown: 'bg-gray-400 ring-gray-400/10',
 }
@@ -418,6 +421,8 @@ const activeHasStatus = computed(() => isReachable(activeBadge.value) || activeB
 const badgeMessageKeys: Record<PrinterBadge, MessageKey> = {
   idle: 'status.onlineIdle',
   busy: 'status.onlineBusy',
+  connecting: 'status.connecting',
+  synchronizing: 'status.synchronizing',
   reconnecting: 'status.reconnecting',
   offline: 'status.offlineLabel',
   unknown: 'status.unknownLabel',

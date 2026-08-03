@@ -7,6 +7,7 @@ describe('monitor badge', () => {
       status: { state: 'printing' },
       error: { code: 'printerTimeout' },
       stale: true,
+      connectionState: 'recovering',
     })).toBe('reconnecting')
   })
 
@@ -16,7 +17,13 @@ describe('monitor badge', () => {
   })
 
   it('preserves live idle and busy states', () => {
-    expect(monitorBadge({ status: { state: 'idle' }, stale: false })).toBe('idle')
-    expect(monitorBadge({ status: { state: 'paused' }, stale: false })).toBe('busy')
+    expect(monitorBadge({ status: { state: 'idle' }, stale: false, connectionState: 'live' })).toBe('idle')
+    expect(monitorBadge({ status: { state: 'paused' }, stale: false, connectionState: 'live' })).toBe('busy')
+  })
+
+  it('exposes connection phases and expires retained status offline', () => {
+    expect(monitorBadge({ stale: true, connectionState: 'connecting' })).toBe('connecting')
+    expect(monitorBadge({ stale: true, connectionState: 'synchronizing' })).toBe('synchronizing')
+    expect(monitorBadge({ status: { state: 'printing' }, stale: true, connectionState: 'offline' })).toBe('offline')
   })
 })
