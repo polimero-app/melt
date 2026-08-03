@@ -40,8 +40,12 @@ const MAX_FTP_LISTING_SIZE: u64 = 8 << 20;
 const MAX_LIST_DEPTH: u8 = 32;
 const MAX_LIST_ENTRIES: usize = 50_000;
 const PUSHALL_INTERVAL: Duration = Duration::from_secs(3);
+const PUSHING_START_INTERVAL: Duration = Duration::from_secs(15);
 const MQTT_DRAIN_QUIET_WINDOW: Duration = Duration::from_millis(5);
 const STATUS_STREAM_SILENCE: Duration = Duration::from_secs(15);
+const STATUS_STREAM_START_AFTER: Duration = Duration::from_secs(20);
+const STATUS_STREAM_OFFLINE_AFTER: Duration = Duration::from_secs(30);
+const STATUS_FULL_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Error)]
@@ -225,7 +229,8 @@ impl Client {
         if let Some(mqtt) = matching_cached_connection(&mut cached, identity) {
             mqtt.deadline = deadline;
             match mqtt.poll_stream_status(payload.clone()) {
-                Ok(report) => return Ok(report),
+                Ok(StreamPoll::Fresh(report)) => return Ok(report),
+                Ok(StreamPoll::Recovering) => return Err(Error::Timeout),
                 Err(_) => *cached = None,
             }
         }
@@ -1125,6 +1130,9 @@ struct MqttConnection {
     connected: bool,
     status_document: Option<Value>,
     status_observed_at: Option<Instant>,
+    full_status_observed_at: Option<Instant>,
+    last_pushall_at: Option<Instant>,
+    last_pushing_start_at: Option<Instant>,
 }
 
 impl MqttConnection {
@@ -1137,6 +1145,9 @@ impl MqttConnection {
             connected: false,
             status_document: None,
             status_observed_at: None,
+            full_status_observed_at: None,
+            last_pushall_at: None,
+            last_pushing_start_at: None,
         }
     }
 
@@ -1203,6 +1214,7 @@ impl MqttConnection {
         let is_status_poll = is_pushall_payload(command.as_bytes());
         if is_status_poll {
             self.drain_stale_packets()?;
+            self.last_pushall_at = Some(Instant::now());
         }
         let mut acknowledged = is_status_poll;
         self.publish(&command)?;
@@ -1247,7 +1259,7 @@ impl MqttConnection {
         }
     }
 
-    fn poll_stream_status(&mut self, recovery: String) -> Result<Vec<u8>, Error> {
+    fn poll_stream_status(&mut self, recovery: String) -> Result<StreamPoll, Error> {
         let quiet_until = self.deadline.min(Instant::now() + MQTT_DRAIN_QUIET_WINDOW);
         let mut updated = false;
         loop {
@@ -1269,11 +1281,69 @@ impl MqttConnection {
                 Instant::now().saturating_duration_since(observed) < STATUS_STREAM_SILENCE
             })
         {
-            return self.status_snapshot();
+            if self.full_status_observed_at.is_some_and(|observed| {
+                Instant::now().saturating_duration_since(observed) >= STATUS_FULL_REFRESH_INTERVAL
+            }) {
+                self.publish_pushall_if_due(&recovery)?;
+            }
+            return self.status_snapshot().map(StreamPoll::Fresh);
         }
 
-        self.exchange(recovery, is_full_report)?;
-        self.status_snapshot()
+        let silence = self
+            .status_observed_at
+            .map(|observed| Instant::now().saturating_duration_since(observed));
+        if self.status_document.is_none() {
+            self.exchange(recovery, is_full_report)?;
+            return self.status_snapshot().map(StreamPoll::Fresh);
+        }
+        self.publish_pushall_if_due(&recovery)?;
+        if silence.is_some_and(|elapsed| elapsed >= STATUS_STREAM_START_AFTER)
+            && !self.supports_mqtt_alive()
+        {
+            self.publish_pushing_start_if_due()?;
+        }
+        if silence.is_some_and(|elapsed| elapsed >= STATUS_STREAM_OFFLINE_AFTER) {
+            return Err(Error::Timeout);
+        }
+        Ok(StreamPoll::Recovering)
+    }
+
+    fn publish_pushall_if_due(&mut self, payload: &str) -> Result<(), Error> {
+        if self
+            .last_pushall_at
+            .is_some_and(|sent| Instant::now().saturating_duration_since(sent) < PUSHALL_INTERVAL)
+        {
+            return Ok(());
+        }
+        self.publish(payload)?;
+        self.last_pushall_at = Some(Instant::now());
+        Ok(())
+    }
+
+    fn publish_pushing_start_if_due(&mut self) -> Result<(), Error> {
+        if self.last_pushing_start_at.is_some_and(|sent| {
+            Instant::now().saturating_duration_since(sent) < PUSHING_START_INTERVAL
+        }) {
+            return Ok(());
+        }
+        let payload = serde_json::to_string(&json!({"pushing": {
+            "sequence_id": next_sequence().to_string(),
+            "command": "start"
+        }}))
+        .map_err(|_| Error::InvalidResponse)?;
+        self.publish(&payload)?;
+        self.last_pushing_start_at = Some(Instant::now());
+        Ok(())
+    }
+
+    fn supports_mqtt_alive(&self) -> bool {
+        self.status_document
+            .as_ref()
+            .and_then(|document| document.get("print"))
+            .and_then(Value::as_object)
+            .and_then(|print| print.get("support_mqtt_alive"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
     }
 
     fn accumulate_status(&mut self, report: &Value) -> bool {
@@ -1281,7 +1351,10 @@ impl MqttConnection {
             return false;
         };
         match kind {
-            StatusReportKind::Full => self.status_document = Some(report.clone()),
+            StatusReportKind::Full => {
+                self.status_document = Some(report.clone());
+                self.full_status_observed_at = Some(Instant::now());
+            }
             StatusReportKind::Delta => {
                 let Some(document) = self.status_document.as_mut() else {
                     return false;
@@ -1363,6 +1436,11 @@ impl MqttConnection {
         self.deadline = Instant::now() + Duration::from_millis(100);
         let _ = self.write_packet(0xe0, &[]);
     }
+}
+
+enum StreamPoll {
+    Fresh(Vec<u8>),
+    Recovering,
 }
 
 impl Drop for MqttConnection {
@@ -3384,6 +3462,76 @@ mod tests {
         );
         assert_eq!(status["print"]["device"]["extruder"]["state"], "ready");
         assert!(status["print"]["hms"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn quiet_status_stream_uses_staged_recovery_and_periodic_full_refresh() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let acceptor = test_acceptor();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            assert_eq!(read_test_packet(&mut stream).kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            stream.flush().unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+
+            let pushall = read_test_packet(&mut stream);
+            let pushall = mqtt_publish_payload(pushall.kind, &pushall.payload).unwrap();
+            assert!(is_pushall_payload(&pushall));
+
+            let start = read_test_packet(&mut stream);
+            let start = mqtt_publish_payload(start.kind, &start.payload).unwrap();
+            let start: Value = serde_json::from_slice(&start).unwrap();
+            assert_eq!(start["pushing"]["command"], "start");
+
+            let refresh = read_test_packet(&mut stream);
+            let refresh = mqtt_publish_payload(refresh.kind, &refresh.payload).unwrap();
+            assert!(is_pushall_payload(&refresh));
+        });
+
+        let profile = Profile::with_timeout(
+            address.ip().to_string(),
+            "SN001",
+            true,
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) =
+            open_tls(&connector, &profile, address.port(), None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+        mqtt.subscribe().unwrap();
+        mqtt.accumulate_status(&json!({"print": {
+            "command": "push_status",
+            "msg": 0,
+            "gcode_state": "IDLE"
+        }}));
+        mqtt.status_observed_at = Some(Instant::now() - Duration::from_secs(21));
+
+        assert!(matches!(
+            mqtt.poll_stream_status(pushall_payload(next_sequence()))
+                .unwrap(),
+            StreamPoll::Recovering
+        ));
+
+        mqtt.deadline = deadline_after(Duration::from_secs(2)).unwrap();
+        mqtt.status_observed_at = Some(Instant::now());
+        mqtt.full_status_observed_at = Some(Instant::now() - Duration::from_secs(301));
+        mqtt.last_pushall_at = Some(Instant::now() - Duration::from_secs(4));
+        assert!(matches!(
+            mqtt.poll_stream_status(pushall_payload(next_sequence()))
+                .unwrap(),
+            StreamPoll::Fresh(_)
+        ));
+
+        server.join().unwrap();
     }
 
     #[test]
