@@ -4236,6 +4236,7 @@ mod tests {
                     emmc_storage: None,
                     extruder_count: None,
                     mqtt_alive_supported: None,
+                    status_transport: None,
                     reported_ip: None,
                 }),
             },

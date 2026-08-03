@@ -1172,6 +1172,27 @@ fn matching_cached_connection(
     cached.as_mut().map(|connection| &mut connection.mqtt)
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum StatusTransport {
+    Lan,
+    Cloud,
+}
+
+impl StatusTransport {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Lan => "lan",
+            Self::Cloud => "cloud",
+        }
+    }
+}
+
+struct SourceStatus {
+    document: Value,
+    observed_at: Instant,
+    full_observed_at: Option<Instant>,
+}
+
 struct MqttConnection {
     stream: SslStream<TcpStream>,
     topics: MqttTopics,
@@ -1179,8 +1200,8 @@ struct MqttConnection {
     pending: Vec<u8>,
     connected: bool,
     status_document: Option<Value>,
-    status_observed_at: Option<Instant>,
-    full_status_observed_at: Option<Instant>,
+    status_sources: BTreeMap<StatusTransport, SourceStatus>,
+    active_status_source: Option<StatusTransport>,
     last_pushall_at: Option<Instant>,
     last_pushing_start_at: Option<Instant>,
     status_decode_errors: u8,
@@ -1197,8 +1218,8 @@ impl MqttConnection {
             pending: Vec::new(),
             connected: false,
             status_document: None,
-            status_observed_at: None,
-            full_status_observed_at: None,
+            status_sources: BTreeMap::new(),
+            active_status_source: None,
             last_pushall_at: None,
             last_pushing_start_at: None,
             status_decode_errors: 0,
@@ -1382,30 +1403,34 @@ impl MqttConnection {
 
         if self.status_resync_required {
             self.publish_pushall_if_due(&recovery)?;
-            return if self.status_document.is_some() {
+            return if self.status_sources.contains_key(&StatusTransport::Lan) {
                 Ok(StreamPoll::Recovering)
             } else {
                 Err(Error::InvalidResponse)
             };
         }
 
+        let lan_status = self.status_sources.get(&StatusTransport::Lan);
         if updated
-            || self.status_observed_at.is_some_and(|observed| {
-                Instant::now().saturating_duration_since(observed) < STATUS_STREAM_SILENCE
+            || lan_status.is_some_and(|status| {
+                Instant::now().saturating_duration_since(status.observed_at) < STATUS_STREAM_SILENCE
             })
         {
-            if self.full_status_observed_at.is_some_and(|observed| {
-                Instant::now().saturating_duration_since(observed) >= STATUS_FULL_REFRESH_INTERVAL
-            }) {
+            if lan_status
+                .and_then(|status| status.full_observed_at)
+                .is_some_and(|observed| {
+                    Instant::now().saturating_duration_since(observed)
+                        >= STATUS_FULL_REFRESH_INTERVAL
+                })
+            {
                 self.publish_pushall_if_due(&recovery)?;
             }
             return self.status_snapshot().map(StreamPoll::Fresh);
         }
 
-        let silence = self
-            .status_observed_at
-            .map(|observed| Instant::now().saturating_duration_since(observed));
-        if self.status_document.is_none() {
+        let silence =
+            lan_status.map(|status| Instant::now().saturating_duration_since(status.observed_at));
+        if lan_status.is_none() {
             self.exchange(recovery, is_full_report)?;
             return self.status_snapshot().map(StreamPoll::Fresh);
         }
@@ -1450,8 +1475,9 @@ impl MqttConnection {
     }
 
     fn supports_mqtt_alive(&self) -> bool {
-        self.status_document
-            .as_ref()
+        self.status_sources
+            .get(&StatusTransport::Lan)
+            .map(|status| &status.document)
             .and_then(|document| document.get("print"))
             .and_then(Value::as_object)
             .and_then(|print| print.get("support_mqtt_alive"))
@@ -1460,13 +1486,26 @@ impl MqttConnection {
     }
 
     fn accumulate_status(&mut self, report: &Value) -> bool {
+        self.accumulate_status_from_at(StatusTransport::Lan, report, Instant::now())
+    }
+
+    fn accumulate_status_from_at(
+        &mut self,
+        source: StatusTransport,
+        report: &Value,
+        observed_at: Instant,
+    ) -> bool {
         let Some(kind) = status_report_kind(report) else {
             return false;
         };
         let candidate = match kind {
             StatusReportKind::Full => report.clone(),
             StatusReportKind::Delta => {
-                let Some(mut document) = self.status_document.clone() else {
+                let Some(mut document) = self
+                    .status_sources
+                    .get(&source)
+                    .map(|status| status.document.clone())
+                else {
                     return false;
                 };
                 merge_status_delta(&mut document, report);
@@ -1477,13 +1516,31 @@ impl MqttConnection {
             self.record_status_decode_failure();
             return false;
         }
-        self.status_document = Some(candidate);
-        if kind == StatusReportKind::Full {
-            self.full_status_observed_at = Some(Instant::now());
+        let full_observed_at = if kind == StatusReportKind::Full {
+            Some(observed_at)
+        } else {
+            self.status_sources
+                .get(&source)
+                .and_then(|status| status.full_observed_at)
+        };
+        self.status_sources.insert(
+            source,
+            SourceStatus {
+                document: candidate.clone(),
+                observed_at,
+                full_observed_at,
+            },
+        );
+        let promote = self
+            .active_status_source
+            .and_then(|active| self.status_sources.get(&active))
+            .is_none_or(|active| observed_at >= active.observed_at);
+        if promote {
+            self.status_document = Some(candidate);
+            self.active_status_source = Some(source);
         }
         self.status_decode_errors = 0;
         self.status_resync_required = false;
-        self.status_observed_at = Some(Instant::now());
         true
     }
 
@@ -1500,7 +1557,16 @@ impl MqttConnection {
             .as_ref()
             .ok_or(Error::InvalidResponse)?;
         parse_status_value(document)?;
-        serde_json::to_vec(document).map_err(|_| Error::InvalidResponse)
+        let mut snapshot = document.clone();
+        if let Some(source) = self.active_status_source
+            && let Some(root) = snapshot.as_object_mut()
+        {
+            root.insert(
+                "_polimero".into(),
+                json!({"status_transport": source.as_str()}),
+            );
+        }
+        serde_json::to_vec(&snapshot).map_err(|_| Error::InvalidResponse)
     }
 
     /// Clears reports received before a new status request is published. Bambu
@@ -2053,6 +2119,11 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
         emmc_storage: has_emmc(print),
         extruder_count: observed_extruder_count(print),
         mqtt_alive_supported: print.get("support_mqtt_alive").and_then(Value::as_bool),
+        status_transport: report
+            .get("_polimero")
+            .and_then(|metadata| metadata.get("status_transport"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         reported_ip: string(print.get("wifi_ip")).filter(|value| !value.is_empty()),
     };
     Ok(Status {
@@ -3647,6 +3718,87 @@ mod tests {
     }
 
     #[test]
+    fn freshest_transport_source_wins_status_arbitration() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let acceptor = test_acceptor();
+        let (release_tx, release_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            assert_eq!(read_test_packet(&mut stream).kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            stream.flush().unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+            release_rx.recv().unwrap();
+        });
+
+        let profile = Profile::with_timeout(
+            address.ip().to_string(),
+            "SN001",
+            true,
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) =
+            open_tls(&connector, &profile, address.port(), None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+        mqtt.subscribe().unwrap();
+        let observed = Instant::now();
+        assert!(mqtt.accumulate_status_from_at(
+            StatusTransport::Lan,
+            &json!({"print": {"msg": 0, "gcode_state": "PRINTING", "mc_percent": 10}}),
+            observed,
+        ));
+        assert!(mqtt.accumulate_status_from_at(
+            StatusTransport::Cloud,
+            &json!({"print": {"msg": 0, "gcode_state": "PRINTING", "mc_percent": 80}}),
+            observed + Duration::from_secs(2),
+        ));
+        assert!(mqtt.accumulate_status_from_at(
+            StatusTransport::Lan,
+            &json!({"print": {"msg": 1, "mc_percent": 11}}),
+            observed + Duration::from_secs(1),
+        ));
+        let cloud = parse_status(&mqtt.status_snapshot().unwrap()).unwrap();
+        assert_eq!(cloud.progress.unwrap().percent, 80);
+        assert_eq!(
+            cloud
+                .extensions
+                .bambu_lan
+                .unwrap()
+                .status_transport
+                .as_deref(),
+            Some("cloud")
+        );
+
+        assert!(mqtt.accumulate_status_from_at(
+            StatusTransport::Lan,
+            &json!({"print": {"msg": 1, "mc_percent": 12}}),
+            observed + Duration::from_secs(3),
+        ));
+        let lan = parse_status(&mqtt.status_snapshot().unwrap()).unwrap();
+        assert_eq!(lan.progress.unwrap().percent, 12);
+        assert_eq!(
+            lan.extensions
+                .bambu_lan
+                .unwrap()
+                .status_transport
+                .as_deref(),
+            Some("lan")
+        );
+
+        release_tx.send(()).unwrap();
+        server.join().unwrap();
+    }
+
+    #[test]
     fn quiet_status_stream_uses_staged_recovery_and_periodic_full_refresh() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -3717,7 +3869,10 @@ mod tests {
         }})));
         assert_eq!(mqtt.status_decode_errors, 0);
         assert!(!mqtt.status_resync_required);
-        mqtt.status_observed_at = Some(Instant::now() - Duration::from_secs(21));
+        mqtt.status_sources
+            .get_mut(&StatusTransport::Lan)
+            .unwrap()
+            .observed_at = Instant::now() - Duration::from_secs(21);
 
         assert!(matches!(
             mqtt.poll_stream_status(pushall_payload(next_sequence()))
@@ -3726,8 +3881,9 @@ mod tests {
         ));
 
         mqtt.deadline = deadline_after(Duration::from_secs(2)).unwrap();
-        mqtt.status_observed_at = Some(Instant::now());
-        mqtt.full_status_observed_at = Some(Instant::now() - Duration::from_secs(301));
+        let lan_status = mqtt.status_sources.get_mut(&StatusTransport::Lan).unwrap();
+        lan_status.observed_at = Instant::now();
+        lan_status.full_observed_at = Some(Instant::now() - Duration::from_secs(301));
         mqtt.last_pushall_at = Some(Instant::now() - Duration::from_secs(4));
         assert!(matches!(
             mqtt.poll_stream_status(pushall_payload(next_sequence()))
