@@ -782,6 +782,30 @@ fn printer_capabilities(
         .ok_or_else(|| CommandError::new("profileNotFound"))?;
     let driver = drivers::profile(profile).map_err(|_| CommandError::new("profileInvalid"))?;
     let mut bambu = driver.bambu_runtime_capabilities();
+    if bambu.is_some() {
+        let kind = driver.driver();
+        let discovered = access_code(&profile.driver, &name, kind)
+            .and_then(|access_code| {
+                tls_fingerprint(&profile.driver, &name, kind, profile.insecure)
+                    .map(|fingerprint| (access_code, fingerprint))
+            })
+            .ok()
+            .and_then(|(access_code, fingerprint)| {
+                state
+                    .pool
+                    .bambu_runtime_capabilities(
+                        &name,
+                        &driver,
+                        access_code.as_deref(),
+                        fingerprint.as_deref(),
+                    )
+                    .ok()
+                    .flatten()
+            });
+        if discovered.is_some() {
+            bambu = discovered;
+        }
+    }
     if let Some(runtime) = bambu.as_mut()
         && let Ok(entries) = state.entries.lock()
         && let Some(extension) = entries
@@ -792,6 +816,9 @@ fn printer_capabilities(
         if let Some(count) = extension.extruder_count {
             runtime.extruder_count = Some(count);
         }
+        runtime.mqtt_alive_supported = extension
+            .mqtt_alive_supported
+            .or(runtime.mqtt_alive_supported);
         if extension.ams.is_some() {
             runtime.ams_supported = Some(true);
         }
@@ -806,6 +833,15 @@ fn printer_capabilities(
                     .push(polimero_core::bambu::StorageVolume::Emmc);
             }
         }
+    }
+    if let Some(runtime) = bambu.as_mut()
+        && let Ok(entries) = state.entries.lock()
+        && let Some(version) = entries
+            .get(&name.to_ascii_lowercase())
+            .and_then(|cached| cached.entry.status.as_ref())
+            .and_then(|status| status.firmware_version.clone())
+    {
+        runtime.firmware_version = Some(version);
     }
     Ok(PrinterCapabilities {
         name,

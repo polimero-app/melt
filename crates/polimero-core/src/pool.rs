@@ -89,6 +89,22 @@ impl ConnectionPool {
         self.is_current_generation(generation).then_some(result)
     }
 
+    pub fn bambu_runtime_capabilities(
+        &self,
+        name: &str,
+        profile: &drivers::Profile,
+        access_code: Option<&str>,
+        tls_fingerprint: Option<&str>,
+    ) -> Result<Option<bambu::RuntimeCapabilities>, drivers::DriverError> {
+        let drivers::Profile::Bambu(profile) = profile else {
+            return Ok(None);
+        };
+        self.with_bambu(name, profile, access_code, tls_fingerprint, |client| {
+            client.runtime_capabilities(access_code, tls_fingerprint)
+        })
+        .map(Some)
+    }
+
     fn status_at(
         &self,
         generation: Option<u64>,

@@ -4235,6 +4235,7 @@ mod tests {
                     sd_card_state: Some("normal"),
                     emmc_storage: None,
                     extruder_count: None,
+                    mqtt_alive_supported: None,
                     reported_ip: None,
                 }),
             },

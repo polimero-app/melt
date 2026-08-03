@@ -28,8 +28,9 @@ use thiserror::Error;
 use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rfc3339};
 
 use super::{
-    MQTT_USERNAME, MqttTopics, Profile, TlsPinError, is_pushall_payload, is_valid_tls_fingerprint,
-    payload_sequence_id, pushall_payload, tls_fingerprint, tunnel, verify_tls_fingerprint,
+    MQTT_USERNAME, MqttTopics, Profile, RuntimeCapabilities, StorageTransport, StorageVolume,
+    TlsPinError, is_pushall_payload, is_valid_tls_fingerprint, payload_sequence_id,
+    pushall_payload, tls_fingerprint, tunnel, verify_tls_fingerprint,
 };
 
 const FTP_PORT: u16 = 990;
@@ -47,6 +48,8 @@ const STATUS_STREAM_START_AFTER: Duration = Duration::from_secs(20);
 const STATUS_STREAM_OFFLINE_AFTER: Duration = Duration::from_secs(30);
 const STATUS_FULL_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const STATUS_DECODE_ERROR_BUDGET: u8 = 5;
+const VERSION_RETRY_INTERVAL: Duration = Duration::from_secs(2);
+const VERSION_MAX_ATTEMPTS: u8 = 10;
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Error)]
@@ -172,6 +175,27 @@ impl Client {
         let payload = pushall_payload(next_sequence());
         let report = self.exchange(access_code, fingerprint, payload, is_full_report)?;
         parse_status(&report)
+    }
+
+    /// Queries firmware module information on the persistent MQTT session and
+    /// refines conservative model defaults with facts observed from firmware.
+    pub fn runtime_capabilities(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+    ) -> Result<RuntimeCapabilities, Error> {
+        let defaults = self.profile.default_capabilities();
+        self.with_mqtt(access_code, fingerprint, |mqtt| {
+            if mqtt.status_document.is_none() {
+                mqtt.exchange(pushall_payload(next_sequence()), is_full_report)?;
+            }
+            let version = mqtt.query_version()?;
+            Ok(refine_runtime_capabilities(
+                defaults,
+                mqtt.status_document.as_ref(),
+                Some(&version),
+            ))
+        })
     }
 
     /// Like [`status`](Self::status), but reuses a live MQTT session across
@@ -1136,6 +1160,7 @@ struct MqttConnection {
     last_pushing_start_at: Option<Instant>,
     status_decode_errors: u8,
     status_resync_required: bool,
+    device_info: Option<Value>,
 }
 
 impl MqttConnection {
@@ -1153,6 +1178,7 @@ impl MqttConnection {
             last_pushing_start_at: None,
             status_decode_errors: 0,
             status_resync_required: false,
+            device_info: None,
         }
     }
 
@@ -1208,6 +1234,44 @@ impl MqttConnection {
         mqtt_string(&mut packet, &self.topics.request)?;
         packet.extend_from_slice(payload.as_bytes());
         self.write_packet(0x30, &packet)
+    }
+
+    fn query_version(&mut self) -> Result<Value, Error> {
+        if let Some(info) = self.device_info.clone() {
+            return Ok(info);
+        }
+        let mut attempts = 0_u8;
+        let mut retry_at = Instant::now();
+        loop {
+            if Instant::now() >= retry_at && attempts < VERSION_MAX_ATTEMPTS {
+                let payload = json!({"info": {
+                    "sequence_id": next_sequence_id(),
+                    "command": "get_version"
+                }})
+                .to_string();
+                self.publish(&payload)?;
+                attempts += 1;
+                retry_at = Instant::now() + VERSION_RETRY_INTERVAL;
+            }
+            let wait_until = self.deadline.min(retry_at);
+            match self.read_packet_until(wait_until)? {
+                Some(packet) if packet.kind >> 4 == 3 => {
+                    let report = mqtt_publish_payload(packet.kind, &packet.payload)?;
+                    let Ok(value) = serde_json::from_slice::<Value>(&report) else {
+                        continue;
+                    };
+                    self.accumulate_status(&value);
+                    if let Some(info) = version_info(&value) {
+                        self.device_info = Some(info.clone());
+                        return Ok(info);
+                    }
+                }
+                Some(_) => {}
+                None if Instant::now() >= self.deadline => return Err(Error::Timeout),
+                None if attempts >= VERSION_MAX_ATTEMPTS => return Err(Error::InvalidResponse),
+                None => {}
+            }
+        }
     }
 
     fn exchange(
@@ -1789,6 +1853,59 @@ fn is_full_report(report: &Value) -> bool {
     status_report_kind(report) == Some(StatusReportKind::Full)
 }
 
+fn version_info(report: &Value) -> Option<Value> {
+    let info = report.get("info")?.as_object()?;
+    if string(info.get("command")).as_deref() != Some("get_version")
+        || string(info.get("result")).as_deref() == Some("fail")
+        || info.get("module").and_then(Value::as_array)?.is_empty()
+    {
+        return None;
+    }
+    Some(Value::Object(info.clone()))
+}
+
+fn module_firmware_version(info: &Value) -> Option<String> {
+    info.get("module")?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_object)
+        .find(|module| string(module.get("name")).as_deref() == Some("ota"))
+        .and_then(|module| string(module.get("sw_ver")))
+        .filter(|version| !version.is_empty())
+}
+
+fn refine_runtime_capabilities(
+    mut capabilities: RuntimeCapabilities,
+    status: Option<&Value>,
+    info: Option<&Value>,
+) -> RuntimeCapabilities {
+    let print = status
+        .and_then(|status| status.get("print"))
+        .and_then(Value::as_object);
+    if let Some(print) = print {
+        capabilities.extruder_count =
+            observed_extruder_count(print).or(capabilities.extruder_count);
+        if print.contains_key("ams") {
+            capabilities.ams_supported = Some(true);
+        }
+        capabilities.mqtt_alive_supported = print
+            .get("support_mqtt_alive")
+            .and_then(Value::as_bool)
+            .or(capabilities.mqtt_alive_supported);
+        if has_emmc(print) == Some(true) {
+            capabilities.storage_transport = StorageTransport::Tunnel6000;
+            if !capabilities.storage_volumes.contains(&StorageVolume::Emmc) {
+                capabilities.storage_volumes.push(StorageVolume::Emmc);
+            }
+        }
+        capabilities.firmware_version = firmware_version(print).or(capabilities.firmware_version);
+    }
+    if let Some(version) = info.and_then(module_firmware_version) {
+        capabilities.firmware_version = Some(version);
+    }
+    capabilities
+}
+
 /// Mirrors Bambu Studio's `json_diff::diff2all`: omitted object keys retain
 /// their baseline values, nested objects merge recursively, and present
 /// scalars/arrays/nulls replace the previous value.
@@ -1910,6 +2027,7 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
         sd_card_state: sd_card_state(print),
         emmc_storage: has_emmc(print),
         extruder_count: observed_extruder_count(print),
+        mqtt_alive_supported: print.get("support_mqtt_alive").and_then(Value::as_bool),
         reported_ip: string(print.get("wifi_ip")).filter(|value| !value.is_empty()),
     };
     Ok(Status {
@@ -3681,6 +3799,88 @@ mod tests {
                 .state,
             PrinterState::Paused
         );
+    }
+
+    #[test]
+    fn runtime_capabilities_combine_version_query_and_live_firmware_facts() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let acceptor = test_acceptor();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            assert_eq!(read_test_packet(&mut stream).kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            stream.flush().unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+
+            let pushall = read_test_packet(&mut stream);
+            assert!(is_pushall_payload(
+                &mqtt_publish_payload(pushall.kind, &pushall.payload).unwrap()
+            ));
+            write_test_report(
+                &mut stream,
+                &json!({"print": {
+                    "command": "push_status",
+                    "msg": 0,
+                    "gcode_state": "IDLE",
+                    "support_mqtt_alive": true,
+                    "fun2": "20000",
+                    "ams": {"ams": []},
+                    "device": {"extruder": {"info": [{"id": 0}, {"id": 1}]}}
+                }}),
+            );
+
+            let get_version = read_test_packet(&mut stream);
+            let get_version = mqtt_publish_payload(get_version.kind, &get_version.payload).unwrap();
+            let get_version: Value = serde_json::from_slice(&get_version).unwrap();
+            assert_eq!(get_version["info"]["command"], "get_version");
+            write_test_report(
+                &mut stream,
+                &json!({"info": {
+                    "command": "get_version",
+                    "module": [{"name": "ota", "sw_ver": "01.02.03.04"}]
+                }}),
+            );
+            thread::sleep(Duration::from_millis(100));
+        });
+
+        let profile = Profile::with_timeout(
+            address.ip().to_string(),
+            "SN001",
+            true,
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) =
+            open_tls(&connector, &profile, address.port(), None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+        mqtt.subscribe().unwrap();
+        mqtt.exchange(pushall_payload(next_sequence()), is_full_report)
+            .unwrap();
+        let version = mqtt.query_version().unwrap();
+        let capabilities = refine_runtime_capabilities(
+            profile.default_capabilities(),
+            mqtt.status_document.as_ref(),
+            Some(&version),
+        );
+
+        server.join().unwrap();
+        assert_eq!(capabilities.extruder_count, Some(2));
+        assert_eq!(capabilities.ams_supported, Some(true));
+        assert_eq!(capabilities.mqtt_alive_supported, Some(true));
+        assert_eq!(
+            capabilities.firmware_version.as_deref(),
+            Some("01.02.03.04")
+        );
+        assert_eq!(capabilities.storage_transport, StorageTransport::Tunnel6000);
+        assert!(capabilities.storage_volumes.contains(&StorageVolume::Emmc));
     }
 
     #[test]

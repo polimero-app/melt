@@ -229,6 +229,8 @@ pub struct RuntimeCapabilities {
     pub storage_volumes: Vec<StorageVolume>,
     pub extruder_count: Option<u8>,
     pub ams_supported: Option<bool>,
+    pub mqtt_alive_supported: Option<bool>,
+    pub firmware_version: Option<String>,
 }
 
 impl RuntimeCapabilities {
@@ -286,6 +288,8 @@ impl RuntimeCapabilities {
             storage_volumes,
             extruder_count,
             ams_supported: (model_family != ModelFamily::Unknown).then_some(true),
+            mqtt_alive_supported: None,
+            firmware_version: None,
         }
     }
 }
