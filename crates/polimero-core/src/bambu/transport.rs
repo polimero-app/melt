@@ -63,6 +63,8 @@ pub enum Error {
     Pin(#[from] TlsPinError),
     #[error("Bambu TLS certificate is unavailable")]
     MissingCertificate,
+    #[error("Bambu TLS certificate identity does not match the configured printer serial")]
+    CertificateIdentity,
     #[error("Bambu connection failed")]
     Connection,
     #[error("Bambu TLS handshake failed")]
@@ -1258,6 +1260,14 @@ fn open_tls_socket(
         .ssl()
         .peer_certificate()
         .ok_or(Error::MissingCertificate)?;
+    let certificate_serial_matches = certificate
+        .subject_name()
+        .entries_by_nid(openssl::nid::Nid::COMMONNAME)
+        .filter_map(|entry| entry.data().to_string().ok())
+        .any(|common_name| common_name == profile.serial());
+    if !profile.insecure() && !certificate_serial_matches {
+        return Err(Error::CertificateIdentity);
+    }
     let certificate = certificate.to_der().map_err(|_| Error::Tls)?;
     let actual_fingerprint = tls_fingerprint(&certificate);
     if verify_pin && !profile.insecure() {
