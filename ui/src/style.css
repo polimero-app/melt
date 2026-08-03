@@ -17,9 +17,19 @@
      *physical* px (tauri.conf.json), so on a 1.5x display the CSS viewport
      floor is 1280/1.5 = 853px — under stock lg/xl, which left every grid
      stacked. These fire at that floor instead. Raising minWidth is not an
-     escape: 1280 CSS px would need a 1920px-wide window. */
+     escape: 1280 CSS px would need a 1920px-wide window.
+
+     Declare the WHOLE scale, ascending, after resetting it. Tailwind orders
+     breakpoint variants by declaration position, not by value, so overriding
+     only some of them emits md after xl — and `md:grid-cols-2 xl:grid-cols-3`
+     then resolves to 2 columns. 2xl stays above any reachable viewport so it
+     remains dormant; nothing uses it today. */
+  --breakpoint-*: initial;
+  --breakpoint-sm: 480px;
+  --breakpoint-md: 640px;
   --breakpoint-lg: 720px;
   --breakpoint-xl: 840px;
+  --breakpoint-2xl: 1400px;
 }
 
 /* ponytail: no utility equivalent — font synthesis / text rendering hints, plus
