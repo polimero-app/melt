@@ -1492,11 +1492,18 @@ fn print_library_file(
     let device_path = if printer.driver.driver() == drivers::Driver::BambuLan
         && source_filename.to_ascii_lowercase().ends_with(".3mf")
     {
+        let inventory = state
+            .entries
+            .lock()
+            .ok()
+            .and_then(|entries| entries.get(&request.printer)?.entry.status.clone())
+            .and_then(|status| status.extensions.bambu_lan)
+            .and_then(|extension| extension.ams);
         let preflight = polimero_core::bambu::preflight_print_package(
             &absolute,
             request.display_name.as_deref(),
             request.plate,
-            None,
+            inventory.as_ref(),
         )
         .map_err(|_| CommandError::new("jobFileInvalid"))?;
         if !preflight.ready {
@@ -1504,6 +1511,11 @@ fn print_library_file(
         }
         options.plate = Some(preflight.selected_plate.index);
         options.display_name = Some(preflight.names.display_name.clone());
+        if let Some(mapping) = &preflight.filament_mapping {
+            options.use_ams = !mapping.ams_mapping.is_empty();
+            options.ams_mapping.clone_from(&mapping.ams_mapping);
+            options.nozzle_mapping.clone_from(&mapping.nozzle_mapping);
+        }
         let _ = app.emit(
             "print-stage",
             polimero_core::bambu::PrintStageEvent {
