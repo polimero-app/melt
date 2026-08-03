@@ -1675,8 +1675,8 @@ onUnmounted(() => {
             <span class="flex items-center gap-2"><PhArrowsClockwise class="size-4 shrink-0" aria-hidden="true" />{{ t('control.reconnecting') }}</span>
             <Button variant="secondary" :disabled="refreshing" @click="refreshMonitoring">{{ t('control.refreshConnection') }}</Button>
           </div>
-          <section class="grid gap-5 xl:grid-cols-4">
-            <Card class="overflow-hidden xl:col-span-3">
+          <section class="grid gap-5 grid-cols-[3fr_1fr]">
+            <Card class="overflow-hidden">
               <CardHeader :title="t('camera.title')" :icon="PhVideoCamera">
                 <template #suffix>
                   <span
@@ -1959,7 +1959,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Stats -->
-        <dl v-if="hasPrinters" class="mb-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
+        <dl v-if="hasPrinters" class="mb-5 grid gap-5 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
           <Card v-for="stat in fleetStats" :key="stat.label" as="div" class="px-4 py-5 sm:p-6">
             <dt class="truncate text-sm font-medium text-gray-500 dark:text-gray-400">{{ stat.label }}</dt>
             <dd class="mt-1 text-3xl font-semibold tracking-tight" :class="stat.tone">{{ stat.value }}</dd>
@@ -1986,7 +1986,7 @@ onUnmounted(() => {
           <Button class="mt-6" variant="primary" :disabled="!drivers.length" @click="openAddition"><PhBroadcast class="size-4" /> {{ t('printersView.scan') }}</Button>
         </div>
 
-        <div v-else class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+        <div v-else class="grid gap-5 grid-cols-[repeat(auto-fit,minmax(280px,1fr))]">
           <Card v-for="printer in printers" :key="printer.name" as="article" class="px-4 py-5 sm:p-6">
             <div class="flex items-start justify-between">
               <div class="flex items-center gap-3">
@@ -2198,7 +2198,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div v-if="visibleDirectories.length" class="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div v-if="visibleDirectories.length" class="mb-5 grid gap-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
           <button
             v-for="directory in visibleDirectories"
             :key="directory.devicePath"
@@ -2213,7 +2213,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Grid list -->
-        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div class="grid gap-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
           <Card
             v-for="file in visibleFiles"
             :key="file.devicePath"
