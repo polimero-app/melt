@@ -12,6 +12,14 @@
 @theme {
   --font-sans: "Inter Variable", system-ui;
   --font-mono: Hack, monospace;
+
+  /* ponytail: desktop-app breakpoints, not browser ones. minWidth is 1280
+     *physical* px (tauri.conf.json), so on a 1.5x display the CSS viewport
+     floor is 1280/1.5 = 853px — under stock lg/xl, which left every grid
+     stacked. These fire at that floor instead. Raising minWidth is not an
+     escape: 1280 CSS px would need a 1920px-wide window. */
+  --breakpoint-lg: 720px;
+  --breakpoint-xl: 840px;
 }
 
 /* ponytail: no utility equivalent — font synthesis / text rendering hints, plus
