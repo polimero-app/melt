@@ -21,6 +21,7 @@ mod package;
 mod rtsp;
 mod transport;
 mod tunnel;
+mod workflow;
 
 pub use discovery::{DiscoveredPrinter, DiscoveryError, discover};
 pub use mapping::{FilamentAssignment, FilamentMapping, MappingStatus, reconcile_filaments};
@@ -31,6 +32,7 @@ pub use package::{
 };
 pub use rtsp::H264Stream;
 pub use transport::{Client, Error as TransportError, JobStartOptions};
+pub use workflow::{PrintPreflight, PrintStage, PrintStageEvent, preflight_print_package};
 
 pub const MQTT_PORT: u16 = 8883;
 pub const MQTT_USERNAME: &str = "bblp";
