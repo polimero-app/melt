@@ -1,4 +1,4 @@
-.PHONY: build test lint ci contract run release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test
+.PHONY: build test lint ci contract license-check run release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test
 
 build: cargo-build ui-build
 
@@ -6,7 +6,14 @@ test: cargo-test ui-test
 
 lint: cargo-lint
 
-ci: ui-install lint test build contract
+ci: license-check ui-install lint test build contract
+
+license-check:
+	test -f LICENSE
+	grep -Fqx 'license = "AGPL-3.0-only"' Cargo.toml
+	grep -Fq '"license": "AGPL-3.0-only"' ui/package.json
+	grep -Fq '"../../LICENSE"' crates/polimero-desktop/tauri.conf.json
+	! git grep -nE 'license = "MIT"|"license": "MIT"' -- ':!Cargo.lock' ':!Makefile'
 
 contract:
 	cargo test -p polimero-cli --test contract_fixtures --locked

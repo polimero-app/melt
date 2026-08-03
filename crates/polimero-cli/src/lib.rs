@@ -418,6 +418,8 @@ struct Envelope<'a, T: Serialize> {
 #[serde(rename_all = "camelCase")]
 struct VersionData {
     version: &'static str,
+    license: &'static str,
+    source_url: &'static str,
     commit: &'static str,
     go_version: &'static str,
     platform: String,
@@ -440,12 +442,18 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             invocation.format,
             VersionData {
                 version: app_info().version,
+                license: app_info().license,
+                source_url: app_info().source_url,
                 commit: "unknown",
                 go_version: "rust",
                 platform: format!("{}/{}", std::env::consts::OS, std::env::consts::ARCH),
                 modes: ["gui", "headless"],
             },
-            |out| writeln!(out, "polimero version {}", app_info().version),
+            |out| {
+                writeln!(out, "polimero version {}", app_info().version)?;
+                writeln!(out, "License: {}", app_info().license)?;
+                writeln!(out, "Source: {}", app_info().source_url)
+            },
             out,
         ),
         [printer, list] if printer.as_str() == "printer" && list.as_str() == "list" => {
@@ -662,6 +670,9 @@ fn write_group_help(group: &CommandGroup, out: &mut dyn Write) -> i32 {
     if group.path.is_empty() {
         help.push_str(
             "\nFlags:\n  -h, --help            help for polimero\n      --output string   output format: human or json (default \"human\")\n  -v, --verbose         show detailed progress output\n      --version         version for polimero\n",
+        );
+        help.push_str(
+            "\nPolimero is free software under AGPL-3.0-only, without warranty.\nSource: https://github.com/polimero-app/app\nLicense: https://www.gnu.org/licenses/agpl-3.0.html\n",
         );
     } else {
         help.push_str(&format!(

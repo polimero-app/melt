@@ -24,6 +24,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": ["../../LICENSE"],
     "icon": [],
     "linux": {
       "deb": {

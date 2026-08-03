@@ -227,6 +227,9 @@ export type MessageKey =
   | "settingsView.themeLight"
   | "settingsView.themeDark"
   | "settingsView.about"
+  | "settingsView.license"
+  | "settingsView.source"
+  | "settingsView.sourceLink"
   | "settingsView.version"
   | "settingsView.platform"
   | "settingsView.profiles"
@@ -587,6 +590,9 @@ const messages: Record<Locale, Messages> = {
     "settingsView.themeLight": "Light",
     "settingsView.themeDark": "Dark",
     "settingsView.about": "About",
+    "settingsView.license": "License",
+    "settingsView.source": "Source code",
+    "settingsView.sourceLink": "View source",
     "settingsView.version": "Version",
     "settingsView.platform": "Platform",
     "settingsView.profiles": "Profiles",
@@ -944,6 +950,9 @@ const messages: Record<Locale, Messages> = {
     "settingsView.themeLight": "Claro",
     "settingsView.themeDark": "Escuro",
     "settingsView.about": "Sobre",
+    "settingsView.license": "Licença",
+    "settingsView.source": "Código-fonte",
+    "settingsView.sourceLink": "Ver código-fonte",
     "settingsView.version": "Versão",
     "settingsView.platform": "Plataforma",
     "settingsView.profiles": "Perfis",

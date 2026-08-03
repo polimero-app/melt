@@ -16,6 +16,8 @@ use serde::Serialize;
 use thiserror::Error;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const LICENSE: &str = "AGPL-3.0-only";
+pub const SOURCE_URL: &str = "https://github.com/polimero-app/app";
 
 #[derive(Debug, Error)]
 #[error("{message}")]
@@ -40,12 +42,16 @@ impl AppError {
 pub struct AppInfo {
     pub version: &'static str,
     pub modes: [&'static str; 2],
+    pub license: &'static str,
+    pub source_url: &'static str,
 }
 
 pub fn app_info() -> AppInfo {
     AppInfo {
         version: VERSION,
         modes: ["cli", "gui"],
+        license: LICENSE,
+        source_url: SOURCE_URL,
     }
 }
 
@@ -56,6 +62,7 @@ mod tests {
     #[test]
     fn app_info_exposes_both_modes() {
         assert_eq!(app_info().modes, ["cli", "gui"]);
+        assert_eq!(app_info().license, "AGPL-3.0-only");
     }
 
     #[test]

@@ -67,6 +67,8 @@ type ModelTone = 'cyan' | 'amber' | 'rose' | 'violet'
 type AppInfo = {
   version: string
   modes: [string, string]
+  license: string
+  sourceUrl: string
 }
 
 type Printer = {
@@ -2133,6 +2135,18 @@ onUnmounted(() => {
                 <div class="flex items-center justify-between py-2">
                   <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.version') }}</dt>
                   <dd class="font-mono text-gray-900 dark:text-gray-300">{{ info ? `v${info.version}` : '—' }}</dd>
+                </div>
+                <div class="flex items-center justify-between gap-4 py-2">
+                  <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.license') }}</dt>
+                  <dd class="text-right text-gray-900 dark:text-gray-300">
+                    <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noreferrer" class="text-cyan-700 underline hover:text-cyan-600 dark:text-cyan-400">{{ info?.license ?? 'AGPL-3.0-only' }}</a>
+                  </dd>
+                </div>
+                <div class="flex items-center justify-between gap-4 py-2">
+                  <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.source') }}</dt>
+                  <dd class="text-right text-gray-900 dark:text-gray-300">
+                    <a :href="info?.sourceUrl ?? 'https://github.com/polimero-app/app'" target="_blank" rel="noreferrer" class="text-cyan-700 underline hover:text-cyan-600 dark:text-cyan-400">{{ t('settingsView.sourceLink') }}</a>
+                  </dd>
                 </div>
                 <div v-if="diagnostics" class="flex items-center justify-between py-2">
                   <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.platform') }}</dt>

@@ -12,6 +12,11 @@ fn package_configuration_keeps_the_native_artifact_and_cli_contracts() {
     assert_eq!(config["identifier"], "app.polimero");
     assert_eq!(config["bundle"]["active"], true);
     assert_eq!(config["bundle"]["targets"], "all");
+    assert_eq!(env!("CARGO_PKG_LICENSE"), "AGPL-3.0-only");
+    assert_eq!(
+        config["bundle"]["resources"],
+        serde_json::json!(["../../LICENSE"])
+    );
     assert_eq!(
         config["bundle"]["linux"]["deb"]["depends"],
         serde_json::json!(["ffmpeg"])

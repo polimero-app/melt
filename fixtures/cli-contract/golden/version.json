@@ -3,11 +3,13 @@
   "data": {
     "commit": "unknown",
     "goVersion": "go1.26.5-X:nodwarf5",
+    "license": "AGPL-3.0-only",
     "modes": [
       "gui",
       "headless"
     ],
     "platform": "linux/amd64",
+    "sourceUrl": "https://github.com/polimero-app/app",
     "version": "dev"
   },
   "error": null,

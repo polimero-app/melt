@@ -1,5 +1,10 @@
 # Polimero Tauri migration
 
+Polimero's CLI, GUI, desktop application, and shared source are licensed under
+the GNU Affero General Public License v3.0 only (`AGPL-3.0-only`). See
+[`LICENSE`](LICENSE). Corresponding source is available from
+<https://github.com/polimero-app/app>.
+
 This directory is the parallel Rust/Tauri implementation. The Go application
 remains the released implementation until this workspace passes its CLI and GUI
 compatibility gates.
