@@ -44,6 +44,14 @@ scans its SSDP and UDP announcement channels, while TLS fingerprint refresh
 always requires explicit confirmation before replacing a keychain pin. Generic
 Klipper light control remains an explicit capability error.
 
+Bambu sliced 3MF files are inspected before desktop library prints and can be
+inspected independently with `polimero jobs preflight`. The print workflow
+preserves project, plate, display, and storage names separately; reconciles
+available AMS/nozzle data; probes storage protocols conservatively; and waits
+for an observed print start. See
+[`docs/bambu-compatibility.md`](docs/bambu-compatibility.md) for the
+compatibility policy and physical-printer qualification matrix.
+
 The desktop polls configured profiles locally every five seconds while open;
 failed profiles back off independently to one minute. It offers a redacted
 diagnostics report. Release tags run native installer builds for the required
