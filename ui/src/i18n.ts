@@ -328,6 +328,7 @@ export type MessageKey =
   | "errors.slicerLaunchFailed"
   | "errors.jogTargetMissing"
   | "errors.fileDestinationUnwritable"
+  | "errors.fileIntegrityFailed"
   | "errors.libraryUnavailable"
   | "errors.libraryPathInvalid"
   | "operations.operation"
@@ -687,6 +688,7 @@ const messages: Record<Locale, Messages> = {
     "errors.slicerLaunchFailed": "Unable to open the file with that slicer.",
     "errors.jogTargetMissing": "Choose at least one axis to move first.",
     "errors.fileDestinationUnwritable": "Cannot write to the chosen destination.",
+    "errors.fileIntegrityFailed": "The downloaded file did not pass its integrity check.",
     "errors.libraryUnavailable": "Unable to access your local file library.",
     "errors.libraryPathInvalid": "That file library path is not valid.",
     "operations.operation": "running this operation",
@@ -1043,6 +1045,7 @@ const messages: Record<Locale, Messages> = {
     "errors.slicerLaunchFailed": "Não foi possível abrir o arquivo com este fatiador.",
     "errors.jogTargetMissing": "Escolha ao menos um eixo para mover.",
     "errors.fileDestinationUnwritable": "Não é possível gravar no destino escolhido.",
+    "errors.fileIntegrityFailed": "O arquivo baixado não passou na verificação de integridade.",
     "errors.libraryUnavailable": "Não foi possível acessar sua biblioteca de arquivos local.",
     "errors.libraryPathInvalid": "Este caminho da biblioteca de arquivos não é válido.",
     "operations.operation": "esta operação",

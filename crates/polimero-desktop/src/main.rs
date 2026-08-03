@@ -1854,7 +1854,12 @@ fn printer_file_download(
     state: tauri::State<'_, TransferState>,
 ) -> Result<u64, CommandError> {
     let printer = desktop_printer(&request.name, Operation::FileDownload)?;
-    let mut destination = std::fs::File::create(&request.destination)
+    let destination = std::path::Path::new(&request.destination);
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)
         .map_err(|_| CommandError::of("fileDestinationUnwritable", Operation::FileDownload))?;
     let transfer_id = request
         .transfer_id
@@ -1873,7 +1878,7 @@ fn printer_file_download(
         );
     }
     let mut progress = ProgressWriter {
-        destination: &mut destination,
+        destination: temporary.as_file_mut(),
         app: app.clone(),
         state: state.inner().clone(),
         transfer_id: transfer_id.clone(),
@@ -1889,8 +1894,28 @@ fn printer_file_download(
         &mut progress,
     )
     .map_err(|error| operation_error(error, Operation::FileDownload));
+    drop(progress);
     match result {
         Ok(bytes) => {
+            let actual = temporary
+                .as_file()
+                .metadata()
+                .map(|metadata| metadata.len())
+                .map_err(|_| CommandError::new("fileIntegrityFailed"))?;
+            if actual != bytes
+                || request
+                    .total_bytes
+                    .is_some_and(|expected| expected != actual)
+            {
+                return Err(CommandError::new("fileIntegrityFailed"));
+            }
+            temporary
+                .as_file_mut()
+                .sync_all()
+                .map_err(|_| CommandError::new("fileIntegrityFailed"))?;
+            temporary.persist(destination).map_err(|_| {
+                CommandError::of("fileDestinationUnwritable", Operation::FileDownload)
+            })?;
             use tauri::Emitter;
             let _ = app.emit(
                 "transfer-progress",
