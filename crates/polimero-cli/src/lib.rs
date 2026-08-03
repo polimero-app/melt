@@ -4168,6 +4168,7 @@ mod tests {
             }),
             progress: Some(moonraker::Progress {
                 percent: 61,
+                preparation_percent: None,
                 current_layer: Some(3),
                 total_layers: Some(100),
             }),
@@ -4191,6 +4192,11 @@ mod tests {
                 file_size: Some(2 * 1024 * 1024),
                 nozzle_diameter: Some(0.4),
                 bed_type: Some("textured_plate".into()),
+                plate_index: None,
+                plate_count: None,
+                print_type: None,
+                queue_position: None,
+                queue_total: None,
             }),
             stage: Some("printing"),
             timelapse: Some(moonraker::Timelapse {

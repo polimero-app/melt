@@ -1018,6 +1018,8 @@ pub struct Job {
 pub struct Progress {
     pub percent: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub preparation_percent: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub current_layer: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_layers: Option<u32>,
@@ -1027,6 +1029,12 @@ pub struct Progress {
 pub struct StatusError {
     pub code: &'static str,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recoverable: Option<bool>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -1061,6 +1069,16 @@ pub struct PrintMeta {
     pub nozzle_diameter: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bed_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plate_index: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plate_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub print_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_position: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_total: Option<u32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -1661,6 +1679,7 @@ fn map_progress(status: &BTreeMap<String, Value>) -> (Option<Progress>, Option<S
     (
         Some(Progress {
             percent,
+            preparation_percent: None,
             current_layer: info.and_then(|info| unsigned(info, "current_layer")),
             total_layers: info.and_then(|info| unsigned(info, "total_layer")),
         }),
@@ -1700,6 +1719,9 @@ fn map_errors(status: &BTreeMap<String, Value>, state: PrinterState) -> Vec<Stat
     vec![StatusError {
         code: "printer_error",
         message,
+        raw_code: None,
+        image_id: None,
+        recoverable: None,
     }]
 }
 
@@ -1867,6 +1889,9 @@ mod tests {
             vec![StatusError {
                 code: "printer_error",
                 message: "Move out of range".into(),
+                raw_code: None,
+                image_id: None,
+                recoverable: None,
             }]
         );
     }

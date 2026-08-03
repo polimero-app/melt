@@ -2124,7 +2124,12 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
         .get("print")
         .and_then(Value::as_object)
         .ok_or(Error::InvalidResponse)?;
-    let state = match string(print.get("gcode_state")).as_deref() {
+    let reported_state = print
+        .get("job")
+        .and_then(|job| job.get("job_state"))
+        .and_then(Value::as_str)
+        .or_else(|| print.get("gcode_state").and_then(Value::as_str));
+    let state = match reported_state {
         Some("IDLE" | "FINISH") => PrinterState::Idle,
         Some("PRINTING" | "PREPARE" | "RUNNING" | "SLICING") => PrinterState::Printing,
         // Firmware reports PAUSE; PAUSED is accepted for third-party stacks.
@@ -2149,13 +2154,19 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
             message: "temperature data unavailable",
         });
     }
-    let progress = integer(print.get("mc_percent")).map(|percent| Progress {
-        percent: percent.clamp(0, 100).try_into().unwrap_or_default(),
-        current_layer: integer(print.get("layer_num"))
-            .or_else(|| integer(print.get("mc_layer_num")))
-            .and_then(|value| value.try_into().ok()),
-        total_layers: integer(print.get("total_layer_num")).and_then(|value| value.try_into().ok()),
-    });
+    let progress = integer(print.get("mc_percent"))
+        .or_else(|| integer(print.get("percent")))
+        .map(|percent| Progress {
+            percent: percent.clamp(0, 100).try_into().unwrap_or_default(),
+            preparation_percent: integer(print.get("gcode_file_prepare_percent"))
+                .or_else(|| integer(print.get("prepare_per")))
+                .map(|value| value.clamp(0, 100).try_into().unwrap_or_default()),
+            current_layer: integer(print.get("layer_num"))
+                .or_else(|| integer(print.get("mc_layer_num")))
+                .and_then(|value| value.try_into().ok()),
+            total_layers: integer(print.get("total_layer_num"))
+                .and_then(|value| value.try_into().ok()),
+        });
     if progress.is_none() {
         warnings.push(StatusWarning {
             code: "progress_unavailable",
@@ -2242,33 +2253,46 @@ fn heater(print: &Map<String, Value>, current: &str, target: &str) -> Option<Tem
 
 fn status_errors(print: &Map<String, Value>, state: PrinterState) -> Vec<StatusError> {
     let mut errors = Vec::new();
-    if integer(print.get("mc_print_error_code")).is_some_and(|value| value != 0) {
+    if let Some(value) = integer(print.get("mc_print_error_code"))
+        .or_else(|| integer(print.get("print_error")))
+        .filter(|value| *value != 0)
+    {
         errors.push(StatusError {
             code: "printer_error",
             message: "printer reported an error".into(),
+            raw_code: Some(format!("{value:08X}")),
+            image_id: print
+                .get("err2")
+                .and_then(|error| string(error.get("img_id")))
+                .filter(|value| !value.is_empty()),
+            recoverable: None,
         });
     }
-    if print
+    for item in print
         .get("hms")
         .and_then(Value::as_array)
-        .is_some_and(|items| {
-            items.iter().any(|item| {
-                item.as_object().is_some_and(|hms| {
-                    integer(hms.get("attr")).is_some_and(|value| value != 0)
-                        || integer(hms.get("code")).is_some_and(|value| value != 0)
-                })
-            })
-        })
+        .into_iter()
+        .flatten()
     {
-        errors.push(StatusError {
-            code: "hardware_error",
-            message: "printer reported a hardware error".into(),
-        });
+        let attr = integer(item.get("attr")).unwrap_or_default();
+        let code = integer(item.get("code")).unwrap_or_default();
+        if attr != 0 || code != 0 {
+            errors.push(StatusError {
+                code: "hardware_error",
+                message: "printer reported a hardware error".into(),
+                raw_code: Some(format!("{attr:08X}-{code:08X}")),
+                image_id: None,
+                recoverable: None,
+            });
+        }
     }
     if errors.is_empty() && state == PrinterState::Error {
         errors.push(StatusError {
             code: "printer_error",
             message: "printer reported an error state".into(),
+            raw_code: None,
+            image_id: None,
+            recoverable: None,
         });
     }
     errors
@@ -2387,6 +2411,20 @@ fn print_meta(print: &Map<String, Value>) -> Option<PrintMeta> {
             .and_then(|value| value.try_into().ok()),
         nozzle_diameter: number(print.get("nozzle_diameter")).filter(|value| *value > 0.0),
         bed_type: string(print.get("bed_type")).filter(|value| !value.is_empty()),
+        plate_index: integer(print.get("plate_idx"))
+            .or_else(|| integer(print.get("plate_id")))
+            .filter(|value| *value >= 0)
+            .and_then(|value| value.try_into().ok()),
+        plate_count: integer(print.get("plate_cnt"))
+            .filter(|value| *value > 0)
+            .and_then(|value| value.try_into().ok()),
+        print_type: string(print.get("print_type")).filter(|value| !value.is_empty()),
+        queue_position: integer(print.get("queue_number"))
+            .filter(|value| *value >= 0)
+            .and_then(|value| value.try_into().ok()),
+        queue_total: integer(print.get("queue_total"))
+            .filter(|value| *value >= 0)
+            .and_then(|value| value.try_into().ok()),
     })
 }
 
@@ -3367,6 +3405,31 @@ mod tests {
             Some(220.0)
         );
         assert_eq!(status.fans["partCooling"], 60);
+    }
+
+    #[test]
+    fn maps_structured_job_fallbacks_and_preserves_error_codes() {
+        let status = parse_status(
+            br#"{"print":{"job":{"job_state":"RUNNING"},"percent":42,"prepare_per":87,"gcode_file":"/data/Metadata/plate_2.gcode","plate_idx":2,"plate_cnt":3,"print_type":"local","queue_number":1,"queue_total":4,"print_error":17,"err2":{"img_id":"E17"},"hms":[{"attr":1,"code":2}]}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(status.state, PrinterState::Printing);
+        assert_eq!(status.progress.as_ref().unwrap().percent, 42);
+        assert_eq!(
+            status.progress.as_ref().unwrap().preparation_percent,
+            Some(87)
+        );
+        let meta = status.print_meta.unwrap();
+        assert_eq!(meta.plate_index, Some(2));
+        assert_eq!(meta.plate_count, Some(3));
+        assert_eq!(meta.queue_position, Some(1));
+        assert_eq!(status.errors[0].raw_code.as_deref(), Some("00000011"));
+        assert_eq!(status.errors[0].image_id.as_deref(), Some("E17"));
+        assert_eq!(
+            status.errors[1].raw_code.as_deref(),
+            Some("00000001-00000002")
+        );
     }
 
     #[test]
