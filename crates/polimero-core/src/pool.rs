@@ -8,12 +8,17 @@
 use std::{
     collections::HashMap,
     sync::{
-        Arc, Mutex, RwLock,
+        Arc, Mutex, RwLock, Weak,
         atomic::{AtomicU64, Ordering},
     },
+    thread,
+    time::Duration,
 };
 
 use crate::{bambu, drivers, moonraker};
+
+const BAMBU_SERVICE_INTERVAL: Duration = Duration::from_millis(100);
+const BAMBU_SERVICE_SLICE: Duration = Duration::from_millis(25);
 
 enum PooledSession {
     Moonraker {
@@ -474,6 +479,7 @@ impl ConnectionPool {
             return Some(client.clone());
         }
         let client = Arc::new(bambu::Client::new(profile.clone()));
+        spawn_bambu_worker(Arc::downgrade(&client));
         let replaced = sessions.insert(
             name,
             PooledSession::Bambu {
@@ -531,6 +537,19 @@ impl ConnectionPool {
         drop(sessions);
         drop(removed);
     }
+}
+
+fn spawn_bambu_worker(client: Weak<bambu::Client>) {
+    thread::spawn(move || {
+        loop {
+            thread::sleep(BAMBU_SERVICE_INTERVAL);
+            let Some(client) = client.upgrade() else {
+                break;
+            };
+            client.service_cached_status(BAMBU_SERVICE_SLICE);
+            drop(client);
+        }
+    });
 }
 
 fn canonical_name(name: &str) -> String {

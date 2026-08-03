@@ -241,6 +241,31 @@ impl Client {
         result.map(|(status, _)| status)
     }
 
+    /// Services an already-authenticated status stream without initiating a
+    /// new connection. Intended for the pool's per-printer background worker.
+    pub(crate) fn service_cached_status(&self, timeout: Duration) -> bool {
+        let Ok(mut cached) = self.mqtt.try_lock() else {
+            return true;
+        };
+        let Some(connection) = cached.as_mut() else {
+            return false;
+        };
+        let Ok(deadline) = deadline_after(timeout) else {
+            return true;
+        };
+        connection.mqtt.deadline = deadline;
+        match connection
+            .mqtt
+            .poll_stream_status(pushall_payload(next_sequence()))
+        {
+            Ok(_) => true,
+            Err(_) => {
+                *cached = None;
+                false
+            }
+        }
+    }
+
     fn poll_status_inner(
         &self,
         access_code: &str,
@@ -3997,6 +4022,83 @@ mod tests {
                 .is_none(),
             "credentials changes must discard an authenticated cached session"
         );
+    }
+
+    #[test]
+    fn background_service_drains_status_without_a_user_poll() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let acceptor = test_acceptor();
+        let (send_tx, send_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            assert_eq!(read_test_packet(&mut stream).kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            stream.flush().unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+            send_rx.recv().unwrap();
+            write_test_report(
+                &mut stream,
+                &json!({"print": {
+                    "command": "push_status",
+                    "msg": 1,
+                    "mc_percent": 12
+                }}),
+            );
+            release_rx.recv().unwrap();
+        });
+
+        let profile = Profile::with_timeout(
+            address.ip().to_string(),
+            "SN001",
+            true,
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) =
+            open_tls(&connector, &profile, address.port(), None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+        mqtt.subscribe().unwrap();
+        mqtt.accumulate_status(&json!({"print": {
+            "command": "push_status",
+            "msg": 0,
+            "gcode_state": "PRINTING",
+            "mc_percent": 11
+        }}));
+        let identity = profile.connection_identity(Some("access-code"), None);
+        let client = Client::new(profile);
+        *client.mqtt.lock().unwrap() = Some(CachedConnection { identity, mqtt });
+
+        send_tx.send(()).unwrap();
+        let mut progress = None;
+        for _ in 0..20 {
+            assert!(client.service_cached_status(Duration::from_millis(50)));
+            progress = client
+                .mqtt
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|cached| cached.mqtt.status_snapshot().ok())
+                .and_then(|snapshot| parse_status(&snapshot).ok())
+                .and_then(|status| status.progress)
+                .map(|progress| progress.percent);
+            if progress == Some(12) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        release_tx.send(()).unwrap();
+        server.join().unwrap();
+        assert_eq!(progress, Some(12));
     }
 
     #[test]
