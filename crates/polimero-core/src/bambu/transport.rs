@@ -28,9 +28,10 @@ use thiserror::Error;
 use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rfc3339};
 
 use super::{
-    BedLevelingSupport, MQTT_USERNAME, MqttTopics, Profile, RuntimeCapabilities, StorageTransport,
-    StorageVolume, TlsPinError, is_pushall_payload, is_valid_tls_fingerprint, payload_sequence_id,
-    pushall_payload, tls_fingerprint, tunnel, verify_tls_fingerprint,
+    BedLevelingSupport, MQTT_USERNAME, MappingStatus, MqttTopics, PrintStage, PrintStageEvent,
+    Profile, RuntimeCapabilities, StorageTransport, StorageVolume, TlsPinError, is_pushall_payload,
+    is_valid_tls_fingerprint, payload_sequence_id, preflight_print_package, pushall_payload,
+    tls_fingerprint, tunnel, verify_tls_fingerprint,
 };
 
 const FTP_PORT: u16 = 990;
@@ -94,12 +95,15 @@ pub enum Error {
     InvalidSpeedProfile,
     #[error("local file operation failed")]
     LocalIo,
+    #[error("print package preflight failed")]
+    PreflightRejected,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct JobStartOptions {
     pub plate: Option<u32>,
+    pub display_name: Option<String>,
     pub skip_leveling: bool,
     pub bed_type: Option<String>,
     pub flow_calibration: bool,
@@ -345,6 +349,103 @@ impl Client {
         Ok(JobResult {
             state: parse_status(&report)?.state,
         })
+    }
+
+    /// Preflights, uploads, verifies, and starts one local sliced 3MF package.
+    #[allow(clippy::too_many_arguments)]
+    pub fn print_file(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        source: &Path,
+        destination_root: &str,
+        mut options: JobStartOptions,
+        inventory: Option<&AmsData>,
+        overwrite: bool,
+        mut on_stage: impl FnMut(PrintStageEvent),
+    ) -> Result<JobResult, Error> {
+        on_stage(stage_event(PrintStage::Inspect, Some(0), None, None));
+        let preflight = preflight_print_package(
+            source,
+            options.display_name.as_deref(),
+            options.plate,
+            inventory,
+        )
+        .map_err(|_| Error::PreflightRejected)?;
+        if !preflight.ready {
+            return Err(Error::PreflightRejected);
+        }
+        on_stage(stage_event(
+            PrintStage::ResolveCapabilities,
+            Some(10),
+            None,
+            Some(format!("{:?}", self.storage_transport())),
+        ));
+        options.plate = Some(preflight.selected_plate.index);
+        options.display_name = Some(preflight.names.display_name.clone());
+        if options.ams_mapping.is_empty()
+            && let Some(mapping) = &preflight.filament_mapping
+            && mapping.status == MappingStatus::Exact
+            && !mapping.ams_mapping.is_empty()
+        {
+            options.use_ams = true;
+            options.ams_mapping.clone_from(&mapping.ams_mapping);
+        }
+        on_stage(stage_event(
+            PrintStage::ReconcileMaterials,
+            Some(20),
+            None,
+            preflight
+                .filament_mapping
+                .as_ref()
+                .map(|mapping| format!("{:?}", mapping.status)),
+        ));
+        let destination = destination_path(destination_root, &preflight.names.remote_filename)?;
+        on_stage(stage_event(
+            PrintStage::ResolveDestination,
+            Some(25),
+            None,
+            Some(destination.clone()),
+        ));
+        on_stage(stage_event(PrintStage::CheckStorage, Some(30), None, None));
+        on_stage(stage_event(PrintStage::Upload, Some(35), Some(0), None));
+        let uploaded =
+            self.upload_file(access_code, fingerprint, source, &destination, overwrite)?;
+        on_stage(stage_event(
+            PrintStage::Verify,
+            Some(75),
+            Some(uploaded),
+            None,
+        ));
+        if uploaded != preflight.package.size_bytes {
+            return Err(Error::FileTransfer);
+        }
+        on_stage(stage_event(
+            PrintStage::SendCommand,
+            Some(80),
+            Some(uploaded),
+            None,
+        ));
+        on_stage(stage_event(
+            PrintStage::AwaitAcceptance,
+            Some(85),
+            Some(uploaded),
+            None,
+        ));
+        let result = self.job_start(access_code, fingerprint, &destination, options)?;
+        on_stage(stage_event(
+            PrintStage::AwaitPrintStart,
+            Some(95),
+            Some(uploaded),
+            None,
+        ));
+        on_stage(stage_event(
+            PrintStage::Finished,
+            Some(100),
+            Some(uploaded),
+            None,
+        ));
+        Ok(result)
     }
 
     pub fn job_pause(
@@ -1865,7 +1966,15 @@ fn job_start_payload(
             "param".into(),
             Value::String(format!("Metadata/plate_{plate}.gcode")),
         );
-        print.insert("subtask_name".into(), Value::String(filename.into()));
+        print.insert(
+            "subtask_name".into(),
+            Value::String(
+                options
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| filename.into()),
+            ),
+        );
         for key in ["project_id", "profile_id", "task_id", "subtask_id", "cfg"] {
             print.insert(key.into(), Value::String("0".into()));
         }
@@ -1891,7 +2000,15 @@ fn job_start_payload(
         print.insert("extrude_cali_flag".into(), Value::from(0));
     } else {
         print.insert("param".into(), Value::String(path.into()));
-        print.insert("subtask_name".into(), Value::String(filename.into()));
+        print.insert(
+            "subtask_name".into(),
+            Value::String(
+                options
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| filename.into()),
+            ),
+        );
         print.insert("plate_idx".into(), Value::from(options.plate.unwrap_or(0)));
     }
     Ok(Value::Object(Map::from_iter([("print".into(), Value::Object(print))])).to_string())
@@ -1899,6 +2016,9 @@ fn job_start_payload(
 
 fn validate_job_options(profile: &Profile, options: &JobStartOptions) -> Result<(), Error> {
     if options.plate == Some(0)
+        || options.display_name.as_ref().is_some_and(|value| {
+            value.is_empty() || value.len() > 99 || value.chars().any(char::is_control)
+        })
         || options.bed_type.as_ref().is_some_and(|value| {
             value.is_empty() || value.len() > 64 || value.chars().any(char::is_control)
         })
@@ -2741,6 +2861,33 @@ fn normalize_device_path(value: &str) -> Result<String, Error> {
         return Err(Error::InvalidDevicePath);
     }
     Ok(format!("/{}", segments.join("/")))
+}
+
+fn destination_path(root: &str, filename: &str) -> Result<String, Error> {
+    if root.is_empty() || filename.is_empty() || filename.contains(['/', '\\']) {
+        return Err(Error::InvalidDevicePath);
+    }
+    let separator = if root.ends_with([':', '/']) { "" } else { "/" };
+    let destination = format!("{root}{separator}{filename}");
+    let path = destination
+        .split_once(':')
+        .map_or(destination.as_str(), |(_, path)| path);
+    normalize_device_path(path)?;
+    Ok(destination)
+}
+
+fn stage_event(
+    stage: PrintStage,
+    percent: Option<u8>,
+    bytes_transferred: Option<u64>,
+    detail: Option<String>,
+) -> PrintStageEvent {
+    PrintStageEvent {
+        stage,
+        percent,
+        bytes_transferred,
+        detail,
+    }
 }
 
 fn storage_location(
@@ -3613,6 +3760,7 @@ mod tests {
     fn serializes_typed_ams_and_multi_extruder_print_options() {
         let options = JobStartOptions {
             plate: Some(2),
+            display_name: Some("Customer dual part".into()),
             bed_type: Some("textured_plate".into()),
             flow_calibration: true,
             timelapse: true,
@@ -3629,6 +3777,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(payload["print"]["param"], "Metadata/plate_2.gcode");
+        assert_eq!(payload["print"]["subtask_name"], "Customer dual part");
         assert_eq!(payload["print"]["bed_type"], "textured_plate");
         assert_eq!(payload["print"]["flow_cali"], true);
         assert_eq!(payload["print"]["timelapse"], true);
@@ -3663,6 +3812,19 @@ mod tests {
             job_file_url("udisk", "/cube.3mf", true),
             "brtc://udisk/cube.3mf"
         );
+    }
+
+    #[test]
+    fn builds_staged_print_destinations_without_changing_the_filename() {
+        assert_eq!(
+            destination_path("sdcard:/cache", "customer_part.gcode.3mf").unwrap(),
+            "sdcard:/cache/customer_part.gcode.3mf"
+        );
+        assert_eq!(
+            destination_path("emmc:", "customer_part.gcode.3mf").unwrap(),
+            "emmc:customer_part.gcode.3mf"
+        );
+        assert!(destination_path("sdcard:/cache", "../part.3mf").is_err());
     }
 
     #[test]
