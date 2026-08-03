@@ -2160,6 +2160,11 @@ fn refine_runtime_capabilities(
     status: Option<&Value>,
     info: Option<&Value>,
 ) -> RuntimeCapabilities {
+    if let Some(status) = status {
+        capabilities
+            .observations
+            .merge_status(status, is_full_report(status));
+    }
     let print = status
         .and_then(|status| status.get("print"))
         .and_then(Value::as_object);

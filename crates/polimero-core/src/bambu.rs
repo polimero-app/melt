@@ -14,17 +14,20 @@ use thiserror::Error;
 
 use crate::trace::{SharedTracer, next_tracer_generation};
 
+mod capabilities;
 mod discovery;
 mod firmware;
 mod identity;
 mod mapping;
 mod names;
 mod package;
+mod quirks;
 mod rtsp;
 mod transport;
 mod tunnel;
 mod workflow;
 
+pub use capabilities::{CapabilityObservations, ObservationSource, Observed, ReportKind};
 pub use discovery::{DiscoveredPrinter, DiscoveryError, discover};
 pub use firmware::{FirmwareInventory, FirmwareModule, FirmwareVersion};
 pub use identity::{CanonicalModel, ModelIdentity};
@@ -33,6 +36,10 @@ pub use names::{JobNames, NameError, derive_job_names, validate_remote_filename}
 pub use package::{
     FilamentRequirement, PackageError, PackageIssue, PackageIssueSeverity, PlateManifest,
     PrintPackage, inspect_print_package,
+};
+pub use quirks::{
+    Qualification as QuirkQualification, QuirkEffect, QuirkEntry, applicable as applicable_quirks,
+    registry as quirk_registry,
 };
 pub use rtsp::H264Stream;
 pub use transport::{Client, Error as TransportError, JobStartOptions};
@@ -252,6 +259,7 @@ pub enum BedLevelingSupport {
 pub struct RuntimeCapabilities {
     pub identity: ModelIdentity,
     pub firmware: FirmwareInventory,
+    pub observations: CapabilityObservations,
     pub model_family: ModelFamily,
     pub authorization: AuthorizationMode,
     pub camera: CameraTransport,
@@ -323,6 +331,7 @@ impl RuntimeCapabilities {
         Self {
             identity,
             firmware: FirmwareInventory::default(),
+            observations: CapabilityObservations::default(),
             model_family,
             authorization: AuthorizationMode::Unknown,
             camera,
