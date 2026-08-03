@@ -659,6 +659,16 @@ struct LibraryPreviewRequest {
 struct LibraryPrintRequest {
     printer: String,
     path: String,
+    #[serde(default)]
+    plate: Option<u32>,
+    #[serde(default)]
+    display_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryInspectRequest {
+    path: String,
 }
 
 impl Clone for FilePreviewResponse {
@@ -1455,6 +1465,15 @@ fn set_library_path(
 }
 
 #[tauri::command(async)]
+fn inspect_library_print(
+    request: LibraryInspectRequest,
+) -> Result<polimero_core::bambu::PrintPackage, CommandError> {
+    let absolute = resolve_absolute_path(&request.path)?;
+    polimero_core::bambu::inspect_print_package(&absolute)
+        .map_err(|_| CommandError::new("jobFileInvalid"))
+}
+
+#[tauri::command(async)]
 fn print_library_file(
     request: LibraryPrintRequest,
     state: tauri::State<'_, MonitorState>,
@@ -1471,8 +1490,13 @@ fn print_library_file(
     let device_path = if printer.driver.driver() == drivers::Driver::BambuLan
         && source_filename.to_ascii_lowercase().ends_with(".3mf")
     {
-        let preflight = polimero_core::bambu::preflight_print_package(&absolute, None, None, None)
-            .map_err(|_| CommandError::new("jobFileInvalid"))?;
+        let preflight = polimero_core::bambu::preflight_print_package(
+            &absolute,
+            request.display_name.as_deref(),
+            request.plate,
+            None,
+        )
+        .map_err(|_| CommandError::new("jobFileInvalid"))?;
         if !preflight.ready {
             return Err(CommandError::new("jobFileInvalid"));
         }
@@ -2787,6 +2811,7 @@ fn main() {
             library_file_preview,
             set_library_path,
             print_library_file,
+            inspect_library_print,
             printer_job_action,
             printer_temperature_set,
             printer_fan_set,

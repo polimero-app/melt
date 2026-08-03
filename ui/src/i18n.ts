@@ -265,6 +265,8 @@ export type MessageKey =
   | "filesView.dragDrop"
   | "filesView.uploadHint"
   | "filesView.printer"
+  | "filesView.displayName"
+  | "filesView.plate"
   | "filesView.noPrinters"
   | "filesView.printerOffline"
   | "filesView.uploadingTo"
@@ -622,6 +624,8 @@ const messages: Record<Locale, Messages> = {
     "filesView.dragDrop": "or drag and drop",
     "filesView.uploadHint": "3MF, STL, OBJ up to 200 MB",
     "filesView.printer": "Printer",
+    "filesView.displayName": "Job name",
+    "filesView.plate": "Plate",
     "filesView.noPrinters": "No printers available",
     "filesView.printerOffline": "{name} — offline",
     "filesView.uploadingTo": "Uploading to {directory}",
@@ -976,6 +980,8 @@ const messages: Record<Locale, Messages> = {
     "filesView.dragDrop": "ou arraste e solte",
     "filesView.uploadHint": "3MF, STL, OBJ de até 200 MB",
     "filesView.printer": "Impressora",
+    "filesView.displayName": "Nome do trabalho",
+    "filesView.plate": "Mesa",
     "filesView.noPrinters": "Nenhuma impressora disponível",
     "filesView.printerOffline": "{name} — offline",
     "filesView.uploadingTo": "Enviando para {directory}",

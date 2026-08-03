@@ -188,6 +188,22 @@ type FileEntry = {
   modifiedAt?: string
 }
 
+type PrintPlate = {
+  index: number
+  name?: string
+  gcodePath: string
+  thumbnailPaths: string[]
+  estimatedSeconds?: number
+  estimatedGrams?: number
+}
+
+type PrintPackage = {
+  sourceFileName: string
+  sliced: boolean
+  plates: PrintPlate[]
+  issues: { severity: 'warning' | 'error'; code: string; message: string }[]
+}
+
 type FileList = {
   entries: FileEntry[]
 }
@@ -314,6 +330,9 @@ const libraryBreadcrumbs = ref<LibraryBreadcrumb[]>([])
 const printTarget = ref<FileEntry>()
 const printBusy = ref(false)
 const printStage = ref<PrintStageEvent>()
+const printPackage = ref<PrintPackage>()
+const printPlate = ref<number>()
+const printDisplayName = ref('')
 const loadError = ref<string>()
 const profileError = ref<string>()
 const adding = ref(false)
@@ -1423,7 +1442,21 @@ async function openWithSlicer(file: FileEntry, slicer: string) {
   }
 }
 
-function requestPrint(file: FileEntry) {
+async function requestPrint(file: FileEntry) {
+  printPackage.value = undefined
+  printPlate.value = undefined
+  printDisplayName.value = file.name.replace(/\.gcode\.3mf$|\.3mf$|\.gcode$/i, '')
+  if (/\.3mf$/i.test(file.name)) {
+    try {
+      const inspected = await invoke<PrintPackage>('inspect_library_print', { request: { path: file.devicePath } })
+      if (!inspected.sliced) throw new Error(t('errors.jobFileInvalid'))
+      printPackage.value = inspected
+      printPlate.value = inspected.plates.find((plate) => plate.gcodePath)?.index
+    } catch (reason) {
+      showToast(message(reason))
+      return
+    }
+  }
   printTarget.value = file
 }
 
@@ -1433,7 +1466,14 @@ async function printToPrinter(name: string) {
   printBusy.value = true
   printStage.value = { stage: 'inspect', percent: 0 }
   try {
-    await invoke('print_library_file', { request: { printer: name, path: file.devicePath } })
+    await invoke('print_library_file', {
+      request: {
+        printer: name,
+        path: file.devicePath,
+        plate: printPlate.value,
+        displayName: printDisplayName.value || undefined,
+      },
+    })
     printTarget.value = undefined
     showToast(t('filesView.sentToPrinter', { name: file.name }))
   } catch (reason) {
@@ -2293,6 +2333,20 @@ onUnmounted(() => {
           >{{ t('dashboard.print') }}</Button>
         </li>
       </ul>
+      <div v-if="printPackage" class="mt-5 space-y-4 border-t border-gray-200 pt-4 dark:border-white/10">
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-200">
+          {{ t('filesView.displayName') }}
+          <input v-model="printDisplayName" maxlength="99" class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-white/15 dark:bg-white/5 dark:text-white" />
+        </label>
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-200">
+          {{ t('filesView.plate') }}
+          <select v-model="printPlate" class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-white/15 dark:bg-gray-900 dark:text-white">
+            <option v-for="plate in printPackage.plates.filter((candidate) => candidate.gcodePath)" :key="plate.index" :value="plate.index">
+              {{ plate.name || `${t('filesView.plate')} ${plate.index}` }}
+            </option>
+          </select>
+        </label>
+      </div>
       <div v-if="printBusy" class="mt-4 space-y-2">
         <div class="flex justify-between text-xs text-gray-500 dark:text-gray-400">
           <span>{{ t('common.sending') }}</span>
