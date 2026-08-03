@@ -28,8 +28,8 @@ use thiserror::Error;
 use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rfc3339};
 
 use super::{
-    MQTT_USERNAME, MqttTopics, Profile, RuntimeCapabilities, StorageTransport, StorageVolume,
-    TlsPinError, is_pushall_payload, is_valid_tls_fingerprint, payload_sequence_id,
+    BedLevelingSupport, MQTT_USERNAME, MqttTopics, Profile, RuntimeCapabilities, StorageTransport,
+    StorageVolume, TlsPinError, is_pushall_payload, is_valid_tls_fingerprint, payload_sequence_id,
     pushall_payload, tls_fingerprint, tunnel, verify_tls_fingerprint,
 };
 
@@ -117,6 +117,7 @@ pub struct JobStartOptions {
 pub struct Client {
     profile: Profile,
     mqtt: Mutex<Option<CachedConnection>>,
+    capabilities: Mutex<Option<RuntimeCapabilities>>,
 }
 
 impl Client {
@@ -124,6 +125,7 @@ impl Client {
         Self {
             profile,
             mqtt: Mutex::new(None),
+            capabilities: Mutex::new(None),
         }
     }
 
@@ -185,7 +187,7 @@ impl Client {
         fingerprint: Option<&str>,
     ) -> Result<RuntimeCapabilities, Error> {
         let defaults = self.profile.default_capabilities();
-        self.with_mqtt(access_code, fingerprint, |mqtt| {
+        let capabilities = self.with_mqtt(access_code, fingerprint, |mqtt| {
             if mqtt.status_document.is_none() {
                 mqtt.exchange(pushall_payload(next_sequence()), is_full_report)?;
             }
@@ -195,7 +197,21 @@ impl Client {
                 mqtt.status_document.as_ref(),
                 Some(&version),
             ))
-        })
+        })?;
+        *self.capabilities.lock().map_err(|_| Error::Connection)? = Some(capabilities.clone());
+        Ok(capabilities)
+    }
+
+    fn effective_capabilities(&self) -> RuntimeCapabilities {
+        self.capabilities
+            .lock()
+            .ok()
+            .and_then(|capabilities| capabilities.clone())
+            .unwrap_or_else(|| self.profile.default_capabilities())
+    }
+
+    fn storage_transport(&self) -> StorageTransport {
+        self.effective_capabilities().storage_transport
     }
 
     /// Like [`status`](Self::status), but reuses a live MQTT session across
@@ -310,20 +326,18 @@ impl Client {
         device_path: &str,
         options: JobStartOptions,
     ) -> Result<JobResult, Error> {
-        let (mut storage, path) = storage_location(&self.profile, device_path)?;
+        let transport = self.storage_transport();
+        let (mut storage, path) = storage_location(transport, device_path)?;
         if path == "/" {
             return Err(Error::InvalidDevicePath);
         }
         validate_job_options(&self.profile, &options)?;
-        if self.profile.default_capabilities().storage_transport
-            != super::StorageTransport::Tunnel6000
-        {
+        if self.storage_transport() != super::StorageTransport::Tunnel6000 {
             let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
             storage = ftp.resolve_mount(storage)?.0;
             ftp.quit();
         }
-        let tunnel_storage = self.profile.default_capabilities().storage_transport
-            == super::StorageTransport::Tunnel6000;
+        let tunnel_storage = self.storage_transport() == super::StorageTransport::Tunnel6000;
         let payload = job_start_payload(storage, &path, tunnel_storage, options)?;
         let report = self.exchange(access_code, fingerprint, payload, |report| {
             report_state_is(report, &[PrinterState::Printing])
@@ -598,9 +612,7 @@ impl Client {
         access_code: Option<&str>,
         fingerprint: Option<&str>,
     ) -> Result<Vec<FileRoot>, Error> {
-        if self.profile.default_capabilities().storage_transport
-            == super::StorageTransport::Tunnel6000
-        {
+        if self.storage_transport() == super::StorageTransport::Tunnel6000 {
             return tunnel::Connection::open(&self.profile, access_code, fingerprint)?.roots();
         }
         let mut ftp = FtpsConnection::open(&self.profile, access_code, fingerprint)?;
@@ -616,10 +628,9 @@ impl Client {
         device_path: &str,
         recursive: bool,
     ) -> Result<FileList, Error> {
-        let (storage, path) = storage_location(&self.profile, device_path)?;
-        if self.profile.default_capabilities().storage_transport
-            == super::StorageTransport::Tunnel6000
-        {
+        let transport = self.storage_transport();
+        let (storage, path) = storage_location(transport, device_path)?;
+        if transport == super::StorageTransport::Tunnel6000 {
             if recursive && path != "/" {
                 return Err(Error::Unsupported("recursive :6000 file listing"));
             }
@@ -693,13 +704,12 @@ impl Client {
         device_path: &str,
         destination: &mut dyn Write,
     ) -> Result<u64, Error> {
-        let (storage, path) = storage_location(&self.profile, device_path)?;
+        let transport = self.storage_transport();
+        let (storage, path) = storage_location(transport, device_path)?;
         if path == "/" {
             return Err(Error::InvalidDevicePath);
         }
-        if self.profile.default_capabilities().storage_transport
-            == super::StorageTransport::Tunnel6000
-        {
+        if transport == super::StorageTransport::Tunnel6000 {
             return tunnel::Connection::open(&self.profile, access_code, fingerprint)?
                 .download(&path, destination);
         }
@@ -719,12 +729,11 @@ impl Client {
         plate: u32,
         destination: &mut dyn Write,
     ) -> Result<u64, Error> {
-        if self.profile.default_capabilities().storage_transport
-            != super::StorageTransport::Tunnel6000
-        {
+        let transport = self.storage_transport();
+        if transport != super::StorageTransport::Tunnel6000 {
             return Err(Error::Unsupported(":6000 SUB_FILE thumbnail"));
         }
-        let (storage, path) = storage_location(&self.profile, device_path)?;
+        let (storage, path) = storage_location(transport, device_path)?;
         let plate = plate.max(1);
         let paths = [
             format!("{path}#Metadata/plate_{plate}.png"),
@@ -750,13 +759,12 @@ impl Client {
         if !metadata.is_file() {
             return Err(Error::LocalIo);
         }
-        let (storage, path) = storage_location(&self.profile, device_path)?;
+        let transport = self.storage_transport();
+        let (storage, path) = storage_location(transport, device_path)?;
         if path == "/" {
             return Err(Error::DirectoryDestination);
         }
-        if self.profile.default_capabilities().storage_transport
-            == super::StorageTransport::Tunnel6000
-        {
+        if transport == super::StorageTransport::Tunnel6000 {
             let mut connection = tunnel::Connection::open(&self.profile, access_code, fingerprint)?;
             if !overwrite {
                 let exists = connection
@@ -790,13 +798,12 @@ impl Client {
         fingerprint: Option<&str>,
         device_path: &str,
     ) -> Result<(), Error> {
-        let (storage, path) = storage_location(&self.profile, device_path)?;
+        let transport = self.storage_transport();
+        let (storage, path) = storage_location(transport, device_path)?;
         if path == "/" {
             return Err(Error::InvalidDevicePath);
         }
-        if self.profile.default_capabilities().storage_transport
-            == super::StorageTransport::Tunnel6000
-        {
+        if transport == super::StorageTransport::Tunnel6000 {
             return tunnel::Connection::open(&self.profile, access_code, fingerprint)?
                 .delete(storage, path.trim_start_matches('/'));
         }
@@ -1985,6 +1992,37 @@ fn refine_runtime_capabilities(
             .get("support_mqtt_alive")
             .and_then(Value::as_bool)
             .or(capabilities.mqtt_alive_supported);
+        capabilities.send_to_storage_supported = observed_bool(
+            print,
+            "support_send_to_sd",
+            capabilities.send_to_storage_supported,
+        );
+        capabilities.flow_calibration_supported = observed_bool(
+            print,
+            "support_flow_calibration",
+            capabilities.flow_calibration_supported,
+        );
+        capabilities.timelapse_supported =
+            observed_bool(print, "support_timelapse", capabilities.timelapse_supported);
+        capabilities.ams_humidity_supported = observed_bool(
+            print,
+            "support_ams_humidity",
+            capabilities.ams_humidity_supported,
+        );
+        capabilities.bed_leveling = match integer(print.get("support_bed_leveling")) {
+            Some(0) => BedLevelingSupport::Unsupported,
+            Some(1) => BedLevelingSupport::Toggle,
+            Some(2) => BedLevelingSupport::AutomaticOrToggle,
+            _ => capabilities.bed_leveling,
+        };
+        capabilities.nozzle_temperature_range = observed_range(
+            print.get("nozzle_temp_range"),
+            capabilities.nozzle_temperature_range,
+        );
+        capabilities.bed_temperature_range = observed_range(
+            print.get("bed_temp_range"),
+            capabilities.bed_temperature_range,
+        );
         if has_emmc(print) == Some(true) {
             capabilities.storage_transport = StorageTransport::Tunnel6000;
             if !capabilities.storage_volumes.contains(&StorageVolume::Emmc) {
@@ -1997,6 +2035,23 @@ fn refine_runtime_capabilities(
         capabilities.firmware_version = Some(version);
     }
     capabilities
+}
+
+fn observed_bool(print: &Map<String, Value>, field: &str, fallback: Option<bool>) -> Option<bool> {
+    print.get(field).and_then(Value::as_bool).or(fallback)
+}
+
+fn observed_range(value: Option<&Value>, fallback: Option<[i32; 2]>) -> Option<[i32; 2]> {
+    let values = value?.as_array()?;
+    if values.len() != 2 {
+        return fallback;
+    }
+    let minimum = integer(values.first()).and_then(|value| value.try_into().ok());
+    let maximum = integer(values.get(1)).and_then(|value| value.try_into().ok());
+    match (minimum, maximum) {
+        (Some(minimum), Some(maximum)) if minimum <= maximum => Some([minimum, maximum]),
+        _ => fallback,
+    }
 }
 
 /// Mirrors Bambu Studio's `json_diff::diff2all`: omitted object keys retain
@@ -2598,7 +2653,10 @@ fn normalize_device_path(value: &str) -> Result<String, Error> {
     Ok(format!("/{}", segments.join("/")))
 }
 
-fn storage_location(profile: &Profile, value: &str) -> Result<(&'static str, String), Error> {
+fn storage_location(
+    transport: StorageTransport,
+    value: &str,
+) -> Result<(&'static str, String), Error> {
     let (requested, path) = value
         .split_once(':')
         .map_or((None, value), |(storage, path)| (Some(storage), path));
@@ -2607,11 +2665,7 @@ fn storage_location(profile: &Profile, value: &str) -> Result<(&'static str, Str
         Some("udisk" | "usb" | "external") => "udisk",
         Some("sdcard") => "sdcard",
         Some(_) => return Err(Error::InvalidDevicePath),
-        None if profile.default_capabilities().storage_transport
-            == super::StorageTransport::Tunnel6000 =>
-        {
-            "emmc"
-        }
+        None if transport == super::StorageTransport::Tunnel6000 => "emmc",
         None => FILE_ROOT,
     };
     Ok((storage, normalize_device_path(path)?))
@@ -3472,23 +3526,17 @@ mod tests {
 
     #[test]
     fn parses_explicit_and_model_default_storage_locations() {
-        let p1 = Profile::new("printer.local", "SN001", true)
-            .unwrap()
-            .with_model("P1S");
         assert_eq!(
-            storage_location(&p1, "sdcard:/models/cube.3mf").unwrap(),
+            storage_location(StorageTransport::Ftps, "sdcard:/models/cube.3mf").unwrap(),
             ("sdcard", "/models/cube.3mf".into())
         );
 
-        let h2 = Profile::new("printer.local", "SN001", true)
-            .unwrap()
-            .with_model("H2D");
         assert_eq!(
-            storage_location(&h2, "/cube.3mf").unwrap(),
+            storage_location(StorageTransport::Tunnel6000, "/cube.3mf").unwrap(),
             ("emmc", "/cube.3mf".into())
         );
         assert_eq!(
-            storage_location(&h2, "usb:/cube.3mf").unwrap(),
+            storage_location(StorageTransport::Tunnel6000, "usb:/cube.3mf").unwrap(),
             ("udisk", "/cube.3mf".into())
         );
         assert_eq!(job_file_url("root", "/cube.3mf", false), "ftp://cube.3mf");
@@ -4011,6 +4059,13 @@ mod tests {
                     "msg": 0,
                     "gcode_state": "IDLE",
                     "support_mqtt_alive": true,
+                    "support_send_to_sd": true,
+                    "support_flow_calibration": true,
+                    "support_timelapse": false,
+                    "support_ams_humidity": true,
+                    "support_bed_leveling": 2,
+                    "nozzle_temp_range": [0, 350],
+                    "bed_temp_range": [0, 120],
                     "fun2": "20000",
                     "ams": {"ams": []},
                     "device": {"extruder": {"info": [{"id": 0}, {"id": 1}]}}
@@ -4058,6 +4113,16 @@ mod tests {
         assert_eq!(capabilities.extruder_count, Some(2));
         assert_eq!(capabilities.ams_supported, Some(true));
         assert_eq!(capabilities.mqtt_alive_supported, Some(true));
+        assert_eq!(capabilities.send_to_storage_supported, Some(true));
+        assert_eq!(capabilities.flow_calibration_supported, Some(true));
+        assert_eq!(capabilities.timelapse_supported, Some(false));
+        assert_eq!(capabilities.ams_humidity_supported, Some(true));
+        assert_eq!(
+            capabilities.bed_leveling,
+            BedLevelingSupport::AutomaticOrToggle
+        );
+        assert_eq!(capabilities.nozzle_temperature_range, Some([0, 350]));
+        assert_eq!(capabilities.bed_temperature_range, Some([0, 120]));
         assert_eq!(
             capabilities.firmware_version.as_deref(),
             Some("01.02.03.04")

@@ -156,6 +156,7 @@ impl Profile {
 #[serde(rename_all = "camelCase")]
 pub enum ModelFamily {
     A1,
+    A2,
     P1,
     P2,
     X1,
@@ -173,6 +174,8 @@ impl ModelFamily {
             .replace(['-', '_', ' '], "");
         if model.starts_with("A1") {
             Self::A1
+        } else if model.starts_with("A2") {
+            Self::A2
         } else if model.starts_with("P1") {
             Self::P1
         } else if model.starts_with("P2") {
@@ -224,6 +227,16 @@ pub enum StorageVolume {
     UsbDisk,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BedLevelingSupport {
+    #[default]
+    Unknown,
+    Unsupported,
+    Toggle,
+    AutomaticOrToggle,
+}
+
 /// Model-derived hints. Live observations may refine these values, but an
 /// unknown model deliberately remains unknown instead of over-advertising.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -237,6 +250,13 @@ pub struct RuntimeCapabilities {
     pub extruder_count: Option<u8>,
     pub ams_supported: Option<bool>,
     pub mqtt_alive_supported: Option<bool>,
+    pub send_to_storage_supported: Option<bool>,
+    pub flow_calibration_supported: Option<bool>,
+    pub timelapse_supported: Option<bool>,
+    pub ams_humidity_supported: Option<bool>,
+    pub bed_leveling: BedLevelingSupport,
+    pub nozzle_temperature_range: Option<[i32; 2]>,
+    pub bed_temperature_range: Option<[i32; 2]>,
     pub firmware_version: Option<String>,
 }
 
@@ -248,7 +268,7 @@ impl RuntimeCapabilities {
             .replace(['-', '_', ' '], "");
         let model_family = ModelFamily::from_model(&normalized);
         let (camera, storage_transport, storage_volumes, extruder_count) = match model_family {
-            ModelFamily::A1 => (
+            ModelFamily::A1 | ModelFamily::A2 => (
                 CameraTransport::MjpegTls,
                 StorageTransport::Ftps,
                 vec![StorageVolume::SdCard],
@@ -276,6 +296,8 @@ impl RuntimeCapabilities {
                 vec![StorageVolume::Emmc, StorageVolume::UsbDisk],
                 if normalized.starts_with("H2D") {
                     Some(2)
+                } else if normalized.starts_with("H2C") || normalized.starts_with("X2D") {
+                    None
                 } else {
                     Some(1)
                 },
@@ -296,6 +318,13 @@ impl RuntimeCapabilities {
             extruder_count,
             ams_supported: (model_family != ModelFamily::Unknown).then_some(true),
             mqtt_alive_supported: None,
+            send_to_storage_supported: None,
+            flow_calibration_supported: None,
+            timelapse_supported: None,
+            ams_humidity_supported: None,
+            bed_leveling: BedLevelingSupport::Unknown,
+            nozzle_temperature_range: None,
+            bed_temperature_range: None,
             firmware_version: None,
         }
     }
@@ -774,6 +803,7 @@ mod tests {
     fn classifies_supported_model_families_without_exact_model_matches() {
         for (model, family) in [
             ("A1 mini", ModelFamily::A1),
+            ("A2L", ModelFamily::A2),
             ("P1S", ModelFamily::P1),
             ("P2S", ModelFamily::P2),
             ("X1 Carbon", ModelFamily::X1),
@@ -795,6 +825,9 @@ mod tests {
         assert_eq!(h2d.camera, CameraTransport::RtspsH264);
         assert_eq!(h2d.storage_transport, StorageTransport::Tunnel6000);
         assert_eq!(h2d.extruder_count, Some(2));
+
+        assert_eq!(RuntimeCapabilities::for_model("H2C").extruder_count, None);
+        assert_eq!(RuntimeCapabilities::for_model("X2D").extruder_count, None);
 
         let unknown = RuntimeCapabilities::for_model("");
         assert_eq!(unknown.model_family, ModelFamily::Unknown);
