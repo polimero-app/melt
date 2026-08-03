@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 use zip::ZipArchive;
@@ -216,7 +216,7 @@ fn plate_entry(name: &str) -> Option<(u32, &str)> {
 }
 
 fn read_json_entry(archive: &mut ZipArchive<File>, path: &str) -> Result<Value, PackageError> {
-    let mut entry = archive
+    let entry = archive
         .by_name(path)
         .map_err(|_| PackageError::InvalidMetadata)?;
     if entry.size() > MAX_METADATA_SIZE {
