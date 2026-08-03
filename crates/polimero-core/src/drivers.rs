@@ -202,6 +202,15 @@ impl Profile {
             Self::Moonraker(_) => None,
         }
     }
+
+    /// Stable ownership key for resources that must be unique per physical
+    /// printer. Profile names are only a fallback for drivers without a serial.
+    pub fn physical_printer_key(&self, profile_name: &str) -> String {
+        match self {
+            Self::Bambu(profile) => format!("bambu:{}", profile.serial().to_ascii_uppercase()),
+            Self::Moonraker(_) => format!("profile:{}", profile_name.to_ascii_lowercase()),
+        }
+    }
 }
 
 #[derive(Debug, Error)]

@@ -314,6 +314,7 @@ struct MonitorState {
 struct WebRtcSessions {
     generations: HashMap<String, u64>,
     active: HashMap<String, webrtc_camera::Session>,
+    profile_keys: HashMap<String, String>,
 }
 
 #[derive(Default)]
@@ -2400,6 +2401,7 @@ fn printer_camera_stream(
     state: tauri::State<'_, CameraStreamState>,
 ) -> Result<CameraStream, CommandError> {
     let printer = desktop_printer(&name, Operation::CameraStream)?;
+    let owner_key = printer.driver.physical_printer_key(&printer.name);
     let stream = drivers::camera_stream(
         &printer.driver,
         printer.access_code.as_deref(),
@@ -2407,8 +2409,7 @@ fn printer_camera_stream(
         Duration::from_secs(10),
     )
     .map_err(|error| operation_error(error, Operation::CameraStream))?;
-    start_camera_server(stream, name.to_ascii_lowercase(), state.inner().clone())
-        .map(|url| CameraStream { url })
+    start_camera_server(stream, owner_key, state.inner().clone()).map(|url| CameraStream { url })
 }
 
 #[tauri::command(async)]
@@ -2418,7 +2419,8 @@ fn printer_camera_webrtc_offer(
     state: tauri::State<'_, CameraWebRtcState>,
 ) -> Result<CameraWebRtcAnswer, CommandError> {
     let printer = desktop_printer(&name, Operation::CameraStream)?;
-    let name = name.to_ascii_lowercase();
+    let profile_name = name.to_ascii_lowercase();
+    let name = printer.driver.physical_printer_key(&printer.name);
     let generation = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
     {
         let mut sessions = state
@@ -2426,6 +2428,7 @@ fn printer_camera_webrtc_offer(
             .lock()
             .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?;
         sessions.generations.insert(name.clone(), generation);
+        sessions.profile_keys.insert(profile_name, name.clone());
         sessions.active.remove(&name);
     }
     let (sdp, session) = webrtc_camera::start(
@@ -2461,12 +2464,17 @@ fn printer_camera_webrtc_stop(
         .lock()
         .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?;
     if let Some(name) = name {
-        let name = name.to_ascii_lowercase();
+        let profile_name = name.to_ascii_lowercase();
+        let name = sessions
+            .profile_keys
+            .remove(&profile_name)
+            .unwrap_or(profile_name);
         sessions.generations.insert(name.clone(), generation);
         sessions.active.remove(&name);
     } else {
         sessions.generations.clear();
         sessions.active.clear();
+        sessions.profile_keys.clear();
     }
     Ok(())
 }
