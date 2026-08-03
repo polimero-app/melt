@@ -32,6 +32,7 @@ pub struct FilamentMapping {
     pub status: MappingStatus,
     pub assignments: Vec<FilamentAssignment>,
     pub ams_mapping: Vec<i32>,
+    pub nozzle_mapping: Vec<i32>,
 }
 
 /// Produces an explainable mapping and refuses to allocate one tray twice.
@@ -83,10 +84,22 @@ pub fn reconcile_filaments(plate: &PlateManifest, inventory: &AmsData) -> Filame
         .iter()
         .map(|assignment| assignment.tray_index.unwrap_or(-1))
         .collect();
+    let nozzle_mapping = plate
+        .filaments
+        .iter()
+        .filter_map(|requirement| requirement.nozzle_index)
+        .map(|index| i32::try_from(index).unwrap_or(i32::MAX))
+        .collect::<Vec<_>>();
+    let nozzle_mapping = if nozzle_mapping.len() == plate.filaments.len() {
+        nozzle_mapping
+    } else {
+        Vec::new()
+    };
     FilamentMapping {
         status,
         assignments,
         ams_mapping,
+        nozzle_mapping,
     }
 }
 
@@ -186,5 +199,28 @@ mod tests {
         let missing = reconcile_filaments(&plate(&[("GFB00", "000000FF")]), &inventory);
         assert_eq!(missing.status, MappingStatus::Unavailable);
         assert_eq!(missing.ams_mapping, vec![-1]);
+    }
+
+    #[test]
+    fn preserves_complete_nozzle_assignments_only() {
+        let mut selected = plate(&[("GFA00", "FFFFFFFF"), ("GFB00", "000000FF")]);
+        selected.filaments[0].nozzle_index = Some(1);
+        selected.filaments[1].nozzle_index = Some(0);
+        let inventory = AmsData {
+            units: vec![AmsUnit {
+                trays: vec![tray(0, "GFA00", "FFFFFFFF"), tray(1, "GFB00", "000000FF")],
+                ..Default::default()
+            }],
+        };
+        assert_eq!(
+            reconcile_filaments(&selected, &inventory).nozzle_mapping,
+            vec![1, 0]
+        );
+        selected.filaments[1].nozzle_index = None;
+        assert!(
+            reconcile_filaments(&selected, &inventory)
+                .nozzle_mapping
+                .is_empty()
+        );
     }
 }

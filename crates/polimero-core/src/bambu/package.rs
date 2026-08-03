@@ -37,6 +37,8 @@ pub struct PackageIssue {
 pub struct FilamentRequirement {
     pub index: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub nozzle_index: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tray_info_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filament_type: Option<String>,
@@ -251,6 +253,11 @@ fn apply_plate_metadata(plate: &mut PlateManifest, value: &Value) {
                 .get("id")
                 .and_then(value_u32)
                 .unwrap_or(position as u32),
+            nozzle_index: filament
+                .get("nozzle_id")
+                .or_else(|| filament.get("extruder_id"))
+                .or_else(|| filament.get("extruder"))
+                .and_then(value_u32),
             tray_info_id: first_string(filament, &["tray_info_idx", "setting_id"]),
             filament_type: first_string(filament, &["type", "filament_type"]),
             color: first_string(filament, &["color", "filament_color"]),
@@ -315,7 +322,7 @@ mod tests {
             ("Metadata/plate_1.png", b"png"),
             (
                 "Metadata/plate_1.json",
-                br##"{"plate_name":"Bracket","prediction":"120","weight":3.5,"filament":[{"id":1,"tray_info_idx":"GFA00","type":"PLA","color":"#FF0000","used_g":3.5}]}"##,
+                br##"{"plate_name":"Bracket","prediction":"120","weight":3.5,"filament":[{"id":1,"nozzle_id":1,"tray_info_idx":"GFA00","type":"PLA","color":"#FF0000","used_g":3.5}]}"##,
             ),
             ("Metadata/plate_2.gcode", b"G28"),
         ]);
@@ -326,6 +333,7 @@ mod tests {
         assert_eq!(plate.name.as_deref(), Some("Bracket"));
         assert_eq!(plate.estimated_seconds, Some(120));
         assert_eq!(plate.filaments[0].tray_info_id.as_deref(), Some("GFA00"));
+        assert_eq!(plate.filaments[0].nozzle_index, Some(1));
     }
 
     #[test]

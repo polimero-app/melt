@@ -457,6 +457,9 @@ impl Client {
         {
             options.use_ams = true;
             options.ams_mapping.clone_from(&mapping.ams_mapping);
+            if options.nozzle_mapping.is_empty() {
+                options.nozzle_mapping.clone_from(&mapping.nozzle_mapping);
+            }
         }
         on_stage(stage_event(
             PrintStage::ReconcileMaterials,
