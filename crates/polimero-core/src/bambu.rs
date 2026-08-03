@@ -15,11 +15,16 @@ use thiserror::Error;
 use crate::trace::{SharedTracer, next_tracer_generation};
 
 mod discovery;
+mod package;
 mod rtsp;
 mod transport;
 mod tunnel;
 
 pub use discovery::{DiscoveredPrinter, DiscoveryError, discover};
+pub use package::{
+    FilamentRequirement, PackageError, PackageIssue, PackageIssueSeverity, PlateManifest,
+    PrintPackage, inspect_print_package,
+};
 pub use rtsp::H264Stream;
 pub use transport::{Client, Error as TransportError, JobStartOptions};
 
