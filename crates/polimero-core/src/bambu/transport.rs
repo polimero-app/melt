@@ -1231,6 +1231,10 @@ impl MqttConnection {
             refresh
         };
         let mut retry_at = Instant::now() + PUSHALL_INTERVAL;
+        // Status received while a control is pending is useful for proving
+        // the requested outcome, but must not overwrite the shared snapshot
+        // until that outcome and the command acknowledgement are both known.
+        let mut pending_status: Option<(Vec<u8>, Value)> = None;
 
         loop {
             let wait_until = self.deadline.min(retry_at);
@@ -1243,7 +1247,7 @@ impl MqttConnection {
                         self.record_status_decode_failure();
                         continue;
                     };
-                    let accumulated = self.accumulate_status(&value);
+                    let accumulated = is_status_poll && self.accumulate_status(&value);
                     command_rejection(&value, command_sequence.as_deref())?;
                     acknowledged |= report_matches_sequence(&value, command_sequence.as_deref());
                     if is_status_poll && accumulated && predicate(&value) {
@@ -1251,7 +1255,11 @@ impl MqttConnection {
                         // is not an acknowledgement of `pushing.pushall`.
                         return Ok(report);
                     }
-                    if acknowledged && predicate(&value) {
+                    if !is_status_poll && predicate(&value) {
+                        pending_status = Some((report, value));
+                    }
+                    if acknowledged && let Some((report, value)) = pending_status.take() {
+                        self.accumulate_status(&value);
                         return Ok(report);
                     }
                 }
@@ -3585,6 +3593,94 @@ mod tests {
         ));
 
         server.join().unwrap();
+    }
+
+    #[test]
+    fn pending_command_does_not_publish_stale_telemetry_to_the_snapshot() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let acceptor = test_acceptor();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            assert_eq!(read_test_packet(&mut stream).kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            stream.flush().unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+
+            let command = read_test_packet(&mut stream);
+            let command = mqtt_publish_payload(command.kind, &command.payload).unwrap();
+            let sequence = payload_sequence_id(&command).unwrap();
+            let refresh = read_test_packet(&mut stream);
+            assert!(is_pushall_payload(
+                &mqtt_publish_payload(refresh.kind, &refresh.payload).unwrap()
+            ));
+            write_test_report(
+                &mut stream,
+                &json!({"print": {
+                    "command": "push_status",
+                    "msg": 0,
+                    "gcode_state": "PRINTING"
+                }}),
+            );
+            write_test_report(
+                &mut stream,
+                &json!({"print": {
+                    "sequence_id": sequence,
+                    "command": "pause",
+                    "result": "success"
+                }}),
+            );
+            write_test_report(
+                &mut stream,
+                &json!({"print": {
+                    "command": "push_status",
+                    "msg": 1,
+                    "gcode_state": "PAUSE"
+                }}),
+            );
+        });
+
+        let profile = Profile::with_timeout(
+            address.ip().to_string(),
+            "SN001",
+            true,
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) =
+            open_tls(&connector, &profile, address.port(), None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+        mqtt.subscribe().unwrap();
+        mqtt.accumulate_status(&json!({"print": {
+            "command": "push_status",
+            "msg": 0,
+            "gcode_state": "IDLE"
+        }}));
+        let command = json!({"print": {
+            "sequence_id": next_sequence_id(),
+            "command": "pause"
+        }})
+        .to_string();
+
+        mqtt.exchange(command, |report| {
+            report_state_is(report, &[PrinterState::Paused])
+        })
+        .unwrap();
+
+        server.join().unwrap();
+        assert_eq!(
+            parse_status(&mqtt.status_snapshot().unwrap())
+                .unwrap()
+                .state,
+            PrinterState::Paused
+        );
     }
 
     #[test]
