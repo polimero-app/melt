@@ -29,7 +29,7 @@ const groups = computed(() =>
       :title="label"
       :aria-label="label"
     >
-      <PhDotsThree class="size-5" />
+      <PhDotsThree class="size-5" aria-hidden="true" />
     </MenuButton>
     <transition
       enter-active-class="transition ease-out duration-100"

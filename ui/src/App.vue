@@ -1708,6 +1708,7 @@ onUnmounted(() => {
           <div v-if="usePrinterMenu" class="hidden items-center pr-8 sm:flex">
             <div class="grid grid-cols-1">
               <select
+                name="printer-navigation"
                 :value="activePrinter?.name"
                 :aria-label="t('nav.selectPrinter')"
                 class="col-start-1 row-start-1 appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800"
@@ -1819,14 +1820,14 @@ onUnmounted(() => {
               class="inline-flex items-center gap-x-1.5 rounded-md bg-cyan-100 px-2 py-1 text-xs font-medium text-cyan-700 dark:bg-cyan-400/10 dark:text-cyan-400"
               :title="wifiSignal(wifiDbm).label"
             >
-              <component :is="wifiSignal(wifiDbm).icon" class="size-3.5" />{{ wifiDbm }} dBm
+              <component :is="wifiSignal(wifiDbm).icon" class="size-3.5" aria-hidden="true" />{{ wifiDbm }} dBm
             </span>
             <Button
               v-if="capabilities?.emergencyStop"
               variant="danger"
               :disabled="!activeHasStatus"
               @click="emergencyStop"
-            ><PhStop class="size-4" /> {{ t('dashboard.emergency') }}</Button>
+            ><PhStop class="size-4" aria-hidden="true" /> {{ t('dashboard.emergency') }}</Button>
             <ActionMenu :label="t('control.printerActions')" :items="printerActionItems" />
           </div>
         </div>
@@ -1839,7 +1840,7 @@ onUnmounted(() => {
           <PhWarning class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />
           <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{{ t('control.unavailableTitle') }}</h3>
           <p class="mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">{{ selectedMonitor?.error ? message(selectedMonitor.error) : t('control.unavailableDescription') }}</p>
-          <Button class="mt-6" variant="primary" :disabled="refreshing" @click="refreshMonitoring"><PhArrowsClockwise class="size-4" /> {{ t('control.refreshConnection') }}</Button>
+          <Button class="mt-6" variant="primary" :disabled="refreshing" @click="refreshMonitoring"><PhArrowsClockwise class="size-4" aria-hidden="true" /> {{ t('control.refreshConnection') }}</Button>
         </div>
 
         <div v-show="activeHasStatus">
@@ -1885,9 +1886,9 @@ onUnmounted(() => {
                     <svg class="size-1.5" viewBox="0 0 6 6" aria-hidden="true"><circle cx="3" cy="3" r="3" /></svg>{{ cameraOnline ? t('camera.live') : t('status.offlineLabel') }}<span v-if="cameraOnline && cameraTransport" class="ml-1 opacity-75">({{ cameraTransport.toUpperCase() }})</span>
                   </span>
                 </template>
-                <IconButton :title="t('camera.refresh')" :aria-label="t('camera.refresh')" :disabled="cameraLoading || !cameraSupported" @click="refreshCamera"><PhArrowsClockwise class="size-4" /></IconButton>
-                <IconButton :title="t('camera.snapshot')" :aria-label="t('camera.snapshot')" :disabled="cameraLoading || !capabilities?.cameraSnapshot" @click="saveSnapshot"><PhCamera class="size-4" /></IconButton>
-                <IconButton :title="t('camera.maximize')" :aria-label="t('camera.maximize')" :disabled="!cameraOnline" @click="toggleCameraFullscreen"><PhCornersOut class="size-4" /></IconButton>
+                <IconButton :title="t('camera.refresh')" :aria-label="t('camera.refresh')" :disabled="cameraLoading || !cameraSupported" @click="refreshCamera"><PhArrowsClockwise class="size-4" aria-hidden="true" /></IconButton>
+                <IconButton :title="t('camera.snapshot')" :aria-label="t('camera.snapshot')" :disabled="cameraLoading || !capabilities?.cameraSnapshot" @click="saveSnapshot"><PhCamera class="size-4" aria-hidden="true" /></IconButton>
+                <IconButton :title="t('camera.maximize')" :aria-label="t('camera.maximize')" :disabled="!cameraOnline" @click="toggleCameraFullscreen"><PhCornersOut class="size-4" aria-hidden="true" /></IconButton>
               </CardHeader>
               <div
                 ref="cameraStage"
@@ -1897,10 +1898,10 @@ onUnmounted(() => {
                 <video v-if="cameraPeer" ref="cameraVideo" :aria-label="t('camera.title')" class="absolute inset-0 size-full object-contain" autoplay muted playsinline />
                 <img v-else-if="cameraUrl" :src="cameraUrl" :alt="t('camera.title')" width="1280" height="720" class="absolute inset-0 size-full object-contain" @error="cameraUrl = undefined" />
                 <div v-else class="relative z-10 text-center">
-                  <PhWarning class="mx-auto size-8 text-yellow-600 dark:text-yellow-400" />
+                  <PhWarning class="mx-auto size-8 text-yellow-600 dark:text-yellow-400" aria-hidden="true" />
                   <p class="mt-3 font-medium text-gray-900 dark:text-white">{{ t('camera.unavailable') }}</p>
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ cameraError ?? t('camera.checkConnection') }}</p>
-                  <Button v-if="cameraSupported" class="mt-4" :disabled="cameraLoading" @click="refreshCamera"><PhArrowsClockwise class="size-4" /> {{ t('camera.refreshFeed') }}</Button>
+                  <Button v-if="cameraSupported" class="mt-4" :disabled="cameraLoading" @click="refreshCamera"><PhArrowsClockwise class="size-4" aria-hidden="true" /> {{ t('camera.refreshFeed') }}</Button>
                 </div>
               </div>
             </Card>
@@ -1920,8 +1921,8 @@ onUnmounted(() => {
                     class="size-10 shrink-0 overflow-hidden rounded-lg"
                   />
                   <div v-else class="grid size-10 shrink-0 place-items-center rounded-lg bg-cyan-50 text-cyan-600 dark:bg-cyan-400/10 dark:text-cyan-400">
-                    <PhHexagon v-if="!selectedStatus?.job" class="size-5" />
-                    <PhCube v-else class="size-5" />
+                    <PhHexagon v-if="!selectedStatus?.job" class="size-5" aria-hidden="true" />
+                    <PhCube v-else class="size-5" aria-hidden="true" />
                   </div>
                   <div class="min-w-0">
                     <p class="truncate font-mono text-sm font-semibold text-gray-900 dark:text-white">{{ selectedStatus?.job?.name ?? t('dashboard.noJob') }}</p>
@@ -1962,18 +1963,18 @@ onUnmounted(() => {
                     class="flex-1"
                     :disabled="!capabilities?.jobResume"
                     @click="sendJobAction('resume')"
-                  ><PhPlay class="size-4" /> {{ t('dashboard.resume') }}</Button>
+                  ><PhPlay class="size-4" aria-hidden="true" /> {{ t('dashboard.resume') }}</Button>
                   <Button
                     v-else
                     class="flex-1"
                     :disabled="!capabilities?.jobPause || selectedStatus?.state !== 'printing'"
                     @click="sendJobAction('pause')"
-                  ><PhPause class="size-4" /> {{ t('dashboard.pause') }}</Button>
+                  ><PhPause class="size-4" aria-hidden="true" /> {{ t('dashboard.pause') }}</Button>
                   <Button
                     variant="danger"
                     :disabled="!capabilities?.jobCancel || !['printing', 'paused'].includes(selectedStatus?.state ?? '')"
                     @click="sendJobAction('cancel')"
-                  ><PhStop class="size-4" /> {{ t('common.cancel') }}</Button>
+                  ><PhStop class="size-4" aria-hidden="true" /> {{ t('common.cancel') }}</Button>
                 </div>
                 <div v-if="capabilities?.speedControl" class="mt-4">
                   <label for="speed-profile" class="block text-sm/6 font-light text-gray-900 dark:text-white">{{ t('control.speedProfile') }}</label>
@@ -2009,6 +2010,7 @@ onUnmounted(() => {
                   </div>
                   <div v-if="capabilities?.temperatureWrite" class="flex items-center gap-1">
                     <input
+                      :name="`temperature-${row.key}`"
                       type="number"
                       min="0"
                       step="5"
@@ -2019,8 +2021,8 @@ onUnmounted(() => {
                       class="w-16 rounded-md bg-white px-2 py-1 text-right font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 dark:bg-white/5 dark:text-white dark:outline-white/10"
                       @change="setTemperature(row.key, $event)"
                     />
-                    <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.decreaseTemp', { sensor: t(temperatureKeys[row.key]) })" @click="adjustTemperature(row.key, -5)"><PhMinus class="size-3.5" /></IconButton>
-                    <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.increaseTemp', { sensor: t(temperatureKeys[row.key]) })" @click="adjustTemperature(row.key, 5)"><PhPlus class="size-3.5" /></IconButton>
+                    <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.decreaseTemp', { sensor: t(temperatureKeys[row.key]) })" @click="adjustTemperature(row.key, -5)"><PhMinus class="size-3.5" aria-hidden="true" /></IconButton>
+                    <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.increaseTemp', { sensor: t(temperatureKeys[row.key]) })" @click="adjustTemperature(row.key, 5)"><PhPlus class="size-3.5" aria-hidden="true" /></IconButton>
                   </div>
                 </div>
               </div>
@@ -2043,8 +2045,9 @@ onUnmounted(() => {
               <CardHeader :title="t('control.lights')" :icon="PhSun" />
               <div class="font-light space-y-4 px-4 py-5 sm:p-6">
                 <div v-for="[key, value] in lightRows" :key="key" class="flex items-center justify-between gap-3">
-                  <span class="text-sm/6 font-light text-gray-900 dark:text-white">{{ lightLabel(key) }}</span>
+                  <label :for="`light-${key}`" class="grow cursor-pointer text-sm/6 font-light text-gray-900 dark:text-white">{{ lightLabel(key) }}</label>
                   <Switch
+                    :id="`light-${key}`"
                     :model-value="value === 'on'"
                     :label="lightLabel(key)"
                     @update:model-value="toggleLight(key, $event)"
@@ -2060,7 +2063,7 @@ onUnmounted(() => {
                   <div class="grid grid-cols-3 grid-rows-3 gap-1">
                     <IconButton variant="outline" class="col-start-2 row-start-1" :disabled="jogDisabled" :aria-label="t('control.jogAxis', { axis: 'Y+' })" @click="jog('y', 1)">Y+</IconButton>
                     <IconButton variant="outline" class="col-start-1 row-start-2" :disabled="jogDisabled" :aria-label="t('control.jogAxis', { axis: 'X−' })" @click="jog('x', -1)">X−</IconButton>
-                    <IconButton variant="outline" class="col-start-2 row-start-2" :title="t('dashboard.home')" :aria-label="t('dashboard.home')" :disabled="selectedStatus?.state !== 'idle'" @click="homeAxes"><PhHouse class="size-4" /></IconButton>
+                    <IconButton variant="outline" class="col-start-2 row-start-2" :title="t('dashboard.home')" :aria-label="t('dashboard.home')" :disabled="selectedStatus?.state !== 'idle'" @click="homeAxes"><PhHouse class="size-4" aria-hidden="true" /></IconButton>
                     <IconButton variant="outline" class="col-start-3 row-start-2" :disabled="jogDisabled" :aria-label="t('control.jogAxis', { axis: 'X+' })" @click="jog('x', 1)">X+</IconButton>
                     <IconButton variant="outline" class="col-start-2 row-start-3" :disabled="jogDisabled" :aria-label="t('control.jogAxis', { axis: 'Y−' })" @click="jog('y', -1)">Y−</IconButton>
                   </div>
@@ -2101,7 +2104,7 @@ onUnmounted(() => {
             <!-- Table -->
             <Card v-if="capabilities?.fileList" class="overflow-hidden">
               <CardHeader :title="t('dashboard.files')" :icon="PhFolder">
-                <IconButton :title="t('dashboard.loadFiles')" :aria-label="t('dashboard.loadFiles')" :disabled="filesLoading" @click="loadFiles"><PhArrowsClockwise class="size-4" /></IconButton>
+                <IconButton :title="t('dashboard.loadFiles')" :aria-label="t('dashboard.loadFiles')" :disabled="filesLoading" @click="loadFiles"><PhArrowsClockwise class="size-4" aria-hidden="true" /></IconButton>
               </CardHeader>
               <div class="overflow-x-auto">
                 <table class="relative min-w-full divide-y divide-gray-300 text-left dark:divide-white/15">
@@ -2131,7 +2134,7 @@ onUnmounted(() => {
                             :aria-label="t('filesView.printNamed', { name: file.name })"
                             :disabled="!capabilities?.jobStart || selectedStatus?.state !== 'idle'"
                             @click.stop="sendJobAction('start', file.devicePath)"
-                          ><PhPlay class="size-4" /></IconButton>
+                          ><PhPlay class="size-4" aria-hidden="true" /></IconButton>
                           <IconButton
                             v-if="capabilities?.fileDownload"
                             :title="downloadingPath === file.devicePath && downloadProgress !== undefined
@@ -2142,7 +2145,7 @@ onUnmounted(() => {
                             @click.stop="downloadFile(file)"
                           >
                             <span v-if="downloadingPath === file.devicePath && downloadProgress !== undefined" class="font-mono text-[10px]">{{ Math.round(downloadProgress) }}%</span>
-                            <PhDownloadSimple v-else class="size-4" />
+                            <PhDownloadSimple v-else class="size-4" aria-hidden="true" />
                           </IconButton>
                         </div>
                       </td>
@@ -2169,8 +2172,8 @@ onUnmounted(() => {
                   <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <span class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ system.name }}</span>
                     <div v-if="system.temperature !== undefined || system.humidity" class="flex items-center gap-3 font-mono text-xs text-gray-500 dark:text-gray-400">
-                      <span v-if="system.humidity" class="flex items-center gap-1"><PhDrop class="size-4" /> {{ system.humidity }}</span>
-                      <span v-if="system.temperature !== undefined" class="flex items-center gap-1"><PhThermometerSimple class="size-4" /> {{ formatTemperature(system.temperature) }} °C</span>
+                      <span v-if="system.humidity" class="flex items-center gap-1"><PhDrop class="size-4" aria-hidden="true" /> {{ system.humidity }}</span>
+                      <span v-if="system.temperature !== undefined" class="flex items-center gap-1"><PhThermometerSimple class="size-4" aria-hidden="true" /> {{ formatTemperature(system.temperature) }} °C</span>
                     </div>
                   </div>
                   <div class="flex flex-wrap gap-3">
@@ -2201,7 +2204,7 @@ onUnmounted(() => {
             <p class="mt-2 max-w-4xl text-sm text-gray-500 dark:text-gray-400">{{ t('printersView.description') }}</p>
           </div>
           <div class="mt-5 flex lg:mt-0 lg:ml-4 max-lg:w-full">
-            <Button variant="primary" class="max-lg:w-full" :disabled="!drivers.length" @click="openAddition"><PhBroadcast class="size-4" /> {{ t('printersView.discover') }}</Button>
+            <Button variant="primary" class="max-lg:w-full" :disabled="!drivers.length" @click="openAddition"><PhBroadcast class="size-4" aria-hidden="true" /> {{ t('printersView.discover') }}</Button>
           </div>
         </div>
 
@@ -2222,7 +2225,7 @@ onUnmounted(() => {
           <PhWarning class="mx-auto size-12 text-red-400 dark:text-red-500" aria-hidden="true" />
           <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{{ t('profiles.error') }}</h3>
           <p class="mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">{{ profileError ?? loadError }}</p>
-          <Button class="mt-6" variant="primary" @click="load"><PhArrowsClockwise class="size-4" /> {{ t('common.retry') }}</Button>
+          <Button class="mt-6" variant="primary" @click="load"><PhArrowsClockwise class="size-4" aria-hidden="true" /> {{ t('common.retry') }}</Button>
         </div>
 
         <!-- Empty state -->
@@ -2230,20 +2233,20 @@ onUnmounted(() => {
           <PhPrinter class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />
           <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{{ t('printersView.emptyTitle') }}</h3>
           <p class="mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">{{ t('printersView.emptyDescription') }}</p>
-          <Button class="mt-6" variant="primary" :disabled="!drivers.length" @click="openAddition"><PhBroadcast class="size-4" /> {{ t('printersView.scan') }}</Button>
+          <Button class="mt-6" variant="primary" :disabled="!drivers.length" @click="openAddition"><PhBroadcast class="size-4" aria-hidden="true" /> {{ t('printersView.scan') }}</Button>
         </div>
 
         <div v-else class="grid gap-5 grid-cols-[repeat(auto-fit,minmax(280px,1fr))]">
           <Card v-for="printer in printers" :key="printer.name" as="article" class="px-4 py-5 sm:p-6">
             <div class="flex items-start justify-between">
               <div class="flex items-center gap-3">
-                <span class="grid size-10 place-items-center rounded-lg bg-gray-100 text-cyan-600 dark:bg-white/10 dark:text-cyan-400"><PhPrinter class="size-5" /></span>
+                <span class="grid size-10 place-items-center rounded-lg bg-gray-100 text-cyan-600 dark:bg-white/10 dark:text-cyan-400"><PhPrinter class="size-5" aria-hidden="true" /></span>
                 <div>
                   <h3 class="font-semibold text-gray-900 dark:text-white">{{ printer.name }}</h3>
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ printer.driver }}</p>
                 </div>
               </div>
-              <IconButton class="hover:text-red-600 dark:hover:text-red-400" :title="t('printersView.removePrinter')" :aria-label="t('printersView.removeNamed', { name: printer.name })" @click="removePrinter(printer.name)"><PhTrash class="size-4" /></IconButton>
+              <IconButton class="hover:text-red-600 dark:hover:text-red-400" :title="t('printersView.removePrinter')" :aria-label="t('printersView.removeNamed', { name: printer.name })" @click="removePrinter(printer.name)"><PhTrash class="size-4" aria-hidden="true" /></IconButton>
             </div>
             <div class="mt-6 flex items-center justify-between border-y border-gray-200 py-3 dark:border-white/10">
               <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('printersView.status') }}</span>
@@ -2280,9 +2283,9 @@ onUnmounted(() => {
               </div>
             </dl>
             <div class="mt-5 flex gap-2">
-              <Button class="flex-1" @click="selectPrinter(printer.name)"><PhCards class="size-4" /> {{ t('printersView.openControl') }}</Button>
-              <Button class="flex-1" @click="openEdit(printer)"><PhPencilSimple class="size-4" /> {{ t('printersView.editPrinter') }}</Button>
-              <Button class="flex-1" :disabled="tlsRefreshing" :aria-label="t('printersView.refreshCertificateNamed', { name: printer.name })" @click="openTlsRefresh(printer.name)"><PhArrowsClockwise class="size-4" /> {{ t('printersView.refreshCertificate') }}</Button>
+              <Button class="flex-1" @click="selectPrinter(printer.name)"><PhCards class="size-4" aria-hidden="true" /> {{ t('printersView.openControl') }}</Button>
+              <Button class="flex-1" @click="openEdit(printer)"><PhPencilSimple class="size-4" aria-hidden="true" /> {{ t('printersView.editPrinter') }}</Button>
+              <Button class="flex-1" :disabled="tlsRefreshing" :aria-label="t('printersView.refreshCertificateNamed', { name: printer.name })" @click="openTlsRefresh(printer.name)"><PhArrowsClockwise class="size-4" aria-hidden="true" /> {{ t('printersView.refreshCertificate') }}</Button>
             </div>
           </Card>
           <button
@@ -2307,57 +2310,63 @@ onUnmounted(() => {
           <Card as="section" class="overflow-hidden">
             <CardHeader :title="t('settingsView.notifications')" :icon="PhBellRinging" />
             <div class="divide-y divide-gray-200 dark:divide-white/10">
-              <div v-for="notification in notifications" :key="notification.id" class="flex items-center justify-between gap-3 px-4 py-5 hover:bg-gray-50 sm:px-6 dark:hover:bg-white/5">
+              <label v-for="notification in notifications" :key="notification.id" :for="`notification-${notification.id}`" class="flex cursor-pointer items-center justify-between gap-3 px-4 py-5 hover:bg-gray-50 sm:px-6 dark:hover:bg-white/5">
                 <span class="flex grow flex-col">
                   <span class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ t(notification.label) }}</span>
                   <span class="text-sm text-gray-500 dark:text-gray-400">{{ t(notification.description) }}</span>
                 </span>
-                <Switch v-model="notification.enabled" :label="t(notification.label)" @update:model-value="updateNotification(notification.id, $event)" />
-              </div>
+                <Switch :id="`notification-${notification.id}`" v-model="notification.enabled" :label="t(notification.label)" @update:model-value="updateNotification(notification.id, $event)" />
+              </label>
             </div>
           </Card>
           <Card as="section" class="overflow-hidden">
             <CardHeader :title="t('settingsView.slicers')" :icon="PhDesktop" />
             <div class="divide-y divide-gray-200 dark:divide-white/10">
-              <div v-for="slicer in slicers" :key="slicer.name" class="flex items-center justify-between gap-3 px-4 py-5 hover:bg-gray-50 sm:px-6 dark:hover:bg-white/5">
-                <span class="flex min-w-0 grow flex-col">
+              <div v-for="(slicer, slicerIndex) in slicers" :key="slicer.name" class="flex items-center justify-between gap-3 px-4 py-5 hover:bg-gray-50 sm:px-6 dark:hover:bg-white/5">
+                <label :for="`slicer-${slicerIndex}`" class="flex min-w-0 grow cursor-pointer flex-col">
                   <span class="truncate text-sm/6 font-medium text-gray-900 dark:text-white" translate="no">{{ slicer.name }}</span>
                   <span class="truncate font-mono text-sm text-gray-500 dark:text-gray-400" translate="no">{{ slicer.path }}</span>
-                </span>
+                </label>
                 <div class="flex items-center gap-2">
-                  <Switch v-model="slicer.enabled" :label="slicer.name" @update:model-value="updateSlicerEnabled(slicer.name, $event)" />
+                  <Switch :id="`slicer-${slicerIndex}`" v-model="slicer.enabled" :label="slicer.name" @update:model-value="updateSlicerEnabled(slicer.name, $event)" />
                   <IconButton
                     class="hover:text-red-600 dark:hover:text-red-400"
                     :title="t('settingsView.removeSlicer')"
                     :aria-label="t('settingsView.removeNamedSlicer', { name: slicer.name })"
                     @click="removeSlicer(slicer.name)"
-                  ><PhTrash class="size-4" /></IconButton>
+                  ><PhTrash class="size-4" aria-hidden="true" /></IconButton>
                 </div>
               </div>
               <p v-if="!slicers.length" class="px-4 py-5 text-sm text-gray-500 sm:px-6 dark:text-gray-400">{{ t('settingsView.noSlicers') }}</p>
             </div>
-            <form class="flex flex-wrap items-end gap-2 border-t border-gray-200 px-4 py-4 sm:px-6 dark:border-white/10" @submit.prevent="addSlicer">
+            <form autocomplete="off" class="flex flex-wrap items-end gap-2 border-t border-gray-200 px-4 py-4 sm:px-6 dark:border-white/10" @submit.prevent="addSlicer">
               <div class="min-w-0 flex-1">
                 <label for="slicer-name" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.slicerName') }}</label>
                 <input
                   id="slicer-name"
+                  name="slicer-name"
                   v-model="slicerDraft.name"
                   type="text"
-                  class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+                  autocomplete="off"
+                  :aria-describedby="slicerError ? 'slicer-error' : undefined"
+                  class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
                 />
               </div>
               <div class="min-w-0 flex-[2]">
                 <label for="slicer-path" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.slicerPath') }}</label>
                 <input
                   id="slicer-path"
+                  name="slicer-path"
                   v-model="slicerDraft.path"
                   type="text"
-                  class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+                  autocomplete="off"
+                  :aria-describedby="slicerError ? 'slicer-error' : undefined"
+                  class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
                 />
               </div>
               <Button type="submit" :disabled="slicerBusy || !slicerDraft.name.trim() || !slicerDraft.path.trim()">{{ t('settingsView.addSlicer') }}</Button>
             </form>
-            <p v-if="slicerError" class="px-4 pb-4 text-xs text-red-600 sm:px-6 dark:text-red-400" role="alert">{{ slicerError }}</p>
+            <p v-if="slicerError" id="slicer-error" class="px-4 pb-4 text-xs text-red-600 sm:px-6 dark:text-red-400" role="alert">{{ slicerError }}</p>
           </Card>
           <Card as="section">
             <CardHeader :title="t('settingsView.appearance')" :icon="PhSun" />
@@ -2431,7 +2440,7 @@ onUnmounted(() => {
                 </div>
               </dl>
               <p v-if="diagnosticsError" class="mt-3 text-xs text-red-600 dark:text-red-400" role="alert">{{ diagnosticsError }}</p>
-              <Button class="mt-4 w-full" :disabled="diagnosticsLoading" @click="runDiagnostics"><PhDesktop class="size-4" /> {{ diagnosticsLoading ? t('common.loading') : t('diagnostics.open') }}</Button>
+              <Button class="mt-4 w-full" :disabled="diagnosticsLoading" @click="runDiagnostics"><PhDesktop class="size-4" aria-hidden="true" /> {{ diagnosticsLoading ? t('common.loading') : t('diagnostics.open') }}</Button>
             </div>
           </Card>
         </div>
@@ -2444,19 +2453,19 @@ onUnmounted(() => {
             <p class="mt-2 max-w-4xl text-sm text-gray-500 dark:text-gray-400">{{ t('filesView.description') }}</p>
           </div>
           <div class="mt-5 flex gap-2 lg:mt-0 lg:ml-4 max-lg:w-full">
-            <Button class="max-lg:flex-1" :disabled="libraryFilesLoading" @click="chooseLibraryFolder"><PhFolderOpen class="size-4" /> {{ t('filesView.changeFolder') }}</Button>
-            <Button class="max-lg:flex-1" :disabled="uploadBusy || !libraryPath" @click="uploadFile"><PhUploadSimple class="size-4" /> {{ t('filesView.upload') }}</Button>
-            <Button class="max-lg:flex-1" :disabled="libraryFilesLoading" @click="loadLibraryFiles(libraryPath)"><PhArrowsClockwise class="size-4" /> {{ t('dashboard.refresh') }}</Button>
+            <Button class="max-lg:flex-1" :disabled="libraryFilesLoading" @click="chooseLibraryFolder"><PhFolderOpen class="size-4" aria-hidden="true" /> {{ t('filesView.changeFolder') }}</Button>
+            <Button class="max-lg:flex-1" :disabled="uploadBusy || !libraryPath" @click="uploadFile"><PhUploadSimple class="size-4" aria-hidden="true" /> {{ t('filesView.upload') }}</Button>
+            <Button class="max-lg:flex-1" :disabled="libraryFilesLoading" @click="loadLibraryFiles(libraryPath)"><PhArrowsClockwise class="size-4" aria-hidden="true" /> {{ t('dashboard.refresh') }}</Button>
           </div>
         </div>
 
         <div class="mb-5 flex flex-wrap items-center gap-2 px-4 sm:px-0">
           <!-- Breadcrumbs -->
-          <IconButton :title="t('filesView.up')" :aria-label="t('filesView.up')" :disabled="!libraryParent || libraryFilesLoading" @click="navigateToDirectory(libraryParent!)"><PhArrowUp class="size-4" /></IconButton>
+          <IconButton :title="t('filesView.up')" :aria-label="t('filesView.up')" :disabled="!libraryParent || libraryFilesLoading" @click="navigateToDirectory(libraryParent!)"><PhArrowUp class="size-4" aria-hidden="true" /></IconButton>
           <nav class="flex overflow-x-auto" :aria-label="t('filesView.breadcrumb')">
             <ol role="list" class="flex items-center space-x-4">
               <li v-for="(breadcrumb, index) in libraryBreadcrumbs" :key="breadcrumb.path" class="flex items-center">
-                <PhCaretRight v-if="index > 0" class="mr-4 size-5 shrink-0 text-gray-400 dark:text-gray-500" />
+                <PhCaretRight v-if="index > 0" class="mr-4 size-5 shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
                 <button
                   type="button"
                   class="text-sm font-medium whitespace-nowrap text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
@@ -2469,6 +2478,7 @@ onUnmounted(() => {
           </nav>
           <div class="ml-auto grid grid-cols-1">
             <select
+              name="file-sort"
               v-model="sortKey"
               :aria-label="t('filesView.sortBy')"
               class="col-start-1 row-start-1 w-auto appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800"
@@ -2484,6 +2494,7 @@ onUnmounted(() => {
             <input
               name="file-search"
               v-model="searchTerm"
+              autocomplete="off"
               class="col-start-1 row-start-1 block w-40 rounded-md bg-white py-1.5 pr-3 pl-10 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-cyan-600 sm:w-64 sm:pl-9 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:placeholder:text-gray-500"
               :aria-label="t('filesView.search')"
               :placeholder="t('filesView.search') + '…'"
@@ -2501,7 +2512,7 @@ onUnmounted(() => {
             class="min-h-28 bg-white px-4 py-5 text-left shadow-sm transition hover:bg-cyan-50 hover:shadow-md sm:rounded-lg sm:p-6 dark:bg-gray-800/50 dark:shadow-none dark:outline dark:-outline-offset-1 dark:outline-white/10 dark:hover:bg-cyan-400/5 dark:hover:outline-cyan-400/30"
             @click="navigateToDirectory(directory.devicePath)"
           >
-            <PhFolder class="size-7 text-cyan-600 dark:text-cyan-400" />
+            <PhFolder class="size-7 text-cyan-600 dark:text-cyan-400" aria-hidden="true" />
             <span class="mt-3 block truncate text-sm font-medium text-gray-900 dark:text-white">{{ directory.name }}</span>
                     <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('filesView.folderModified', { date: formatDate(directory.modifiedAt) }) }}</span>
           </button>
@@ -2530,7 +2541,7 @@ onUnmounted(() => {
               <span class="absolute right-3 bottom-2.5 text-[10px] font-bold text-gray-500 uppercase dark:text-slate-300/45">.{{ fileTypeLabel(file).toLowerCase() }}</span>
             </div>
             <div class="flex items-start gap-3 px-4 py-5 sm:p-6">
-              <PhFile class="mt-0.5 size-4 shrink-0 text-gray-400 dark:text-gray-500" />
+              <PhFile class="mt-0.5 size-4 shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
               <div class="min-w-0 flex-1">
                 <h3 class="truncate text-sm font-medium text-gray-900 dark:text-white">{{ file.name }}</h3>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ formatSize(file.sizeBytes) }} · {{ formatDate(file.modifiedAt) }}</p>
@@ -2549,7 +2560,7 @@ onUnmounted(() => {
 
     <SlideOver :open="additionOpen" :title="editingPrinter ? t('printersView.editPrinter') : t('addition.title')" :description="t('addition.description')" :close-label="t('common.closePanel')" @close="closeAddition">
       <form id="add-printer-form" @submit.prevent="addPrinter">
-        <Button class="w-full" :disabled="discovering" @click="discoverPrinters"><PhBroadcast class="size-4" /> {{ discovering ? t('printersView.scanning') : t('printersView.discover') }}</Button>
+        <Button class="w-full" :disabled="discovering" @click="discoverPrinters"><PhBroadcast class="size-4" aria-hidden="true" /> {{ discovering ? t('printersView.scanning') : t('printersView.discover') }}</Button>
         <p v-if="discoveryError" class="mt-2 text-xs text-red-600 dark:text-red-400" role="alert">{{ discoveryError }}</p>
         <ul v-if="discovered.length" class="mt-3 divide-y divide-gray-200 rounded-md border border-gray-200 dark:divide-white/10 dark:border-white/10">
           <li v-for="printer in discovered" :key="`${printer.serial}:${printer.host}`" class="flex items-center justify-between gap-2 px-3 py-2">
@@ -2588,8 +2599,8 @@ onUnmounted(() => {
             <input id="printer-access-code" name="printer-access-code" v-model="draft.accessCode" type="password" autocomplete="new-password" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
           </div>
           <div class="flex items-center justify-between">
-            <span class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.insecure') }}</span>
-            <Switch v-model="draft.insecure" :label="t('addition.insecure')" />
+            <label for="printer-insecure" class="grow cursor-pointer text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.insecure') }}</label>
+            <Switch id="printer-insecure" v-model="draft.insecure" :label="t('addition.insecure')" />
           </div>
         </div>
         <p v-if="additionError" class="mt-4 text-sm text-red-600 dark:text-red-400" role="alert">{{ additionError }}</p>
@@ -2632,11 +2643,11 @@ onUnmounted(() => {
       <div v-if="printPackage" class="mt-5 space-y-4 border-t border-gray-200 pt-4 dark:border-white/10">
         <label class="block text-sm font-medium text-gray-700 dark:text-gray-200">
           {{ t('filesView.displayName') }}
-          <input v-model="printDisplayName" maxlength="99" class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-white/15 dark:bg-white/5 dark:text-white" />
+          <input v-model="printDisplayName" name="print-display-name" maxlength="99" autocomplete="off" class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-white/15 dark:bg-white/5 dark:text-white" />
         </label>
         <label class="block text-sm font-medium text-gray-700 dark:text-gray-200">
           {{ t('filesView.plate') }}
-          <select v-model="printPlate" class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-white/15 dark:bg-gray-900 dark:text-white">
+          <select v-model="printPlate" name="print-plate" class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-white/15 dark:bg-gray-900 dark:text-white">
             <option v-for="plate in printPackage.plates.filter((candidate) => candidate.gcodePath)" :key="plate.index" :value="plate.index">
               {{ plate.name || `${t('filesView.plate')} ${plate.index}` }}
             </option>

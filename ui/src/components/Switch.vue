@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps<{ label: string }>()
+defineProps<{ id?: string; label: string }>()
 const model = defineModel<boolean>({ required: true })
 </script>
 
@@ -14,6 +14,7 @@ const model = defineModel<boolean>({ required: true })
       class="absolute left-0 size-5 rounded-full border border-gray-300 bg-white shadow-xs transition-transform duration-200 ease-in-out group-has-checked:translate-x-5 dark:border-transparent dark:shadow-none"
     ></span>
     <input
+      :id="id"
       v-model="model"
       type="checkbox"
       class="absolute inset-0 size-full appearance-none focus:outline-hidden"

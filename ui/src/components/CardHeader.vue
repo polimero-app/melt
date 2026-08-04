@@ -12,7 +12,7 @@ withDefaults(defineProps<{ title: string; icon?: Component; iconClass?: string }
     :class="$slots.default ? 'justify-between' : ''"
   >
     <div class="flex items-center gap-3">
-      <component :is="icon" v-if="icon" class="size-4" :class="iconClass" />
+      <component :is="icon" v-if="icon" class="size-4" :class="iconClass" aria-hidden="true" />
       <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ title }}</h3>
       <slot name="suffix" />
     </div>
