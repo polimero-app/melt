@@ -4462,6 +4462,7 @@ mod tests {
             lights: [("chamber_light".to_string(), "on".to_string())]
                 .into_iter()
                 .collect(),
+            controls: moonraker::ControlInventory::default(),
             print_meta: Some(moonraker::PrintMeta {
                 file_name: "cube.3mf".into(),
                 file_size: Some(2 * 1024 * 1024),

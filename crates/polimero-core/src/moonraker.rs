@@ -1007,6 +1007,113 @@ pub struct Temperatures {
     pub chamber: Option<Temperature>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TemperatureKind {
+    Nozzle,
+    Bed,
+    Chamber,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolPosition {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemperatureControl {
+    pub kind: TemperatureKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position: Option<ToolPosition>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_celsius: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_celsius: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minimum_celsius: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum_celsius: Option<f64>,
+    pub controllable: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FanKind {
+    Parts,
+    Auxiliary,
+    Hotend,
+    Exhaust,
+    Chamber,
+    Mainboard,
+    Heat,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FanMode {
+    Manual,
+    Auto,
+    Off,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FanControl {
+    pub kind: FanKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speed_percent: Option<u8>,
+    pub mode: FanMode,
+    pub minimum_percent: u8,
+    pub maximum_percent: u8,
+    pub controllable: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LightKind {
+    Lamp,
+    Work,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LightMode {
+    On,
+    Off,
+    Flashing,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LightControl {
+    pub kind: LightKind,
+    pub mode: LightMode,
+    pub controllable: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlInventory {
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub temperatures: BTreeMap<String, TemperatureControl>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub fans: BTreeMap<String, FanControl>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub lights: BTreeMap<String, LightControl>,
+}
+
+impl ControlInventory {
+    pub fn is_empty(&self) -> bool {
+        self.temperatures.is_empty() && self.fans.is_empty() && self.lights.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Job {
     pub name: String,
@@ -1218,6 +1325,8 @@ pub struct Status {
     pub wifi: Option<Wifi>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub lights: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "ControlInventory::is_empty")]
+    pub controls: ControlInventory,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub print_meta: Option<PrintMeta>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1238,6 +1347,7 @@ impl Status {
     pub fn without_extended(mut self) -> Self {
         self.fans.clear();
         self.lights.clear();
+        self.controls = ControlInventory::default();
         self.time_estimates = None;
         self.speed_level = None;
         self.wifi = None;
@@ -1456,6 +1566,7 @@ impl Status {
             speed_level: None,
             wifi: None,
             lights: BTreeMap::new(),
+            controls: ControlInventory::default(),
             print_meta: None,
             stage: None,
             timelapse: None,

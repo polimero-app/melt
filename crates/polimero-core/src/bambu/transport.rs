@@ -2512,6 +2512,7 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
         speed_level: speed_level(print),
         wifi: wifi(print),
         lights: lights(report),
+        controls: Default::default(),
         print_meta: print_meta(print),
         stage: stage(print),
         timelapse: timelapse(print),
