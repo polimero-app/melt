@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cameraViewState, isActiveJobState, materialSystemLabel, printerStateMessageKey } from './presentation'
+import { cameraViewState, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
 
 describe('cameraViewState', () => {
   it('distinguishes live transports from retained snapshots', () => {
@@ -40,5 +40,13 @@ describe('materialSystemLabel', () => {
     expect(materialSystemLabel(128, 'External spool')).toBe('HT')
     expect(materialSystemLabel(254, 'External spool')).toBe('External spool')
     expect(materialSystemLabel(42, 'External spool')).toBe('AMS 42')
+  })
+})
+
+describe('serialNumberDisplay', () => {
+  it('redacts configured serials until explicitly revealed', () => {
+    expect(serialNumberDisplay('01P00A123456789', false)).toBe('••••••••')
+    expect(serialNumberDisplay('01P00A123456789', true)).toBe('01P00A123456789')
+    expect(serialNumberDisplay('', false)).toBe('—')
   })
 })

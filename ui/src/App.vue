@@ -7,7 +7,7 @@ import { locales, preferredLocale, translate, type Locale, type MessageKey } fro
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration } from './formatting'
 import { printTargetState } from './printing'
-import { cameraViewState, isActiveJobState, materialSystemLabel, printerStateMessageKey } from './presentation'
+import { cameraViewState, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import { shouldDeferLibraryCards } from './library'
@@ -37,6 +37,8 @@ import {
   PhDesktop,
   PhDownloadSimple,
   PhDrop,
+  PhEye,
+  PhEyeSlash,
   PhFan,
   PhFile,
   PhFolder,
@@ -409,6 +411,7 @@ const sectionTabs = computed<{ view: View; label: string; icon: Component }[]>((
 const PRINTER_TAB_LIMIT = 5
 const usePrinterMenu = computed(() => printers.value.length > PRINTER_TAB_LIMIT)
 const activePrinterId = ref('')
+const revealedSerials = ref(new Set<string>())
 const theme = ref<'light' | 'dark' | 'system'>(
   (['light', 'dark', 'system'] as const).find((value) => value === localStorage.getItem('theme')) ?? 'system',
 )
@@ -498,6 +501,17 @@ function openEdit(printer: Printer) {
   additionBaseline.value = { ...draft.value }
   resetAdditionPanelState()
   additionOpen.value = true
+}
+
+function serialIsRevealed(name: string) {
+  return revealedSerials.value.has(name)
+}
+
+function toggleSerial(name: string) {
+  const next = new Set(revealedSerials.value)
+  if (next.has(name)) next.delete(name)
+  else next.add(name)
+  revealedSerials.value = next
 }
 
 const activePrinter = computed(() => printers.value.find((printer) => printer.name === activePrinterId.value) ?? printers.value[0])
@@ -2281,7 +2295,22 @@ onUnmounted(() => {
             <dl class="mt-2 divide-y divide-gray-200 text-xs dark:divide-white/10">
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t('addition.serial') }}</dt>
-                <dd class="font-mono text-gray-900 dark:text-gray-300">{{ printer.serial || '—' }}</dd>
+                <dd class="flex items-center gap-1 font-mono text-gray-900 dark:text-gray-300">
+                  <span aria-live="polite">
+                    <span class="sr-only">{{ printer.serial ? (serialIsRevealed(printer.name) ? printer.serial : t('printersView.serialHidden')) : '—' }}</span>
+                    <span aria-hidden="true">{{ serialNumberDisplay(printer.serial, serialIsRevealed(printer.name)) }}</span>
+                  </span>
+                  <IconButton
+                    v-if="printer.serial"
+                    :title="t(serialIsRevealed(printer.name) ? 'printersView.hideSerialNamed' : 'printersView.showSerialNamed', { name: printer.name })"
+                    :aria-label="t(serialIsRevealed(printer.name) ? 'printersView.hideSerialNamed' : 'printersView.showSerialNamed', { name: printer.name })"
+                    :aria-pressed="serialIsRevealed(printer.name)"
+                    @click="toggleSerial(printer.name)"
+                  >
+                    <PhEyeSlash v-if="serialIsRevealed(printer.name)" class="size-4" aria-hidden="true" />
+                    <PhEye v-else class="size-4" aria-hidden="true" />
+                  </IconButton>
+                </dd>
               </div>
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t('printersView.host') }}</dt>

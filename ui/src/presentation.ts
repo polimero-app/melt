@@ -35,3 +35,8 @@ export function materialSystemLabel(id: number, externalLabel: string): string {
   if (id >= 0 && id < 26) return String.fromCharCode('A'.charCodeAt(0) + id)
   return `AMS ${id}`
 }
+
+export function serialNumberDisplay(serial: string, revealed: boolean): string {
+  if (!serial) return '—'
+  return revealed ? serial : '••••••••'
+}

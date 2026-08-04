@@ -211,6 +211,9 @@ export type MessageKey =
   | "printersView.scan"
   | "printersView.removePrinter"
   | "printersView.removeNamed"
+  | "printersView.serialHidden"
+  | "printersView.showSerialNamed"
+  | "printersView.hideSerialNamed"
   | "printersView.status"
   | "printersView.host"
   | "printersView.discoveredHost"
@@ -614,6 +617,9 @@ const messages: Record<Locale, Messages> = {
     "printersView.scan": "Scan local network",
     "printersView.removePrinter": "Remove printer",
     "printersView.removeNamed": "Remove {name}",
+    "printersView.serialHidden": "Serial number hidden",
+    "printersView.showSerialNamed": "Show serial number for {name}",
+    "printersView.hideSerialNamed": "Hide serial number for {name}",
     "printersView.status": "Status",
     "printersView.host": "Host",
     "printersView.discoveredHost": "Discovered host (not applied)",
@@ -1014,6 +1020,9 @@ const messages: Record<Locale, Messages> = {
     "printersView.scan": "Buscar na rede local",
     "printersView.removePrinter": "Remover impressora",
     "printersView.removeNamed": "Remover {name}",
+    "printersView.serialHidden": "Número de série oculto",
+    "printersView.showSerialNamed": "Mostrar número de série de {name}",
+    "printersView.hideSerialNamed": "Ocultar número de série de {name}",
     "printersView.status": "Status",
     "printersView.host": "Host",
     "printersView.discoveredHost": "Host descoberto (não aplicado)",
