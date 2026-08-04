@@ -492,6 +492,10 @@ function openEdit(printer: Printer) {
 }
 
 const activePrinter = computed(() => printers.value.find((printer) => printer.name === activePrinterId.value) ?? printers.value[0])
+const compactNavValue = computed(() => {
+  if (activeView.value !== 'control') return `view:${activeView.value}`
+  return activePrinter.value ? `printer:${activePrinter.value.name}` : 'view:printers'
+})
 const hasPrinters = computed(() => printers.value.length > 0)
 const selectedMonitor = computed(() => monitoring.value.find((entry) => entry.name === activePrinter.value?.name))
 const selectedStatus = computed(() => selectedMonitor.value?.status)
@@ -818,6 +822,14 @@ async function selectPrinter(name: string, refresh = true, focus = refresh) {
 function goTo(view: View) {
   activeView.value = view
   if (view === 'files') void loadLibraryFiles(libraryPath.value)
+}
+
+function navigateCompact(value: string) {
+  const separator = value.indexOf(':')
+  const kind = value.slice(0, separator)
+  const destination = value.slice(separator + 1)
+  if (kind === 'printer') void selectPrinter(destination)
+  else if (kind === 'view') goTo(destination as View)
 }
 
 // The Control tab's file table always shows the printer's storage root; it
@@ -1662,8 +1674,23 @@ onUnmounted(() => {
     <!-- Tabs with underline -->
     <header class="sticky top-0 z-20 bg-white/95 pt-[env(safe-area-inset-top)] backdrop-blur dark:bg-gray-900/95">
       <div class="mx-auto max-w-[1500px] overflow-x-auto px-4 sm:px-8 lg:px-10">
-        <nav class="flex min-w-max items-stretch border-b border-gray-200 dark:border-white/10" :aria-label="t('nav.ariaLabel')">
-          <div v-if="printers.length && !usePrinterMenu" class="flex items-center space-x-8 pr-8">
+        <nav class="flex min-w-0 items-stretch border-b border-gray-200 sm:min-w-max dark:border-white/10" :aria-label="t('nav.ariaLabel')">
+          <div class="grid w-full grid-cols-1 py-2 sm:hidden">
+            <select
+              name="primary-navigation"
+              :value="compactNavValue"
+              :aria-label="t('nav.ariaLabel')"
+              class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-2 pr-9 pl-3 text-sm font-medium text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-gray-900 dark:text-white dark:outline-white/15 dark:*:bg-gray-800"
+              @change="navigateCompact(($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="printer in printers" :key="`compact-${printer.name}`" :value="`printer:${printer.name}`">
+                {{ printer.name }} · {{ statusLabel(badgeFor(printer.name)) }}
+              </option>
+              <option v-for="tab in sectionTabs" :key="`compact-${tab.view}`" :value="`view:${tab.view}`">{{ tab.label }}</option>
+            </select>
+            <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-3 size-4 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
+          </div>
+          <div v-if="printers.length && !usePrinterMenu" class="hidden items-center space-x-8 pr-8 sm:flex">
             <button
               v-for="printer in printers"
               :key="printer.name"
@@ -1678,7 +1705,7 @@ onUnmounted(() => {
               <span class="size-1.5 shrink-0 rounded-full ring-3" :class="statusDotClasses[badgeFor(printer.name)]"></span>{{ printer.name }}
             </button>
           </div>
-          <div v-if="usePrinterMenu" class="flex items-center pr-8">
+          <div v-if="usePrinterMenu" class="hidden items-center pr-8 sm:flex">
             <div class="grid grid-cols-1">
               <select
                 :value="activePrinter?.name"
@@ -1691,8 +1718,8 @@ onUnmounted(() => {
               <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-2 size-4 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
             </div>
           </div>
-          <span v-if="printers.length" class="my-3 w-px shrink-0 bg-gray-200 dark:bg-white/15" aria-hidden="true"></span>
-          <div class="flex items-center space-x-8 pl-8">
+          <span v-if="printers.length" class="my-3 hidden w-px shrink-0 bg-gray-200 sm:block dark:bg-white/15" aria-hidden="true"></span>
+          <div class="hidden items-center space-x-8 pl-8 sm:flex">
             <button
               v-for="tab in sectionTabs"
               :key="tab.view"
@@ -1722,7 +1749,7 @@ onUnmounted(() => {
     <main id="main-content" tabindex="-1" class="mx-auto max-w-[1500px] py-7 outline-none sm:px-8 lg:px-10">
       <h1 class="sr-only">{{ t('app.title') }}</h1>
       <!-- Notification -->
-      <div aria-live="polite" class="pointer-events-none fixed inset-0 z-50 flex items-end px-4 py-6 sm:items-start sm:p-6">
+      <div aria-live="polite" class="pointer-events-none fixed inset-0 z-50 flex items-end px-4 py-6 sm:p-6">
         <div class="flex w-full flex-col items-center space-y-4 sm:items-end">
           <transition
             enter-active-class="transform ease-out duration-300 transition"
@@ -1844,7 +1871,7 @@ onUnmounted(() => {
               </div>
             </div>
           </section>
-          <section class="grid gap-5 grid-cols-[3fr_1fr]">
+          <section class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,3fr)_minmax(18rem,1fr)]">
             <Card class="overflow-hidden">
               <CardHeader :title="t('camera.title')" :icon="PhVideoCamera">
                 <template #suffix>
@@ -2155,8 +2182,8 @@ onUnmounted(() => {
                       <span class="absolute inset-x-0 bottom-0 transition-[height] duration-200" :style="{ height: `${material.remainingPercent ?? 100}%`, backgroundColor: material.color }"></span>
                       <span class="relative z-10 flex h-full flex-col items-center justify-center gap-1 p-1 text-center font-mono" :style="{ color: textColorFor(material.color) }">
                         <span class="text-xs font-bold">{{ material.slot }}</span>
-                        <span v-if="material.type !== '—'" class="text-[9px] font-semibold tracking-wide uppercase wrap-anywhere">{{ material.type }}</span>
-                        <span v-if="material.remainingGrams !== undefined" class="text-[8px] font-medium">{{ material.remainingGrams }} g</span>
+                        <span v-if="material.type !== '—'" class="text-[10px] font-semibold tracking-wide uppercase wrap-anywhere">{{ material.type }}</span>
+                        <span v-if="material.remainingGrams !== undefined" class="text-[10px] font-medium">{{ material.remainingGrams }} g</span>
                       </span>
                     </div>
                   </div>

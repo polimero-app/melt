@@ -17,7 +17,7 @@ const variantClasses: Record<string, string> = {
 <template>
   <button
     :type="type"
-    class="inline-flex items-center justify-center gap-x-1.5 rounded-md px-2.5 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-35"
+    class="inline-flex min-h-11 items-center justify-center gap-x-1.5 rounded-md px-2.5 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-35 sm:min-h-9"
     :class="variantClasses[variant]"
   >
     <slot />
