@@ -468,6 +468,7 @@ const draft = ref({
   accessCode: '',
 })
 const editingPrinter = ref<string>()
+const editRemoved = ref(false)
 
 function openEdit(printer: Printer) {
   editingPrinter.value = printer.name
@@ -907,6 +908,7 @@ function openAddition() {
 function closeAddition() {
   if (!adding.value) additionOpen.value = false
   editingPrinter.value = undefined
+  editRemoved.value = false
 }
 
 async function discoverPrinters() {
@@ -937,7 +939,10 @@ async function addPrinter() {
 
   try {
     const replacing = editingPrinter.value
-    if (replacing) await invoke('remove_configured_printer', { name: replacing })
+    if (replacing && !editRemoved.value) {
+      await invoke('remove_configured_printer', { name: replacing })
+      editRemoved.value = true
+    }
     const profile = await invoke<Printer>('create_configured_printer', { request: draft.value })
     const printer = {
       name: profile.name,
@@ -951,6 +956,7 @@ async function addPrinter() {
       .sort((left, right) => left.name.localeCompare(right.name))
     additionOpen.value = false
     editingPrinter.value = undefined
+    editRemoved.value = false
     draft.value.accessCode = ''
     await selectPrinter(printer.name)
   } catch (reason) {
