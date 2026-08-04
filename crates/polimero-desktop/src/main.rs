@@ -2604,6 +2604,12 @@ fn subscribe_camera(
     let drivers::Profile::Bambu(profile) = &printer.driver else {
         return Err(CommandError::new("cameraPreviewUnavailable"));
     };
+    let capabilities = polimero_core::bambu::Client::new(profile.clone())
+        .runtime_capabilities(
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+        )
+        .ok();
     manager
         .subscribe(
             profile,
@@ -2611,6 +2617,7 @@ fn subscribe_camera(
             printer.tls_fingerprint.as_deref(),
             Duration::from_secs(10),
             kind,
+            capabilities.as_ref(),
         )
         .map_err(|error| operation_error(DriverError::Camera(error), operation))
 }

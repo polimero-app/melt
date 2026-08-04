@@ -42,6 +42,20 @@ block a command until independent physical evidence scopes it to the affected
 model and module firmware. Conflicting explicit fields block mutations
 conservatively and are surfaced rather than guessed.
 
+## Camera transport selection
+
+Fresh, host-validated `print.ipcam` advertisements outrank qualified quirks,
+exact-model defaults, and family hints. Advertised URLs may target only the
+configured printer and may not embed credentials. Stale or rejected
+advertisements fall through to a non-mutating probe. TLS pin and certificate
+identity failures are terminal and never cause a fallback.
+
+P1S deliberately has no unconditional camera default because current community
+implementations disagree between RTSPS and the classic TLS-MJPEG transport.
+Polimero probes RTSPS and then classic MJPEG within the caller's safety
+boundary, caches the successful transport in the physical camera owner, and
+keeps both disputed registry entries provisional.
+
 Polimero treats a reported Bambu model as a capability hint, not a complete
 contract. Runtime observations and safe protocol probes take precedence over
 the model family. Unknown models and unknown fields remain distinct from an

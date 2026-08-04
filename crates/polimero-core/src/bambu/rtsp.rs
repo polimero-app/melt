@@ -366,6 +366,7 @@ fn map_transport_error(error: transport::Error) -> CameraError {
     match error {
         transport::Error::Pin(error) => CameraError::Pin(error),
         transport::Error::MissingCertificate => CameraError::MissingCertificate,
+        transport::Error::CertificateIdentity => CameraError::Identity,
         transport::Error::Tls => CameraError::Tls,
         transport::Error::Timeout => CameraError::Connect(io::Error::from(io::ErrorKind::TimedOut)),
         _ => CameraError::Connect(io::Error::from(io::ErrorKind::ConnectionRefused)),

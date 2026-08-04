@@ -6,14 +6,16 @@ use std::{
         mpsc::{self, Receiver, SyncSender, TrySendError},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use super::{
-    CameraError, CameraTransport, H264AccessUnit, H264Stream, MjpegStream, Profile,
-    open_decoded_h264_stream, open_mjpeg_stream,
+    CameraError, CameraSelection, CameraSelectionSource, CameraTransport, H264AccessUnit,
+    H264Stream, MjpegStream, Profile, RuntimeCapabilities, open_classic_mjpeg_stream,
+    open_decoded_h264_stream, select_camera_transport,
 };
 
 const SUBSCRIBER_CAPACITY: usize = 2;
@@ -51,6 +53,8 @@ pub struct CameraOwnerStatus {
     pub subscribers: usize,
     pub generation: u64,
     pub has_jpeg: bool,
+    pub selection_source: CameraSelectionSource,
+    pub rejected_advertisement: Option<String>,
 }
 
 enum Source {
@@ -80,6 +84,7 @@ struct Owner {
     generation: u64,
     transport: CameraOwnerTransport,
     parameters: Option<H264Parameters>,
+    selection: CameraSelection,
     shutdown: Mutex<Option<TcpStream>>,
     state: Mutex<OwnerState>,
 }
@@ -152,6 +157,8 @@ impl Owner {
             subscribers: state.subscribers.len(),
             generation: self.generation,
             has_jpeg: state.latest_jpeg.is_some(),
+            selection_source: self.selection.source,
+            rejected_advertisement: self.selection.rejected_advertisement.clone(),
         }
     }
 }
@@ -210,9 +217,19 @@ impl CameraManager {
         fingerprint: Option<&str>,
         timeout: Duration,
         kind: CameraFrameKind,
+        capabilities: Option<&RuntimeCapabilities>,
     ) -> Result<CameraSubscription, CameraError> {
         let printer_key = format!("bambu:{}", profile.serial().to_ascii_uppercase());
-        let revision = profile.connection_identity(access_code, fingerprint);
+        let defaults;
+        let capabilities = match capabilities {
+            Some(capabilities) => capabilities,
+            None => {
+                defaults = profile.default_capabilities();
+                &defaults
+            }
+        };
+        let selection = select_camera_transport(profile.host(), capabilities);
+        let revision = camera_revision(profile, access_code, fingerprint, capabilities, &selection);
         let mut manager = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if let Some(owner) = manager.owners.get(&printer_key).and_then(Weak::upgrade) {
             if owner.revision == revision {
@@ -225,7 +242,8 @@ impl CameraManager {
             }
             owner.stop();
         }
-        let source = open_source(profile, access_code, fingerprint, timeout)?;
+        let (source, selection) =
+            open_source(profile, access_code, fingerprint, timeout, selection)?;
         let shutdown = source.shutdown_handle().map_err(CameraError::Stream)?;
         manager.generation = manager.generation.wrapping_add(1);
         let (transport, parameters) = match &source {
@@ -250,6 +268,7 @@ impl CameraManager {
             generation: manager.generation,
             transport,
             parameters,
+            selection,
             shutdown: Mutex::new(Some(shutdown)),
             state: Mutex::new(OwnerState {
                 next_subscriber: 1,
@@ -294,15 +313,77 @@ fn open_source(
     access_code: Option<&str>,
     fingerprint: Option<&str>,
     timeout: Duration,
-) -> Result<Source, CameraError> {
-    if profile.default_capabilities().camera != CameraTransport::MjpegTls {
-        match open_decoded_h264_stream(profile, access_code, fingerprint, timeout) {
-            Ok(stream) => return Ok(Source::H264(stream)),
-            Err(CameraError::Pin(error)) => return Err(CameraError::Pin(error)),
-            Err(_) => {}
+    selection: CameraSelection,
+) -> Result<(Source, CameraSelection), CameraError> {
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| CameraError::Connect(std::io::ErrorKind::TimedOut.into()))?;
+    let open = |transport| open_transport(profile, access_code, fingerprint, deadline, transport);
+    let security_error =
+        |error: &CameraError| matches!(error, CameraError::Pin(_) | CameraError::Identity);
+    let (first_transport, second_transport) = match selection.preferred {
+        CameraTransport::MjpegTls => (CameraTransport::MjpegTls, CameraTransport::RtspsH264),
+        CameraTransport::RtspsH264 | CameraTransport::Unknown => {
+            (CameraTransport::RtspsH264, CameraTransport::MjpegTls)
         }
+    };
+    let first = open(first_transport);
+    match first {
+        Ok(source) => Ok((source, selection)),
+        Err(error) if security_error(&error) => Err(error),
+        Err(_) => open(second_transport).map(|source| {
+            let preferred = match &source {
+                Source::Mjpeg(_) => CameraTransport::MjpegTls,
+                Source::H264(_) => CameraTransport::RtspsH264,
+            };
+            (
+                source,
+                CameraSelection {
+                    preferred,
+                    source: CameraSelectionSource::SafeProbe,
+                    rejected_advertisement: selection.rejected_advertisement,
+                    quirk_ids: selection.quirk_ids,
+                },
+            )
+        }),
     }
-    open_mjpeg_stream(profile, access_code, fingerprint, timeout).map(Source::Mjpeg)
+}
+
+fn open_transport(
+    profile: &Profile,
+    access_code: Option<&str>,
+    fingerprint: Option<&str>,
+    deadline: Instant,
+    transport: CameraTransport,
+) -> Result<Source, CameraError> {
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| CameraError::Connect(std::io::ErrorKind::TimedOut.into()))?;
+    match transport {
+        CameraTransport::RtspsH264 => {
+            open_decoded_h264_stream(profile, access_code, fingerprint, remaining).map(Source::H264)
+        }
+        CameraTransport::MjpegTls => {
+            open_classic_mjpeg_stream(profile, access_code, fingerprint, remaining)
+                .map(Source::Mjpeg)
+        }
+        CameraTransport::Unknown => unreachable!("unknown is resolved before probing"),
+    }
+}
+
+fn camera_revision(
+    profile: &Profile,
+    access_code: Option<&str>,
+    fingerprint: Option<&str>,
+    capabilities: &RuntimeCapabilities,
+    selection: &CameraSelection,
+) -> [u8; 32] {
+    let mut digest = Sha256::new();
+    digest.update(profile.connection_identity(access_code, fingerprint));
+    digest.update(serde_json::to_vec(&capabilities.firmware).unwrap_or_default());
+    digest.update(serde_json::to_vec(selection).unwrap_or_default());
+    digest.finalize().into()
 }
 
 fn run_owner(owner: Arc<Owner>, mut source: Source) {
@@ -342,6 +423,12 @@ mod tests {
             generation: 1,
             transport: CameraOwnerTransport::MjpegTls,
             parameters: None,
+            selection: CameraSelection {
+                preferred: CameraTransport::MjpegTls,
+                source: CameraSelectionSource::SafeProbe,
+                rejected_advertisement: None,
+                quirk_ids: Vec::new(),
+            },
             shutdown: Mutex::new(None),
             state: Mutex::new(OwnerState {
                 next_subscriber: 1,

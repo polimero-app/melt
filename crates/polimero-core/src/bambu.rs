@@ -16,6 +16,7 @@ use crate::trace::{SharedTracer, next_tracer_generation};
 
 mod authorization;
 mod camera_manager;
+mod camera_negotiation;
 mod capabilities;
 mod discovery;
 mod firmware;
@@ -38,6 +39,7 @@ pub use camera_manager::{
     CameraFrame, CameraFrameKind, CameraManager, CameraOwnerStatus, CameraOwnerTransport,
     CameraSubscription, H264Parameters,
 };
+pub use camera_negotiation::{CameraSelection, CameraSelectionSource, select_camera_transport};
 pub use capabilities::{CapabilityObservations, ObservationSource, Observed, ReportKind};
 pub use discovery::{DiscoveredPrinter, DiscoveryError, discover};
 pub use firmware::{FirmwareInventory, FirmwareModule, FirmwareVersion};
@@ -309,7 +311,9 @@ impl RuntimeCapabilities {
             ),
             ModelFamily::P1 => (
                 if normalized.starts_with("P1S") {
-                    CameraTransport::RtspsH264
+                    // Community implementations disagree across P1S firmware;
+                    // negotiate from a live advertisement or safe probe.
+                    CameraTransport::Unknown
                 } else {
                     CameraTransport::MjpegTls
                 },
@@ -549,6 +553,8 @@ pub enum CameraError {
     Connect(#[source] io::Error),
     #[error("Bambu camera TLS handshake failed")]
     Tls,
+    #[error("Bambu camera certificate identity does not match the printer serial")]
+    Identity,
     #[error("Bambu camera authentication failed")]
     Authentication(#[source] io::Error),
     #[error("Bambu camera frame is invalid")]
@@ -648,8 +654,26 @@ pub fn open_mjpeg_stream(
         }
     }
 
-    let mut connection =
-        open_camera_connection(profile, fingerprint, camera_time_remaining(deadline)?)?;
+    open_classic_mjpeg_stream(
+        profile,
+        Some(access_code),
+        fingerprint,
+        camera_time_remaining(deadline)?,
+    )
+}
+
+/// Opens only the classic framed-TLS MJPEG transport. Camera negotiation uses
+/// this after an explicit advertisement or as one arm of a safe probe.
+pub fn open_classic_mjpeg_stream(
+    profile: &Profile,
+    access_code: Option<&str>,
+    fingerprint: Option<&str>,
+    timeout: Duration,
+) -> Result<MjpegStream, CameraError> {
+    let access_code = access_code
+        .filter(|value| !value.is_empty())
+        .ok_or(CameraError::MissingAccessCode)?;
+    let mut connection = open_camera_connection(profile, fingerprint, timeout)?;
     send_camera_auth(&mut connection, access_code).map_err(CameraError::Authentication)?;
     Ok(MjpegStream {
         source: MjpegSource::Classic(connection),
@@ -726,6 +750,7 @@ fn open_camera_connection(
     .map_err(|error| match error {
         TransportError::Pin(error) => CameraError::Pin(error),
         TransportError::MissingCertificate => CameraError::MissingCertificate,
+        TransportError::CertificateIdentity => CameraError::Identity,
         TransportError::Tls => CameraError::Tls,
         TransportError::Timeout => CameraError::Connect(io::Error::from(io::ErrorKind::TimedOut)),
         _ => CameraError::Connect(io::Error::from(io::ErrorKind::ConnectionRefused)),
