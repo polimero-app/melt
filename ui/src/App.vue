@@ -150,7 +150,7 @@ type TemperatureControl = {
 
 type FanControl = {
   kind: 'parts' | 'auxiliary' | 'hotend' | 'exhaust' | 'chamber' | 'mainboard' | 'heat' | 'unknown'
-  speed?: number
+  speedPercent?: number
   mode: 'manual' | 'auto' | 'off'
   minimumPercent?: number
   maximumPercent?: number
@@ -610,7 +610,7 @@ const fanRows = computed(() => {
   const controls = Object.entries(selectedStatus.value?.controls?.fans ?? {})
   if (controls.length) return controls
   return Object.entries(selectedStatus.value?.fans ?? {}).map(([key, speed]) => [key, {
-    kind: 'unknown', mode: 'manual', speed, controllable: Boolean(capabilities.value?.fanControl),
+    kind: 'unknown', mode: 'manual', speedPercent: speed, controllable: Boolean(capabilities.value?.fanControl),
   }] as [string, FanControl])
 })
 // While dragging, the readout follows the pointer; the committed value comes
@@ -2127,12 +2127,12 @@ onUnmounted(() => {
                   <div>
                     <p class="text-sm/6 font-light text-gray-900 dark:text-white">{{ temperatureLabel(row.key, row.value) }}</p>
                     <p class="font-mono text-sm text-gray-500 dark:text-gray-400"><span class="font-bold">{{ row.value.currentCelsius === undefined ? '—' : formatTemperature(row.value.currentCelsius) }}</span> °C <span aria-hidden="true">/</span> <span class="font-bold">{{ row.value.targetCelsius === undefined ? '—' : formatTemperature(row.value.targetCelsius) }}</span> °C</p>
-                    <p v-if="!row.value.controllable" class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{{ t('control.telemetryOnly') }}</p>
                   </div>
                   <div v-if="capabilities?.temperatureWrite && row.value.controllable" class="flex items-center gap-1">
                     <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.decreaseTemp', { sensor: temperatureLabel(row.key, row.value) })" @click="adjustTemperature(row.key, row.value, -5)"><PhMinus class="size-3.5" aria-hidden="true" /></IconButton>
                     <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.increaseTemp', { sensor: temperatureLabel(row.key, row.value) })" @click="adjustTemperature(row.key, row.value, 5)"><PhPlus class="size-3.5" aria-hidden="true" /></IconButton>
                   </div>
+                  <p v-else-if="!row.value.controllable" class="shrink-0 text-right text-xs text-gray-400 dark:text-gray-500">{{ t('control.telemetryOnly') }}</p>
                 </div>
               </div>
             </Card>
@@ -2143,9 +2143,9 @@ onUnmounted(() => {
                 <div v-for="[key, value] in fanRows" :key="key" class="block">
                   <span class="mb-2 flex justify-between">
                     <span class="text-sm/6 font-light text-gray-900 dark:text-white">{{ fanLabel(key) }}</span>
-                    <span class="text-sm/6 text-gray-500 dark:text-gray-400">{{ fanDrafts[key] ?? value.speed ?? '—' }}{{ (fanDrafts[key] ?? value.speed) === undefined ? '' : '%' }}</span>
+                    <span class="text-sm/6 text-gray-500 dark:text-gray-400">{{ fanDrafts[key] ?? value.speedPercent ?? '—' }}{{ (fanDrafts[key] ?? value.speedPercent) === undefined ? '' : '%' }}</span>
                   </span>
-                  <input v-if="value.controllable && value.speed !== undefined" :key="`${key}-${value.speed}`" :value="value.speed" :name="`fan-${key}`" class="h-1 w-full cursor-pointer accent-cyan-600 dark:accent-cyan-400" type="range" :min="value.minimumPercent ?? 0" :max="value.maximumPercent ?? 100" :aria-label="t('control.fanPower', { fan: fanLabel(key) })" @input="previewFan(key, $event)" @change="sendFan(key, $event)" />
+                  <input v-if="value.controllable && value.speedPercent !== undefined" :key="`${key}-${value.speedPercent}`" :value="value.speedPercent" :name="`fan-${key}`" class="h-1 w-full cursor-pointer accent-cyan-600 dark:accent-cyan-400" type="range" :min="value.minimumPercent ?? 0" :max="value.maximumPercent ?? 100" :aria-label="t('control.fanPower', { fan: fanLabel(key) })" @input="previewFan(key, $event)" @change="sendFan(key, $event)" />
                   <p v-else class="text-xs text-gray-400 dark:text-gray-500">{{ t('control.telemetryOnly') }}</p>
                 </div>
               </div>
