@@ -10,6 +10,7 @@ import { printTargetState } from './printing'
 import { cameraViewState, printerStateMessageKey } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
+import { shouldDeferLibraryCards } from './library'
 import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
 import SlideOver from './components/SlideOver.vue'
@@ -1561,6 +1562,7 @@ const visibleFiles = computed(() => {
     return left.name.localeCompare(right.name)
   })
 })
+const deferLibraryCards = computed(() => shouldDeferLibraryCards(visibleFiles.value.length))
 const printerFiles = computed(() => files.value.filter((file) => file.type === 'file'))
 const DASHBOARD_FILE_LIMIT = 3
 const dashboardFiles = computed(() => printerFiles.value.slice(0, DASHBOARD_FILE_LIMIT))
@@ -2601,6 +2603,7 @@ onUnmounted(() => {
             :key="file.devicePath"
             as="article"
             class="transition hover:shadow-md dark:hover:outline-cyan-400/30"
+            :class="deferLibraryCards && 'library-card-deferred'"
           >
             <div class="relative min-h-45 overflow-hidden sm:rounded-t-lg" :class="fileToneFor(file.name).preview">
               <ModelThumbnail

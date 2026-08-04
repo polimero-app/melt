@@ -107,3 +107,10 @@ select {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Large libraries keep their complete searchable DOM, but off-screen cards do
+   not consume layout and paint work until they approach the viewport. */
+.library-card-deferred {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 280px;
+}
