@@ -157,10 +157,22 @@ export type MessageKey =
   | "control.fanPartCooling"
   | "control.fanAuxiliary"
   | "control.fanHeatbreak"
+  | "control.fanHotend"
+  | "control.fanExhaust"
+  | "control.fanChamber"
+  | "control.fanMainboard"
+  | "control.fanHeat"
+  | "control.fanHotendSecondary"
+  | "control.fanAuxiliarySecondary"
   | "control.fanPower"
   | "control.lights"
+  | "control.lamp"
+  | "control.workLight"
   | "control.chamberLight"
   | "control.auxLight"
+  | "control.nozzleLeft"
+  | "control.nozzleRight"
+  | "control.telemetryOnly"
   | "control.stepSize"
   | "control.feedRate"
   | "control.homingStarted"
@@ -559,13 +571,25 @@ const messages: Record<Locale, Messages> = {
     "control.increaseTemp": "Increase {sensor} target temperature",
     "control.setTemp": "Target temperature for {sensor}",
     "control.fans": "Fans",
-    "control.fanPartCooling": "Part cooling",
-    "control.fanAuxiliary": "Auxiliary",
+    "control.fanPartCooling": "Parts",
+    "control.fanAuxiliary": "Aux",
     "control.fanHeatbreak": "Heatbreak",
+    "control.fanHotend": "Hotend",
+    "control.fanExhaust": "Exhaust",
+    "control.fanChamber": "Chamber",
+    "control.fanMainboard": "MC board",
+    "control.fanHeat": "Heat",
+    "control.fanHotendSecondary": "Hotend 2",
+    "control.fanAuxiliarySecondary": "Auxiliary 2",
     "control.fanPower": "{fan} fan power",
     "control.lights": "Lights",
+    "control.lamp": "Lamp",
+    "control.workLight": "Work light",
     "control.chamberLight": "Chamber light",
     "control.auxLight": "Aux light",
+    "control.nozzleLeft": "Left nozzle",
+    "control.nozzleRight": "Right nozzle",
+    "control.telemetryOnly": "Telemetry only",
     "control.stepSize": "Step size",
     "control.feedRate": "Feed rate",
     "control.homingStarted": "Axes homing started",
@@ -961,13 +985,25 @@ const messages: Record<Locale, Messages> = {
     "control.increaseTemp": "Aumentar a temperatura alvo de {sensor}",
     "control.setTemp": "Temperatura alvo para {sensor}",
     "control.fans": "Ventoinhas",
-    "control.fanPartCooling": "Resfriamento da peça",
-    "control.fanAuxiliary": "Auxiliar",
+    "control.fanPartCooling": "Peças",
+    "control.fanAuxiliary": "Aux",
     "control.fanHeatbreak": "Heatbreak",
+    "control.fanHotend": "Hotend",
+    "control.fanExhaust": "Exaustão",
+    "control.fanChamber": "Câmara",
+    "control.fanMainboard": "Placa controladora",
+    "control.fanHeat": "Aquecimento",
+    "control.fanHotendSecondary": "Hotend 2",
+    "control.fanAuxiliarySecondary": "Auxiliar 2",
     "control.fanPower": "Potência da ventoinha: {fan}",
     "control.lights": "Luzes",
+    "control.lamp": "Lâmpada",
+    "control.workLight": "Luz de trabalho",
     "control.chamberLight": "Luz da câmara",
     "control.auxLight": "Luz auxiliar",
+    "control.nozzleLeft": "Bico esquerdo",
+    "control.nozzleRight": "Bico direito",
+    "control.telemetryOnly": "Somente telemetria",
     "control.stepSize": "Tamanho do passo",
     "control.feedRate": "Velocidade de avanço",
     "control.homingStarted": "Referenciamento dos eixos iniciado",

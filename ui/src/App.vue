@@ -138,6 +138,31 @@ type Temperature = {
   targetCelsius?: number
 }
 
+type TemperatureControl = {
+  kind: 'nozzle' | 'bed' | 'chamber'
+  position?: 'left' | 'right'
+  currentCelsius?: number
+  targetCelsius?: number
+  minimumCelsius?: number
+  maximumCelsius?: number
+  controllable: boolean
+}
+
+type FanControl = {
+  kind: 'parts' | 'auxiliary' | 'hotend' | 'exhaust' | 'chamber' | 'mainboard' | 'heat' | 'unknown'
+  speed?: number
+  mode: 'manual' | 'auto' | 'off'
+  minimumPercent?: number
+  maximumPercent?: number
+  controllable: boolean
+}
+
+type LightControl = {
+  kind: 'lamp' | 'work' | 'unknown'
+  mode: 'on' | 'off' | 'flashing' | 'unknown'
+  controllable: boolean
+}
+
 type AmsTrayStatus = {
   slot: number
   trayIndex?: number
@@ -173,6 +198,11 @@ type PrinterStatus = {
   fans?: Record<string, number>
   wifi?: { signalDbm: number }
   lights?: Record<string, string>
+  controls?: {
+    temperatures?: Record<string, TemperatureControl>
+    fans?: Record<string, FanControl>
+    lights?: Record<string, LightControl>
+  }
   extensions?: { 'bambu-lan'?: { ams?: { units: AmsUnitStatus[] } } }
 }
 
@@ -568,13 +598,21 @@ const statusFaults = computed(() => {
   ]
 })
 const temperatureRows = computed(() => {
+  const controls = Object.entries(selectedStatus.value?.controls?.temperatures ?? {})
+  if (controls.length) return controls.map(([key, value]) => ({ key, value }))
   const temperatures = selectedStatus.value?.temperatures ?? {}
   return (['nozzle', 'bed', 'chamber'] as const).flatMap((key) => {
     const value = temperatures[key]
-    return value ? [{ key, value }] : []
+    return value ? [{ key, value: { kind: key, ...value, controllable: Boolean(capabilities.value?.temperatureWrite) } }] : []
   })
 })
-const fanRows = computed(() => Object.entries(selectedStatus.value?.fans ?? {}))
+const fanRows = computed(() => {
+  const controls = Object.entries(selectedStatus.value?.controls?.fans ?? {})
+  if (controls.length) return controls
+  return Object.entries(selectedStatus.value?.fans ?? {}).map(([key, speed]) => [key, {
+    kind: 'unknown', mode: 'manual', speed, controllable: Boolean(capabilities.value?.fanControl),
+  }] as [string, FanControl])
+})
 // While dragging, the readout follows the pointer; the committed value comes
 // back from the printer on the next status push.
 const fanDrafts = ref<Record<string, number>>({})
@@ -584,22 +622,46 @@ function previewFan(key: string, event: Event) {
 }
 const fanMessageKeys: Record<string, MessageKey> = {
   partCooling: 'control.fanPartCooling',
+  parts: 'control.fanPartCooling',
   auxiliary: 'control.fanAuxiliary',
-  heatbreak: 'control.fanHeatbreak',
+  heatbreak: 'control.fanHotend',
+  hotend: 'control.fanHotend',
+  exhaust: 'control.fanExhaust',
+  chamber: 'control.fanChamber',
+  mainboard: 'control.fanMainboard',
+  heat: 'control.fanHeat',
+  hotendSecondary: 'control.fanHotendSecondary',
+  auxiliarySecondary: 'control.fanAuxiliarySecondary',
 }
 const fanLabel = (key: string) => {
   const messageKey = fanMessageKeys[key]
   return messageKey ? t(messageKey) : key
 }
-const temperatureKeys: Record<'nozzle' | 'bed' | 'chamber', MessageKey> = {
-  nozzle: 'dashboard.nozzle',
-  bed: 'dashboard.bed',
-  chamber: 'control.chamber',
-}
+const temperatureLabel = (key: string, control: TemperatureControl) => t(
+  control.kind === 'nozzle' && control.position === 'left'
+    ? 'control.nozzleLeft'
+    : control.kind === 'nozzle' && control.position === 'right'
+      ? 'control.nozzleRight'
+      : control.kind === 'nozzle'
+        ? 'dashboard.nozzle'
+        : control.kind === 'bed'
+          ? 'dashboard.bed'
+          : control.kind === 'chamber'
+            ? 'control.chamber'
+            : key as MessageKey,
+)
 const wifiDbm = computed(() => selectedStatus.value?.wifi?.signalDbm)
-const lightRows = computed(() => Object.entries(selectedStatus.value?.lights ?? {}))
+const lightRows = computed(() => {
+  const controls = Object.entries(selectedStatus.value?.controls?.lights ?? {})
+  if (controls.length) return controls
+  return Object.entries(selectedStatus.value?.lights ?? {}).map(([key, mode]) => [key, {
+    kind: key === 'chamber_light' ? 'lamp' : 'unknown', mode, controllable: Boolean(capabilities.value?.lightControl),
+  }] as [string, LightControl])
+})
 const lightMessageKeys: Record<string, MessageKey> = {
+  lamp: 'control.lamp',
   chamber_light: 'control.chamberLight',
+  work_light: 'control.workLight',
   aux_light: 'control.auxLight',
 }
 const lightLabel = (key: string) => {
@@ -1136,28 +1198,29 @@ async function runJobAction(action: 'start' | 'pause' | 'resume' | 'cancel', dev
   }
 }
 
-const temperatureMaximums: Record<'nozzle' | 'bed' | 'chamber', number> = {
+const temperatureMaximums: Record<TemperatureControl['kind'], number> = {
   nozzle: 300,
   bed: 120,
   chamber: 60,
 }
 
-const temperatureTimers: Partial<Record<'nozzle' | 'bed' | 'chamber', number>> = {}
-const pendingTemperatures: Partial<Record<'nozzle' | 'bed' | 'chamber', number>> = {}
+const temperatureTimers: Record<string, number | undefined> = {}
+const pendingTemperatures: Record<string, number | undefined> = {}
 
-function queueTemperature(kind: 'nozzle' | 'bed' | 'chamber', next: number) {
-  const maximum = temperatureMaximums[kind]
-  pendingTemperatures[kind] = clampTarget(maximum, next)
-  if (temperatureTimers[kind] !== undefined) window.clearTimeout(temperatureTimers[kind])
-  temperatureTimers[kind] = window.setTimeout(async () => {
+function queueTemperature(key: string, control: TemperatureControl, next: number) {
+  const maximum = control.maximumCelsius ?? temperatureMaximums[control.kind]
+  const minimum = control.minimumCelsius ?? 0
+  pendingTemperatures[key] = Math.max(minimum, clampTarget(maximum, next))
+  if (temperatureTimers[key] !== undefined) window.clearTimeout(temperatureTimers[key])
+  temperatureTimers[key] = window.setTimeout(async () => {
     const printerName = activePrinter.value?.name
-    const target = pendingTemperatures[kind]
-    delete pendingTemperatures[kind]
-    delete temperatureTimers[kind]
+    const target = pendingTemperatures[key]
+    delete pendingTemperatures[key]
+    delete temperatureTimers[key]
     if (!printerName || target === undefined) return
     try {
       await invoke('printer_temperature_set', {
-        request: { name: printerName, [`${kind}Celsius`]: target },
+        request: { name: printerName, temperature: key, targetCelsius: target },
       })
       void refreshMonitoring()
     } catch (reason) {
@@ -1166,12 +1229,11 @@ function queueTemperature(kind: 'nozzle' | 'bed' | 'chamber', next: number) {
   }, 150)
 }
 
-function adjustTemperature(kind: 'nozzle' | 'bed' | 'chamber', delta: number) {
+function adjustTemperature(key: string, control: TemperatureControl, delta: number) {
   if (!activePrinter.value || !selectedStatus.value) return
-  const temperature = selectedStatus.value.temperatures?.[kind]
-  if (!temperature) return
-  const base = pendingTemperatures[kind] ?? temperature.targetCelsius ?? temperature.currentCelsius
-  queueTemperature(kind, base + delta)
+  const base = pendingTemperatures[key] ?? control.targetCelsius ?? control.currentCelsius
+  if (base === undefined) return
+  queueTemperature(key, control, base + delta)
 }
 
 async function sendFan(fan: string, event: Event) {
@@ -2063,12 +2125,13 @@ onUnmounted(() => {
               <div class="font-light space-y-4 px-4 py-5 sm:p-6">
                 <div v-for="row in temperatureRows" :key="row.key" class="flex items-center justify-between gap-3">
                   <div>
-                    <p class="text-sm/6 font-light text-gray-900 dark:text-white">{{ t(temperatureKeys[row.key]) }}</p>
-                    <p class="font-mono text-sm text-gray-500 dark:text-gray-400"><span class="font-bold">{{ formatTemperature(row.value.currentCelsius) }}</span> °C <span aria-hidden="true">/</span> <span class="font-bold">{{ row.value.targetCelsius === undefined ? '—' : formatTemperature(row.value.targetCelsius) }}</span> °C</p>
+                    <p class="text-sm/6 font-light text-gray-900 dark:text-white">{{ temperatureLabel(row.key, row.value) }}</p>
+                    <p class="font-mono text-sm text-gray-500 dark:text-gray-400"><span class="font-bold">{{ row.value.currentCelsius === undefined ? '—' : formatTemperature(row.value.currentCelsius) }}</span> °C <span aria-hidden="true">/</span> <span class="font-bold">{{ row.value.targetCelsius === undefined ? '—' : formatTemperature(row.value.targetCelsius) }}</span> °C</p>
+                    <p v-if="!row.value.controllable" class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{{ t('control.telemetryOnly') }}</p>
                   </div>
-                  <div v-if="capabilities?.temperatureWrite" class="flex items-center gap-1">
-                    <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.decreaseTemp', { sensor: t(temperatureKeys[row.key]) })" @click="adjustTemperature(row.key, -5)"><PhMinus class="size-3.5" aria-hidden="true" /></IconButton>
-                    <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.increaseTemp', { sensor: t(temperatureKeys[row.key]) })" @click="adjustTemperature(row.key, 5)"><PhPlus class="size-3.5" aria-hidden="true" /></IconButton>
+                  <div v-if="capabilities?.temperatureWrite && row.value.controllable" class="flex items-center gap-1">
+                    <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.decreaseTemp', { sensor: temperatureLabel(row.key, row.value) })" @click="adjustTemperature(row.key, row.value, -5)"><PhMinus class="size-3.5" aria-hidden="true" /></IconButton>
+                    <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.increaseTemp', { sensor: temperatureLabel(row.key, row.value) })" @click="adjustTemperature(row.key, row.value, 5)"><PhPlus class="size-3.5" aria-hidden="true" /></IconButton>
                   </div>
                 </div>
               </div>
@@ -2077,13 +2140,14 @@ onUnmounted(() => {
             <Card v-if="fanRows.length">
               <CardHeader :title="t('control.fans')" :icon="PhFan" />
               <div class="font-light space-y-4 px-4 py-5 sm:p-6">
-                <label v-for="[key, value] in fanRows" :key="key" class="block">
+                <div v-for="[key, value] in fanRows" :key="key" class="block">
                   <span class="mb-2 flex justify-between">
                     <span class="text-sm/6 font-light text-gray-900 dark:text-white">{{ fanLabel(key) }}</span>
-                    <span class="text-sm/6 text-gray-500 dark:text-gray-400">{{ fanDrafts[key] ?? value }}%</span>
+                    <span class="text-sm/6 text-gray-500 dark:text-gray-400">{{ fanDrafts[key] ?? value.speed ?? '—' }}{{ (fanDrafts[key] ?? value.speed) === undefined ? '' : '%' }}</span>
                   </span>
-                      <input :key="`${key}-${value}`" :value="value" :disabled="!capabilities?.fanControl" :name="`fan-${key}`" class="h-1 w-full cursor-pointer accent-cyan-600 disabled:cursor-not-allowed disabled:opacity-35 dark:accent-cyan-400" type="range" min="0" max="100" :aria-label="t('control.fanPower', { fan: fanLabel(key) })" @input="previewFan(key, $event)" @change="sendFan(key, $event)" />
-                </label>
+                  <input v-if="capabilities?.fanControl && value.controllable && value.speed !== undefined" :key="`${key}-${value.speed}`" :value="value.speed" :name="`fan-${key}`" class="h-1 w-full cursor-pointer accent-cyan-600 dark:accent-cyan-400" type="range" :min="value.minimumPercent ?? 0" :max="value.maximumPercent ?? 100" :aria-label="t('control.fanPower', { fan: fanLabel(key) })" @input="previewFan(key, $event)" @change="sendFan(key, $event)" />
+                  <p v-else class="text-xs text-gray-400 dark:text-gray-500">{{ t('control.telemetryOnly') }}</p>
+                </div>
               </div>
             </Card>
 
@@ -2093,11 +2157,13 @@ onUnmounted(() => {
                 <div v-for="[key, value] in lightRows" :key="key" class="flex items-center justify-between gap-3">
                   <label :for="`light-${key}`" class="grow cursor-pointer text-sm/6 font-light text-gray-900 dark:text-white">{{ lightLabel(key) }}</label>
                   <Switch
+                    v-if="capabilities?.lightControl && value.controllable"
                     :id="`light-${key}`"
-                    :model-value="value === 'on'"
+                    :model-value="value.mode === 'on'"
                     :label="lightLabel(key)"
                     @update:model-value="toggleLight(key, $event)"
                   />
+                  <span v-else class="text-xs text-gray-400 dark:text-gray-500">{{ value.mode }} · {{ t('control.telemetryOnly') }}</span>
                 </div>
               </div>
             </Card>
