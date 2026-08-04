@@ -1473,11 +1473,17 @@ async function stopCameraSession() {
 
 async function saveSnapshot() {
   if (!activePrinter.value || cameraLoading.value || !capabilities.value?.cameraSnapshot) return
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  const destination = await saveFileDialog({
+    defaultPath: `${activePrinter.value.name.replace(/[^\w.-]+/g, '-')}-${stamp}.jpg`,
+    filters: [{ name: 'JPEG', extensions: ['jpg', 'jpeg'] }],
+  })
+  if (!destination) return
   cameraLoading.value = true
   cameraError.value = undefined
   try {
-    cameraUrl.value = (await invoke<CameraSnapshot>('printer_camera_snapshot', { name: activePrinter.value.name })).dataUrl
-    showToast(t('camera.snapshotCaptured'))
+    cameraUrl.value = (await invoke<CameraSnapshot>('printer_camera_snapshot', { name: activePrinter.value.name, destination })).dataUrl
+    showToast(t('camera.snapshotSaved'))
   } catch (reason) {
     cameraError.value = message(reason)
   } finally {

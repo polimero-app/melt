@@ -190,7 +190,6 @@ export type MessageKey =
   | "camera.refreshFeed"
   | "camera.restored"
   | "camera.snapshotSaved"
-  | "camera.snapshotCaptured"
   | "materials.title"
   | "materials.externalSpool"
   | "materials.slotExternal"
@@ -595,8 +594,7 @@ const messages: Record<Locale, Messages> = {
     "camera.checkConnection": "Check the printer connection and try again.",
     "camera.refreshFeed": "Refresh feed",
     "camera.restored": "Camera connection restored",
-    "camera.snapshotSaved": "Snapshot saved to file library",
-    "camera.snapshotCaptured": "Snapshot captured",
+    "camera.snapshotSaved": "Snapshot saved",
     "materials.title": "Filament Spools & Material Systems",
     "materials.externalSpool": "External spool",
     "materials.slotExternal": "EXT",
@@ -998,8 +996,7 @@ const messages: Record<Locale, Messages> = {
     "camera.checkConnection": "Verifique a conexão da impressora e tente novamente.",
     "camera.refreshFeed": "Atualizar transmissão",
     "camera.restored": "Conexão da câmera restabelecida",
-    "camera.snapshotSaved": "Captura salva na biblioteca de arquivos",
-    "camera.snapshotCaptured": "Captura realizada",
+    "camera.snapshotSaved": "Captura salva",
     "materials.title": "Carretéis de filamento e sistemas de material",
     "materials.externalSpool": "Carretel externo",
     "materials.slotExternal": "EXT",

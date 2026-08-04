@@ -2526,6 +2526,7 @@ fn printer_emergency_stop(
 #[tauri::command(async)]
 fn printer_camera_snapshot(
     name: String,
+    destination: Option<String>,
     manager: tauri::State<'_, CameraManager>,
 ) -> Result<CameraSnapshot, CommandError> {
     let printer = desktop_printer(&name, Operation::CameraSnapshot)?;
@@ -2549,6 +2550,11 @@ fn printer_camera_snapshot(
             }
         }
     };
+    if let Some(destination) = destination {
+        std::fs::write(&destination, image.as_ref()).map_err(|_| {
+            CommandError::of("fileDestinationUnwritable", Operation::CameraSnapshot)
+        })?;
+    }
     Ok(CameraSnapshot {
         data_url: format!("data:image/jpeg;base64,{}", STANDARD.encode(image.as_ref())),
     })
