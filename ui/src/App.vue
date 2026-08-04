@@ -2352,10 +2352,10 @@ onUnmounted(() => {
                 <dd :class="printer.insecure ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-300'">{{ printer.insecure ? t('printersView.tlsDisabled') : t('printersView.tlsVerified') }}</dd>
               </div>
             </dl>
-            <div class="mt-5 flex gap-2">
-              <Button class="flex-1" @click="selectPrinter(printer.name)"><PhCards class="size-4" aria-hidden="true" /> {{ t('printersView.openControl') }}</Button>
-              <Button class="flex-1" @click="openEdit(printer)"><PhPencilSimple class="size-4" aria-hidden="true" /> {{ t('printersView.editPrinter') }}</Button>
-              <Button class="flex-1" :disabled="tlsRefreshing" :aria-label="t('printersView.refreshCertificateNamed', { name: printer.name })" @click="openTlsRefresh(printer.name)"><PhArrowsClockwise class="size-4" aria-hidden="true" /> {{ t('printersView.refreshCertificate') }}</Button>
+            <div class="mt-5 grid grid-cols-3 gap-2 xl:grid-cols-2">
+              <Button class="min-w-0 w-full xl:col-span-2" @click="selectPrinter(printer.name)"><PhCards class="size-4" aria-hidden="true" /> {{ t('printersView.openControl') }}</Button>
+              <Button class="min-w-0 w-full" @click="openEdit(printer)"><PhPencilSimple class="size-4" aria-hidden="true" /> {{ t('printersView.editPrinter') }}</Button>
+              <Button class="min-w-0 w-full" :disabled="tlsRefreshing" :aria-label="t('printersView.refreshCertificateNamed', { name: printer.name })" @click="openTlsRefresh(printer.name)"><PhArrowsClockwise class="size-4" aria-hidden="true" /> {{ t('printersView.refreshCertificate') }}</Button>
             </div>
           </Card>
           <button
