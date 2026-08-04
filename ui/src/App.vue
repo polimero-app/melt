@@ -1160,13 +1160,6 @@ function adjustTemperature(kind: 'nozzle' | 'bed' | 'chamber', delta: number) {
   queueTemperature(kind, base + delta)
 }
 
-function setTemperature(kind: 'nozzle' | 'bed' | 'chamber', event: Event) {
-  if (!activePrinter.value) return
-  const target = Number((event.target as HTMLInputElement).value)
-  if (!Number.isFinite(target)) return
-  queueTemperature(kind, target)
-}
-
 async function sendFan(fan: string, event: Event) {
   delete fanDrafts.value[fan]
   if (!activePrinter.value) return
@@ -2051,18 +2044,6 @@ onUnmounted(() => {
                     <p class="font-mono text-sm text-gray-500 dark:text-gray-400"><span class="font-bold">{{ formatTemperature(row.value.currentCelsius) }}</span> °C <span aria-hidden="true">/</span> <span class="font-bold">{{ row.value.targetCelsius === undefined ? '—' : formatTemperature(row.value.targetCelsius) }}</span> °C</p>
                   </div>
                   <div v-if="capabilities?.temperatureWrite" class="flex items-center gap-1">
-                    <input
-                      :name="`temperature-${row.key}`"
-                      type="number"
-                      min="0"
-                      step="5"
-                      :max="temperatureMaximums[row.key]"
-                      :value="row.value.targetCelsius ?? row.value.currentCelsius"
-                      :disabled="selectedStatus?.state !== 'idle'"
-                      :aria-label="t('control.setTemp', { sensor: t(temperatureKeys[row.key]) })"
-                      class="w-16 rounded-md bg-white px-2 py-1 text-right font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 dark:bg-white/5 dark:text-white dark:outline-white/10"
-                      @change="setTemperature(row.key, $event)"
-                    />
                     <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.decreaseTemp', { sensor: t(temperatureKeys[row.key]) })" @click="adjustTemperature(row.key, -5)"><PhMinus class="size-3.5" aria-hidden="true" /></IconButton>
                     <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.increaseTemp', { sensor: t(temperatureKeys[row.key]) })" @click="adjustTemperature(row.key, 5)"><PhPlus class="size-3.5" aria-hidden="true" /></IconButton>
                   </div>
