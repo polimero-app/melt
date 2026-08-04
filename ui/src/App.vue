@@ -6,6 +6,7 @@ import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plug
 import { locales, preferredLocale, translate, type Locale, type MessageKey } from './i18n'
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration, relativeAge } from './formatting'
+import { printTargetState } from './printing'
 import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
 import SlideOver from './components/SlideOver.vue'
@@ -358,6 +359,7 @@ const libraryParent = ref<string>()
 const libraryBreadcrumbs = ref<LibraryBreadcrumb[]>([])
 const printTarget = ref<FileEntry>()
 const printBusy = ref(false)
+const currentPrintTargetState = computed(() => printTargetState(printers.value.length, printBusy.value))
 const printStage = ref<PrintStageEvent>()
 const printPackage = ref<PrintPackage>()
 const printPlate = ref<number>()
@@ -2632,7 +2634,7 @@ onUnmounted(() => {
           </select>
         </label>
       </div>
-      <div v-if="printBusy" class="mt-4 space-y-2">
+      <div v-if="currentPrintTargetState === 'busy'" class="mt-4 space-y-2">
         <div class="flex justify-between text-xs text-gray-500 dark:text-gray-400">
           <span>{{ t('common.sending') }}</span>
           <span>{{ printStage?.percent ?? 0 }}%</span>
@@ -2641,7 +2643,7 @@ onUnmounted(() => {
           <div class="h-full rounded-full bg-cyan-600 transition-[width]" :style="{ width: `${printStage?.percent ?? 0}%` }"></div>
         </div>
       </div>
-      <p v-else class="text-sm text-gray-500 dark:text-gray-400">{{ t('filesView.noPrinters') }}</p>
+      <p v-else-if="currentPrintTargetState === 'empty'" class="text-sm text-gray-500 dark:text-gray-400">{{ t('filesView.noPrinters') }}</p>
       <template #footer>
         <Button :disabled="printBusy" @click="printTarget = undefined">{{ t('common.cancel') }}</Button>
       </template>
