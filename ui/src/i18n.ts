@@ -133,6 +133,7 @@ export type MessageKey =
   | "control.faultUnrecoverable"
   | "control.currentJob"
   | "control.complete"
+  | "control.preparing"
   | "control.remaining"
   | "control.timeUnavailable"
   | "control.layer"
@@ -513,6 +514,7 @@ const messages: Record<Locale, Messages> = {
     "control.faultUnrecoverable": "not recoverable",
     "control.currentJob": "Current job",
     "control.complete": "{percent}% complete",
+    "control.preparing": "Preparing — heating and levelling",
     "control.remaining": "{duration} left",
     "control.timeUnavailable": "Time estimate unavailable",
     "control.layer": "Layer {current} / {total}",
@@ -890,6 +892,7 @@ const messages: Record<Locale, Messages> = {
     "control.faultUnrecoverable": "não recuperável",
     "control.currentJob": "Trabalho atual",
     "control.complete": "{percent}% concluído",
+    "control.preparing": "Preparando — aquecendo e nivelando",
     "control.remaining": "faltam {duration}",
     "control.timeUnavailable": "Estimativa de tempo indisponível",
     "control.layer": "Camada {current} / {total}",

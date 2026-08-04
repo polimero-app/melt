@@ -165,7 +165,7 @@ type PrinterStatus = {
   state: 'idle' | 'printing' | 'paused' | 'error' | 'unknown'
   temperatures?: { nozzle?: Temperature; bed?: Temperature; chamber?: Temperature }
   job?: { name: string }
-  progress?: { percent: number; currentLayer?: number; totalLayers?: number }
+  progress?: { percent: number; preparationPercent?: number; currentLayer?: number; totalLayers?: number }
   timeEstimates?: { elapsedSeconds: number; remainingSeconds?: number; totalSeconds?: number }
   errors: { code: string; message: string; rawCode?: string; recoverable?: boolean }[]
   warnings: { code: string; message: string }[]
@@ -495,6 +495,11 @@ const badgeMessageKeys: Record<PrinterBadge, MessageKey> = {
 }
 const statusLabel = (badge: PrinterBadge) => t(badgeMessageKeys[badge])
 const progressPercent = computed(() => selectedStatus.value?.progress?.percent ?? 0)
+const preparingPercent = computed(() => {
+  const progress = selectedStatus.value?.progress
+  if (!progress || progress.percent > 0) return undefined
+  return progress.preparationPercent
+})
 const statusFaults = computed(() => {
   const status = selectedStatus.value
   if (!status) return []
@@ -1818,9 +1823,21 @@ onUnmounted(() => {
                       {{ t('control.remaining', { duration: formatDuration(selectedStatus.timeEstimates.remainingSeconds) }) }}
                     </span>
                   </div>
-                  <div class="overflow-hidden rounded-full bg-gray-200 dark:bg-white/10">
-                    <div class="h-2 rounded-full bg-cyan-600 dark:bg-cyan-500" :style="{ width: `${progressPercent}%` }"></div>
+                  <div
+                    class="overflow-hidden rounded-full bg-gray-200 dark:bg-white/10"
+                    role="progressbar"
+                    :aria-valuenow="preparingPercent ?? progressPercent"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    :aria-label="preparingPercent !== undefined ? t('control.preparing') : t('control.complete', { percent: progressPercent })"
+                  >
+                    <div
+                      class="h-2 rounded-full transition-[width]"
+                      :class="preparingPercent !== undefined ? 'bg-amber-500 dark:bg-amber-400' : 'bg-cyan-600 dark:bg-cyan-500'"
+                      :style="{ width: `${preparingPercent ?? progressPercent}%` }"
+                    ></div>
                   </div>
+                  <p v-if="preparingPercent !== undefined" class="mt-2 text-xs text-amber-700 dark:text-amber-300">{{ t('control.preparing') }}</p>
                 </div>
                 <div class="mt-6 flex gap-2">
                   <Button
