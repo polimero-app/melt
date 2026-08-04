@@ -61,6 +61,9 @@ export type MessageKey =
   | "addition.error"
   | "addition.discover"
   | "addition.useDiscovery"
+  | "addition.discardTitle"
+  | "addition.discardDescription"
+  | "addition.discardConfirm"
   | "tls.title"
   | "tls.description"
   | "tls.refresh"
@@ -236,6 +239,8 @@ export type MessageKey =
   | "settingsView.slicerName"
   | "settingsView.slicerPath"
   | "settingsView.addSlicer"
+  | "settingsView.slicerNameRequired"
+  | "settingsView.slicerPathRequired"
   | "settingsView.removeSlicer"
   | "settingsView.removeNamedSlicer"
   | "settingsView.slicerRemoveTitle"
@@ -459,6 +464,9 @@ const messages: Record<Locale, Messages> = {
     "addition.error": "We could not save this profile.",
     "addition.discover": "Find Bambu printers on this network",
     "addition.useDiscovery": "Use this printer",
+    "addition.discardTitle": "Discard printer changes?",
+    "addition.discardDescription": "The profile information you entered will be lost.",
+    "addition.discardConfirm": "Discard changes",
     "tls.title": "TLS certificate",
     "tls.description": "Capture and review the printer certificate before replacing its local pin.",
     "tls.refresh": "Capture new certificate",
@@ -634,6 +642,8 @@ const messages: Record<Locale, Messages> = {
     "settingsView.slicerName": "Name",
     "settingsView.slicerPath": "Executable path",
     "settingsView.addSlicer": "Add slicer",
+    "settingsView.slicerNameRequired": "Enter a slicer name.",
+    "settingsView.slicerPathRequired": "Enter the executable path.",
     "settingsView.removeSlicer": "Remove slicer",
     "settingsView.removeNamedSlicer": "Remove {name}",
     "settingsView.slicerRemoveTitle": "Remove {name}?",
@@ -854,6 +864,9 @@ const messages: Record<Locale, Messages> = {
     "addition.error": "Não foi possível salvar este perfil.",
     "addition.discover": "Encontrar impressoras Bambu nesta rede",
     "addition.useDiscovery": "Usar esta impressora",
+    "addition.discardTitle": "Descartar alterações da impressora?",
+    "addition.discardDescription": "As informações de perfil inseridas serão perdidas.",
+    "addition.discardConfirm": "Descartar alterações",
     "tls.title": "Certificado TLS",
     "tls.description": "Capture e revise o certificado da impressora antes de substituir a fixação local.",
     "tls.refresh": "Capturar novo certificado",
@@ -1029,6 +1042,8 @@ const messages: Record<Locale, Messages> = {
     "settingsView.slicerName": "Nome",
     "settingsView.slicerPath": "Caminho do executável",
     "settingsView.addSlicer": "Adicionar fatiador",
+    "settingsView.slicerNameRequired": "Informe um nome para o fatiador.",
+    "settingsView.slicerPathRequired": "Informe o caminho do executável.",
     "settingsView.removeSlicer": "Remover fatiador",
     "settingsView.removeNamedSlicer": "Remover {name}",
     "settingsView.slicerRemoveTitle": "Remover {name}?",

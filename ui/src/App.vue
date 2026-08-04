@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, shallowRef, watch, watchEffect, type Component } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch, watchEffect, type Component } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog'
@@ -9,6 +9,7 @@ import { clampTarget, formatDuration, relativeAge } from './formatting'
 import { printTargetState } from './printing'
 import { cameraViewState, printerStateMessageKey } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
+import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
 import SlideOver from './components/SlideOver.vue'
@@ -460,7 +461,11 @@ const slicers = ref<SlicerSetting[]>(defaultSlicers)
 const slicerDraft = ref({ name: '', path: '' })
 const slicerBusy = ref(false)
 const slicerError = ref<string>()
-const draft = ref({
+const slicerNameError = ref<string>()
+const slicerPathError = ref<string>()
+const slicerNameInput = ref<HTMLInputElement>()
+const slicerPathInput = ref<HTMLInputElement>()
+const draft = ref<PrinterDraftFields>({
   name: '',
   driver: '',
   host: '',
@@ -469,8 +474,10 @@ const draft = ref({
   insecure: false,
   accessCode: '',
 })
+const additionBaseline = ref<PrinterDraftFields>({ ...draft.value })
 const editingPrinter = ref<string>()
 const editRemoved = ref(false)
+const additionDirty = computed(() => additionOpen.value && !printerDraftsMatch(draft.value, additionBaseline.value))
 
 function resetAdditionPanelState() {
   additionError.value = undefined
@@ -489,6 +496,7 @@ function openEdit(printer: Printer) {
     accessCode: '',
     insecure: printer.insecure,
   }
+  additionBaseline.value = { ...draft.value }
   resetAdditionPanelState()
   additionOpen.value = true
 }
@@ -724,6 +732,14 @@ async function updateSlicerEnabled(name: string, enabled: boolean) {
 
 async function addSlicer() {
   if (slicerBusy.value) return
+  const validation = validateSlicerDraft(slicerDraft.value)
+  slicerNameError.value = validation.nameRequired ? t('settingsView.slicerNameRequired') : undefined
+  slicerPathError.value = validation.pathRequired ? t('settingsView.slicerPathRequired') : undefined
+  if (validation.nameRequired || validation.pathRequired) {
+    await nextTick()
+    ;(validation.nameRequired ? slicerNameInput.value : slicerPathInput.value)?.focus()
+    return
+  }
   slicerBusy.value = true
   slicerError.value = undefined
   try {
@@ -731,6 +747,8 @@ async function addSlicer() {
       request: { name: slicerDraft.value.name.trim(), path: slicerDraft.value.path.trim(), enabled: true },
     })
     slicerDraft.value = { name: '', path: '' }
+    slicerNameError.value = undefined
+    slicerPathError.value = undefined
   } catch (reason) {
     slicerError.value = message(reason)
   } finally {
@@ -928,16 +946,35 @@ function openAddition() {
     insecure: false,
     accessCode: '',
   }
+  additionBaseline.value = { ...draft.value }
   resetAdditionPanelState()
   additionOpen.value = true
   void discoverPrinters()
 }
 
-function closeAddition() {
-  if (adding.value) return
+function closeAdditionImmediately() {
   additionOpen.value = false
   editingPrinter.value = undefined
   editRemoved.value = false
+}
+
+function closeAddition() {
+  if (adding.value) return
+  if (!additionDirty.value) {
+    closeAdditionImmediately()
+    return
+  }
+  askConfirmation(
+    { title: 'addition.discardTitle', description: 'addition.discardDescription', confirm: 'addition.discardConfirm' },
+    {},
+    async () => closeAdditionImmediately(),
+  )
+}
+
+function warnBeforeUnload(event: BeforeUnloadEvent) {
+  if (!additionDirty.value) return
+  event.preventDefault()
+  event.returnValue = ''
 }
 
 async function discoverPrinters() {
@@ -1628,6 +1665,7 @@ async function printToPrinter(name: string) {
 }
 
 onMounted(() => {
+  window.addEventListener('beforeunload', warnBeforeUnload)
   systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
   systemPrefersDark.value = systemThemeQuery.matches
   systemThemeQuery.addEventListener('change', handleSystemThemeChange)
@@ -1672,6 +1710,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('beforeunload', warnBeforeUnload)
   void stopCamera()
   systemThemeQuery?.removeEventListener('change', handleSystemThemeChange)
   monitorUnlisten?.()
@@ -2368,32 +2407,40 @@ onUnmounted(() => {
               </div>
               <p v-if="!slicers.length" class="px-4 py-5 text-sm text-gray-500 sm:px-6 dark:text-gray-400">{{ t('settingsView.noSlicers') }}</p>
             </div>
-            <form autocomplete="off" class="flex flex-wrap items-end gap-2 border-t border-gray-200 px-4 py-4 sm:px-6 dark:border-white/10" @submit.prevent="addSlicer">
-              <div class="min-w-0 flex-1">
+            <form autocomplete="off" class="grid gap-3 border-t border-gray-200 px-4 py-4 sm:px-6 dark:border-white/10" @submit.prevent="addSlicer">
+              <div class="min-w-0">
                 <label for="slicer-name" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.slicerName') }}</label>
                 <input
+                  ref="slicerNameInput"
                   id="slicer-name"
                   name="slicer-name"
                   v-model="slicerDraft.name"
                   type="text"
                   autocomplete="off"
-                  :aria-describedby="slicerError ? 'slicer-error' : undefined"
+                  :aria-invalid="Boolean(slicerNameError)"
+                  :aria-describedby="[slicerNameError && 'slicer-name-error', slicerError && 'slicer-error'].filter(Boolean).join(' ') || undefined"
                   class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+                  @input="slicerNameError = undefined"
                 />
+                <p v-if="slicerNameError" id="slicer-name-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ slicerNameError }}</p>
               </div>
-              <div class="min-w-0 flex-[2]">
+              <div class="min-w-0">
                 <label for="slicer-path" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.slicerPath') }}</label>
                 <input
+                  ref="slicerPathInput"
                   id="slicer-path"
                   name="slicer-path"
                   v-model="slicerDraft.path"
                   type="text"
                   autocomplete="off"
-                  :aria-describedby="slicerError ? 'slicer-error' : undefined"
+                  :aria-invalid="Boolean(slicerPathError)"
+                  :aria-describedby="[slicerPathError && 'slicer-path-error', slicerError && 'slicer-error'].filter(Boolean).join(' ') || undefined"
                   class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+                  @input="slicerPathError = undefined"
                 />
+                <p v-if="slicerPathError" id="slicer-path-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ slicerPathError }}</p>
               </div>
-              <Button type="submit" :disabled="slicerBusy || !slicerDraft.name.trim() || !slicerDraft.path.trim()">{{ t('settingsView.addSlicer') }}</Button>
+              <Button type="submit" class="w-full" :disabled="slicerBusy">{{ t('settingsView.addSlicer') }}</Button>
             </form>
             <p v-if="slicerError" id="slicer-error" class="px-4 pb-4 text-xs text-red-600 sm:px-6 dark:text-red-400" role="alert">{{ slicerError }}</p>
           </Card>
