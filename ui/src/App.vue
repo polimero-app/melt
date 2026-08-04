@@ -836,7 +836,6 @@ async function refreshMonitoring() {
 // view, background re-selections (load, removal fallback) keep the current view.
 async function selectPrinter(name: string, refresh = true, focus = refresh) {
   const request = ++selectionRequest
-  await stopCamera()
   activePrinterId.value = name
   if (focus) activeView.value = 'control'
   fanDrafts.value = {}
@@ -845,6 +844,8 @@ async function selectPrinter(name: string, refresh = true, focus = refresh) {
   filesError.value = undefined
   cameraUrl.value = undefined
   cameraError.value = undefined
+  await stopCamera()
+  if (request !== selectionRequest || activePrinterId.value !== name) return
   try {
     const result = await invoke<{ capabilities: Capabilities }>('printer_capabilities', { name })
     if (request !== selectionRequest || activePrinterId.value !== name) return
