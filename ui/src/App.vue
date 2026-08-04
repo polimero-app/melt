@@ -406,6 +406,10 @@ const sectionTabs = computed<{ view: View; label: string; icon: Component }[]>((
   { view: 'settings', label: t('nav.settings'), icon: PhGearSix },
   { view: 'files', label: t('nav.files'), icon: PhFolder },
 ])
+// Below this the tab strip reads better than a dropdown; above it the strip
+// starts scrolling and the active printer can end up off-screen.
+const PRINTER_TAB_LIMIT = 5
+const usePrinterMenu = computed(() => printers.value.length > PRINTER_TAB_LIMIT)
 const activePrinterId = ref('')
 const theme = ref<'light' | 'dark' | 'system'>(
   (['light', 'dark', 'system'] as const).find((value) => value === localStorage.getItem('theme')) ?? 'system',
@@ -1667,7 +1671,7 @@ onUnmounted(() => {
     <header class="sticky top-0 z-20 bg-white/95 pt-[env(safe-area-inset-top)] backdrop-blur dark:bg-gray-900/95">
       <div class="mx-auto max-w-[1500px] overflow-x-auto px-4 sm:px-8 lg:px-10">
         <nav class="flex min-w-max items-stretch border-b border-gray-200 dark:border-white/10" :aria-label="t('nav.ariaLabel')">
-          <div v-if="printers.length" class="flex items-center space-x-8 pr-8">
+          <div v-if="printers.length && !usePrinterMenu" class="flex items-center space-x-8 pr-8">
             <button
               v-for="printer in printers"
               :key="printer.name"
@@ -1681,6 +1685,19 @@ onUnmounted(() => {
             >
               <span class="size-1.5 shrink-0 rounded-full ring-3" :class="statusDotClasses[badgeFor(printer.name)]"></span>{{ printer.name }}
             </button>
+          </div>
+          <div v-if="usePrinterMenu" class="flex items-center pr-8">
+            <div class="grid grid-cols-1">
+              <select
+                :value="activePrinter?.name"
+                :aria-label="t('nav.selectPrinter')"
+                class="col-start-1 row-start-1 appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800"
+                @change="selectPrinter(($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="printer in printers" :key="printer.name" :value="printer.name">{{ printer.name }} · {{ statusLabel(badgeFor(printer.name)) }}</option>
+              </select>
+              <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-2 size-4 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
+            </div>
           </div>
           <span v-if="printers.length" class="my-3 w-px shrink-0 bg-gray-200 dark:bg-white/15" aria-hidden="true"></span>
           <div class="flex items-center space-x-8 pl-8">
