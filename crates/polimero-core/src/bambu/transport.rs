@@ -12,11 +12,12 @@ use std::{
 };
 
 use crate::moonraker::{
-    AmsData, AmsTray, AmsUnit, BambuExtension, Extensions, FanResult, FileEntry, FileEntryType,
-    FileList, FileRoot, GcodePosition, Job, JobResult, LightResult, LightState, MotionResult,
+    AmsData, AmsTray, AmsUnit, BambuExtension, ControlInventory, Extensions, FanControl, FanKind,
+    FanMode, FanResult, FileEntry, FileEntryType, FileList, FileRoot, GcodePosition, Job,
+    JobResult, LightControl, LightKind, LightMode, LightResult, LightState, MotionResult,
     MotionState, PrintMeta, PrinterState, Progress, SpeedResult, Status, StatusError,
-    StatusWarning, Temperature, TemperatureResult, TemperatureTargets, Temperatures, TimeEstimates,
-    Timelapse, Wifi,
+    StatusWarning, Temperature, TemperatureControl, TemperatureKind, TemperatureResult,
+    TemperatureTargets, Temperatures, TimeEstimates, Timelapse, ToolPosition, Wifi,
 };
 use crate::trace::TraceEvent;
 use openssl::ssl::{
@@ -2444,8 +2445,9 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
         Some(_) => PrinterState::Unknown,
         None => return Err(Error::InvalidResponse),
     };
-    let nozzle = heater(print, "nozzle_temper", "nozzle_target_temper");
-    let bed = heater(print, "bed_temper", "bed_target_temper");
+    let nozzle = heater(print, "nozzle_temper", "nozzle_target_temper")
+        .or_else(|| primary_nozzle_temperature(print));
+    let bed = bed_temperature(print);
     let chamber = chamber_temperature(print);
     let temperatures =
         (nozzle.is_some() || bed.is_some() || chamber.is_some()).then_some(Temperatures {
@@ -2500,6 +2502,9 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
             .map(str::to_owned),
         reported_ip: string(print.get("wifi_ip")).filter(|value| !value.is_empty()),
     };
+    let fans = status_fans(print);
+    let lights = lights(report);
+    let controls = control_inventory(print, &temperatures, &fans, &lights);
     Ok(Status {
         state,
         temperatures,
@@ -2507,12 +2512,12 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
         progress,
         errors,
         warnings,
-        fans: status_fans(print),
+        fans,
         time_estimates: time_estimates(print),
         speed_level: speed_level(print),
         wifi: wifi(print),
-        lights: lights(report),
-        controls: Default::default(),
+        lights,
+        controls,
         print_meta: print_meta(print),
         stage: stage(print),
         timelapse: timelapse(print),
@@ -2535,17 +2540,47 @@ fn observed_extruder_count(print: &Map<String, Value>) -> Option<u8> {
         .ok()
 }
 
+fn primary_nozzle_temperature(print: &Map<String, Value>) -> Option<Temperature> {
+    let entries = print
+        .get("device")?
+        .get("extruder")?
+        .get("info")?
+        .as_array()?;
+    let primary = entries
+        .iter()
+        .find(|entry| integer(entry.get("id")) == Some(0))
+        .or_else(|| entries.first())?;
+    packed_temperature(integer(primary.get("temp"))?)
+}
+
+fn bed_temperature(print: &Map<String, Value>) -> Option<Temperature> {
+    heater(print, "bed_temper", "bed_target_temper").or_else(|| {
+        let packed = integer(print.get("device")?.get("bed_temp"))?;
+        packed_temperature(packed)
+    })
+}
+
 /// Chamber readings move between firmware generations: X1-class printers report
 /// a flat `chamber_temper`, while H2-class printers expose the chamber
 /// temperature controller at `device.ctc.info.temp`.
 // ponytail: two known layouts, not a recursive key search. Add another arm if a
 // model reports the chamber somewhere else.
 fn chamber_temperature(print: &Map<String, Value>) -> Option<Temperature> {
-    let current_celsius = number(print.get("chamber_temper"))
-        .or_else(|| number(print.get("device")?.get("ctc")?.get("info")?.get("temp")))?;
+    if let Some(current_celsius) = number(print.get("chamber_temper")) {
+        return Some(Temperature {
+            current_celsius,
+            target_celsius: number(print.get("ctt")),
+        });
+    }
+    let packed = integer(print.get("device")?.get("ctc")?.get("info")?.get("temp"))?;
+    packed_temperature(packed)
+}
+
+fn packed_temperature(value: i64) -> Option<Temperature> {
+    let value: u32 = value.try_into().ok()?;
     Some(Temperature {
-        current_celsius,
-        target_celsius: None,
+        current_celsius: f64::from(value & 0xffff),
+        target_celsius: Some(f64::from(value >> 16)),
     })
 }
 
@@ -2620,6 +2655,305 @@ fn status_fans(print: &Map<String, Value>) -> BTreeMap<String, u8> {
         })
     })
     .collect()
+}
+
+fn control_inventory(
+    print: &Map<String, Value>,
+    temperatures: &Option<Temperatures>,
+    fans: &BTreeMap<String, u8>,
+    lights: &BTreeMap<String, String>,
+) -> ControlInventory {
+    ControlInventory {
+        temperatures: temperature_controls(print, temperatures),
+        fans: airduct_fan_controls(print).unwrap_or_else(|| legacy_fan_controls(print, fans)),
+        lights: light_controls(lights),
+    }
+}
+
+fn temperature_controls(
+    print: &Map<String, Value>,
+    temperatures: &Option<Temperatures>,
+) -> BTreeMap<String, TemperatureControl> {
+    let mut controls = BTreeMap::new();
+    let ranges = |key| numeric_range(print.get(key));
+    let nozzle_range = ranges("nozzle_temp_range");
+    let bed_range = ranges("bed_temp_range");
+    let chamber_range = numeric_range(print.get("support_chamber_temp_edit_range"));
+
+    let dual_nozzles = print
+        .get("device")
+        .and_then(|device| device.get("extruder"))
+        .and_then(|extruder| extruder.get("info"))
+        .and_then(Value::as_array)
+        .filter(|entries| entries.len() > 1);
+    if let Some(entries) = dual_nozzles {
+        for entry in entries {
+            let Some(id) = integer(entry.get("id")) else {
+                continue;
+            };
+            let Some(temperature) = integer(entry.get("temp")).and_then(packed_temperature) else {
+                continue;
+            };
+            let (key, position) = if id == 0 {
+                ("nozzleRight".to_owned(), Some(ToolPosition::Right))
+            } else if id == 1 {
+                ("nozzleLeft".to_owned(), Some(ToolPosition::Left))
+            } else {
+                (format!("nozzle{id}"), None)
+            };
+            controls.insert(
+                key,
+                temperature_control(
+                    TemperatureKind::Nozzle,
+                    position,
+                    &temperature,
+                    nozzle_range,
+                    true,
+                ),
+            );
+        }
+    } else if let Some(temperature) = temperatures
+        .as_ref()
+        .and_then(|temperatures| temperatures.nozzle.as_ref())
+    {
+        controls.insert(
+            "nozzle".to_owned(),
+            temperature_control(
+                TemperatureKind::Nozzle,
+                None,
+                temperature,
+                nozzle_range,
+                true,
+            ),
+        );
+    }
+    if let Some(temperature) = temperatures
+        .as_ref()
+        .and_then(|temperatures| temperatures.bed.as_ref())
+    {
+        controls.insert(
+            "bed".to_owned(),
+            temperature_control(TemperatureKind::Bed, None, temperature, bed_range, true),
+        );
+    }
+    if let Some(temperature) = temperatures
+        .as_ref()
+        .and_then(|temperatures| temperatures.chamber.as_ref())
+    {
+        controls.insert(
+            "chamber".to_owned(),
+            temperature_control(
+                TemperatureKind::Chamber,
+                None,
+                temperature,
+                chamber_range,
+                print
+                    .get("support_chamber_temp_edit")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            ),
+        );
+    }
+    controls
+}
+
+fn temperature_control(
+    kind: TemperatureKind,
+    position: Option<ToolPosition>,
+    temperature: &Temperature,
+    range: Option<(f64, f64)>,
+    controllable: bool,
+) -> TemperatureControl {
+    TemperatureControl {
+        kind,
+        position,
+        current_celsius: Some(temperature.current_celsius),
+        target_celsius: temperature.target_celsius,
+        minimum_celsius: range.map(|range| range.0),
+        maximum_celsius: range.map(|range| range.1),
+        controllable,
+    }
+}
+
+fn numeric_range(value: Option<&Value>) -> Option<(f64, f64)> {
+    let values = value?.as_array()?;
+    Some((number(values.first())?, number(values.get(1))?))
+}
+
+fn legacy_fan_controls(
+    print: &Map<String, Value>,
+    fans: &BTreeMap<String, u8>,
+) -> BTreeMap<String, FanControl> {
+    let aux_supported = print
+        .get("support_aux_fan")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let chamber_supported = print
+        .get("support_chamber_fan")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    fans.iter()
+        .map(|(id, speed)| {
+            let (kind, controllable) = match id.as_str() {
+                "partCooling" => (FanKind::Parts, true),
+                "auxiliary" => (FanKind::Auxiliary, aux_supported),
+                "chamber" => (FanKind::Exhaust, chamber_supported),
+                "heatbreak" => (FanKind::Hotend, false),
+                _ => (FanKind::Unknown, false),
+            };
+            (
+                id.clone(),
+                FanControl {
+                    kind,
+                    speed_percent: Some(*speed),
+                    mode: FanMode::Manual,
+                    minimum_percent: 0,
+                    maximum_percent: 100,
+                    controllable,
+                },
+            )
+        })
+        .collect()
+}
+
+fn airduct_fan_controls(print: &Map<String, Value>) -> Option<BTreeMap<String, FanControl>> {
+    let airduct = print.get("device")?.get("airduct")?;
+    let current_mode = integer(airduct.get("modeCur")).unwrap_or(-1);
+    let mode_rules = airduct
+        .get("modeList")
+        .and_then(Value::as_array)
+        .and_then(|modes| {
+            modes
+                .iter()
+                .find(|mode| integer(mode.get("modeId")).is_some_and(|mode| mode == current_mode))
+        })
+        .map(|mode| {
+            (
+                encoded_fan_ids(mode.get("ctrl")),
+                encoded_fan_ids(mode.get("off")),
+            )
+        });
+    let mut controls = BTreeMap::new();
+    for part in airduct.get("parts")?.as_array()? {
+        let Some(packed_id) = integer(part.get("id")) else {
+            continue;
+        };
+        if packed_id & 0xf != 0 {
+            continue;
+        }
+        let part_id = (packed_id >> 4) & 0xff;
+        let kind = fan_kind(part_id);
+        let key = fan_key(part_id);
+        let state = integer(part.get("state")).map(normalize_airduct_percent);
+        let range = integer(part.get("range"))
+            .and_then(|range| u32::try_from(range).ok())
+            .unwrap_or(1000 << 16);
+        let minimum = normalize_airduct_percent(i64::from(range & 0xffff));
+        let maximum = normalize_airduct_percent(i64::from(range >> 16));
+        let mode = match &mode_rules {
+            None => FanMode::Manual,
+            Some((controllable, _)) if controllable.contains(&part_id) => FanMode::Manual,
+            Some((_, forced_off)) if forced_off.contains(&part_id) => FanMode::Off,
+            Some(_) => FanMode::Auto,
+        };
+        controls.insert(
+            key,
+            FanControl {
+                kind,
+                speed_percent: state,
+                mode,
+                minimum_percent: minimum,
+                maximum_percent: maximum.max(minimum),
+                controllable: mode == FanMode::Manual,
+            },
+        );
+    }
+    Some(controls)
+}
+
+fn encoded_fan_ids(value: Option<&Value>) -> Vec<i64> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|value| integer(Some(value)))
+        .map(|value| value >> 4)
+        .collect()
+}
+
+fn normalize_airduct_percent(value: i64) -> u8 {
+    let percent = if value > 100 { value / 10 } else { value };
+    percent.clamp(0, 100).try_into().unwrap_or_default()
+}
+
+fn fan_kind(id: i64) -> FanKind {
+    match id {
+        0 | 4 => FanKind::Hotend,
+        1 => FanKind::Parts,
+        2 | 10 => FanKind::Auxiliary,
+        3 => FanKind::Exhaust,
+        5 => FanKind::Mainboard,
+        6 => FanKind::Heat,
+        _ => FanKind::Unknown,
+    }
+}
+
+fn fan_key(id: i64) -> String {
+    match id {
+        0 => "hotend".to_owned(),
+        1 => "parts".to_owned(),
+        2 => "auxiliary".to_owned(),
+        3 => "exhaust".to_owned(),
+        4 => "hotendSecondary".to_owned(),
+        5 => "mainboard".to_owned(),
+        6 => "heat".to_owned(),
+        10 => "auxiliarySecondary".to_owned(),
+        _ => format!("fan{id}"),
+    }
+}
+
+fn light_controls(lights: &BTreeMap<String, String>) -> BTreeMap<String, LightControl> {
+    let mut controls = BTreeMap::new();
+    if let Some(mode) = lights
+        .get("chamber_light")
+        .or_else(|| lights.get("chamber_light2"))
+    {
+        controls.insert(
+            "lamp".to_owned(),
+            LightControl {
+                kind: LightKind::Lamp,
+                mode: light_mode(mode),
+                controllable: lights.contains_key("chamber_light"),
+            },
+        );
+    }
+    for (id, mode) in lights {
+        if matches!(id.as_str(), "chamber_light" | "chamber_light2") {
+            continue;
+        }
+        controls.insert(
+            id.clone(),
+            LightControl {
+                kind: if id == "work_light" {
+                    LightKind::Work
+                } else {
+                    LightKind::Unknown
+                },
+                mode: light_mode(mode),
+                controllable: false,
+            },
+        );
+    }
+    controls
+}
+
+fn light_mode(mode: &str) -> LightMode {
+    match mode {
+        "on" => LightMode::On,
+        "off" => LightMode::Off,
+        "flashing" => LightMode::Flashing,
+        _ => LightMode::Unknown,
+    }
 }
 
 /// Remaining time is reported in minutes; H2-class firmware renames the field.
@@ -3856,6 +4190,58 @@ mod tests {
                 .and_then(|extension| extension.extruder_count),
             Some(2)
         );
+    }
+
+    #[test]
+    fn maps_h2_device_controls_with_per_item_modes() {
+        let status = parse_status(
+            br#"{"print":{"gcode_state":"IDLE","support_chamber_temp_edit":true,"support_chamber_temp_edit_range":[20,60],"nozzle_temp_range":[20,350],"device":{"bed_temp":3932185,"ctc":{"info":{"temp":2949145}},"extruder":{"info":[{"id":0,"temp":14417951},{"id":1,"temp":14090272}]},"airduct":{"modeCur":0,"modeList":[{"modeId":0,"ctrl":[16,32],"off":[48]}],"parts":[{"id":16,"state":750,"range":65536000},{"id":32,"state":500,"range":65536000},{"id":48,"state":0,"range":65536000},{"id":96,"state":400,"range":65536000}]}}},"lights_report":[{"node":"chamber_light","mode":"on"},{"node":"chamber_light2","mode":"on"},{"node":"work_light","mode":"flashing"}]}"#,
+        )
+        .unwrap();
+
+        let right = &status.controls.temperatures["nozzleRight"];
+        assert_eq!(right.position, Some(ToolPosition::Right));
+        assert_eq!(right.current_celsius, Some(31.0));
+        assert_eq!(right.target_celsius, Some(220.0));
+        assert!(right.controllable);
+        let left = &status.controls.temperatures["nozzleLeft"];
+        assert_eq!(left.position, Some(ToolPosition::Left));
+        assert_eq!(left.target_celsius, Some(215.0));
+        let chamber = &status.controls.temperatures["chamber"];
+        assert_eq!(chamber.current_celsius, Some(25.0));
+        assert_eq!(chamber.target_celsius, Some(45.0));
+        assert!(chamber.controllable);
+
+        assert_eq!(status.controls.fans["parts"].mode, FanMode::Manual);
+        assert!(status.controls.fans["parts"].controllable);
+        assert_eq!(status.controls.fans["exhaust"].mode, FanMode::Off);
+        assert!(!status.controls.fans["exhaust"].controllable);
+        assert_eq!(status.controls.fans["heat"].mode, FanMode::Auto);
+        assert_eq!(status.controls.fans["heat"].speed_percent, Some(40));
+
+        assert_eq!(status.controls.lights["lamp"].kind, LightKind::Lamp);
+        assert!(status.controls.lights["lamp"].controllable);
+        assert_eq!(
+            status.controls.lights["work_light"].mode,
+            LightMode::Flashing
+        );
+        assert!(!status.controls.lights["work_light"].controllable);
+        assert!(!status.controls.lights.contains_key("chamber_light2"));
+    }
+
+    #[test]
+    fn keeps_legacy_fan_telemetry_visible_when_not_controllable() {
+        let status = parse_status(
+            br#"{"print":{"gcode_state":"IDLE","support_aux_fan":false,"support_chamber_fan":true,"cooling_fan_speed":"6","big_fan1_speed":"3","big_fan2_speed":"9","heatbreak_fan_speed":"15"}}"#,
+        )
+        .unwrap();
+
+        assert!(status.controls.fans["partCooling"].controllable);
+        assert!(!status.controls.fans["auxiliary"].controllable);
+        assert_eq!(status.controls.fans["auxiliary"].speed_percent, Some(20));
+        assert!(status.controls.fans["chamber"].controllable);
+        assert!(!status.controls.fans["heatbreak"].controllable);
+        assert_eq!(status.controls.fans["heatbreak"].speed_percent, Some(100));
     }
 
     #[test]

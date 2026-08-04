@@ -1551,6 +1551,8 @@ impl Status {
             warnings.push(warning);
         }
         let active = matches!(state, PrinterState::Printing | PrinterState::Paused);
+        let fans = map_fans(&status);
+        let controls = portable_control_inventory(&temperatures, &fans);
 
         Self {
             state,
@@ -1559,14 +1561,14 @@ impl Status {
             progress: active.then_some(progress).flatten(),
             errors: map_errors(&status, state),
             warnings,
-            fans: map_fans(&status),
+            fans,
             // Klipper exposes no portable equivalent for the extended Bambu
             // telemetry, matching the reference implementation.
             time_estimates: None,
             speed_level: None,
             wifi: None,
             lights: BTreeMap::new(),
-            controls: ControlInventory::default(),
+            controls,
             print_meta: None,
             stage: None,
             timelapse: None,
@@ -1575,6 +1577,67 @@ impl Status {
             extensions: Extensions::default(),
         }
     }
+}
+
+fn portable_control_inventory(
+    temperatures: &Option<Temperatures>,
+    fans: &BTreeMap<String, u8>,
+) -> ControlInventory {
+    let mut inventory = ControlInventory::default();
+    let mut add_temperature =
+        |id: &str, kind: TemperatureKind, value: Option<&Temperature>, controllable| {
+            if let Some(value) = value {
+                inventory.temperatures.insert(
+                    id.to_owned(),
+                    TemperatureControl {
+                        kind,
+                        position: None,
+                        current_celsius: Some(value.current_celsius),
+                        target_celsius: value.target_celsius,
+                        minimum_celsius: None,
+                        maximum_celsius: None,
+                        controllable,
+                    },
+                );
+            }
+        };
+    let temperatures = temperatures.as_ref();
+    add_temperature(
+        "nozzle",
+        TemperatureKind::Nozzle,
+        temperatures.and_then(|temperatures| temperatures.nozzle.as_ref()),
+        true,
+    );
+    add_temperature(
+        "bed",
+        TemperatureKind::Bed,
+        temperatures.and_then(|temperatures| temperatures.bed.as_ref()),
+        true,
+    );
+    add_temperature(
+        "chamber",
+        TemperatureKind::Chamber,
+        temperatures.and_then(|temperatures| temperatures.chamber.as_ref()),
+        false,
+    );
+    inventory.fans.extend(fans.iter().map(|(id, speed)| {
+        (
+            id.clone(),
+            FanControl {
+                kind: if id == "partCooling" {
+                    FanKind::Parts
+                } else {
+                    FanKind::Unknown
+                },
+                speed_percent: Some(*speed),
+                mode: FanMode::Manual,
+                minimum_percent: 0,
+                maximum_percent: 100,
+                controllable: id == "partCooling",
+            },
+        )
+    }));
+    inventory
 }
 
 fn normalize_device_path(value: &str) -> Result<String, Error> {
@@ -1989,10 +2052,20 @@ mod tests {
         assert_eq!(status.job.unwrap().name, "cube.gcode");
         assert_eq!(status.progress.unwrap().percent, 61);
         assert_eq!(
-            status.temperatures.unwrap().nozzle.unwrap().current_celsius,
+            status
+                .temperatures
+                .as_ref()
+                .unwrap()
+                .nozzle
+                .as_ref()
+                .unwrap()
+                .current_celsius,
             212.5
         );
         assert_eq!(status.fans["partCooling"], 61);
+        assert!(status.controls.temperatures["nozzle"].controllable);
+        assert_eq!(status.controls.fans["partCooling"].kind, FanKind::Parts);
+        assert!(status.controls.fans["partCooling"].controllable);
     }
 
     #[test]
