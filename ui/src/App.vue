@@ -5,7 +5,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog'
 import { locales, preferredLocale, translate, type Locale, type MessageKey } from './i18n'
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
-import { relativeAge } from './formatting'
+import { formatDuration, relativeAge } from './formatting'
 import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
 import SlideOver from './components/SlideOver.vue'
@@ -166,6 +166,7 @@ type PrinterStatus = {
   temperatures?: { nozzle?: Temperature; bed?: Temperature; chamber?: Temperature }
   job?: { name: string }
   progress?: { percent: number; currentLayer?: number; totalLayers?: number }
+  timeEstimates?: { elapsedSeconds: number; remainingSeconds?: number; totalSeconds?: number }
   errors: { code: string; message: string; rawCode?: string; recoverable?: boolean }[]
   warnings: { code: string; message: string }[]
   fans?: Record<string, number>
@@ -1813,6 +1814,9 @@ onUnmounted(() => {
                 <div class="mt-6">
                   <div class="mb-2 flex justify-between text-xs text-gray-500 dark:text-gray-400">
                     <span>{{ t('control.layer', { current: selectedStatus?.progress?.currentLayer ?? '—', total: selectedStatus?.progress?.totalLayers ?? '—' }) }}</span>
+                    <span v-if="selectedStatus?.timeEstimates?.remainingSeconds !== undefined" class="font-mono">
+                      {{ t('control.remaining', { duration: formatDuration(selectedStatus.timeEstimates.remainingSeconds) }) }}
+                    </span>
                   </div>
                   <div class="overflow-hidden rounded-full bg-gray-200 dark:bg-white/10">
                     <div class="h-2 rounded-full bg-cyan-600 dark:bg-cyan-500" :style="{ width: `${progressPercent}%` }"></div>

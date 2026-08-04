@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { relativeAge } from './formatting'
+import { formatDuration, relativeAge } from './formatting'
 
 describe('relative age', () => {
   const now = Date.parse('2026-08-04T12:00:30.000Z')
@@ -20,5 +20,25 @@ describe('relative age', () => {
 
   it('never reports a negative age when the clocks disagree', () => {
     expect(relativeAge('2026-08-04T12:00:45.000Z', now)?.seconds).toBe(0)
+  })
+})
+
+describe('duration formatting', () => {
+  it('renders hours and minutes above an hour', () => {
+    expect(formatDuration(15120)).toBe('4h 12m')
+  })
+
+  it('renders minutes alone below an hour', () => {
+    expect(formatDuration(720)).toBe('12m')
+  })
+
+  it('collapses sub-minute and negative values', () => {
+    expect(formatDuration(45)).toBe('< 1m')
+    expect(formatDuration(0)).toBe('< 1m')
+    expect(formatDuration(-10)).toBe('< 1m')
+  })
+
+  it('drops a zero minute component', () => {
+    expect(formatDuration(7200)).toBe('2h')
   })
 })

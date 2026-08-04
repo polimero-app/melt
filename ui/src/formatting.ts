@@ -14,3 +14,11 @@ export function relativeAge(observedAt: string | undefined, nowMs: number): Fres
   if (seconds >= RECENT_AFTER_SECONDS) return { seconds, bucket: 'recent' }
   return { seconds, bucket: 'live' }
 }
+
+export function formatDuration(seconds: number): string {
+  if (seconds < 60) return '< 1m'
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (!hours) return `${minutes}m`
+  return minutes ? `${hours}h ${minutes}m` : `${hours}h`
+}
