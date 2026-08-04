@@ -1558,7 +1558,7 @@ onMounted(() => {
       failure: 'settingsView.notifyFailure',
       disconnection: 'settingsView.notifyDisconnected',
     }
-    showToast(`${event.payload.printer}: ${t(labels[event.payload.kind])}`)
+    showToast(`${event.payload.printer}: ${t(labels[event.payload.kind])}`, event.payload.kind === 'completion' ? 'success' : 'error')
   }).then((unlisten) => {
     notificationUnlisten = unlisten
   })
