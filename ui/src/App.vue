@@ -524,6 +524,13 @@ const temperatureRows = computed(() => {
   })
 })
 const fanRows = computed(() => Object.entries(selectedStatus.value?.fans ?? {}))
+// While dragging, the readout follows the pointer; the committed value comes
+// back from the printer on the next status push.
+const fanDrafts = ref<Record<string, number>>({})
+
+function previewFan(key: string, event: Event) {
+  fanDrafts.value[key] = Number((event.target as HTMLInputElement).value)
+}
 const fanMessageKeys: Record<string, MessageKey> = {
   partCooling: 'control.fanPartCooling',
   auxiliary: 'control.fanAuxiliary',
@@ -1060,6 +1067,7 @@ function adjustTemperature(kind: 'nozzle' | 'bed' | 'chamber', delta: number) {
 }
 
 async function sendFan(fan: string, event: Event) {
+  delete fanDrafts.value[fan]
   if (!activePrinter.value) return
   const speed = Number((event.target as HTMLInputElement).value)
   if (!Number.isInteger(speed)) return
@@ -1931,9 +1939,9 @@ onUnmounted(() => {
                 <label v-for="[key, value] in fanRows" :key="key" class="block">
                   <span class="mb-2 flex justify-between">
                     <span class="text-sm/6 font-light text-gray-900 dark:text-white">{{ fanLabel(key) }}</span>
-                    <span class="text-sm/6 text-gray-500 dark:text-gray-400">{{ value }}%</span>
+                    <span class="text-sm/6 text-gray-500 dark:text-gray-400">{{ fanDrafts[key] ?? value }}%</span>
                   </span>
-                      <input :key="`${key}-${value}`" :value="value" :disabled="!capabilities?.fanControl" :name="`fan-${key}`" class="h-1 w-full cursor-pointer accent-cyan-600 disabled:cursor-not-allowed disabled:opacity-35 dark:accent-cyan-400" type="range" min="0" max="100" :aria-label="t('control.fanPower', { fan: fanLabel(key) })" @change="sendFan(key, $event)" />
+                      <input :key="`${key}-${value}`" :value="value" :disabled="!capabilities?.fanControl" :name="`fan-${key}`" class="h-1 w-full cursor-pointer accent-cyan-600 disabled:cursor-not-allowed disabled:opacity-35 dark:accent-cyan-400" type="range" min="0" max="100" :aria-label="t('control.fanPower', { fan: fanLabel(key) })" @input="previewFan(key, $event)" @change="sendFan(key, $event)" />
                 </label>
               </div>
             </Card>
