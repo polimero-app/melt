@@ -81,6 +81,13 @@ bounds. Upload `frag_id` remains at the proven top level. The checked-in
 executable transcript under `fixtures/bambu/tunnel-6000` is the regression
 authority when community prose differs from executable protocol behavior.
 
+Printer-generated 3MF thumbnails are requested read-only through bounded
+`SUB_FILE` candidates, including the firmware-observed `#thumbnail` form.
+Responses must be PNG, at most 16 MiB, no larger than 4096 pixels on either
+axis, and no more than 16 million pixels before they enter memory/disk caches.
+The cache key includes physical printer identity, remote path, size, and
+modification marker; preview failure never affects download or printing.
+
 Polimero treats a reported Bambu model as a capability hint, not a complete
 contract. Runtime observations and safe protocol probes take precedence over
 the model family. Unknown models and unknown fields remain distinct from an

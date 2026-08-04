@@ -741,10 +741,10 @@ impl PreviewCache {
     }
 }
 
-fn preview_cache_key(request: &FilePreviewRequest) -> String {
+fn preview_cache_key(request: &FilePreviewRequest, printer_key: &str) -> String {
     format!(
         "{}:{}:{}:{}",
-        request.name,
+        printer_key,
         request.device_path,
         request.size_bytes.unwrap_or_default(),
         request.modified_at.as_deref().unwrap_or_default()
@@ -2001,7 +2001,11 @@ fn printer_file_preview(
     request: FilePreviewRequest,
     state: tauri::State<'_, PreviewState>,
 ) -> Result<FilePreviewResponse, CommandError> {
-    let cache_key = preview_cache_key(&request);
+    let printer = desktop_printer(&request.name, Operation::FileDownload)?;
+    let cache_key = preview_cache_key(
+        &request,
+        &printer.driver.physical_printer_key(&printer.name),
+    );
     if let Some(preview) = lookup_preview_cache(&state, &cache_key) {
         return Ok(preview);
     }
@@ -2018,7 +2022,6 @@ fn printer_file_preview(
     // doesn't peg every core at once; a disk-cache hit above never reaches
     // this, so cached folders stay instant regardless of the limit.
     let _permit = RENDER_SEMAPHORE.acquire();
-    let printer = desktop_printer(&request.name, Operation::FileDownload)?;
     if extension == "3mf" {
         let mut thumbnail = Vec::new();
         if drivers::file_thumbnail_to(
@@ -2030,7 +2033,7 @@ fn printer_file_preview(
             &mut thumbnail,
         )
         .is_ok()
-            && !thumbnail.is_empty()
+            && preview::validate_png(&thumbnail)
         {
             let preview = FilePreviewResponse {
                 kind: "png",
@@ -2176,6 +2179,9 @@ fn preview_cache_path(cache_key: &str) -> Option<std::path::PathBuf> {
 
 fn read_disk_preview_cache(cache_key: &str) -> Option<FilePreviewResponse> {
     let bytes = std::fs::read(preview_cache_path(cache_key)?).ok()?;
+    if !preview::validate_png(&bytes) {
+        return None;
+    }
     Some(FilePreviewResponse {
         kind: "png",
         data: STANDARD.encode(bytes),
@@ -2218,10 +2224,16 @@ fn extract_3mf_thumbnail(reader: impl Read + std::io::Seek) -> Option<Vec<u8>> {
         fallback.get_or_insert(name);
     }
     let name = chosen.or(fallback)?;
-    let mut entry = archive.by_name(&name).ok()?;
+    let entry = archive.by_name(&name).ok()?;
+    if entry.size() > preview::MAX_PREVIEW_BYTES as u64 {
+        return None;
+    }
     let mut thumbnail = Vec::new();
-    entry.read_to_end(&mut thumbnail).ok()?;
-    Some(thumbnail)
+    entry
+        .take(preview::MAX_PREVIEW_BYTES as u64 + 1)
+        .read_to_end(&mut thumbnail)
+        .ok()?;
+    preview::validate_png(&thumbnail).then_some(thumbnail)
 }
 
 /// Renders (and caches) a model thumbnail from already-in-memory file bytes,
@@ -3275,15 +3287,25 @@ mod tests {
         buffer
     }
 
+    fn test_png(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        bytes.extend_from_slice(&width.to_be_bytes());
+        bytes.extend_from_slice(&height.to_be_bytes());
+        bytes
+    }
+
     #[test]
     fn prefers_a_thumbnail_named_png_over_others() {
+        let icon = test_png(1, 1);
+        let plate = test_png(2, 1);
+        let thumb = test_png(3, 1);
         let bytes = zip_with_entries(&[
-            ("preview/icon.png", b"icon"),
-            ("Metadata/PLATE_1.png", b"plate"),
-            ("Metadata/thumbnail_middle.png", b"thumb"),
+            ("preview/icon.png", &icon),
+            ("Metadata/PLATE_1.png", &plate),
+            ("Metadata/thumbnail_middle.png", &thumb),
         ]);
         let thumbnail = extract_3mf_thumbnail(std::io::Cursor::new(bytes)).unwrap();
-        assert_eq!(thumbnail, b"thumb");
+        assert_eq!(thumbnail, thumb);
     }
 
     /// Real slicers don't all name their preview the same way, so anything
@@ -3291,13 +3313,15 @@ mod tests {
     /// still finds; falling back to the first PNG covers those too.
     #[test]
     fn falls_back_to_the_first_png_when_none_are_named_thumbnail() {
+        let icon = test_png(1, 1);
+        let other = test_png(2, 1);
         let bytes = zip_with_entries(&[
             ("3D/3dmodel.model", b"<model/>"),
-            ("preview/icon.png", b"icon"),
-            ("preview/other.png", b"other"),
+            ("preview/icon.png", &icon),
+            ("preview/other.png", &other),
         ]);
         let thumbnail = extract_3mf_thumbnail(std::io::Cursor::new(bytes)).unwrap();
-        assert_eq!(thumbnail, b"icon");
+        assert_eq!(thumbnail, icon);
     }
 
     #[test]

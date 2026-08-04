@@ -8,11 +8,31 @@ type Triangle = [Point; 3];
 
 const WIDTH: usize = 640;
 const HEIGHT: usize = 360;
+pub const MAX_PREVIEW_BYTES: usize = 16 << 20;
+const MAX_PREVIEW_DIMENSION: u32 = 4096;
+const MAX_PREVIEW_PIXELS: u64 = 16_000_000;
 
 #[derive(Debug)]
 pub enum PreviewError {
     InvalidModel,
     Png,
+}
+
+pub fn validate_png(bytes: &[u8]) -> bool {
+    if bytes.len() < 24
+        || bytes.len() > MAX_PREVIEW_BYTES
+        || &bytes[..8] != b"\x89PNG\r\n\x1a\n"
+        || &bytes[12..16] != b"IHDR"
+    {
+        return false;
+    }
+    let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+    let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+    width > 0
+        && height > 0
+        && width <= MAX_PREVIEW_DIMENSION
+        && height <= MAX_PREVIEW_DIMENSION
+        && u64::from(width) * u64::from(height) <= MAX_PREVIEW_PIXELS
 }
 
 pub fn rasterize(extension: &str, bytes: &[u8]) -> Result<Vec<u8>, PreviewError> {
@@ -362,5 +382,17 @@ mod tests {
             "rendering took {:?}, the triangle cap isn't limiting cost",
             start.elapsed()
         );
+    }
+
+    #[test]
+    fn validates_png_signature_and_bounded_dimensions() {
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend_from_slice(&640_u32.to_be_bytes());
+        png.extend_from_slice(&360_u32.to_be_bytes());
+        assert!(validate_png(&png));
+
+        png[16..20].copy_from_slice(&5000_u32.to_be_bytes());
+        assert!(!validate_png(&png));
+        assert!(!validate_png(b"not a png"));
     }
 }
