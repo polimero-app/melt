@@ -165,6 +165,7 @@ type PrinterStatus = {
   state: 'idle' | 'printing' | 'paused' | 'error' | 'unknown'
   temperatures?: { nozzle?: Temperature; bed?: Temperature; chamber?: Temperature }
   job?: { name: string }
+  printMeta?: { fileName: string; fileSize?: number; plateIndex?: number; plateCount?: number; bedType?: string }
   progress?: { percent: number; preparationPercent?: number; currentLayer?: number; totalLayers?: number }
   timeEstimates?: { elapsedSeconds: number; remainingSeconds?: number; totalSeconds?: number }
   errors: { code: string; message: string; rawCode?: string; recoverable?: boolean }[]
@@ -499,6 +500,13 @@ const preparingPercent = computed(() => {
   const progress = selectedStatus.value?.progress
   if (!progress || progress.percent > 0) return undefined
   return progress.preparationPercent
+})
+// The printing file lives on the printer, so a preview is only possible when
+// the same name happens to sit in the local library. No match, no thumbnail.
+const jobThumbnail = computed(() => {
+  const name = selectedStatus.value?.job?.name
+  if (!name) return undefined
+  return libraryFiles.value.find((file) => file.type === 'file' && file.name === name)
 })
 const statusFaults = computed(() => {
   const status = selectedStatus.value
@@ -1807,13 +1815,26 @@ onUnmounted(() => {
               </CardHeader>
               <div class="px-4 py-5 sm:p-6">
                 <div class="flex items-start gap-3">
-                  <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-cyan-50 text-cyan-600 dark:bg-cyan-400/10 dark:text-cyan-400">
+                  <ModelThumbnail
+                    v-if="jobThumbnail"
+                    :path="jobThumbnail.devicePath"
+                    :size-bytes="jobThumbnail.sizeBytes"
+                    :modified-at="jobThumbnail.modifiedAt"
+                    :alt="jobThumbnail.name"
+                    class="size-10 shrink-0 overflow-hidden rounded-lg"
+                  />
+                  <div v-else class="grid size-10 shrink-0 place-items-center rounded-lg bg-cyan-50 text-cyan-600 dark:bg-cyan-400/10 dark:text-cyan-400">
                     <PhHexagon v-if="!selectedStatus?.job" class="size-5" />
                     <PhCube v-else class="size-5" />
                   </div>
                   <div class="min-w-0">
                     <p class="truncate font-mono text-sm font-semibold text-gray-900 dark:text-white">{{ selectedStatus?.job?.name ?? t('dashboard.noJob') }}</p>
-                    <p class="mt-1 font-mono text-xs text-gray-500 capitalize dark:text-gray-400">{{ selectedStatus?.state ?? 'unknown' }}</p>
+                    <p class="mt-1 font-mono text-xs text-gray-500 capitalize dark:text-gray-400">
+                      {{ selectedStatus?.state ?? 'unknown' }}
+                      <span v-if="selectedStatus?.printMeta?.plateIndex !== undefined">
+                        · {{ t('control.plateOf', { index: selectedStatus.printMeta.plateIndex, total: selectedStatus.printMeta.plateCount ?? '—' }) }}
+                      </span>
+                    </p>
                   </div>
                 </div>
                 <div class="mt-6">
