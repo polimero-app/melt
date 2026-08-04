@@ -1455,9 +1455,6 @@ const printerActionItems = computed<ActionMenuItem[]>(() => {
   if (capabilities.value?.tlsRefresh) {
     items.push({ label: t('printersView.refreshCertificate'), icon: PhArrowsClockwise, onSelect: () => void openTlsRefresh(activePrinter.value!.name) })
   }
-  if (capabilities.value?.emergencyStop) {
-    items.push({ label: t('dashboard.emergency'), icon: PhStop, danger: true, onSelect: () => void emergencyStop() })
-  }
   items.push({ label: t('printersView.removePrinter'), icon: PhTrash, danger: true, onSelect: () => void removePrinter(activePrinter.value!.name) })
   return items
 })
@@ -1734,6 +1731,12 @@ onUnmounted(() => {
             >
               <component :is="wifiSignal(wifiDbm).icon" class="size-3.5" />{{ wifiDbm }} dBm
             </span>
+            <Button
+              v-if="capabilities?.emergencyStop"
+              variant="danger"
+              :disabled="!activeHasStatus"
+              @click="emergencyStop"
+            ><PhStop class="size-4" /> {{ t('dashboard.emergency') }}</Button>
             <ActionMenu :label="t('control.printerActions')" :items="printerActionItems" />
           </div>
         </div>
