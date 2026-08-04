@@ -29,7 +29,7 @@ pub enum PreviewError {
 pub fn first_model_in_zip(reader: impl Read + Seek) -> Result<(String, Vec<u8>), PreviewError> {
     let mut archive = zip::ZipArchive::new(reader).map_err(|_| PreviewError::InvalidModel)?;
     for index in 0..archive.len() {
-        let mut entry = archive
+        let entry = archive
             .by_index(index)
             .map_err(|_| PreviewError::InvalidModel)?;
         if entry.is_dir() {
