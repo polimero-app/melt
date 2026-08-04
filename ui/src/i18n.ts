@@ -177,6 +177,8 @@ export type MessageKey =
   | "control.observedAtTitle"
   | "camera.title"
   | "camera.live"
+  | "camera.snapshotLabel"
+  | "camera.loading"
   | "camera.refresh"
   | "camera.snapshot"
   | "camera.maximize"
@@ -571,6 +573,8 @@ const messages: Record<Locale, Messages> = {
     "control.observedAtTitle": "Age of the last reading received from the printer",
     "camera.title": "Camera",
     "camera.live": "LIVE",
+    "camera.snapshotLabel": "SNAPSHOT",
+    "camera.loading": "LOADING…",
     "camera.refresh": "Refresh camera",
     "camera.snapshot": "Save snapshot",
     "camera.maximize": "Maximize camera",
@@ -962,6 +966,8 @@ const messages: Record<Locale, Messages> = {
     "control.observedAtTitle": "Idade da última leitura recebida da impressora",
     "camera.title": "Câmera",
     "camera.live": "AO VIVO",
+    "camera.snapshotLabel": "CAPTURA",
+    "camera.loading": "CARREGANDO…",
     "camera.refresh": "Atualizar câmera",
     "camera.snapshot": "Salvar captura",
     "camera.maximize": "Maximizar câmera",

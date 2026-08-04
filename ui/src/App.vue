@@ -7,6 +7,7 @@ import { locales, preferredLocale, translate, type Locale, type MessageKey } fro
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration, relativeAge } from './formatting'
 import { printTargetState } from './printing'
+import { cameraViewState, printerStateMessageKey } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
@@ -602,7 +603,25 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
     })),
   }))
 })
-const cameraOnline = computed(() => Boolean(cameraPeer.value || cameraUrl.value))
+const cameraHasMedia = computed(() => Boolean(cameraPeer.value || cameraUrl.value))
+const cameraState = computed(() => cameraViewState({
+  loading: cameraLoading.value,
+  hasPeer: Boolean(cameraPeer.value),
+  hasMedia: Boolean(cameraUrl.value),
+  hasStreamTransport: cameraTransport.value !== undefined,
+}))
+const cameraStateLabel = computed(() => t({
+  live: 'camera.live',
+  snapshot: 'camera.snapshotLabel',
+  loading: 'camera.loading',
+  offline: 'status.offlineLabel',
+}[cameraState.value] as MessageKey))
+const cameraStateClasses = computed(() => ({
+  live: 'bg-green-100 fill-green-500 text-green-700 dark:bg-green-400/10 dark:fill-green-400 dark:text-green-400',
+  snapshot: 'bg-cyan-100 fill-cyan-500 text-cyan-700 dark:bg-cyan-400/10 dark:fill-cyan-400 dark:text-cyan-400',
+  loading: 'bg-yellow-100 fill-yellow-500 text-yellow-800 dark:bg-yellow-400/10 dark:fill-yellow-400 dark:text-yellow-500',
+  offline: 'bg-gray-100 fill-gray-400 text-gray-600 dark:bg-white/10 dark:fill-gray-500 dark:text-gray-400',
+}[cameraState.value]))
 const cameraSupported = computed(() => Boolean(capabilities.value?.cameraStream || capabilities.value?.cameraSnapshot))
 
 watchEffect(() => {
@@ -1883,21 +1902,19 @@ onUnmounted(() => {
                   <span
                     class="inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-xs font-medium"
                     :title="cameraTransport === 'mjpeg' ? cameraTransportDetail : undefined"
-                    :class="cameraOnline
-                      ? 'bg-green-100 fill-green-500 text-green-700 dark:bg-green-400/10 dark:fill-green-400 dark:text-green-400'
-                      : 'bg-yellow-100 fill-yellow-500 text-yellow-800 dark:bg-yellow-400/10 dark:fill-yellow-400 dark:text-yellow-500'"
+                    :class="cameraStateClasses"
                   >
-                    <svg class="size-1.5" viewBox="0 0 6 6" aria-hidden="true"><circle cx="3" cy="3" r="3" /></svg>{{ cameraOnline ? t('camera.live') : t('status.offlineLabel') }}<span v-if="cameraOnline && cameraTransport" class="ml-1 opacity-75">({{ cameraTransport.toUpperCase() }})</span>
+                    <svg class="size-1.5" viewBox="0 0 6 6" aria-hidden="true"><circle cx="3" cy="3" r="3" /></svg>{{ cameraStateLabel }}<span v-if="cameraState === 'live' && cameraTransport" class="ml-1 opacity-75">({{ cameraTransport.toUpperCase() }})</span>
                   </span>
                 </template>
                 <IconButton :title="t('camera.refresh')" :aria-label="t('camera.refresh')" :disabled="cameraLoading || !cameraSupported" @click="refreshCamera"><PhArrowsClockwise class="size-4" aria-hidden="true" /></IconButton>
                 <IconButton :title="t('camera.snapshot')" :aria-label="t('camera.snapshot')" :disabled="cameraLoading || !capabilities?.cameraSnapshot" @click="saveSnapshot"><PhCamera class="size-4" aria-hidden="true" /></IconButton>
-                <IconButton :title="t('camera.maximize')" :aria-label="t('camera.maximize')" :disabled="!cameraOnline" @click="toggleCameraFullscreen"><PhCornersOut class="size-4" aria-hidden="true" /></IconButton>
+                <IconButton :title="t('camera.maximize')" :aria-label="t('camera.maximize')" :disabled="!cameraHasMedia" @click="toggleCameraFullscreen"><PhCornersOut class="size-4" aria-hidden="true" /></IconButton>
               </CardHeader>
               <div
                 ref="cameraStage"
                 class="relative min-h-60 overflow-hidden sm:min-h-77.5"
-                :class="cameraOnline ? 'bg-black' : 'grid place-items-center bg-gray-100 dark:bg-gray-800'"
+                :class="cameraHasMedia ? 'bg-black' : 'grid place-items-center bg-gray-100 dark:bg-gray-800'"
               >
                 <video v-if="cameraPeer" ref="cameraVideo" :aria-label="t('camera.title')" class="absolute inset-0 size-full object-contain" autoplay muted playsinline />
                 <img v-else-if="cameraUrl" :src="cameraUrl" :alt="t('camera.title')" width="1280" height="720" class="absolute inset-0 size-full object-contain" @error="cameraUrl = undefined" />
@@ -1934,8 +1951,8 @@ onUnmounted(() => {
                       :title="selectedStatus?.job?.name"
                       translate="no"
                     >{{ selectedStatus?.job?.name ?? t('dashboard.noJob') }}</p>
-                    <p class="mt-1 font-mono text-xs text-gray-500 capitalize dark:text-gray-400">
-                      {{ selectedStatus?.state ?? 'unknown' }}
+                    <p class="mt-1 font-mono text-xs text-gray-500 dark:text-gray-400">
+                      {{ t(printerStateMessageKey(selectedStatus?.state)) }}
                       <span v-if="selectedStatus?.printMeta?.plateIndex !== undefined">
                         · {{ t('control.plateOf', { index: selectedStatus.printMeta.plateIndex, total: selectedStatus.printMeta.plateCount ?? '—' }) }}
                       </span>
