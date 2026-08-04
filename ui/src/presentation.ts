@@ -46,3 +46,8 @@ export function filamentColor(value: string | undefined): string {
   if (!hex || !/^(?:[\da-f]{6}|[\da-f]{8})$/i.test(hex) || hex.toUpperCase() === '00000000') return '#9CA3AF'
   return `#${hex.slice(0, 6).toUpperCase()}`
 }
+
+export function filamentFillPercent(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value < 0) return 100
+  return Math.min(value, 100)
+}

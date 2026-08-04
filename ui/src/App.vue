@@ -7,7 +7,7 @@ import { locales, preferredLocale, translate, type Locale, type MessageKey } fro
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration } from './formatting'
 import { printTargetState } from './printing'
-import { cameraViewState, filamentColor, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
+import { cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import { shouldDeferLibraryCards } from './library'
@@ -279,6 +279,7 @@ interface MaterialSlot {
   type: string
   name: string
   color: string
+  remainingPercent: number
   remainingGrams?: number
 }
 
@@ -620,6 +621,7 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
       type: tray.filamentType ?? '—',
       name: tray.filamentType ?? '—',
       color: filamentColor(tray.color),
+      remainingPercent: filamentFillPercent(tray.remainingPercent),
       remainingGrams: tray.remainingGrams,
     })),
   }))
@@ -1547,6 +1549,12 @@ function textColorFor(color: string) {
   return luminance > 0.55 ? 'var(--color-gray-900)' : 'var(--color-white)'
 }
 
+function emptyFilamentOverlayFor(color: string) {
+  return textColorFor(color) === 'var(--color-gray-900)'
+    ? 'rgba(255, 255, 255, 0.72)'
+    : 'rgba(0, 0, 0, 0.55)'
+}
+
 function wifiSignal(dbm: number | undefined) {
   if (dbm === undefined) return { icon: PhWifiSlash, label: t('control.signalNone') }
   if (dbm >= -55) return { icon: PhWifiHigh, label: t('control.signalExcellent') }
@@ -1570,7 +1578,7 @@ const visibleFiles = computed(() => {
 const deferLibraryCards = computed(() => shouldDeferLibraryCards(visibleFiles.value.length))
 const printerFiles = computed(() => files.value.filter((file) => file.type === 'file'))
 const enabledSlicers = computed(() => slicers.value.filter((slicer) => slicer.enabled))
-const isModelFile = (file: FileEntry) => file.mediaType === 'model' && /\.(3mf|stl|obj)$/i.test(file.name)
+const isModelFile = (file: FileEntry) => /\.(3mf|stl|obj|zip)$/i.test(file.name)
 
 function fileActionItems(file: FileEntry): ActionMenuItem[] {
   const items: ActionMenuItem[] = [
@@ -2217,10 +2225,14 @@ onUnmounted(() => {
                     <div
                       v-for="material in system.slots"
                       :key="`${system.name}-${material.slot}`"
-                      class="size-18 shrink-0 overflow-hidden rounded-md border border-black/10 dark:border-white/15"
+                      class="relative size-18 shrink-0 overflow-hidden rounded-md border border-black/10 dark:border-white/15"
                       :style="{ backgroundColor: material.color, color: textColorFor(material.color) }"
                     >
-                      <span class="flex h-full flex-col items-center justify-center gap-1 p-1 text-center font-mono">
+                      <span
+                        class="absolute inset-x-0 top-0 transition-[height] duration-200"
+                        :style="{ height: `${100 - material.remainingPercent}%`, backgroundColor: emptyFilamentOverlayFor(material.color) }"
+                      ></span>
+                      <span class="relative z-10 flex h-full flex-col items-center justify-center gap-1 p-1 text-center font-mono">
                         <span class="text-xs font-bold">{{ material.slot }}</span>
                         <span v-if="material.type !== '—'" class="text-[10px] font-semibold tracking-wide uppercase wrap-anywhere">{{ material.type }}</span>
                         <span v-if="material.remainingGrams !== undefined" class="text-[10px] font-medium">{{ material.remainingGrams }} g</span>

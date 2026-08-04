@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cameraViewState, filamentColor, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
+import { cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
 
 describe('cameraViewState', () => {
   it('distinguishes live transports from retained snapshots', () => {
@@ -58,5 +58,19 @@ describe('filamentColor', () => {
     expect(filamentColor('00000000')).toBe('#9CA3AF')
     expect(filamentColor('not-a-color')).toBe('#9CA3AF')
     expect(filamentColor(undefined)).toBe('#9CA3AF')
+  })
+})
+
+describe('filamentFillPercent', () => {
+  it('uses a full fill when the remaining percentage is unsupported', () => {
+    expect(filamentFillPercent(-1)).toBe(100)
+    expect(filamentFillPercent(undefined)).toBe(100)
+    expect(filamentFillPercent(Number.NaN)).toBe(100)
+  })
+
+  it('preserves supported percentages within the display range', () => {
+    expect(filamentFillPercent(0)).toBe(0)
+    expect(filamentFillPercent(42)).toBe(42)
+    expect(filamentFillPercent(120)).toBe(100)
   })
 })
