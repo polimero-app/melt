@@ -165,6 +165,8 @@ export type MessageKey =
   | "control.speedLudicrous"
   | "control.speedSet"
   | "control.emergencyStopSent"
+  | "control.observedAt"
+  | "control.observedAtTitle"
   | "camera.title"
   | "camera.live"
   | "camera.refresh"
@@ -542,6 +544,8 @@ const messages: Record<Locale, Messages> = {
     "control.speedLudicrous": "Ludicrous",
     "control.speedSet": "Speed profile set to {profile}",
     "control.emergencyStopSent": "Emergency stop sent",
+    "control.observedAt": "{seconds}s ago",
+    "control.observedAtTitle": "Age of the last reading received from the printer",
     "camera.title": "Camera",
     "camera.live": "LIVE",
     "camera.refresh": "Refresh camera",
@@ -916,6 +920,8 @@ const messages: Record<Locale, Messages> = {
     "control.speedLudicrous": "Absurdo",
     "control.speedSet": "Perfil de velocidade definido como {profile}",
     "control.emergencyStopSent": "Parada de emergência enviada",
+    "control.observedAt": "há {seconds}s",
+    "control.observedAtTitle": "Idade da última leitura recebida da impressora",
     "camera.title": "Câmera",
     "camera.live": "AO VIVO",
     "camera.refresh": "Atualizar câmera",
