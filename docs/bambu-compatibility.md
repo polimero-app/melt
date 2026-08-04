@@ -16,6 +16,13 @@ from the same access unit; classic camera sources expose complete JPEG frames.
 This boundary permits snapshots and multiple viewers to share one upstream
 without transcoding the WebRTC path.
 
+The shared camera manager is keyed by the normalized printer serial and a
+credential-free connection revision. Subscriber queues hold at most two media
+units and drop new frames under backpressure. The most recent decoded JPEG is
+retained for snapshots. The first subscriber opens the upstream; dropping the
+last subscriber interrupts its socket, and connection changes invalidate the
+previous generation.
+
 Polimero treats a reported Bambu model as a capability hint, not a complete
 contract. Runtime observations and safe protocol probes take precedence over
 the model family. Unknown models and unknown fields remain distinct from an

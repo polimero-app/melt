@@ -14,6 +14,7 @@ use thiserror::Error;
 
 use crate::trace::{SharedTracer, next_tracer_generation};
 
+mod camera_manager;
 mod capabilities;
 mod discovery;
 mod firmware;
@@ -28,6 +29,10 @@ mod transport;
 mod tunnel;
 mod workflow;
 
+pub use camera_manager::{
+    CameraFrame, CameraFrameKind, CameraManager, CameraOwnerStatus, CameraOwnerTransport,
+    CameraSubscription, H264Parameters,
+};
 pub use capabilities::{CapabilityObservations, ObservationSource, Observed, ReportKind};
 pub use discovery::{DiscoveredPrinter, DiscoveryError, discover};
 pub use firmware::{FirmwareInventory, FirmwareModule, FirmwareVersion};
@@ -542,6 +547,8 @@ pub enum CameraError {
     InvalidFrame,
     #[error("Bambu camera stream failed")]
     Stream(#[source] io::Error),
+    #[error("Bambu camera does not provide the requested encoded media")]
+    UnsupportedMedia,
 }
 
 /// A real Bambu LAN camera stream, converted from whichever protocol the
