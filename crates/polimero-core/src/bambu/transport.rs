@@ -2908,6 +2908,19 @@ fn temperature_controls(
         .as_ref()
         .and_then(|temperatures| temperatures.chamber.as_ref())
     {
+        // H2-class reports expose a dedicated chamber-temperature controller
+        // under `device.ctc`, but do not consistently publish the legacy
+        // `support_chamber_temp_edit` capability flag. An explicit flag still
+        // wins; otherwise the controller node is the observed control path.
+        let chamber_controllable = print
+            .get("support_chamber_temp_edit")
+            .and_then(Value::as_bool)
+            .unwrap_or_else(|| {
+                print
+                    .get("device")
+                    .and_then(|device| device.get("ctc"))
+                    .is_some()
+            });
         controls.insert(
             "chamber".to_owned(),
             temperature_control(
@@ -2915,10 +2928,7 @@ fn temperature_controls(
                 None,
                 temperature,
                 chamber_range,
-                print
-                    .get("support_chamber_temp_edit")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
+                chamber_controllable,
             ),
         );
     }
@@ -3029,6 +3039,14 @@ fn airduct_fan_controls(print: &Map<String, Value>) -> Option<BTreeMap<String, F
             Some((_, forced_off)) if forced_off.contains(&part_id) => FanMode::Off,
             Some(_) => FanMode::Auto,
         };
+        // On H2-class printers, `off` is the current switch state for the
+        // user-facing Parts, Aux, and Exhaust controls. Bambu Studio can turn
+        // those fans back on; it is not a telemetry-only mode. Heat and the
+        // internal fans remain automatic unless the mode explicitly lists
+        // them as manually controlled.
+        let controllable = mode == FanMode::Manual
+            || (mode == FanMode::Off
+                && matches!(kind, FanKind::Parts | FanKind::Auxiliary | FanKind::Exhaust));
         controls.insert(
             key,
             FanControl {
@@ -3037,7 +3055,7 @@ fn airduct_fan_controls(print: &Map<String, Value>) -> Option<BTreeMap<String, F
                 mode,
                 minimum_percent: minimum,
                 maximum_percent: maximum.max(minimum),
-                controllable: mode == FanMode::Manual,
+                controllable,
             },
         );
     }
@@ -4366,9 +4384,9 @@ mod tests {
     }
 
     #[test]
-    fn maps_h2_device_controls_with_per_item_modes() {
+    fn maps_h2c_device_controls_with_per_item_modes() {
         let status = parse_status(
-            br#"{"print":{"gcode_state":"IDLE","support_chamber_temp_edit":true,"support_chamber_temp_edit_range":[20,60],"nozzle_temp_range":[20,350],"device":{"bed_temp":3932185,"ctc":{"info":{"temp":2949145}},"extruder":{"info":[{"id":0,"temp":14417951},{"id":1,"temp":14090272}]},"airduct":{"modeCur":0,"modeList":[{"modeId":0,"ctrl":[16,32],"off":[48]}],"parts":[{"id":16,"state":750,"range":65536000},{"id":32,"state":500,"range":65536000},{"id":48,"state":0,"range":65536000},{"id":96,"state":400,"range":65536000}]}}},"lights_report":[{"node":"chamber_light","mode":"on"},{"node":"chamber_light2","mode":"on"},{"node":"work_light","mode":"flashing"}]}"#,
+            br#"{"print":{"gcode_state":"IDLE","support_chamber_temp_edit_range":[20,60],"nozzle_temp_range":[20,350],"device":{"bed_temp":3932185,"ctc":{"info":{"temp":2949145}},"extruder":{"info":[{"id":0,"temp":14417951},{"id":1,"temp":14090272}]},"airduct":{"modeCur":0,"modeList":[{"modeId":0,"ctrl":[16,32],"off":[48]}],"parts":[{"id":16,"state":750,"range":65536000},{"id":32,"state":500,"range":65536000},{"id":48,"state":0,"range":65536000},{"id":96,"state":400,"range":65536000}]}}},"lights_report":[{"node":"chamber_light","mode":"on"},{"node":"chamber_light2","mode":"on"},{"node":"work_light","mode":"flashing"}]}"#,
         )
         .unwrap();
 
@@ -4387,10 +4405,12 @@ mod tests {
 
         assert_eq!(status.controls.fans["parts"].mode, FanMode::Manual);
         assert!(status.controls.fans["parts"].controllable);
+        assert!(status.controls.fans["auxiliary"].controllable);
         assert_eq!(status.controls.fans["exhaust"].mode, FanMode::Off);
-        assert!(!status.controls.fans["exhaust"].controllable);
+        assert!(status.controls.fans["exhaust"].controllable);
         assert_eq!(status.controls.fans["heat"].mode, FanMode::Auto);
         assert_eq!(status.controls.fans["heat"].speed_percent, Some(40));
+        assert!(!status.controls.fans["heat"].controllable);
 
         assert_eq!(status.controls.lights["lamp"].kind, LightKind::Lamp);
         assert!(status.controls.lights["lamp"].controllable);
@@ -4405,6 +4425,16 @@ mod tests {
             validate_temperature_control(&status, "nozzle", 230.0),
             Err(Error::Unsupported(_))
         ));
+    }
+
+    #[test]
+    fn explicit_chamber_edit_flag_overrides_the_h2_controller_fallback() {
+        let status = parse_status(
+            br#"{"print":{"gcode_state":"IDLE","support_chamber_temp_edit":false,"device":{"ctc":{"info":{"temp":26}}}}}"#,
+        )
+        .unwrap();
+
+        assert!(!status.controls.temperatures["chamber"].controllable);
     }
 
     #[test]

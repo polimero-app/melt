@@ -86,9 +86,14 @@ Detailed status exposes a `controls` inventory alongside the legacy portable
 identifiers; each entry carries its observed value, semantic kind, operating
 mode where applicable, bounds when reported, and a per-item `controllable`
 flag. The desktop renders every observed entry, but only shows an actuator when
-that item is controllable. Read-only chamber temperature, automatic or forced-
-off fans, hotend/mainboard fan telemetry, and unknown lights therefore remain
-visible without implying that Polimero can command them.
+that item is controllable. Read-only chamber temperature, automatic fans,
+hotend/mainboard fan telemetry, and unknown lights therefore remain visible
+without implying that Polimero can command them. On H2-class printers, an
+`off` airduct entry for Parts, Aux, or Exhaust is a user-adjustable switch state,
+so those controls remain commandable just as they are in Bambu Studio.
+Likewise, the H2 device-tree chamber controller (`device.ctc`) establishes a
+writable chamber-temperature path when the legacy edit-support flag is absent;
+an explicitly false support flag is still honored.
 
 Names follow Bambu Studio terminology: Nozzle (or Left Nozzle and Right
 Nozzle), Bed, Chamber; Parts, Aux, Hotend, Exhaust, MC Board, and Heat; and one
