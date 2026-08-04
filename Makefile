@@ -1,4 +1,4 @@
-.PHONY: build test lint ci contract license-check run release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test
+.PHONY: build test lint ci contract bambu-evidence-check license-check run release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test
 
 build: cargo-build ui-build
 
@@ -6,7 +6,7 @@ test: cargo-test ui-test
 
 lint: cargo-lint
 
-ci: license-check ui-install lint test build contract
+ci: license-check bambu-evidence-check ui-install lint test build contract
 
 license-check:
 	test -f LICENSE
@@ -17,6 +17,9 @@ license-check:
 
 contract:
 	cargo test -p polimero-cli --test contract_fixtures --locked
+
+bambu-evidence-check:
+	cargo test -p polimero-core --test bambu_evidence --locked
 
 run:
 	@set -e; \
@@ -30,7 +33,7 @@ run:
 		cargo run -p polimero-desktop --bin polimero; \
 	fi
 
-release-gate: contract cargo-build
+release-gate: bambu-evidence-check contract cargo-build
 	$(MAKE) release-cli-check
 
 release-cli-check:

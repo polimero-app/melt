@@ -23,6 +23,12 @@ serials consistently with documented test identifiers. Certificate fingerprints
 are allowed only for generated test certificates. Inspect decoded and raw forms;
 binary fixtures need a reproducible textual summary.
 
+`make bambu-evidence-check` enforces the manifest contract and scans every
+referenced textual artifact for common secret, private-key, user-path, private
+network, and MAC-address forms. This is a conservative floor, not proof of
+anonymity: contributors must still inspect semantic identifiers and decoded/raw
+forms before commit.
+
 ## Conflict handling and runtime precedence
 
 Conflicting evidence remains visible and cross-referenced. Narrow the affected
