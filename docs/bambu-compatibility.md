@@ -56,6 +56,12 @@ Polimero probes RTSPS and then classic MJPEG within the caller's safety
 boundary, caches the successful transport in the physical camera owner, and
 keeps both disputed registry entries provisional.
 
+The WebRTC adapter contains an arrival-clock RTP repair path, but it is enabled
+only by an applicable qualified firmware quirk. It assigns one 90 kHz timestamp
+to every packet in an access unit, preserves valid source deltas and wraparound,
+and repairs frozen or regressing values from monotonic arrival time. The current
+P2S report remains provisional, so production streams do not activate this path.
+
 Polimero treats a reported Bambu model as a capability hint, not a complete
 contract. Runtime observations and safe protocol probes take precedence over
 the model family. Unknown models and unknown fields remain distinct from an

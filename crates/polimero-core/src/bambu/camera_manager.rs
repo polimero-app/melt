@@ -14,8 +14,8 @@ use sha2::{Digest, Sha256};
 
 use super::{
     CameraError, CameraSelection, CameraSelectionSource, CameraTransport, H264AccessUnit,
-    H264Stream, MjpegStream, Profile, RuntimeCapabilities, open_classic_mjpeg_stream,
-    open_decoded_h264_stream, select_camera_transport,
+    H264Stream, MjpegStream, Profile, QuirkEffect, RuntimeCapabilities, applicable_quirks,
+    open_classic_mjpeg_stream, open_decoded_h264_stream, select_camera_transport,
 };
 
 const SUBSCRIBER_CAPACITY: usize = 2;
@@ -85,6 +85,7 @@ struct Owner {
     transport: CameraOwnerTransport,
     parameters: Option<H264Parameters>,
     selection: CameraSelection,
+    repair_rtp_timestamps: bool,
     shutdown: Mutex<Option<TcpStream>>,
     state: Mutex<OwnerState>,
 }
@@ -190,6 +191,9 @@ impl CameraSubscription {
             .latest_jpeg
             .clone()
     }
+    pub fn repair_rtp_timestamps(&self) -> bool {
+        self.owner.repair_rtp_timestamps
+    }
 }
 
 impl Drop for CameraSubscription {
@@ -229,6 +233,10 @@ impl CameraManager {
             }
         };
         let selection = select_camera_transport(profile.host(), capabilities);
+        let repair_rtp_timestamps =
+            applicable_quirks(&capabilities.identity, &capabilities.firmware)
+                .iter()
+                .any(|entry| entry.effect == QuirkEffect::RepairRtpTimestampsFromArrivalTime);
         let revision = camera_revision(profile, access_code, fingerprint, capabilities, &selection);
         let mut manager = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if let Some(owner) = manager.owners.get(&printer_key).and_then(Weak::upgrade) {
@@ -269,6 +277,7 @@ impl CameraManager {
             transport,
             parameters,
             selection,
+            repair_rtp_timestamps,
             shutdown: Mutex::new(Some(shutdown)),
             state: Mutex::new(OwnerState {
                 next_subscriber: 1,
@@ -429,6 +438,7 @@ mod tests {
                 rejected_advertisement: None,
                 quirk_ids: Vec::new(),
             },
+            repair_rtp_timestamps: false,
             shutdown: Mutex::new(None),
             state: Mutex::new(OwnerState {
                 next_subscriber: 1,

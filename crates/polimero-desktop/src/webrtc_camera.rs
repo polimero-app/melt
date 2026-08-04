@@ -5,7 +5,7 @@ use std::{
         mpsc,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use base64::Engine;
@@ -102,6 +102,7 @@ async fn serve(
         .ok_or_else(|| "camera owner is not an H.264 source".to_owned())?;
     let sps = parameters.sps.to_vec();
     let pps = parameters.pps.to_vec();
+    let mut timestamp_repair = RtpTimestampRepair::new(subscription.repair_rtp_timestamps());
     let (codec, payload_type) = codec_capability(&sps, &pps, &offer_sdp)?;
     let mut media_engine = MediaEngine::default();
     media_engine
@@ -200,10 +201,20 @@ async fn serve(
         if stop.load(Ordering::Acquire) {
             break;
         }
-        for raw in access_unit {
-            let mut raw = &raw[..];
-            let packet =
-                Packet::unmarshal(&mut raw).map_err(|error| format!("RTP packet: {error}"))?;
+        let mut packets = access_unit
+            .into_iter()
+            .map(|raw| {
+                let mut raw = &raw[..];
+                Packet::unmarshal(&mut raw).map_err(|error| format!("RTP packet: {error}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if let Some(source_timestamp) = packets.first().map(|packet| packet.header.timestamp) {
+            let timestamp = timestamp_repair.timestamp(source_timestamp, Instant::now());
+            for packet in &mut packets {
+                packet.header.timestamp = timestamp;
+            }
+        }
+        for packet in packets {
             if !started {
                 if !is_idr_start(&packet.payload) {
                     continue;
@@ -232,6 +243,48 @@ async fn serve(
         .await
         .map_err(|error| format!("WebRTC close: {error}"))?;
     Ok(())
+}
+
+struct RtpTimestampRepair {
+    enabled: bool,
+    last_source: Option<u32>,
+    last_output: Option<u32>,
+    last_arrival: Option<Instant>,
+}
+
+impl RtpTimestampRepair {
+    fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            last_source: None,
+            last_output: None,
+            last_arrival: None,
+        }
+    }
+
+    fn timestamp(&mut self, source: u32, arrival: Instant) -> u32 {
+        if !self.enabled {
+            return source;
+        }
+        let output = match (self.last_source, self.last_output, self.last_arrival) {
+            (Some(last_source), Some(last_output), Some(last_arrival)) => {
+                let source_delta = source.wrapping_sub(last_source);
+                let ticks = if source_delta > 0 && source_delta < (1 << 31) {
+                    source_delta
+                } else {
+                    let arrival_delta = arrival.saturating_duration_since(last_arrival);
+                    ((arrival_delta.as_nanos().saturating_mul(90_000) / 1_000_000_000)
+                        .clamp(1, 90_000)) as u32
+                };
+                last_output.wrapping_add(ticks)
+            }
+            _ => source,
+        };
+        self.last_source = Some(source);
+        self.last_output = Some(output);
+        self.last_arrival = Some(arrival);
+        output
+    }
 }
 
 fn codec_capability(
@@ -335,10 +388,13 @@ mod tests {
             mpsc,
         },
         thread,
-        time::Duration,
+        time::{Duration, Instant},
     };
 
-    use super::{Session, await_answer, compatible_offer_profile, decode_profile, is_idr_start};
+    use super::{
+        RtpTimestampRepair, Session, await_answer, compatible_offer_profile, decode_profile,
+        is_idr_start,
+    };
 
     #[test]
     fn selects_browser_profile_compatible_with_camera() {
@@ -392,5 +448,43 @@ mod tests {
         assert!(!is_idr_start(&[0x7c, 0x45, 0x01]));
         assert!(is_idr_start(&[0x78, 0x00, 0x02, 0x65, 0x01]));
         assert!(!is_idr_start(&[0x61, 0x01]));
+    }
+
+    #[test]
+    fn timestamp_repair_is_inert_without_a_qualified_quirk() {
+        let now = Instant::now();
+        let mut repair = RtpTimestampRepair::new(false);
+        assert_eq!(repair.timestamp(42, now), 42);
+        assert_eq!(repair.timestamp(42, now + Duration::from_millis(40)), 42);
+    }
+
+    #[test]
+    fn timestamp_repair_preserves_valid_deltas_and_repairs_frozen_values() {
+        let now = Instant::now();
+        let mut repair = RtpTimestampRepair::new(true);
+        assert_eq!(repair.timestamp(90_000, now), 90_000);
+        assert_eq!(
+            repair.timestamp(93_000, now + Duration::from_millis(33)),
+            93_000
+        );
+        assert_eq!(
+            repair.timestamp(93_000, now + Duration::from_millis(66)),
+            95_970
+        );
+    }
+
+    #[test]
+    fn timestamp_repair_handles_regression_and_source_wraparound() {
+        let now = Instant::now();
+        let mut regression = RtpTimestampRepair::new(true);
+        assert_eq!(regression.timestamp(10_000, now), 10_000);
+        assert_eq!(
+            regression.timestamp(9_000, now + Duration::from_millis(40)),
+            13_600
+        );
+
+        let mut wrap = RtpTimestampRepair::new(true);
+        assert_eq!(wrap.timestamp(u32::MAX - 10, now), u32::MAX - 10);
+        assert_eq!(wrap.timestamp(20, now + Duration::from_millis(1)), 20);
     }
 }
