@@ -1675,7 +1675,7 @@ onUnmounted(() => {
     <header class="sticky top-0 z-20 bg-white/95 pt-[env(safe-area-inset-top)] backdrop-blur dark:bg-gray-900/95">
       <div class="mx-auto max-w-[1500px] overflow-x-auto px-4 sm:px-8 lg:px-10">
         <nav class="flex min-w-0 items-stretch border-b border-gray-200 sm:min-w-max dark:border-white/10" :aria-label="t('nav.ariaLabel')">
-          <div class="grid w-full grid-cols-1 py-2 sm:hidden">
+          <div class="grid w-full grid-cols-1 py-2 lg:hidden">
             <select
               name="primary-navigation"
               :value="compactNavValue"
@@ -1690,7 +1690,7 @@ onUnmounted(() => {
             </select>
             <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-3 size-4 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
           </div>
-          <div v-if="printers.length && !usePrinterMenu" class="hidden items-center space-x-8 pr-8 sm:flex">
+          <div v-if="printers.length && !usePrinterMenu" class="hidden items-center space-x-8 pr-8 min-[1400px]:flex">
             <button
               v-for="printer in printers"
               :key="printer.name"
@@ -1705,13 +1705,17 @@ onUnmounted(() => {
               <span class="size-1.5 shrink-0 rounded-full ring-3" :class="statusDotClasses[badgeFor(printer.name)]"></span>{{ printer.name }}
             </button>
           </div>
-          <div v-if="usePrinterMenu" class="hidden items-center pr-8 sm:flex">
+          <div
+            v-if="printers.length"
+            class="hidden items-center pr-4 lg:flex min-[1400px]:pr-8"
+            :class="!usePrinterMenu && 'min-[1400px]:hidden'"
+          >
             <div class="grid grid-cols-1">
               <select
                 name="printer-navigation"
                 :value="activePrinter?.name"
                 :aria-label="t('nav.selectPrinter')"
-                class="col-start-1 row-start-1 appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800"
+                class="col-start-1 row-start-1 w-44 appearance-none truncate rounded-md bg-white py-1.5 pr-8 pl-3 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 min-[900px]:w-52 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800"
                 @change="selectPrinter(($event.target as HTMLSelectElement).value)"
               >
                 <option v-for="printer in printers" :key="printer.name" :value="printer.name">{{ printer.name }} · {{ statusLabel(badgeFor(printer.name)) }}</option>
@@ -1719,8 +1723,8 @@ onUnmounted(() => {
               <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-2 size-4 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
             </div>
           </div>
-          <span v-if="printers.length" class="my-3 hidden w-px shrink-0 bg-gray-200 sm:block dark:bg-white/15" aria-hidden="true"></span>
-          <div class="hidden items-center space-x-8 pl-8 sm:flex">
+          <span v-if="printers.length" class="my-3 hidden w-px shrink-0 bg-gray-200 lg:block dark:bg-white/15" aria-hidden="true"></span>
+          <div class="hidden items-center space-x-4 pl-4 lg:flex min-[1400px]:space-x-8 min-[1400px]:pl-8">
             <button
               v-for="tab in sectionTabs"
               :key="tab.view"
