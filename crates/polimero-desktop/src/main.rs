@@ -758,9 +758,12 @@ impl PreviewCache {
     }
 }
 
+const PREVIEW_CACHE_VERSION: &str = "complete-mesh-v3";
+
 fn preview_cache_key(request: &FilePreviewRequest, printer_key: &str) -> String {
     format!(
-        "{}:{}:{}:{}",
+        "{}:{}:{}:{}:{}",
+        PREVIEW_CACHE_VERSION,
         printer_key,
         request.device_path,
         request.size_bytes.unwrap_or_default(),
@@ -2160,7 +2163,8 @@ fn library_file_preview(
     state: tauri::State<'_, PreviewState>,
 ) -> Result<FilePreviewResponse, CommandError> {
     let cache_key = format!(
-        "library:{}:{}:{}",
+        "{}:library:{}:{}:{}",
+        PREVIEW_CACHE_VERSION,
         request.path,
         request.size_bytes.unwrap_or_default(),
         request.modified_at.as_deref().unwrap_or_default()

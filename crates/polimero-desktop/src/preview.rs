@@ -1,4 +1,7 @@
-use std::io::{Cursor, Read};
+use std::{
+    collections::HashMap,
+    io::{Cursor, Read},
+};
 
 use euc::{DepthStrategy, Pipeline, buffer::Buffer2d, rasterizer};
 use vek::{Mat4, Vec3, Vec4};
@@ -197,31 +200,25 @@ fn parse_stl(bytes: &[u8]) -> Vec<Triangle> {
         .collect()
 }
 
-/// Thumbnails don't need full mesh fidelity, and the rasterizer is
-/// O(triangles) per draw call; without a cap, a real high-poly print
-/// (hundreds of thousands of triangles, common for detailed models) can
-/// still take a while to render. Striding down to this many triangles keeps
-/// preview generation fast regardless of source mesh complexity.
-const MAX_RENDER_TRIANGLES: usize = 12_000;
-
 struct MeshVertex {
     position: Vec3<f32>,
-    light: f32,
+    normal: Vec3<f32>,
 }
 
 struct MeshPipeline {
     mvp: Mat4<f32>,
+    light_dir: Vec3<f32>,
 }
 
 impl Pipeline for MeshPipeline {
     type Vertex = MeshVertex;
-    type VsOut = f32;
+    type VsOut = Vec3<f32>;
     type Pixel = [u8; 3];
 
     #[inline(always)]
     fn vert(&self, vertex: &Self::Vertex) -> ([f32; 4], Self::VsOut) {
         let clip = self.mvp * Vec4::from_point(vertex.position);
-        (clip.into_array(), vertex.light)
+        (clip.into_array(), vertex.normal)
     }
 
     #[inline(always)]
@@ -230,13 +227,92 @@ impl Pipeline for MeshPipeline {
     }
 
     #[inline(always)]
-    fn frag(&self, light: &f32) -> Self::Pixel {
+    fn frag(&self, normal: &Vec3<f32>) -> Self::Pixel {
+        // Interpolating vertex normals and evaluating the light here gives
+        // curved meshes smooth (Gouraud/Phong-style) shading. Computing a
+        // single light value per face makes every source triangle visible.
+        let diffuse = normal
+            .try_normalized()
+            .map_or(0.0, |normal| normal.dot(self.light_dir).abs());
         [
-            (30.0 + light * 35.0).clamp(0.0, 255.0) as u8,
-            (145.0 + light * 80.0).clamp(0.0, 255.0) as u8,
-            (185.0 + light * 55.0).clamp(0.0, 255.0) as u8,
+            (30.0 + diffuse * 35.0).clamp(0.0, 255.0) as u8,
+            (145.0 + diffuse * 80.0).clamp(0.0, 255.0) as u8,
+            (185.0 + diffuse * 55.0).clamp(0.0, 255.0) as u8,
         ]
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct PointKey([u32; 3]);
+
+impl From<Vec3<f32>> for PointKey {
+    fn from(point: Vec3<f32>) -> Self {
+        // STL files commonly mix -0 and +0 at otherwise shared vertices.
+        // Canonicalizing zero lets those faces participate in the same
+        // averaged normal without fuzzy position matching.
+        Self([point.x, point.y, point.z].map(
+            |value| {
+                if value == 0.0 { 0 } else { value.to_bits() }
+            },
+        ))
+    }
+}
+
+#[derive(Debug)]
+struct NormalCluster {
+    sum: Vec3<f32>,
+}
+
+const SMOOTH_ANGLE_COSINE: f32 = 0.5; // 60 degrees
+
+fn face_normal(triangle: &Triangle) -> Option<Vec3<f32>> {
+    let points = (*triangle).map(Vec3::from);
+    (points[1] - points[0])
+        .cross(points[2] - points[0])
+        .try_normalized()
+}
+
+/// Build a small set of normal clusters at each shared position. Faces less
+/// than 60 degrees apart share a smooth normal, while deliberate corners
+/// (box edges, chamfers, and similar features) remain crisp.
+fn normal_clusters(triangles: &[Triangle]) -> HashMap<PointKey, Vec<NormalCluster>> {
+    let mut normals: HashMap<PointKey, Vec<NormalCluster>> = HashMap::new();
+    for triangle in triangles {
+        let Some(face_normal) = face_normal(triangle) else {
+            continue;
+        };
+        for point in (*triangle).map(Vec3::from) {
+            let clusters = normals.entry(point.into()).or_default();
+            if let Some(cluster) = clusters.iter_mut().find(|cluster| {
+                cluster
+                    .sum
+                    .try_normalized()
+                    .is_some_and(|normal| normal.dot(face_normal) >= SMOOTH_ANGLE_COSINE)
+            }) {
+                cluster.sum += face_normal;
+            } else {
+                clusters.push(NormalCluster { sum: face_normal });
+            }
+        }
+    }
+    normals
+}
+
+fn smooth_normal(
+    clusters: &HashMap<PointKey, Vec<NormalCluster>>,
+    point: Vec3<f32>,
+    face_normal: Vec3<f32>,
+) -> Vec3<f32> {
+    clusters
+        .get(&point.into())
+        .and_then(|clusters| {
+            clusters
+                .iter()
+                .filter_map(|cluster| cluster.sum.try_normalized())
+                .max_by(|left, right| left.dot(face_normal).total_cmp(&right.dot(face_normal)))
+        })
+        .filter(|normal| normal.dot(face_normal) >= SMOOTH_ANGLE_COSINE)
+        .unwrap_or(face_normal)
 }
 
 /// Renders triangles with `euc`, a real (tested) software triangle
@@ -245,26 +321,21 @@ impl Pipeline for MeshPipeline {
 /// turned every render into a near full-canvas fill and pegged a CPU core
 /// on real meshes.
 fn render(triangles: &[Triangle]) -> Vec<u8> {
-    let stride = (triangles.len() / MAX_RENDER_TRIANGLES).max(1);
-    let sampled = triangles.iter().step_by(stride);
-
-    // Flat (per-face) shading: every vertex of a triangle carries that
-    // triangle's own face-normal lighting, matching the look of the
-    // previous renderer without needing vertex-normal averaging.
-    let light_dir = Vec3::new(-0.4, 0.8, 0.45);
-    let mut vertices = Vec::with_capacity(triangles.len().min(MAX_RENDER_TRIANGLES) * 3);
+    let normals = normal_clusters(triangles);
+    let mut vertices = Vec::with_capacity(triangles.len() * 3);
     let mut min = Vec3::broadcast(f32::INFINITY);
     let mut max = Vec3::broadcast(f32::NEG_INFINITY);
-    for triangle in sampled {
+    for triangle in triangles {
         let points = (*triangle).map(Vec3::from);
-        let normal = (points[1] - points[0]).cross(points[2] - points[0]);
-        let light = (normal.dot(light_dir) / normal.magnitude().max(0.001)).abs();
+        let Some(face_normal) = face_normal(triangle) else {
+            continue;
+        };
         for point in points {
             min = Vec3::partial_min(min, point);
             max = Vec3::partial_max(max, point);
             vertices.push(MeshVertex {
                 position: point,
-                light,
+                normal: smooth_normal(&normals, point, face_normal),
             });
         }
     }
@@ -287,6 +358,7 @@ fn render(triangles: &[Triangle]) -> Vec<u8> {
     );
     let pipeline = MeshPipeline {
         mvp: proj * view * model,
+        light_dir: Vec3::new(-0.4, 0.8, 0.45).normalized(),
     };
 
     let mut color = Buffer2d::new([WIDTH, HEIGHT], [10u8, 40, 58]);
@@ -346,6 +418,39 @@ mod tests {
     }
 
     #[test]
+    fn averages_normals_across_a_smooth_shared_edge() {
+        let triangles = [
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 1.0]],
+        ];
+        let clusters = normal_clusters(&triangles);
+        let first_face = face_normal(&triangles[0]).unwrap();
+        let normal = smooth_normal(&clusters, Vec3::zero(), first_face);
+
+        assert!(
+            normal.y < 0.0,
+            "the adjacent face must influence the normal"
+        );
+        assert!(normal.z > 0.0);
+        assert_ne!(normal, first_face);
+    }
+
+    #[test]
+    fn keeps_ninety_degree_edges_sharp() {
+        let triangles = [
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+        ];
+        let clusters = normal_clusters(&triangles);
+        let first_face = face_normal(&triangles[0]).unwrap();
+
+        assert_eq!(
+            smooth_normal(&clusters, Vec3::zero(), first_face),
+            first_face
+        );
+    }
+
+    #[test]
     fn rasterizes_a_3mf_without_an_embedded_thumbnail() {
         let model_xml = r#"<model><resources><object id="1"><mesh>
             <vertices>
@@ -368,18 +473,19 @@ mod tests {
     }
 
     /// A real high-poly print (hundreds of thousands of triangles) must
-    /// still render in well under a second; without the `MAX_RENDER_TRIANGLES`
-    /// downsample this took multiple seconds per thumbnail and pegged a CPU
-    /// core when a folder had many such models open at once.
+    /// remain bounded enough for the two-worker preview queue. Every triangle
+    /// is deliberately rendered: striding through this list tears holes in
+    /// the surface because mesh triangles are topology, not independent
+    /// samples.
     #[test]
-    fn caps_render_cost_for_high_poly_meshes() {
+    fn renders_a_high_poly_mesh_without_dropping_faces() {
         let bytes = binary_stl_with_triangles(500_000);
         let start = Instant::now();
         let png = rasterize("stl", &bytes).unwrap();
         assert!(!png.is_empty());
         assert!(
-            start.elapsed().as_secs() < 2,
-            "rendering took {:?}, the triangle cap isn't limiting cost",
+            start.elapsed().as_secs() < 8,
+            "rendering took {:?}",
             start.elapsed()
         );
     }
