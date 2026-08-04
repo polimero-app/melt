@@ -207,6 +207,15 @@ pub struct CreateResult {
     pub profile: crate::config::Profile,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateResult {
+    pub name: String,
+    #[serde(flatten)]
+    pub profile: crate::config::Profile,
+    pub warnings: Vec<RemoveWarning>,
+}
+
 pub fn create(
     dir: impl AsRef<Path>,
     store: &dyn SecretStore,
@@ -281,6 +290,141 @@ pub fn create(
     }
 
     Ok(CreateResult { name, profile })
+}
+
+pub fn update(
+    dir: impl AsRef<Path>,
+    store: &dyn SecretStore,
+    current_name: &str,
+    request: CreateRequest,
+) -> Result<UpdateResult, ProfileError> {
+    let current_name = normalize_name(current_name)?;
+    let name = normalize_name(&request.name)?;
+    validate_host(&request.host)?;
+    validate_access_code(&request.access_code)?;
+
+    let dir = dir.as_ref();
+    let mut config = Config::open(dir).map_err(ProfileError::Config)?;
+    let previous = config
+        .get_profile(&current_name)
+        .cloned()
+        .ok_or_else(|| ProfileError::NotFound(current_name.clone()))?;
+    if name != current_name && config.get_profile(&name).is_some() {
+        return Err(ProfileError::Config(ConfigError::ProfileAlreadyExists));
+    }
+
+    let previous_access_account = account(&previous.driver, &current_name, "access-code");
+    let previous_tls_account = account(&previous.driver, &current_name, "tls-fingerprint");
+    let stored_access = StoredSecret::load(store, previous_access_account.clone())?;
+    let access_code = if request.access_code.is_empty() {
+        stored_access.value.clone()
+    } else {
+        Some(request.access_code.clone())
+    };
+    let profile = crate::config::Profile {
+        driver: request.driver,
+        host: request.host,
+        serial: request.serial,
+        model: request.model,
+        timeout: request.timeout,
+        insecure: request.insecure,
+        created: previous.created,
+        updated: now(),
+    };
+    let driver_profile = drivers::profile(&profile)?;
+    if driver_profile.driver().requires_access_code() && access_code.is_none() {
+        return Err(ProfileError::MissingAccessCode);
+    }
+    let tls_fingerprint = drivers::verify(&driver_profile, access_code.as_deref())?;
+
+    let access_account = account(&profile.driver, &name, "access-code");
+    let tls_account = account(&profile.driver, &name, "tls-fingerprint");
+    let mut changed_secrets = Vec::new();
+    if let Some(access_code) = access_code.as_deref()
+        && (!request.access_code.is_empty() || access_account != previous_access_account)
+    {
+        changed_secrets.push(StoredSecret::replace(
+            store,
+            access_account.clone(),
+            access_code,
+        )?);
+    }
+    if let Some(fingerprint) = tls_fingerprint.as_deref() {
+        match StoredSecret::replace(store, tls_account.clone(), fingerprint) {
+            Ok(secret) => changed_secrets.push(secret),
+            Err(error) => {
+                if restore(store, &mut changed_secrets).is_err() {
+                    return Err(ProfileError::RollbackFailed);
+                }
+                return Err(error);
+            }
+        }
+    }
+
+    let config_change = if name == current_name {
+        config.set_profile(&name, profile.clone())
+    } else {
+        config
+            .remove_profile(&current_name)
+            .and_then(|_| config.add_profile(&name, profile.clone()))
+    };
+    if let Err(error) = config_change.and_then(|_| config.save(dir)) {
+        if restore(store, &mut changed_secrets).is_err() {
+            return Err(ProfileError::RollbackFailed);
+        }
+        return Err(ProfileError::Config(error));
+    }
+
+    let mut warnings = Vec::new();
+    delete_obsolete_secret(
+        store,
+        &previous_access_account,
+        Some(&access_account),
+        "access_code_delete_failed",
+        "profile was updated, but the old stored access code could not be deleted from keychain",
+        &mut warnings,
+    );
+    delete_obsolete_secret(
+        store,
+        &previous_tls_account,
+        tls_fingerprint.as_ref().map(|_| tls_account.as_str()),
+        "tls_fingerprint_delete_failed",
+        "profile was updated, but the old stored TLS fingerprint could not be deleted from keychain",
+        &mut warnings,
+    );
+    if tls_fingerprint.is_none() && tls_account != previous_tls_account {
+        delete_obsolete_secret(
+            store,
+            &tls_account,
+            None,
+            "tls_fingerprint_delete_failed",
+            "profile was updated, but an obsolete TLS fingerprint could not be deleted from keychain",
+            &mut warnings,
+        );
+    }
+
+    Ok(UpdateResult {
+        name,
+        profile,
+        warnings,
+    })
+}
+
+fn delete_obsolete_secret(
+    store: &dyn SecretStore,
+    account: &str,
+    retained_account: Option<&str>,
+    code: &'static str,
+    message: &'static str,
+    warnings: &mut Vec<RemoveWarning>,
+) {
+    if retained_account == Some(account) {
+        return;
+    }
+    match store.delete(SERVICE, account) {
+        Ok(()) | Err(SecretError::NotFound) => {}
+        Err(_) => warnings.push(RemoveWarning { code, message }),
+    }
 }
 
 fn default_timeout() -> String {
@@ -711,6 +855,60 @@ mod tests {
                 .unwrap()
                 .contains("key")
         );
+    }
+
+    #[test]
+    fn updates_a_profile_without_requiring_or_deleting_its_stored_access_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::open(dir.path()).unwrap();
+        config
+            .add_profile(
+                "garage",
+                Profile {
+                    driver: "moonraker".into(),
+                    host: "old-printer.local".into(),
+                    serial: String::new(),
+                    model: String::new(),
+                    timeout: "10s".into(),
+                    insecure: false,
+                    created: "2026-08-01T12:00:00Z".into(),
+                    updated: "2026-08-01T12:00:00Z".into(),
+                },
+            )
+            .unwrap();
+        config.save(dir.path()).unwrap();
+        let store = MemoryStore::default();
+        store
+            .set(SERVICE, "moonraker:garage:access-code", "existing-key")
+            .unwrap();
+        let (host, server) = moonraker_server(None);
+
+        let result = update(
+            dir.path(),
+            &store,
+            "garage",
+            CreateRequest {
+                name: "garage".into(),
+                driver: "moonraker".into(),
+                host: host.clone(),
+                serial: "SN001".into(),
+                model: String::new(),
+                timeout: "15s".into(),
+                insecure: false,
+                access_code: String::new(),
+            },
+        )
+        .unwrap();
+        server.join().unwrap();
+
+        assert_eq!(result.profile.host, host);
+        assert_eq!(result.profile.created, "2026-08-01T12:00:00Z");
+        assert_eq!(
+            store.get(SERVICE, "moonraker:garage:access-code").unwrap(),
+            "existing-key"
+        );
+        let saved = Config::open(dir.path()).unwrap();
+        assert_eq!(saved.get_profile("garage").unwrap().timeout, "15s");
     }
 
     #[test]

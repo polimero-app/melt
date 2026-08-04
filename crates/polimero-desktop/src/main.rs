@@ -1383,6 +1383,23 @@ fn create_configured_printer(
     profiles::create(dir, &SystemKeychain, request).map_err(create_error)
 }
 
+#[tauri::command(async)]
+fn update_configured_printer(
+    name: String,
+    request: profiles::CreateRequest,
+    state: tauri::State<'_, MonitorState>,
+) -> Result<profiles::UpdateResult, CommandError> {
+    let dir = config_dir().map_err(|_| unreadable_config())?;
+    let result = profiles::update(dir, &SystemKeychain, &name, request).map_err(create_error)?;
+    state.pool.remove(&name);
+    invalidate(&state, &name);
+    if result.name != name {
+        state.pool.remove(&result.name);
+        invalidate(&state, &result.name);
+    }
+    Ok(result)
+}
+
 fn create_error(error: profiles::ProfileError) -> CommandError {
     CommandError::new(match error {
         profiles::ProfileError::MissingName => "profileMissingName",
@@ -3096,6 +3113,7 @@ fn main() {
             cached_monitoring,
             printer_status,
             create_configured_printer,
+            update_configured_printer,
             preview_printer_tls,
             refresh_printer_tls,
             printer_files,

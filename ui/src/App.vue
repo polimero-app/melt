@@ -478,7 +478,6 @@ const draft = ref<PrinterDraftFields>({
 })
 const additionBaseline = ref<PrinterDraftFields>({ ...draft.value })
 const editingPrinter = ref<string>()
-const editRemoved = ref(false)
 const additionDirty = computed(() => additionOpen.value && !printerDraftsMatch(draft.value, additionBaseline.value))
 
 function resetAdditionPanelState() {
@@ -972,7 +971,6 @@ function openAddition() {
 function closeAdditionImmediately() {
   additionOpen.value = false
   editingPrinter.value = undefined
-  editRemoved.value = false
 }
 
 function closeAddition() {
@@ -1022,12 +1020,9 @@ async function addPrinter() {
 
   try {
     const replacing = editingPrinter.value
-    if (replacing && !editRemoved.value) {
-      await invoke('remove_configured_printer', { name: replacing })
-      editRemoved.value = true
-      printers.value = printers.value.filter((entry) => entry.name !== replacing)
-    }
-    const profile = await invoke<Printer>('create_configured_printer', { request: draft.value })
+    const profile = replacing
+      ? await invoke<Printer>('update_configured_printer', { name: replacing, request: draft.value })
+      : await invoke<Printer>('create_configured_printer', { request: draft.value })
     const printer = {
       name: profile.name,
       driver: profile.driver,
@@ -1040,7 +1035,6 @@ async function addPrinter() {
       .sort((left, right) => left.name.localeCompare(right.name))
     additionOpen.value = false
     editingPrinter.value = undefined
-    editRemoved.value = false
     draft.value.accessCode = ''
     await selectPrinter(printer.name)
   } catch (reason) {
@@ -2672,7 +2666,7 @@ onUnmounted(() => {
             <input id="printer-timeout" name="printer-timeout" v-model="draft.timeout" required class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
           </div>
           <div>
-            <label for="printer-access-code" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ editingPrinter ? t('addition.accessCodeReenter') : t('addition.accessCode') }}</label>
+            <label for="printer-access-code" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ editingPrinter ? t('addition.accessCodeKeep') : t('addition.accessCode') }}</label>
             <input id="printer-access-code" name="printer-access-code" v-model="draft.accessCode" type="password" autocomplete="new-password" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
           </div>
           <div class="flex items-center justify-between">

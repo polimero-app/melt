@@ -55,7 +55,7 @@ export type MessageKey =
   | "addition.serial"
   | "addition.timeout"
   | "addition.accessCode"
-  | "addition.accessCodeReenter"
+  | "addition.accessCodeKeep"
   | "addition.insecure"
   | "addition.confirm"
   | "addition.error"
@@ -461,7 +461,7 @@ const messages: Record<Locale, Messages> = {
     "addition.serial": "Serial number",
     "addition.timeout": "Connection timeout",
     "addition.accessCode": "Access code",
-    "addition.accessCodeReenter": "Access code (re-enter to save changes)",
+    "addition.accessCodeKeep": "Access code (leave blank to keep existing)",
     "addition.insecure": "Accept an untrusted TLS certificate",
     "addition.confirm": "Verify and save",
     "addition.error": "We could not save this profile.",
@@ -864,7 +864,7 @@ const messages: Record<Locale, Messages> = {
     "addition.serial": "Número de série",
     "addition.timeout": "Tempo limite de conexão",
     "addition.accessCode": "Código de acesso",
-    "addition.accessCodeReenter": "Código de acesso (informe novamente para salvar)",
+    "addition.accessCodeKeep": "Código de acesso (deixe em branco para manter o atual)",
     "addition.insecure": "Aceitar um certificado TLS não confiável",
     "addition.confirm": "Verificar e salvar",
     "addition.error": "Não foi possível salvar este perfil.",
