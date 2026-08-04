@@ -55,7 +55,9 @@ preserves project, plate, display, and storage names separately; reconciles
 available AMS/nozzle data; probes storage protocols conservatively; and waits
 for an observed print start. See
 [`docs/bambu-compatibility.md`](docs/bambu-compatibility.md) for the
-compatibility policy and physical-printer qualification matrix.
+compatibility policy and physical-printer qualification matrix. The exact
+hardware capture and quirk-promotion procedure is documented in
+[`docs/bambu-physical-qualification.md`](docs/bambu-physical-qualification.md).
 
 The desktop polls configured profiles locally every five seconds while open;
 failed profiles back off independently to one minute. It offers a redacted

@@ -203,6 +203,7 @@ For every row, verify and retain evidence for:
    collision, printer rejection, cancellation, and network loss at each stage.
 
 Attach completed matrix evidence to the frozen release records described in
+[`bambu-physical-qualification.md`](bambu-physical-qualification.md) and
 `docs/release-qualification.md`. Until a row has real-device evidence, its
 behavior is implemented and automatically tested, but not physically
 qualified for that model/firmware pair.

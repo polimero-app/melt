@@ -10,3 +10,7 @@ Run `make bambu-evidence-check` before committing a fixture. The check enforces
 the manifest contract, unique/cross-referenced IDs, safe relative file paths,
 referenced-file existence, UTF-8 textual summaries, and common credential,
 private-key, user-path, private-IP, and MAC-address redaction failures.
+
+Physical captures must also follow the staged safety, capture, sanitization,
+review, and quirk-promotion procedure in
+[`docs/bambu-physical-qualification.md`](../../docs/bambu-physical-qualification.md).

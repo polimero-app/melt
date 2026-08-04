@@ -65,7 +65,8 @@ each produced installer on its target OS, including the packaged headless
 Moonraker printer: status, a non-destructive control, emergency-stop handling,
 and confirmation that unsupported capabilities still report capability errors.
 For releases that change Bambu behavior, attach the relevant completed rows
-from `docs/bambu-compatibility.md`: printer and firmware identity, storage
+produced with
+[`bambu-physical-qualification.md`](bambu-physical-qualification.md): printer and firmware identity, storage
 transport, status stream, sliced-package preflight, AMS mapping, print-start
 observation, and tested failure paths. Automated tests do not replace this
 physical-printer evidence.
