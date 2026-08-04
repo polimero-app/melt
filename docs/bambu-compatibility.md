@@ -145,6 +145,14 @@ Bambu Studio's exact private routing rules are not treated as facts merely
 because a model name resembles a known family. Add or change a route only with
 sanitized protocol evidence plus physical-printer qualification.
 
+Qualified quirks may use inclusive numeric minimum/maximum bounds, but every
+bounded rule names the exact firmware module it constrains. Suffixes such as
+`-beta` are retained for diagnostics while range matching compares numeric
+components with missing trailing components treated as zero. Registry tests
+reject malformed/reversed ranges, duplicate IDs, missing evidence ownership or
+removal criteria, and overlapping active MJPEG/RTSPS routes. Provisional,
+contradicted, and expired entries remain visible but never alter runtime behavior.
+
 ## Automated qualification
 
 The Rust tests cover legacy and structured status shapes, unknown fields,
