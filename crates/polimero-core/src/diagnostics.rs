@@ -77,6 +77,7 @@ pub struct CameraOwnerReport {
     pub subscribers: usize,
     pub generation: u64,
     pub has_jpeg: bool,
+    pub reconnect_attempts: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -179,6 +180,7 @@ pub fn bambu_compatibility_report(
                 subscribers: owner.subscribers,
                 generation: owner.generation,
                 has_jpeg: owner.has_jpeg,
+                reconnect_attempts: owner.reconnect_attempts,
             }),
         },
         storage_transport: capabilities.storage_transport,

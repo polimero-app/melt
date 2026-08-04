@@ -98,6 +98,13 @@ redacted camera-owner state. Module serials, unknown module values, observed
 URLs, hosts, complete fingerprints, credentials, and raw capability objects are
 never serialized. Unknown values are represented only by their JSON kind.
 
+An active camera owner reconnects the same negotiated transport while it still
+has subscribers, using interruptible exponential backoff from 250 ms through a
+4-second cap. TLS pin or certificate-identity failures terminate immediately.
+RTSPS recovery also requires unchanged SPS/PPS parameter sets; otherwise
+subscribers are disconnected so a new WebRTC negotiation can establish the new
+codec description. Diagnostics report the reconnect-attempt count.
+
 Polimero treats a reported Bambu model as a capability hint, not a complete
 contract. Runtime observations and safe protocol probes take precedence over
 the model family. Unknown models and unknown fields remain distinct from an

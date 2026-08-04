@@ -3,6 +3,7 @@ use std::{
     net::{Shutdown, TcpStream},
     sync::{
         Arc, Mutex, Weak,
+        atomic::{AtomicU32, Ordering},
         mpsc::{self, Receiver, SyncSender, TrySendError},
     },
     thread,
@@ -53,6 +54,7 @@ pub struct CameraOwnerStatus {
     pub subscribers: usize,
     pub generation: u64,
     pub has_jpeg: bool,
+    pub reconnect_attempts: u32,
     pub selection_source: CameraSelectionSource,
     pub rejected_advertisement: Option<String>,
 }
@@ -86,6 +88,7 @@ struct Owner {
     parameters: Option<H264Parameters>,
     selection: CameraSelection,
     repair_rtp_timestamps: bool,
+    reconnect_attempts: AtomicU32,
     shutdown: Mutex<Option<TcpStream>>,
     state: Mutex<OwnerState>,
 }
@@ -150,6 +153,24 @@ impl Owner {
         }
     }
 
+    fn finish(&self) {
+        self.stop();
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .subscribers
+            .clear();
+    }
+
+    fn has_subscribers(&self) -> bool {
+        !self
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .subscribers
+            .is_empty()
+    }
+
     fn status(&self) -> CameraOwnerStatus {
         let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         CameraOwnerStatus {
@@ -158,6 +179,7 @@ impl Owner {
             subscribers: state.subscribers.len(),
             generation: self.generation,
             has_jpeg: state.latest_jpeg.is_some(),
+            reconnect_attempts: self.reconnect_attempts.load(Ordering::Relaxed),
             selection_source: self.selection.source,
             rejected_advertisement: self.selection.rejected_advertisement.clone(),
         }
@@ -278,6 +300,7 @@ impl CameraManager {
             parameters,
             selection,
             repair_rtp_timestamps,
+            reconnect_attempts: AtomicU32::new(0),
             shutdown: Mutex::new(Some(shutdown)),
             state: Mutex::new(OwnerState {
                 next_subscriber: 1,
@@ -288,7 +311,14 @@ impl CameraManager {
         });
         let subscription = owner.subscribe(kind);
         manager.owners.insert(printer_key, Arc::downgrade(&owner));
-        thread::spawn(move || run_owner(owner, source));
+        let source_config = SourceConfig {
+            profile: profile.clone(),
+            access_code: access_code.map(str::to_owned),
+            fingerprint: fingerprint.map(str::to_owned),
+            timeout,
+            transport,
+        };
+        thread::spawn(move || run_owner(owner, source, source_config));
         Ok(subscription)
     }
 
@@ -397,7 +427,16 @@ fn camera_revision(
     digest.finalize().into()
 }
 
-fn run_owner(owner: Arc<Owner>, mut source: Source) {
+struct SourceConfig {
+    profile: Profile,
+    access_code: Option<String>,
+    fingerprint: Option<String>,
+    timeout: Duration,
+    transport: CameraOwnerTransport,
+}
+
+fn run_owner(owner: Arc<Owner>, mut source: Source, config: SourceConfig) {
+    let mut consecutive_failures = 0_u32;
     loop {
         let result = match &mut source {
             Source::Mjpeg(stream) => stream.next_frame().map(|jpeg| {
@@ -410,7 +449,11 @@ fn run_owner(owner: Arc<Owner>, mut source: Source) {
                 owner.publish(CameraFrame::H264(Arc::new(access_unit)));
             }),
         };
-        if result.is_err()
+        if result.is_ok() {
+            consecutive_failures = 0;
+            continue;
+        }
+        if !owner.has_subscribers()
             || owner
                 .state
                 .lock()
@@ -419,8 +462,80 @@ fn run_owner(owner: Arc<Owner>, mut source: Source) {
         {
             break;
         }
+        consecutive_failures = consecutive_failures.saturating_add(1);
+        owner.reconnect_attempts.fetch_add(1, Ordering::Relaxed);
+        if !wait_for_reconnect(&owner, reconnect_delay(consecutive_failures)) {
+            break;
+        }
+        let deadline = match Instant::now().checked_add(config.timeout) {
+            Some(deadline) => deadline,
+            None => break,
+        };
+        let transport = match config.transport {
+            CameraOwnerTransport::MjpegTls => CameraTransport::MjpegTls,
+            CameraOwnerTransport::RtspsH264 => CameraTransport::RtspsH264,
+        };
+        let replacement = open_transport(
+            &config.profile,
+            config.access_code.as_deref(),
+            config.fingerprint.as_deref(),
+            deadline,
+            transport,
+        );
+        let replacement = match replacement {
+            Ok(replacement) => replacement,
+            Err(CameraError::Pin(_) | CameraError::Identity) => break,
+            Err(_) => continue,
+        };
+        if !same_h264_parameters(&owner, &replacement) {
+            break;
+        }
+        let Ok(shutdown) = replacement.shutdown_handle() else {
+            break;
+        };
+        *owner
+            .shutdown
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(shutdown);
+        source = replacement;
     }
-    owner.stop();
+    owner.finish();
+}
+
+fn same_h264_parameters(owner: &Owner, source: &Source) -> bool {
+    match (owner.parameters.as_ref(), source) {
+        (None, Source::Mjpeg(_)) => true,
+        (Some(expected), Source::H264(stream)) => {
+            let (sps, pps) = stream.parameter_sets();
+            expected.sps.as_ref() == sps && expected.pps.as_ref() == pps
+        }
+        _ => false,
+    }
+}
+
+fn reconnect_delay(attempt: u32) -> Duration {
+    Duration::from_millis(250_u64.saturating_mul(1_u64 << attempt.saturating_sub(1).min(4)))
+}
+
+fn wait_for_reconnect(owner: &Owner, duration: Duration) -> bool {
+    let deadline = Instant::now() + duration;
+    while Instant::now() < deadline {
+        if !owner.has_subscribers()
+            || owner
+                .state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .stopped
+        {
+            return false;
+        }
+        thread::sleep(
+            deadline
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_millis(50)),
+        );
+    }
+    true
 }
 
 #[cfg(test)]
@@ -441,6 +556,7 @@ mod tests {
                 quirk_ids: Vec::new(),
             },
             repair_rtp_timestamps: false,
+            reconnect_attempts: AtomicU32::new(0),
             shutdown: Mutex::new(None),
             state: Mutex::new(OwnerState {
                 next_subscriber: 1,
@@ -492,5 +608,12 @@ mod tests {
                 .as_ref(),
             CameraFrame::H264(_)
         ));
+    }
+
+    #[test]
+    fn reconnect_backoff_is_bounded() {
+        assert_eq!(reconnect_delay(1), Duration::from_millis(250));
+        assert_eq!(reconnect_delay(2), Duration::from_millis(500));
+        assert_eq!(reconnect_delay(10), Duration::from_secs(4));
     }
 }

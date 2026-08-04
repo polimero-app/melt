@@ -242,7 +242,7 @@ type BambuCompatibilityDiagnostic = {
   modelFamily: string
   firmwareModules: { name: string; software: string; hardware?: string }[]
   authorization: { effective: string; conflict: boolean }
-  camera: { preferred: string; source: string; rejectedAdvertisement?: string; owner?: { transport: string; subscribers: number } }
+  camera: { preferred: string; source: string; rejectedAdvertisement?: string; owner?: { transport: string; subscribers: number; reconnectAttempts: number } }
   storageTransport: string
   quirks: { id: string; qualification: string; active: boolean }[]
   tlsPinned: boolean
