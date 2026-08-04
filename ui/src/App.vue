@@ -5,7 +5,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog'
 import { locales, preferredLocale, translate, type Locale, type MessageKey } from './i18n'
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
-import { clampTarget, formatDuration, relativeAge } from './formatting'
+import { clampTarget, formatDuration } from './formatting'
 import { printTargetState } from './printing'
 import { cameraViewState, isActiveJobState, printerStateMessageKey } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
@@ -445,8 +445,6 @@ const speedBusy = ref(false)
 const uploadBusy = ref(false)
 const downloadingPath = ref<string>()
 const downloadProgress = ref<number>()
-const nowMs = ref(Date.now())
-let clockTimer: number | undefined
 const defaultNotifications: NotificationSetting[] = [
   { id: 'completion', label: 'settingsView.notifyComplete', description: 'settingsView.notifyCompleteDescription', enabled: true },
   { id: 'failure', label: 'settingsView.notifyFailure', description: 'settingsView.notifyFailureDescription', enabled: true },
@@ -517,10 +515,6 @@ function badgeFor(name: string): PrinterBadge {
 }
 
 const activeBadge = computed<PrinterBadge>(() => (activePrinter.value ? badgeFor(activePrinter.value.name) : 'offline'))
-const activeFreshness = computed(() => {
-  const entry = monitoring.value.find((candidate) => candidate.name === activePrinter.value?.name)
-  return relativeAge(entry?.observedAt, nowMs.value)
-})
 const isReachable = (badge: PrinterBadge) => badge === 'idle' || badge === 'busy'
 const activeHasStatus = computed(() => isReachable(activeBadge.value) || activeBadge.value === 'reconnecting' || activeBadge.value === 'error')
 const badgeMessageKeys: Record<PrinterBadge, MessageKey> = {
@@ -1572,16 +1566,6 @@ const hiddenFileCount = computed(() => Math.max(0, printerFiles.value.length - D
 const enabledSlicers = computed(() => slicers.value.filter((slicer) => slicer.enabled))
 const isModelFile = (file: FileEntry) => file.mediaType === 'model' && /\.(3mf|stl|obj)$/i.test(file.name)
 
-const printerActionItems = computed<ActionMenuItem[]>(() => {
-  if (!activePrinter.value) return []
-  const items: ActionMenuItem[] = []
-  if (capabilities.value?.tlsRefresh) {
-    items.push({ label: t('printersView.refreshCertificate'), icon: PhArrowsClockwise, onSelect: () => void openTlsRefresh(activePrinter.value!.name) })
-  }
-  items.push({ label: t('printersView.removePrinter'), icon: PhTrash, danger: true, onSelect: () => void removePrinter(activePrinter.value!.name) })
-  return items
-})
-
 function fileActionItems(file: FileEntry): ActionMenuItem[] {
   const items: ActionMenuItem[] = [
     {
@@ -1673,7 +1657,6 @@ onMounted(() => {
   systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
   systemPrefersDark.value = systemThemeQuery.matches
   systemThemeQuery.addEventListener('change', handleSystemThemeChange)
-  clockTimer = window.setInterval(() => { nowMs.value = Date.now() }, 1000)
   void load()
   void listen<MonitorEntry[]>('monitoring-updated', (event) => {
     monitoring.value = event.payload
@@ -1724,7 +1707,6 @@ onUnmounted(() => {
   printStageUnlisten?.()
   if (fileQueryTimer !== undefined) window.clearTimeout(fileQueryTimer)
   if (toastTimer !== undefined) window.clearTimeout(toastTimer)
-  if (clockTimer !== undefined) window.clearInterval(clockTimer)
   Object.values(temperatureTimers).forEach((timer) => {
     if (timer !== undefined) window.clearTimeout(timer)
   })
@@ -1875,14 +1857,6 @@ onUnmounted(() => {
           <div class="mt-5 flex lg:mt-0 lg:ml-4 items-center gap-2">
             <StatusBadge :status="activeBadge" :label="statusLabel(activeBadge)" />
             <span
-              v-if="activeFreshness"
-              class="font-mono text-xs"
-              :class="activeFreshness.bucket === 'stale'
-                ? 'text-amber-600 dark:text-amber-400'
-                : 'text-gray-500 dark:text-gray-400'"
-              :title="t('control.observedAtTitle')"
-            >{{ t('control.observedAt', { seconds: activeFreshness.seconds }) }}</span>
-            <span
               v-if="wifiDbm !== undefined"
               class="inline-flex items-center gap-x-1.5 rounded-md bg-cyan-100 px-2 py-1 text-xs font-medium text-cyan-700 dark:bg-cyan-400/10 dark:text-cyan-400"
               :title="wifiSignal(wifiDbm).label"
@@ -1895,7 +1869,6 @@ onUnmounted(() => {
               :disabled="!activeHasStatus"
               @click="emergencyStop"
             ><PhStop class="size-4" aria-hidden="true" /> {{ t('dashboard.emergency') }}</Button>
-            <ActionMenu :label="t('control.printerActions')" :items="printerActionItems" />
           </div>
         </div>
 
