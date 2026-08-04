@@ -1921,7 +1921,7 @@ onUnmounted(() => {
                     :title="cameraTransport === 'mjpeg' ? cameraTransportDetail : undefined"
                     :class="cameraStateClasses"
                   >
-                    <svg class="size-1.5" viewBox="0 0 6 6" aria-hidden="true"><circle cx="3" cy="3" r="3" /></svg>{{ cameraStateLabel }}<span v-if="cameraState === 'live' && cameraTransport" class="ml-1 opacity-75">({{ cameraTransport.toUpperCase() }})</span>
+                    <svg class="size-1.5" viewBox="0 0 6 6" aria-hidden="true"><circle cx="3" cy="3" r="3" /></svg>{{ cameraStateLabel }}
                   </span>
                 </template>
                 <IconButton :title="t('camera.refresh')" :aria-label="t('camera.refresh')" :disabled="cameraLoading || !cameraSupported" @click="refreshCamera"><PhArrowsClockwise class="size-4" aria-hidden="true" /></IconButton>
