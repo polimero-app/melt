@@ -383,8 +383,15 @@ struct JobActionRequest {
 #[serde(rename_all = "camelCase")]
 struct TemperatureRequest {
     name: String,
+    #[serde(default)]
+    temperature: Option<String>,
+    #[serde(default)]
+    target_celsius: Option<f64>,
+    #[serde(default)]
     nozzle_celsius: Option<f64>,
+    #[serde(default)]
     bed_celsius: Option<f64>,
+    #[serde(default)]
     chamber_celsius: Option<f64>,
 }
 
@@ -1787,6 +1794,35 @@ fn printer_temperature_set(
     request: TemperatureRequest,
     state: tauri::State<'_, MonitorState>,
 ) -> Result<moonraker::TemperatureResult, CommandError> {
+    if let (Some(temperature), Some(target_celsius)) =
+        (request.temperature.as_deref(), request.target_celsius)
+    {
+        let (generation, printer) =
+            pooled_desktop_printer(&state, &request.name, Operation::TemperatureSet)?;
+        ensure_state(
+            &state,
+            generation,
+            &printer,
+            &[moonraker::PrinterState::Idle],
+            Operation::TemperatureSet,
+        )?;
+        let result =
+            current_pool_operation(&state, generation, Operation::TemperatureSet, |pool| {
+                pool.temperature_set_item(
+                    &request.name,
+                    &printer.driver,
+                    printer.access_code.as_deref(),
+                    printer.tls_fingerprint.as_deref(),
+                    temperature,
+                    target_celsius,
+                )
+            });
+        invalidate(&state, &request.name);
+        return result;
+    }
+    if request.temperature.is_some() || request.target_celsius.is_some() {
+        return Err(CommandError::new("temperatureTargetMissing"));
+    }
     let targets = moonraker::TemperatureTargets {
         nozzle_celsius: request.nozzle_celsius,
         bed_celsius: request.bed_celsius,

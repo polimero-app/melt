@@ -704,6 +704,76 @@ impl Client {
         })
     }
 
+    pub fn temperature_set_item(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        item: &str,
+        target_celsius: f64,
+    ) -> Result<TemperatureResult, Error> {
+        self.authorize_mutation(access_code, fingerprint, MutationClass::Thermal)?;
+        let target = target_celsius.round();
+        let status = self.status(access_code, fingerprint)?;
+        let control = status
+            .controls
+            .temperatures
+            .get(item)
+            .ok_or(Error::Unsupported(
+                "requested temperature on this printer model",
+            ))?;
+        if !control.controllable {
+            return Err(Error::Unsupported(
+                "requested temperature is telemetry only",
+            ));
+        }
+        if control
+            .minimum_celsius
+            .is_some_and(|minimum| target < minimum)
+            || control
+                .maximum_celsius
+                .is_some_and(|maximum| target > maximum)
+        {
+            return Err(Error::InvalidTemperatureTarget);
+        }
+
+        let payload = if let Some(extruder_index) = nozzle_index(item) {
+            set_nozzle_temperature_payload(extruder_index, target)
+        } else {
+            let command = match item {
+                "nozzle" => format!("M104 S{target:.0}"),
+                "bed" => format!("M140 S{target:.0}"),
+                "chamber" => format!("M141 S{target:.0}"),
+                _ => {
+                    return Err(Error::Unsupported(
+                        "requested temperature on this printer model",
+                    ));
+                }
+            };
+            gcode_payload(&command)
+        };
+        let report = self.exchange(access_code, fingerprint, payload, |report| {
+            parse_status_value(report)
+                .ok()
+                .and_then(|status| status.controls.temperatures.get(item).cloned())
+                .and_then(|control| control.target_celsius)
+                .is_some_and(|reported| (reported - target).abs() < 0.5)
+        })?;
+        let status = parse_status(&report)?;
+        let kind = status
+            .controls
+            .temperatures
+            .get(item)
+            .map(|control| control.kind)
+            .ok_or(Error::InvalidResponse)?;
+        Ok(TemperatureResult {
+            targets: TemperatureTargets {
+                nozzle_celsius: (kind == TemperatureKind::Nozzle).then_some(target),
+                bed_celsius: (kind == TemperatureKind::Bed).then_some(target),
+                chamber_celsius: (kind == TemperatureKind::Chamber).then_some(target),
+            },
+        })
+    }
+
     pub fn motion_home(
         &self,
         access_code: Option<&str>,
@@ -763,29 +833,35 @@ impl Client {
         if speed_percent > 100 {
             return Err(Error::Unsupported("fan speed above 100%"));
         }
-        let prefix = match fan {
-            "partCooling" => "M106",
-            "auxiliary" => "M106 P2",
-            "chamber" => "M106 P3",
-            _ => return Err(Error::Unsupported("requested fan")),
-        };
-        let pwm = (u16::from(speed_percent) * 255 + 50) / 100;
-        let report = self.exchange(
-            access_code,
-            fingerprint,
-            gcode_payload(&format!("{prefix} S{pwm}")),
-            |report| {
-                parse_status_value(report)
-                    .ok()
-                    .and_then(|status| status.fans.get(fan).copied())
-                    // Reports use a 0-15 scale, so one step is about 7 points.
-                    .is_some_and(|reported| reported.abs_diff(speed_percent) <= 7)
-            },
-        )?;
-        let status = parse_status(&report)?;
-        if !status.fans.contains_key(fan) && !status.fans.is_empty() {
-            return Err(Error::Unsupported("requested fan on this printer model"));
+        let status = self.status(access_code, fingerprint)?;
+        let control = status
+            .controls
+            .fans
+            .get(fan)
+            .ok_or(Error::Unsupported("requested fan on this printer model"))?;
+        if !control.controllable {
+            return Err(Error::Unsupported("requested fan is telemetry only"));
         }
+        let payload = if let Some(index) = modern_fan_index(fan) {
+            set_fan_payload(index, speed_percent)
+        } else {
+            let prefix = match fan {
+                "partCooling" => "M106",
+                "auxiliary" => "M106 P2",
+                "chamber" => "M106 P3",
+                _ => return Err(Error::Unsupported("requested fan")),
+            };
+            let pwm = (u16::from(speed_percent) * 255 + 50) / 100;
+            gcode_payload(&format!("{prefix} S{pwm}"))
+        };
+        let report = self.exchange(access_code, fingerprint, payload, |report| {
+            parse_status_value(report)
+                .ok()
+                .and_then(|status| status.fans.get(fan).copied())
+                // Reports use a 0-15 scale, so one step is about 7 points.
+                .is_some_and(|reported| reported.abs_diff(speed_percent) <= 7)
+        })?;
+        parse_status(&report)?;
         Ok(FanResult {
             fan: fan.to_owned(),
             speed_percent,
@@ -800,20 +876,46 @@ impl Client {
         state: LightState,
     ) -> Result<LightResult, Error> {
         self.authorize_mutation(access_code, fingerprint, MutationClass::Light)?;
+        let status = self.status(access_code, fingerprint)?;
+        let logical_light = match light {
+            "lamp" | "chamber_light" | "chamber_light2" => "lamp",
+            other => other,
+        };
+        let control = status
+            .controls
+            .lights
+            .get(logical_light)
+            .ok_or(Error::Unsupported("requested light on this printer model"))?;
+        if !control.controllable {
+            return Err(Error::Unsupported("requested light is telemetry only"));
+        }
+        let has_secondary_lamp = status.lights.contains_key("chamber_light2");
         let report = self.exchange(
             access_code,
             fingerprint,
-            ledctrl_payload(light, state),
+            ledctrl_payload("chamber_light", state),
             |report| {
-                light_state_is(report, light, state) || light_unsupported_on_model(report, light)
+                light_state_is(report, "chamber_light", state)
+                    || light_unsupported_on_model(report, "chamber_light")
             },
         )?;
         let report: Value = serde_json::from_slice(&report).map_err(|_| Error::InvalidResponse)?;
-        if light_unsupported_on_model(&report, light) {
+        if light_unsupported_on_model(&report, "chamber_light") {
             return Err(Error::Unsupported("requested light on this printer model"));
         }
+        if has_secondary_lamp {
+            self.exchange(
+                access_code,
+                fingerprint,
+                ledctrl_payload("chamber_light2", state),
+                |report| {
+                    light_state_is(report, "chamber_light2", state)
+                        || light_unsupported_on_model(report, "chamber_light2")
+                },
+            )?;
+        }
         Ok(LightResult {
-            light: light.to_owned(),
+            light: logical_light.to_owned(),
             state,
         })
     }
@@ -2104,6 +2206,53 @@ fn ledctrl_payload(node: &str, state: LightState) -> String {
             "led_off_time": 500,
             "loop_times": 1,
             "interval_time": 1000,
+        }
+    })
+    .to_string()
+}
+
+fn modern_fan_index(fan: &str) -> Option<u8> {
+    match fan {
+        "hotend" => Some(0),
+        "parts" => Some(1),
+        "auxiliary" => Some(2),
+        "exhaust" => Some(3),
+        "hotendSecondary" => Some(4),
+        "mainboard" => Some(5),
+        "heat" => Some(6),
+        "auxiliarySecondary" => Some(10),
+        _ => fan.strip_prefix("fan")?.parse().ok(),
+    }
+}
+
+fn set_fan_payload(index: u8, speed_percent: u8) -> String {
+    json!({
+        "print": {
+            "sequence_id": next_sequence_id(),
+            "command": "set_fan",
+            "fan_index": index,
+            // New-protocol reports and commands use tenths of a percent.
+            "speed": u16::from(speed_percent) * 10,
+        }
+    })
+    .to_string()
+}
+
+fn nozzle_index(item: &str) -> Option<u8> {
+    match item {
+        "nozzleRight" => Some(0),
+        "nozzleLeft" => Some(1),
+        _ => item.strip_prefix("nozzle")?.parse().ok(),
+    }
+}
+
+fn set_nozzle_temperature_payload(extruder_index: u8, target_celsius: f64) -> String {
+    json!({
+        "print": {
+            "sequence_id": next_sequence_id(),
+            "command": "set_nozzle_temp",
+            "extruder_index": extruder_index,
+            "target_temp": target_celsius as i64,
         }
     })
     .to_string()
@@ -4544,6 +4693,27 @@ mod tests {
             &delta_without_chamber,
             "chamber_light"
         ));
+    }
+
+    #[test]
+    fn builds_h2_item_control_payloads_with_bambu_indices() {
+        assert_eq!(modern_fan_index("parts"), Some(1));
+        assert_eq!(modern_fan_index("auxiliarySecondary"), Some(10));
+        assert_eq!(modern_fan_index("partCooling"), None);
+        let fan: Value = serde_json::from_str(&set_fan_payload(3, 42)).unwrap();
+        assert_eq!(fan["print"]["command"], "set_fan");
+        assert_eq!(fan["print"]["fan_index"], 3);
+        assert_eq!(fan["print"]["speed"], 420);
+
+        assert_eq!(nozzle_index("nozzleRight"), Some(0));
+        assert_eq!(nozzle_index("nozzleLeft"), Some(1));
+        assert_eq!(nozzle_index("nozzle7"), Some(7));
+        assert_eq!(nozzle_index("nozzle"), None);
+        let nozzle: Value =
+            serde_json::from_str(&set_nozzle_temperature_payload(1, 235.0)).unwrap();
+        assert_eq!(nozzle["print"]["command"], "set_nozzle_temp");
+        assert_eq!(nozzle["print"]["extruder_index"], 1);
+        assert_eq!(nozzle["print"]["target_temp"], 235);
     }
 
     #[test]

@@ -258,6 +258,44 @@ impl ConnectionPool {
         )
     }
 
+    pub fn temperature_set_item(
+        &self,
+        name: &str,
+        profile: &drivers::Profile,
+        access_code: Option<&str>,
+        tls_fingerprint: Option<&str>,
+        item: &str,
+        target_celsius: f64,
+    ) -> Result<moonraker::TemperatureResult, drivers::DriverError> {
+        self.execute(
+            name,
+            profile,
+            access_code,
+            tls_fingerprint,
+            |client| {
+                let targets = match item {
+                    "nozzle" => moonraker::TemperatureTargets {
+                        nozzle_celsius: Some(target_celsius),
+                        ..Default::default()
+                    },
+                    "bed" => moonraker::TemperatureTargets {
+                        bed_celsius: Some(target_celsius),
+                        ..Default::default()
+                    },
+                    _ => {
+                        return Err(moonraker::Error::Unsupported(
+                            "requested temperature control",
+                        ));
+                    }
+                };
+                client.temperature_set(access_code, targets)
+            },
+            |client| {
+                client.temperature_set_item(access_code, tls_fingerprint, item, target_celsius)
+            },
+        )
+    }
+
     pub fn fan_set(
         &self,
         name: &str,
