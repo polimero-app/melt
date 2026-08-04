@@ -1751,11 +1751,12 @@ onUnmounted(() => {
             <div class="grid grid-cols-1">
               <select
                 name="printer-navigation"
-                :value="activePrinter?.name"
+                :value="activeView === 'control' ? activePrinter?.name : ''"
                 :aria-label="t('nav.selectPrinter')"
                 class="col-start-1 row-start-1 w-44 appearance-none truncate rounded-md bg-white py-1.5 pr-8 pl-3 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 min-[900px]:w-52 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800"
                 @change="selectPrinter(($event.target as HTMLSelectElement).value)"
               >
+                <option value="" disabled>{{ t('nav.selectPrinter') }}</option>
                 <option v-for="printer in printers" :key="printer.name" :value="printer.name">{{ printer.name }} · {{ statusLabel(badgeFor(printer.name)) }}</option>
               </select>
               <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-2 size-4 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
