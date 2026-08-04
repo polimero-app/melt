@@ -1553,9 +1553,6 @@ const visibleFiles = computed(() => {
 })
 const deferLibraryCards = computed(() => shouldDeferLibraryCards(visibleFiles.value.length))
 const printerFiles = computed(() => files.value.filter((file) => file.type === 'file'))
-const DASHBOARD_FILE_LIMIT = 3
-const dashboardFiles = computed(() => printerFiles.value.slice(0, DASHBOARD_FILE_LIMIT))
-const hiddenFileCount = computed(() => Math.max(0, printerFiles.value.length - DASHBOARD_FILE_LIMIT))
 const enabledSlicers = computed(() => slicers.value.filter((slicer) => slicer.enabled))
 const isModelFile = (file: FileEntry) => file.mediaType === 'model' && /\.(3mf|stl|obj)$/i.test(file.name)
 
@@ -2129,9 +2126,14 @@ onUnmounted(() => {
               <CardHeader :title="t('dashboard.files')" :icon="PhFolder">
                 <IconButton :title="t('dashboard.loadFiles')" :aria-label="t('dashboard.loadFiles')" :disabled="filesLoading" @click="loadFiles"><PhArrowsClockwise class="size-4" aria-hidden="true" /></IconButton>
               </CardHeader>
-              <div class="overflow-x-auto">
+              <div
+                class="max-h-80 overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:focus-visible:outline-cyan-400"
+                role="region"
+                :aria-label="t('dashboard.files')"
+                tabindex="0"
+              >
                 <table class="relative w-full divide-y divide-gray-300 text-left dark:divide-white/15">
-                  <thead>
+                  <thead class="sticky top-0 z-10 bg-white dark:bg-gray-800">
                     <tr>
                       <th scope="col" class="px-4 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase sm:px-6 dark:text-gray-400">{{ t('filesView.name') }}</th>
                       <th scope="col" class="w-20 px-2 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase dark:text-gray-400">{{ t('filesView.type') }}</th>
@@ -2142,7 +2144,7 @@ onUnmounted(() => {
                   </thead>
                   <tbody class="divide-y divide-gray-200 dark:divide-white/10">
                     <tr
-                      v-for="file in dashboardFiles"
+                      v-for="file in printerFiles"
                       :key="file.devicePath"
                       class="hover:bg-gray-50 dark:hover:bg-white/5"
                     >
@@ -2178,13 +2180,6 @@ onUnmounted(() => {
                     </tr>
                     <tr v-if="!printerFiles.length">
                       <td colspan="5" class="px-4 py-4 text-sm text-gray-500 sm:px-6 dark:text-gray-400">{{ filesLoading ? t('common.loading') : filesError ?? t('dashboard.noFiles') }}</td>
-                    </tr>
-                    <tr v-else-if="hiddenFileCount">
-                      <td colspan="5" class="px-4 py-3 text-sm text-gray-500 sm:px-6 dark:text-gray-400">
-                        <button type="button" class="font-medium text-cyan-700 hover:underline dark:text-cyan-400" @click="goTo('files')">
-                          {{ t('dashboard.moreFiles', { count: hiddenFileCount }) }}
-                        </button>
-                      </td>
                     </tr>
                   </tbody>
                 </table>
