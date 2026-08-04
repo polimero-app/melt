@@ -12,6 +12,7 @@ import { commandDetail, commandMessage, type CommandError } from './errors'
 import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
 import SlideOver from './components/SlideOver.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 import Button from './components/Button.vue'
 import IconButton from './components/IconButton.vue'
 import Switch from './components/Switch.vue'
@@ -2699,17 +2700,15 @@ onUnmounted(() => {
       </template>
     </SlideOver>
 
-    <SlideOver
+    <ConfirmDialog
       :open="pendingConfirm !== undefined"
       :title="pendingConfirm?.title ?? ''"
       :description="pendingConfirm?.description"
-      :close-label="t('common.closePanel')"
+      :confirm-label="confirming ? t('common.sending') : pendingConfirm?.confirm ?? ''"
+      :cancel-label="t('common.cancel')"
+      :busy="confirming"
       @close="!confirming && (pendingConfirm = undefined)"
-    >
-      <template #footer>
-        <Button :disabled="confirming" @click="pendingConfirm = undefined">{{ t('common.cancel') }}</Button>
-        <Button variant="danger" :disabled="confirming" @click="runConfirmation">{{ confirming ? t('common.sending') : pendingConfirm?.confirm }}</Button>
-      </template>
-    </SlideOver>
+      @confirm="runConfirmation"
+    />
   </div>
 </template>
