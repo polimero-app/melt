@@ -15,6 +15,7 @@ const model = defineModel<boolean>({ required: true })
     ></span>
     <input
       :id="id"
+      :name="id"
       v-model="model"
       type="checkbox"
       class="absolute inset-0 size-full appearance-none focus:outline-hidden"

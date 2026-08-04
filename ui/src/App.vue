@@ -2290,7 +2290,7 @@ onUnmounted(() => {
           </Card>
           <button
             type="button"
-            class="relative mx-4 flex min-h-55 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 p-12 text-center hover:border-gray-400 focus:outline-2 focus:outline-offset-2 focus:outline-cyan-600 sm:mx-0 dark:border-white/15 dark:hover:border-white/25 dark:focus:outline-cyan-500"
+            class="relative mx-4 flex min-h-55 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 p-12 text-center hover:border-gray-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600 sm:mx-0 dark:border-white/15 dark:hover:border-white/25 dark:focus-visible:outline-cyan-500"
             @click="openAddition"
           >
             <PhPlus class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />
@@ -2495,7 +2495,7 @@ onUnmounted(() => {
               name="file-search"
               v-model="searchTerm"
               autocomplete="off"
-              class="col-start-1 row-start-1 block w-40 rounded-md bg-white py-1.5 pr-3 pl-10 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-cyan-600 sm:w-64 sm:pl-9 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:placeholder:text-gray-500"
+              class="col-start-1 row-start-1 block w-40 rounded-md bg-white py-1.5 pr-3 pl-10 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:w-64 sm:pl-9 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:placeholder:text-gray-500"
               :aria-label="t('filesView.search')"
               :placeholder="t('filesView.search') + '…'"
               type="search"
