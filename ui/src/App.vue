@@ -307,6 +307,7 @@ type BackendPreferences = {
 const statusDotClasses: Record<PrinterBadge, string> = {
   idle: 'bg-green-500 ring-green-500/10',
   busy: 'bg-yellow-500 ring-yellow-500/10',
+  error: 'bg-red-600 ring-red-600/20',
   reconnecting: 'bg-amber-500 ring-amber-500/10',
   connecting: 'bg-gray-400 ring-gray-400/10',
   synchronizing: 'bg-cyan-500 ring-cyan-500/10',
@@ -472,10 +473,11 @@ function badgeFor(name: string): PrinterBadge {
 
 const activeBadge = computed<PrinterBadge>(() => (activePrinter.value ? badgeFor(activePrinter.value.name) : 'offline'))
 const isReachable = (badge: PrinterBadge) => badge === 'idle' || badge === 'busy'
-const activeHasStatus = computed(() => isReachable(activeBadge.value) || activeBadge.value === 'reconnecting')
+const activeHasStatus = computed(() => isReachable(activeBadge.value) || activeBadge.value === 'reconnecting' || activeBadge.value === 'error')
 const badgeMessageKeys: Record<PrinterBadge, MessageKey> = {
   idle: 'status.onlineIdle',
   busy: 'status.onlineBusy',
+  error: 'status.errorLabel',
   connecting: 'status.connecting',
   synchronizing: 'status.synchronizing',
   reconnecting: 'status.reconnecting',

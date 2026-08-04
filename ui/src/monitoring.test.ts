@@ -13,7 +13,14 @@ describe('monitor badge', () => {
 
   it('reports offline only when no usable status remains', () => {
     expect(monitorBadge({ error: { code: 'printerTimeout' }, stale: true })).toBe('offline')
-    expect(monitorBadge({ status: { state: 'error' } })).toBe('offline')
+    expect(monitorBadge({ status: { state: 'unknown' } })).toBe('offline')
+  })
+
+  it('separates a reported fault from an unreachable printer', () => {
+    expect(monitorBadge({ status: { state: 'error' } })).toBe('error')
+    expect(monitorBadge({ status: { state: 'error' }, connectionState: 'live' })).toBe('error')
+    // A fault we can no longer confirm is not a fault we should still assert.
+    expect(monitorBadge({ status: { state: 'error' }, connectionState: 'offline' })).toBe('offline')
   })
 
   it('preserves live idle and busy states', () => {

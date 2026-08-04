@@ -119,6 +119,7 @@ export type MessageKey =
   | "status.synchronizing"
   | "status.reconnecting"
   | "status.offlineLabel"
+  | "status.errorLabel"
   | "control.printerActions"
   | "control.signalExcellent"
   | "control.signalGood"
@@ -493,6 +494,7 @@ const messages: Record<Locale, Messages> = {
     "status.synchronizing": "Synchronizing",
     "status.reconnecting": "Reconnecting",
     "status.offlineLabel": "Offline",
+    "status.errorLabel": "Error",
     "control.printerActions": "Printer actions",
     "control.signalExcellent": "Excellent signal",
     "control.signalGood": "Good signal",
@@ -864,6 +866,7 @@ const messages: Record<Locale, Messages> = {
     "status.synchronizing": "Sincronizando",
     "status.reconnecting": "Reconectando",
     "status.offlineLabel": "Offline",
+    "status.errorLabel": "Erro",
     "control.printerActions": "Ações da impressora",
     "control.signalExcellent": "Sinal excelente",
     "control.signalGood": "Sinal bom",
