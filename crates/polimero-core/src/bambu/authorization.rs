@@ -77,12 +77,8 @@ pub fn resolve_authorization(report: &Value) -> AuthorizationResolution {
         .filter(|observation| observation.active)
         .map(|observation| observation.mode)
         .collect::<Vec<_>>();
-    let conflict = active
-        .iter()
-        .any(|mode| *mode == AuthorizationMode::DeveloperMode)
-        && active
-            .iter()
-            .any(|mode| *mode == AuthorizationMode::SigningRequired);
+    let conflict = active.contains(&AuthorizationMode::DeveloperMode)
+        && active.contains(&AuthorizationMode::SigningRequired);
     let effective = if conflict {
         AuthorizationMode::ConflictingEvidence
     } else {

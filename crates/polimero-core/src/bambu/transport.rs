@@ -8,7 +8,7 @@ use std::{
         Mutex, MutexGuard, TryLockError,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use crate::moonraker::{
@@ -30,10 +30,13 @@ use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rf
 use super::{
     AuthorizationMode, BedLevelingSupport, FirmwareInventory, MQTT_USERNAME, MappingStatus,
     MqttTopics, PrintStage, PrintStageEvent, Profile, RuntimeCapabilities, StorageTransport,
-    StorageVolume, TlsPinError, is_pushall_payload, is_valid_tls_fingerprint, payload_sequence_id,
+    StorageVolume, TlsPinError, is_pushall_payload, is_valid_tls_fingerprint,
     preflight_print_package, pushall_payload, resolve_authorization, tls_fingerprint, tunnel,
     verify_tls_fingerprint,
 };
+
+#[cfg(test)]
+use super::payload_sequence_id;
 
 const FTP_PORT: u16 = 990;
 const FILE_ROOT: &str = "sdcard";
@@ -203,6 +206,7 @@ impl Client {
     ) -> Result<Status, Error> {
         let payload = pushall_payload(next_sequence());
         let report = self.exchange(access_code, fingerprint, payload, is_full_report)?;
+        self.observe_runtime_status(&report);
         parse_status(&report)
     }
 
@@ -239,17 +243,15 @@ impl Client {
 
     fn authorize_mutation(
         &self,
-        access_code: Option<&str>,
-        fingerprint: Option<&str>,
+        _access_code: Option<&str>,
+        _fingerprint: Option<&str>,
         class: MutationClass,
     ) -> Result<(), Error> {
-        let cached = self
+        let authorization = self
             .capabilities
             .lock()
             .ok()
-            .and_then(|value| value.clone());
-        let authorization = cached
-            .or_else(|| self.runtime_capabilities(access_code, fingerprint).ok())
+            .and_then(|value| value.clone())
             .map(|capabilities| capabilities.authorization)
             .unwrap_or(AuthorizationMode::Unknown);
         if authorization == AuthorizationMode::SigningRequired {
@@ -259,6 +261,18 @@ impl Client {
             return Err(Error::AuthorizationConflict(class));
         }
         Ok(())
+    }
+
+    fn observe_runtime_status(&self, report: &[u8]) {
+        let Ok(status) = serde_json::from_slice::<Value>(report) else {
+            return;
+        };
+        if let Ok(mut cached) = self.capabilities.lock() {
+            let baseline = cached
+                .clone()
+                .unwrap_or_else(|| self.profile.default_capabilities());
+            *cached = Some(refine_runtime_capabilities(baseline, Some(&status), None));
+        }
     }
 
     fn storage_transport(&self) -> StorageTransport {
@@ -355,6 +369,7 @@ impl Client {
         let result = self.poll_status_inner(access_code, fingerprint, deadline, identity, payload);
         let result = result.and_then(|report| {
             let bytes = report.len() as u64;
+            self.observe_runtime_status(&report);
             parse_status(&report).map(|status| (status, bytes))
         });
         match &result {
@@ -1571,7 +1586,7 @@ impl MqttConnection {
         command: String,
         predicate: impl Fn(&Value) -> bool,
     ) -> Result<Vec<u8>, Error> {
-        let command_sequence = payload_sequence_id(command.as_bytes());
+        let correlation = command_correlation(command.as_bytes());
         let is_status_poll = is_pushall_payload(command.as_bytes());
         if is_status_poll {
             self.drain_stale_packets()?;
@@ -1604,8 +1619,8 @@ impl MqttConnection {
                         continue;
                     };
                     let accumulated = is_status_poll && self.accumulate_status(&value);
-                    command_rejection(&value, command_sequence.as_deref())?;
-                    acknowledged |= report_matches_sequence(&value, command_sequence.as_deref());
+                    command_rejection(&value, correlation.as_ref())?;
+                    acknowledged |= report_matches_command(&value, correlation.as_ref());
                     if is_status_poll && accumulated && predicate(&value) {
                         // `print.push_status` owns its sequence namespace and
                         // is not an acknowledgement of `pushing.pushall`.
@@ -1974,8 +1989,11 @@ fn mqtt_publish_payload(header: u8, payload: &[u8]) -> Result<Vec<u8>, Error> {
 }
 
 /// Fails the exchange when the printer refuses the command we just sent.
-fn command_rejection(report: &Value, sequence: Option<&str>) -> Result<(), Error> {
-    let Some(command) = matching_command_envelope(report, sequence) else {
+fn command_rejection(
+    report: &Value,
+    correlation: Option<&CommandCorrelation>,
+) -> Result<(), Error> {
+    let Some(command) = matching_command_envelope(report, correlation) else {
         return Ok(());
     };
     if !string(command.get("result")).is_some_and(|result| result.eq_ignore_ascii_case("fail")) {
@@ -1991,19 +2009,45 @@ fn command_rejection(report: &Value, sequence: Option<&str>) -> Result<(), Error
     Err(Error::CommandRejected)
 }
 
-fn report_matches_sequence(report: &Value, sequence: Option<&str>) -> bool {
-    matching_command_envelope(report, sequence).is_some()
+fn report_matches_command(report: &Value, correlation: Option<&CommandCorrelation>) -> bool {
+    matching_command_envelope(report, correlation).is_some()
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CommandCorrelation {
+    section: String,
+    command: String,
+    sequence: String,
+}
+
+fn command_correlation(payload: &[u8]) -> Option<CommandCorrelation> {
+    let value: Value = serde_json::from_slice(payload).ok()?;
+    ["print", "system", "pushing", "info"]
+        .into_iter()
+        .find_map(|section| {
+            let envelope = value.get(section)?.as_object()?;
+            Some(CommandCorrelation {
+                section: section.to_owned(),
+                command: envelope.get("command")?.as_str()?.to_owned(),
+                sequence: envelope.get("sequence_id")?.as_str()?.to_owned(),
+            })
+        })
 }
 
 fn matching_command_envelope<'a>(
     report: &'a Value,
-    sequence: Option<&str>,
+    correlation: Option<&CommandCorrelation>,
 ) -> Option<&'a Map<String, Value>> {
-    let sequence = sequence?;
-    ["print", "system", "pushing"]
-        .into_iter()
-        .filter_map(|key| report.get(key).and_then(Value::as_object))
-        .find(|command| command.get("sequence_id").and_then(Value::as_str) == Some(sequence))
+    let correlation = correlation?;
+    report
+        .get(&correlation.section)?
+        .as_object()
+        .filter(|command| {
+            command.get("sequence_id").and_then(Value::as_str)
+                == Some(correlation.sequence.as_str())
+                && command.get("command").and_then(Value::as_str)
+                    == Some(correlation.command.as_str())
+        })
 }
 
 fn next_sequence_id() -> String {
@@ -2011,21 +2055,23 @@ fn next_sequence_id() -> String {
 }
 
 fn next_sequence() -> u64 {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(u64::MAX / 2)
-        .saturating_add(u64::from(std::process::id()));
-    let mut previous = SEQUENCE.load(Ordering::Relaxed);
-    loop {
-        let next = now.max(previous.saturating_add(1));
-        match SEQUENCE.compare_exchange_weak(previous, next, Ordering::Relaxed, Ordering::Relaxed) {
-            Ok(_) => return next,
-            Err(value) => previous = value,
-        }
-    }
+    const MAX_SAFE_SEQUENCE: u64 = i32::MAX as u64;
+    SEQUENCE
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |previous| {
+            Some(if previous >= MAX_SAFE_SEQUENCE {
+                1
+            } else {
+                previous + 1
+            })
+        })
+        .map(|previous| {
+            if previous >= MAX_SAFE_SEQUENCE {
+                1
+            } else {
+                previous + 1
+            }
+        })
+        .unwrap_or(1)
 }
 
 fn gcode_payload(gcode: &str) -> String {
@@ -3810,14 +3856,18 @@ mod tests {
     #[test]
     fn command_rejections_are_scoped_to_the_active_sequence() {
         let rejection: Value = serde_json::from_str(
-            r#"{"print":{"sequence_id":"7","result":"fail","reason":"verification failed"}}"#,
+            r#"{"print":{"sequence_id":"7","command":"gcode_line","result":"fail","reason":"verification failed"}}"#,
         )
         .unwrap();
+        let active =
+            command_correlation(br#"{"print":{"sequence_id":"7","command":"gcode_line"}}"#);
+        let other =
+            command_correlation(br#"{"print":{"sequence_id":"other","command":"gcode_line"}}"#);
         assert!(matches!(
-            command_rejection(&rejection, Some("7")),
+            command_rejection(&rejection, active.as_ref()),
             Err(Error::UnsignedCommand)
         ));
-        assert!(command_rejection(&rejection, Some("other")).is_ok());
+        assert!(command_rejection(&rejection, other.as_ref()).is_ok());
     }
 
     #[test]
@@ -3826,17 +3876,22 @@ mod tests {
             "print": {"sequence_id": "unrelated", "gcode_state": "IDLE"},
             "system": {
                 "sequence_id": "active",
+                "command": "ledctrl",
                 "result": "fail",
                 "reason": "verification failed"
             }
         });
 
+        let active =
+            command_correlation(br#"{"system":{"sequence_id":"active","command":"ledctrl"}}"#);
+        let missing =
+            command_correlation(br#"{"system":{"sequence_id":"missing","command":"ledctrl"}}"#);
         assert!(matches!(
-            command_rejection(&report, Some("active")),
+            command_rejection(&report, active.as_ref()),
             Err(Error::UnsignedCommand)
         ));
-        assert!(report_matches_sequence(&report, Some("active")));
-        assert!(!report_matches_sequence(&report, Some("missing")));
+        assert!(report_matches_command(&report, active.as_ref()));
+        assert!(!report_matches_command(&report, missing.as_ref()));
     }
 
     #[test]
@@ -3844,12 +3899,17 @@ mod tests {
         let stale_status: Value =
             serde_json::from_str(r#"{"print":{"sequence_id":"previous","gcode_state":"IDLE"}}"#)
                 .unwrap();
-        let acknowledgement: Value =
-            serde_json::from_str(r#"{"print":{"sequence_id":"current","result":"success"}}"#)
-                .unwrap();
-
-        assert!(!report_matches_sequence(&stale_status, Some("current")));
-        assert!(report_matches_sequence(&acknowledgement, Some("current")));
+        let acknowledgement: Value = serde_json::from_str(
+            r#"{"print":{"sequence_id":"current","command":"gcode_line","result":"success"}}"#,
+        )
+        .unwrap();
+        let active =
+            command_correlation(br#"{"print":{"sequence_id":"current","command":"gcode_line"}}"#);
+        assert!(!report_matches_command(&stale_status, active.as_ref()));
+        assert!(report_matches_command(&acknowledgement, active.as_ref()));
+        let wrong_command =
+            json!({"print":{"sequence_id":"current","command":"print_speed","result":"success"}});
+        assert!(!report_matches_command(&wrong_command, active.as_ref()));
     }
 
     #[test]
@@ -3987,8 +4047,10 @@ mod tests {
     fn signing_required_blocks_before_file_or_network_work() {
         let profile = Profile::new("192.0.2.1", "SN001", true).unwrap();
         let client = Client::new(profile);
-        let mut capabilities = RuntimeCapabilities::default();
-        capabilities.authorization = AuthorizationMode::SigningRequired;
+        let capabilities = RuntimeCapabilities {
+            authorization: AuthorizationMode::SigningRequired,
+            ..Default::default()
+        };
         *client.capabilities.lock().unwrap() = Some(capabilities);
 
         assert!(matches!(
@@ -4917,6 +4979,13 @@ mod tests {
                 &mut stream,
                 &json!({"print": {
                     "sequence_id": sequence,
+                    "command": "gcode_line",
+                    "result": "success"
+                }}),
+            );
+            write_test_report(
+                &mut stream,
+                &json!({"print": {
                     "gcode_state": "IDLE",
                     "mc_percent": 0
                 }}),
@@ -5020,13 +5089,14 @@ mod tests {
                 let command = read_test_packet(&mut stream);
                 let command = mqtt_publish_payload(command.kind, &command.payload).unwrap();
                 let sequence = payload_sequence_id(&command).unwrap();
+                let command_name = command_correlation(&command).unwrap().command;
                 let refresh = read_test_packet(&mut stream);
                 assert!(is_pushall_payload(
                     &mqtt_publish_payload(refresh.kind, &refresh.payload).unwrap()
                 ));
 
                 for report in [
-                    json!({"print": {"sequence_id": sequence, "result": "success"}}),
+                    json!({"print": {"sequence_id": sequence, "command": command_name, "result": "success"}}),
                     json!({"print": {"gcode_state": "IDLE", "mc_percent": 0}}),
                 ] {
                     let mut payload = Vec::new();

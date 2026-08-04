@@ -59,7 +59,7 @@ pub struct CameraOwnerStatus {
 
 enum Source {
     Mjpeg(MjpegStream),
-    H264(H264Stream),
+    H264(Box<H264Stream>),
 }
 
 impl Source {
@@ -371,7 +371,9 @@ fn open_transport(
         .ok_or_else(|| CameraError::Connect(std::io::ErrorKind::TimedOut.into()))?;
     match transport {
         CameraTransport::RtspsH264 => {
-            open_decoded_h264_stream(profile, access_code, fingerprint, remaining).map(Source::H264)
+            open_decoded_h264_stream(profile, access_code, fingerprint, remaining)
+                .map(Box::new)
+                .map(Source::H264)
         }
         CameraTransport::MjpegTls => {
             open_classic_mjpeg_stream(profile, access_code, fingerprint, remaining)

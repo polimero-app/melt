@@ -62,6 +62,16 @@ to every packet in an access unit, preserves valid source deltas and wraparound,
 and repairs frozen or regressing values from monotonic arrival time. The current
 P2S report remains provisional, so production streams do not activate this path.
 
+## MQTT command correlation
+
+Command acknowledgements are matched by MQTT document section, command name,
+and sequence ID together. Unsolicited full or delta status remains eligible to
+update telemetry and to prove a requested state transition, but cannot
+acknowledge an unrelated command. Full `pushall` status owns an independent
+sequence namespace. Locally generated sequence IDs remain positive and within
+the signed 32-bit range, including after wrap, to avoid exposing future
+AMS-facing commands to known unsafe oversized identifiers.
+
 Polimero treats a reported Bambu model as a capability hint, not a complete
 contract. Runtime observations and safe protocol probes take precedence over
 the model family. Unknown models and unknown fields remain distinct from an
