@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cameraViewState, printerStateMessageKey } from './presentation'
+import { cameraViewState, isActiveJobState, printerStateMessageKey } from './presentation'
 
 describe('cameraViewState', () => {
   it('distinguishes live transports from retained snapshots', () => {
@@ -19,5 +19,15 @@ describe('printerStateMessageKey', () => {
     expect(printerStateMessageKey('printing')).toBe('printerState.printing')
     expect(printerStateMessageKey('not-yet-supported')).toBe('printerState.unknown')
     expect(printerStateMessageKey(undefined)).toBe('printerState.unknown')
+  })
+})
+
+describe('isActiveJobState', () => {
+  it('only treats printing and paused printers as active jobs', () => {
+    expect(isActiveJobState('printing')).toBe(true)
+    expect(isActiveJobState('paused')).toBe(true)
+    expect(isActiveJobState('idle')).toBe(false)
+    expect(isActiveJobState('error')).toBe(false)
+    expect(isActiveJobState(undefined)).toBe(false)
   })
 })

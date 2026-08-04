@@ -7,7 +7,7 @@ import { locales, preferredLocale, translate, type Locale, type MessageKey } fro
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration, relativeAge } from './formatting'
 import { printTargetState } from './printing'
-import { cameraViewState, printerStateMessageKey } from './presentation'
+import { cameraViewState, isActiveJobState, printerStateMessageKey } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import { shouldDeferLibraryCards } from './library'
@@ -534,8 +534,10 @@ const badgeMessageKeys: Record<PrinterBadge, MessageKey> = {
   unknown: 'status.unknownLabel',
 }
 const statusLabel = (badge: PrinterBadge) => t(badgeMessageKeys[badge])
+const hasActiveJob = computed(() => isActiveJobState(selectedStatus.value?.state))
 const progressPercent = computed(() => selectedStatus.value?.progress?.percent ?? 0)
 const preparingPercent = computed(() => {
+  if (!hasActiveJob.value) return undefined
   const progress = selectedStatus.value?.progress
   if (!progress || progress.percent > 0) return undefined
   return progress.preparationPercent
@@ -1971,7 +1973,7 @@ onUnmounted(() => {
 
             <Card>
               <CardHeader :title="t('control.currentJob')" :icon="PhCheckSquareOffset">
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ preparingPercent !== undefined ? t('control.preparing') : t('control.complete', { percent: progressPercent }) }}</span>
+                <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ t('control.complete', { percent: progressPercent }) }}</span>
               </CardHeader>
               <div class="px-4 py-5 sm:p-6">
                 <div class="flex items-start gap-3">
@@ -2004,7 +2006,7 @@ onUnmounted(() => {
                 <div class="mt-6">
                   <div class="mb-2 flex justify-between text-xs text-gray-500 dark:text-gray-400">
                     <span>{{ t('control.layer', { current: selectedStatus?.progress?.currentLayer ?? '—', total: selectedStatus?.progress?.totalLayers ?? '—' }) }}</span>
-                    <span v-if="selectedStatus?.timeEstimates?.remainingSeconds !== undefined" class="font-mono">
+                    <span v-if="hasActiveJob && selectedStatus?.timeEstimates?.remainingSeconds !== undefined" class="font-mono">
                       {{ t('control.remaining', { duration: formatDuration(selectedStatus.timeEstimates.remainingSeconds) }) }}
                     </span>
                   </div>

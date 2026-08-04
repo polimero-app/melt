@@ -24,3 +24,7 @@ const printerStateKeys: Record<string, MessageKey> = {
 export function printerStateMessageKey(state: string | undefined): MessageKey {
   return printerStateKeys[state ?? 'unknown'] ?? 'printerState.unknown'
 }
+
+export function isActiveJobState(state: string | undefined): boolean {
+  return state === 'printing' || state === 'paused'
+}
