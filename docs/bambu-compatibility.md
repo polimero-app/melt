@@ -72,6 +72,15 @@ sequence namespace. Locally generated sequence IDs remain positive and within
 the signed 32-bit range, including after wrap, to avoid exposing future
 AMS-facing commands to known unsafe oversized identifiers.
 
+## Port 6000 transport
+
+Control replies correlate by typed operation and sequence, and no more than 64
+unrelated replies may be skipped for one request. Control JSON, binary frames,
+paths, listings, uploads, downloads, and `SUB_FILE` output have independent
+bounds. Upload `frag_id` remains at the proven top level. The checked-in
+executable transcript under `fixtures/bambu/tunnel-6000` is the regression
+authority when community prose differs from executable protocol behavior.
+
 Polimero treats a reported Bambu model as a capability hint, not a complete
 contract. Runtime observations and safe protocol probes take precedence over
 the model family. Unknown models and unknown fields remain distinct from an

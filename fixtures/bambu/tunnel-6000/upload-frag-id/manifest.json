@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "tunnel-6000-upload-frag-id",
+  "capturedAt": "2026-08-04T00:00:00Z",
+  "transport": "tunnel-6000",
+  "direction": "bidirectional",
+  "printer": {
+    "modelRaw": "SANITIZED_TEST_DEVICE",
+    "hardwareRevision": null,
+    "modules": {}
+  },
+  "provenance": "executable-test",
+  "sourceUrl": "https://github.com/ClusterM/open-bamboo-networking",
+  "sourceRevision": "7f8ba03057f394e844a6a336414425786d0a68c1",
+  "confidence": "qualified",
+  "sanitization": ["synthetic serial", "no credentials", "no network identifiers", "zeroed file bytes"],
+  "assertion": "Upload fragments carry frag_id at the top level and replies correlate by cmdtype plus sequence.",
+  "qualification": "Checked against the upstream executable tunnel test and Polimero's parser test.",
+  "removalCondition": "Replace or supplement when a physical capture demonstrates a different API version.",
+  "files": ["transcript.json"]
+}

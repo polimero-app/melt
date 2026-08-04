@@ -1,0 +1,20 @@
+{
+  "client": {
+    "mtype": 12289,
+    "cmdtype": 5,
+    "sequence": 7,
+    "frag_id": 0,
+    "req": {
+      "offset": 0,
+      "size": 4,
+      "file_md5": "f1d3ff8443297732862df21dc4e57262"
+    },
+    "binaryHex": "00000000"
+  },
+  "server": {
+    "mtype": 12289,
+    "cmdtype": 5,
+    "sequence": 7,
+    "result": 0
+  }
+}

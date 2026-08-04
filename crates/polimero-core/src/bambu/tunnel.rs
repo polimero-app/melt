@@ -20,12 +20,36 @@ use transport::Error;
 const PORT: u16 = 6000;
 const HEADER_SIZE: usize = 16;
 const MAX_PAYLOAD: usize = 16 << 20;
+const MAX_CONTROL_JSON: usize = 1 << 20;
+const MAX_TRANSFER_SIZE: u64 = 64 << 30;
+const MAX_SUB_FILE_SIZE: u64 = 32 << 20;
+const MAX_LIST_ENTRIES: usize = 50_000;
+const MAX_PATH_LENGTH: usize = 1024;
+const MAX_SUB_FILE_PATHS: usize = 32;
+const MAX_SKIPPED_REPLIES: usize = 64;
 const MAGIC_LOGIN_CLIENT: u32 = 0x0101_013f;
 const MAGIC_LOGIN_SERVER: u32 = 0x0001_013f;
 const MAGIC_CTRL_CLIENT: u32 = 0x0102_013f;
 const MAGIC_CTRL_SERVER: u32 = 0x0002_013f;
 const MTYPE_CTRL: u32 = 12_289;
 const MTYPE_SETUP: u32 = 12_291;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(i64)]
+enum CommandType {
+    List = 1,
+    SubFile = 2,
+    Delete = 3,
+    Download = 4,
+    Upload = 5,
+    Roots = 7,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ReplyCorrelation {
+    command: CommandType,
+    sequence: u32,
+}
 
 pub(super) struct Connection {
     stream: SslStream<std::net::TcpStream>,
@@ -85,7 +109,7 @@ impl Connection {
     pub(super) fn roots(&mut self) -> Result<Vec<FileRoot>, Error> {
         let sequence = self.next_sequence();
         let reply = self.request(
-            7,
+            CommandType::Roots,
             sequence,
             json!({"peer": "studio", "peer_t": 3, "api_version": 3}),
         )?;
@@ -95,6 +119,9 @@ impl Connection {
             .or_else(|| reply.pointer("/reply/storage_list"))
             .and_then(Value::as_array)
             .ok_or(Error::InvalidResponse)?;
+        if storages.len() > MAX_LIST_ENTRIES {
+            return Err(Error::InvalidResponse);
+        }
         let roots = storages
             .iter()
             .filter_map(storage_entry)
@@ -105,12 +132,12 @@ impl Connection {
     }
 
     pub(super) fn list(&mut self, storage: &str, path: &str) -> Result<FileList, Error> {
-        if path != "/" {
+        if path != "/" || !valid_wire_path(path) {
             return Err(Error::Unsupported("nested :6000 file listing"));
         }
         let sequence = self.next_sequence();
         let reply = self.request(
-            1,
+            CommandType::List,
             sequence,
             json!({
                 "type": "model",
@@ -123,6 +150,9 @@ impl Connection {
             .pointer("/reply/file_lists")
             .and_then(Value::as_array)
             .ok_or(Error::InvalidResponse)?;
+        if files.len() > MAX_LIST_ENTRIES {
+            return Err(Error::InvalidResponse);
+        }
         let root = storage_root(storage)
             .map(|value| value.0)
             .ok_or(Error::InvalidDevicePath)?;
@@ -177,11 +207,18 @@ impl Connection {
         path: &str,
         destination: &mut dyn Write,
     ) -> Result<u64, Error> {
+        if !valid_wire_path(path) {
+            return Err(Error::InvalidDevicePath);
+        }
         let sequence = self.next_sequence();
-        self.send_request(4, sequence, json!({"path": path, "offset": 0}))?;
+        self.send_request(
+            CommandType::Download,
+            sequence,
+            json!({"path": path, "offset": 0}),
+        )?;
         let mut copied = 0_u64;
         loop {
-            let (reply, binary) = self.read_reply(4, sequence)?;
+            let (reply, binary) = self.read_reply(CommandType::Download, sequence)?;
             let result = integer(reply.get("result")).ok_or(Error::InvalidResponse)?;
             let metadata = reply.pointer("/reply/mem_dl_param_size").is_some();
             if !metadata && !binary.is_empty() {
@@ -189,6 +226,9 @@ impl Connection {
                 copied = copied
                     .checked_add(binary.len() as u64)
                     .ok_or(Error::FileTransfer)?;
+                if copied > MAX_TRANSFER_SIZE {
+                    return Err(Error::FileTransfer);
+                }
             }
             match result {
                 1 => continue,
@@ -204,18 +244,29 @@ impl Connection {
         paths: &[String],
         destination: &mut dyn Write,
     ) -> Result<u64, Error> {
+        if paths.is_empty()
+            || paths.len() > MAX_SUB_FILE_PATHS
+            || paths.iter().any(|path| !valid_wire_path(path))
+        {
+            return Err(Error::InvalidDevicePath);
+        }
         let sequence = self.next_sequence();
         self.send_request(
-            2,
+            CommandType::SubFile,
             sequence,
             json!({"paths": paths, "storage": storage, "api_version": 2, "peer": "studio"}),
         )?;
         let mut copied = 0_u64;
         loop {
-            let (reply, binary) = self.read_reply(2, sequence)?;
+            let (reply, binary) = self.read_reply(CommandType::SubFile, sequence)?;
             if !binary.is_empty() {
                 destination.write_all(&binary).map_err(|_| Error::LocalIo)?;
-                copied += binary.len() as u64;
+                copied = copied
+                    .checked_add(binary.len() as u64)
+                    .ok_or(Error::FileTransfer)?;
+                if copied > MAX_SUB_FILE_SIZE {
+                    return Err(Error::FileTransfer);
+                }
             }
             match integer(reply.get("result")) {
                 Some(1) => continue,
@@ -231,15 +282,21 @@ impl Connection {
         source: &Path,
         name: &str,
     ) -> Result<u64, Error> {
+        if !valid_wire_path(name) {
+            return Err(Error::InvalidDevicePath);
+        }
         let size = source.metadata().map_err(|_| Error::LocalIo)?.len();
+        if size > MAX_TRANSFER_SIZE {
+            return Err(Error::FileTransfer);
+        }
         let digest = file_md5(source)?;
         let sequence = self.next_sequence();
         self.send_request(
-            5,
+            CommandType::Upload,
             sequence,
             json!({"type": "model", "storage": storage, "path": name, "total": size}),
         )?;
-        let (init, _) = self.read_reply(5, sequence)?;
+        let (init, _) = self.read_reply(CommandType::Upload, sequence)?;
         if !matches!(integer(init.get("result")), Some(1 | 19)) {
             return Err(Error::FileTransfer);
         }
@@ -248,7 +305,7 @@ impl Connection {
             .and_then(|value| integer(Some(value)))
             .and_then(|value| usize::try_from(value).ok())
             .and_then(|value| value.checked_mul(1024))
-            .filter(|value| *value > 0 && *value <= MAX_PAYLOAD)
+            .filter(|value| *value > 0 && *value <= MAX_PAYLOAD - 4096)
             .ok_or(Error::InvalidResponse)?;
         let mut source = File::open(source).map_err(|_| Error::LocalIo)?;
         let mut offset = init
@@ -280,7 +337,7 @@ impl Connection {
             }
             let body = json!({
                 "mtype": MTYPE_CTRL,
-                "cmdtype": 5,
+                "cmdtype": CommandType::Upload as i64,
                 "sequence": sequence,
                 "frag_id": fragment,
                 "req": request,
@@ -290,7 +347,7 @@ impl Connection {
             fragment = fragment.checked_add(1).ok_or(Error::FileTransfer)?;
         }
         loop {
-            let (reply, _) = self.read_reply(5, sequence)?;
+            let (reply, _) = self.read_reply(CommandType::Upload, sequence)?;
             match integer(reply.get("result")) {
                 Some(1) => continue,
                 Some(0 | 19) => return Ok(size),
@@ -300,24 +357,41 @@ impl Connection {
     }
 
     pub(super) fn delete(&mut self, storage: &str, path: &str) -> Result<(), Error> {
+        if !valid_wire_path(path) {
+            return Err(Error::InvalidDevicePath);
+        }
         let sequence = self.next_sequence();
-        let reply = self.request(3, sequence, json!({"delete": [path], "storage": storage}))?;
+        let reply = self.request(
+            CommandType::Delete,
+            sequence,
+            json!({"delete": [path], "storage": storage}),
+        )?;
         (integer(reply.get("result")) == Some(0))
             .then_some(())
             .ok_or(Error::FileTransfer)
     }
 
-    fn request(&mut self, command: i64, sequence: u32, request: Value) -> Result<Value, Error> {
+    fn request(
+        &mut self,
+        command: CommandType,
+        sequence: u32,
+        request: Value,
+    ) -> Result<Value, Error> {
         self.send_request(command, sequence, request)?;
         self.read_reply(command, sequence).map(|value| value.0)
     }
 
-    fn send_request(&mut self, command: i64, sequence: u32, request: Value) -> Result<(), Error> {
+    fn send_request(
+        &mut self,
+        command: CommandType,
+        sequence: u32,
+        request: Value,
+    ) -> Result<(), Error> {
         self.send_frame(
             MAGIC_CTRL_CLIENT,
             json!({
                 "mtype": MTYPE_CTRL,
-                "cmdtype": command,
+                "cmdtype": command as i64,
                 "sequence": sequence,
                 "req": request,
             })
@@ -328,11 +402,17 @@ impl Connection {
 
     fn send_ctrl_with_binary(&mut self, body: &Value, binary: &[u8]) -> Result<(), Error> {
         let json = body.to_string();
+        if json.len() > MAX_CONTROL_JSON || binary.len() > MAX_PAYLOAD {
+            return Err(Error::FileTransfer);
+        }
         let length = json
             .len()
             .checked_add(2)
             .and_then(|value| value.checked_add(binary.len()))
             .ok_or(Error::FileTransfer)?;
+        if length > MAX_PAYLOAD {
+            return Err(Error::FileTransfer);
+        }
         self.send_header(MAGIC_CTRL_CLIENT, length)?;
         self.stream
             .write_all(json.as_bytes())
@@ -346,23 +426,33 @@ impl Connection {
         self.stream.flush().map_err(|_| Error::Connection)
     }
 
-    fn read_reply(&mut self, command: i64, sequence: u32) -> Result<(Value, Vec<u8>), Error> {
-        loop {
+    fn read_reply(
+        &mut self,
+        command: CommandType,
+        sequence: u32,
+    ) -> Result<(Value, Vec<u8>), Error> {
+        let correlation = ReplyCorrelation { command, sequence };
+        for _ in 0..MAX_SKIPPED_REPLIES {
             let (magic, payload) = self.read_frame()?;
             if magic != MAGIC_CTRL_SERVER {
                 continue;
             }
             let (json, binary) = split_payload(&payload)?;
+            if json.len() > MAX_CONTROL_JSON {
+                return Err(Error::InvalidResponse);
+            }
             let reply: Value = serde_json::from_slice(json).map_err(|_| Error::InvalidResponse)?;
-            if integer(reply.get("cmdtype")) == Some(command)
-                && integer(reply.get("sequence")) == Some(i64::from(sequence))
-            {
+            if reply_matches(&reply, correlation) {
                 return Ok((reply, binary.to_vec()));
             }
         }
+        Err(Error::InvalidResponse)
     }
 
     fn send_frame(&mut self, magic: u32, payload: &[u8]) -> Result<(), Error> {
+        if payload.len() > MAX_PAYLOAD {
+            return Err(Error::FileTransfer);
+        }
         self.send_header(magic, payload.len())?;
         self.stream
             .write_all(payload)
@@ -495,6 +585,19 @@ fn integer(value: Option<&Value>) -> Option<i64> {
     })
 }
 
+fn reply_matches(reply: &Value, correlation: ReplyCorrelation) -> bool {
+    integer(reply.get("cmdtype")) == Some(correlation.command as i64)
+        && integer(reply.get("sequence")) == Some(i64::from(correlation.sequence))
+}
+
+fn valid_wire_path(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= MAX_PATH_LENGTH
+        && !path.chars().any(char::is_control)
+        && !path.contains('\\')
+        && !path.split(['/', '#']).any(|component| component == "..")
+}
+
 fn file_md5(path: &Path) -> Result<String, Error> {
     let mut file = File::open(path).map_err(|_| Error::LocalIo)?;
     let mut hasher =
@@ -547,5 +650,42 @@ mod tests {
             timestamp(&json!(0)).as_deref(),
             Some("1970-01-01T00:00:00Z")
         );
+    }
+
+    #[test]
+    fn reply_correlation_requires_command_and_sequence() {
+        let expected = ReplyCorrelation {
+            command: CommandType::Upload,
+            sequence: 7,
+        };
+        assert!(reply_matches(&json!({"cmdtype":5,"sequence":7}), expected));
+        assert!(!reply_matches(&json!({"cmdtype":4,"sequence":7}), expected));
+        assert!(!reply_matches(&json!({"cmdtype":5,"sequence":8}), expected));
+    }
+
+    #[test]
+    fn wire_paths_are_bounded_and_cannot_escape() {
+        assert!(valid_wire_path("/cache/part.3mf#thumbnail"));
+        assert!(!valid_wire_path("../secret"));
+        assert!(!valid_wire_path("/cache\\part.3mf"));
+        assert!(!valid_wire_path(&"x".repeat(MAX_PATH_LENGTH + 1)));
+    }
+
+    #[test]
+    fn executable_upload_transcript_keeps_frag_id_top_level() {
+        let transcript: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/bambu/tunnel-6000/upload-frag-id/transcript.json"
+        ))
+        .unwrap();
+        let client = &transcript["client"];
+        assert_eq!(client["frag_id"], 0);
+        assert!(client["req"].get("frag_id").is_none());
+        assert!(reply_matches(
+            &transcript["server"],
+            ReplyCorrelation {
+                command: CommandType::Upload,
+                sequence: 7,
+            }
+        ));
     }
 }
