@@ -2285,7 +2285,19 @@ onUnmounted(() => {
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ printer.driver }}</p>
                 </div>
               </div>
-              <IconButton class="hover:text-red-600 dark:hover:text-red-400" :title="t('printersView.removePrinter')" :aria-label="t('printersView.removeNamed', { name: printer.name })" @click="removePrinter(printer.name)"><PhTrash class="size-4" aria-hidden="true" /></IconButton>
+              <div class="flex shrink-0 items-center gap-1">
+                <IconButton
+                  v-if="printer.serial"
+                  :title="t(serialIsRevealed(printer.name) ? 'printersView.hideSerialNamed' : 'printersView.showSerialNamed', { name: printer.name })"
+                  :aria-label="t(serialIsRevealed(printer.name) ? 'printersView.hideSerialNamed' : 'printersView.showSerialNamed', { name: printer.name })"
+                  :aria-pressed="serialIsRevealed(printer.name)"
+                  @click="toggleSerial(printer.name)"
+                >
+                  <PhEyeSlash v-if="serialIsRevealed(printer.name)" class="size-4" aria-hidden="true" />
+                  <PhEye v-else class="size-4" aria-hidden="true" />
+                </IconButton>
+                <IconButton class="hover:text-red-600 dark:hover:text-red-400" :title="t('printersView.removePrinter')" :aria-label="t('printersView.removeNamed', { name: printer.name })" @click="removePrinter(printer.name)"><PhTrash class="size-4" aria-hidden="true" /></IconButton>
+              </div>
             </div>
             <div class="mt-6 flex items-center justify-between border-y border-gray-200 py-3 dark:border-white/10">
               <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('printersView.status') }}</span>
@@ -2295,21 +2307,11 @@ onUnmounted(() => {
             <dl class="mt-2 divide-y divide-gray-200 text-xs dark:divide-white/10">
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t('addition.serial') }}</dt>
-                <dd class="flex items-center gap-1 font-mono text-gray-900 dark:text-gray-300">
+                <dd class="font-mono text-gray-900 dark:text-gray-300">
                   <span aria-live="polite">
                     <span class="sr-only">{{ printer.serial ? (serialIsRevealed(printer.name) ? printer.serial : t('printersView.serialHidden')) : '—' }}</span>
                     <span aria-hidden="true">{{ serialNumberDisplay(printer.serial, serialIsRevealed(printer.name)) }}</span>
                   </span>
-                  <IconButton
-                    v-if="printer.serial"
-                    :title="t(serialIsRevealed(printer.name) ? 'printersView.hideSerialNamed' : 'printersView.showSerialNamed', { name: printer.name })"
-                    :aria-label="t(serialIsRevealed(printer.name) ? 'printersView.hideSerialNamed' : 'printersView.showSerialNamed', { name: printer.name })"
-                    :aria-pressed="serialIsRevealed(printer.name)"
-                    @click="toggleSerial(printer.name)"
-                  >
-                    <PhEyeSlash v-if="serialIsRevealed(printer.name)" class="size-4" aria-hidden="true" />
-                    <PhEye v-else class="size-4" aria-hidden="true" />
-                  </IconButton>
                 </dd>
               </div>
               <div class="flex items-center justify-between py-2">
