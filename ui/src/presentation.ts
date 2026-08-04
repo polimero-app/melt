@@ -29,10 +29,11 @@ export function isActiveJobState(state: string | undefined): boolean {
   return state === 'printing' || state === 'paused'
 }
 
-export function materialSystemLabel(id: number, externalLabel: string): string {
-  if (id === 128) return 'HT'
+export function materialSystemLabel(driver: string, id: number, externalLabel: string, unitCount = 1): string {
   if (id >= 254) return externalLabel
-  if (id >= 0 && id < 26) return String.fromCharCode('A'.charCodeAt(0) + id)
+  if (driver === 'moonraker') return unitCount > 1 ? `CFS ${id + 1}` : 'CFS'
+  if (id >= 128 && id < 153) return id === 128 ? 'AMS HT' : `AMS HT ${id - 127}`
+  if (id >= 0 && id < 26) return `AMS ${String.fromCharCode('A'.charCodeAt(0) + id)}`
   return `AMS ${id}`
 }
 

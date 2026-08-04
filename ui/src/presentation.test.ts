@@ -34,12 +34,20 @@ describe('isActiveJobState', () => {
 
 describe('materialSystemLabel', () => {
   it('matches Bambu Studio labels for regular, HT, and external units', () => {
-    expect(materialSystemLabel(0, 'External spool')).toBe('A')
-    expect(materialSystemLabel(1, 'External spool')).toBe('B')
-    expect(materialSystemLabel(25, 'External spool')).toBe('Z')
-    expect(materialSystemLabel(128, 'External spool')).toBe('HT')
-    expect(materialSystemLabel(254, 'External spool')).toBe('External spool')
-    expect(materialSystemLabel(42, 'External spool')).toBe('AMS 42')
+    expect(materialSystemLabel('bambu-lan', 0, 'External spool')).toBe('AMS A')
+    expect(materialSystemLabel('bambu-lan', 1, 'External spool')).toBe('AMS B')
+    expect(materialSystemLabel('bambu-lan', 25, 'External spool')).toBe('AMS Z')
+    expect(materialSystemLabel('bambu-lan', 128, 'External spool')).toBe('AMS HT')
+    expect(materialSystemLabel('bambu-lan', 129, 'External spool')).toBe('AMS HT 2')
+    expect(materialSystemLabel('bambu-lan', 254, 'External spool')).toBe('External spool')
+    expect(materialSystemLabel('bambu-lan', 42, 'External spool')).toBe('AMS 42')
+  })
+
+  it('uses Creality CFS naming for Moonraker material systems', () => {
+    expect(materialSystemLabel('moonraker', 0, 'External spool')).toBe('CFS')
+    expect(materialSystemLabel('moonraker', 0, 'External spool', 2)).toBe('CFS 1')
+    expect(materialSystemLabel('moonraker', 1, 'External spool', 2)).toBe('CFS 2')
+    expect(materialSystemLabel('moonraker', 254, 'External spool')).toBe('External spool')
   })
 })
 

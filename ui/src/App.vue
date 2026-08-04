@@ -607,12 +607,14 @@ const lightLabel = (key: string) => {
   const messageKey = lightMessageKeys[key]
   return messageKey ? t(messageKey) : key
 }
-// Only Bambu LAN reports AMS/external-spool data today; other drivers simply
-// omit `extensions['bambu-lan']`, so this stays empty for them.
+// Material inventory currently travels in the shared Bambu-shaped extension;
+// its user-facing terminology still follows the selected printer's driver.
 const materialSystems = computed<MaterialSystemView[]>(() => {
   const units = selectedStatus.value?.extensions?.['bambu-lan']?.ams?.units ?? []
+  const driver = activePrinter.value?.driver ?? ''
+  const materialUnitCount = units.filter((unit) => unit.id < 254).length
   return units.map((unit) => ({
-    name: materialSystemLabel(unit.id, t('materials.externalSpool')),
+    name: materialSystemLabel(driver, unit.id, t('materials.externalSpool'), materialUnitCount),
     temperature: unit.temperature,
     humidity: unit.humidityLevel,
     slots: unit.trays.map((tray) => ({
