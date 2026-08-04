@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::{Cursor, Read},
+    io::{Cursor, Read, Seek},
 };
 
 use euc::{DepthStrategy, Pipeline, buffer::Buffer2d, rasterizer};
@@ -12,13 +12,52 @@ type Triangle = [Point; 3];
 const WIDTH: usize = 640;
 const HEIGHT: usize = 360;
 pub const MAX_PREVIEW_BYTES: usize = 16 << 20;
+pub const MAX_MODEL_BYTES: usize = 32 << 20;
 const MAX_PREVIEW_DIMENSION: u32 = 4096;
 const MAX_PREVIEW_PIXELS: u64 = 16_000_000;
 
 #[derive(Debug)]
 pub enum PreviewError {
     InvalidModel,
+    TooLarge,
     Png,
+}
+
+/// Returns the first supported model stored in a ZIP, preserving archive
+/// order. Entries are read in-place rather than extracted to disk, and the
+/// decompressed size is bounded before allocation to avoid ZIP bombs.
+pub fn first_model_in_zip(reader: impl Read + Seek) -> Result<(String, Vec<u8>), PreviewError> {
+    let mut archive = zip::ZipArchive::new(reader).map_err(|_| PreviewError::InvalidModel)?;
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|_| PreviewError::InvalidModel)?;
+        if entry.is_dir() {
+            continue;
+        }
+        let extension = entry
+            .name()
+            .rsplit('.')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !matches!(extension.as_str(), "3mf" | "stl" | "obj") {
+            continue;
+        }
+        if entry.size() > MAX_MODEL_BYTES as u64 {
+            return Err(PreviewError::TooLarge);
+        }
+        let mut bytes = Vec::with_capacity(entry.size() as usize);
+        entry
+            .take(MAX_MODEL_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| PreviewError::InvalidModel)?;
+        if bytes.len() > MAX_MODEL_BYTES {
+            return Err(PreviewError::TooLarge);
+        }
+        return Ok((extension, bytes));
+    }
+    Err(PreviewError::InvalidModel)
 }
 
 pub fn validate_png(bytes: &[u8]) -> bool {
@@ -470,6 +509,45 @@ mod tests {
         }
         let png = rasterize_3mf(&buffer).unwrap();
         assert!(!png.is_empty());
+    }
+
+    #[test]
+    fn selects_only_the_first_supported_model_in_a_zip() {
+        let first = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        let second = binary_stl_with_triangles(1);
+        let mut buffer = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buffer));
+            let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+            zip.start_file("notes/readme.txt", options).unwrap();
+            zip.write_all(b"not a model").unwrap();
+            zip.start_file("models/first.OBJ", options).unwrap();
+            zip.write_all(first).unwrap();
+            zip.start_file("models/second.stl", options).unwrap();
+            zip.write_all(&second).unwrap();
+            zip.finish().unwrap();
+        }
+
+        let (extension, bytes) = first_model_in_zip(Cursor::new(buffer)).unwrap();
+        assert_eq!(extension, "obj");
+        assert_eq!(bytes, first);
+    }
+
+    #[test]
+    fn rejects_a_zip_without_a_supported_model() {
+        let mut buffer = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buffer));
+            let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+            zip.start_file("readme.txt", options).unwrap();
+            zip.write_all(b"not a model").unwrap();
+            zip.finish().unwrap();
+        }
+
+        assert!(matches!(
+            first_model_in_zip(Cursor::new(buffer)),
+            Err(PreviewError::InvalidModel)
+        ));
     }
 
     /// A real high-poly print (hundreds of thousands of triangles) must

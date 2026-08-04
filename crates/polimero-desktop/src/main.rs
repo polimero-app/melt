@@ -758,7 +758,7 @@ impl PreviewCache {
     }
 }
 
-const PREVIEW_CACHE_VERSION: &str = "complete-mesh-v3";
+const PREVIEW_CACHE_VERSION: &str = "zip-first-model-v1";
 
 fn preview_cache_key(request: &FilePreviewRequest, printer_key: &str) -> String {
     format!(
@@ -2178,11 +2178,22 @@ fn library_file_preview(
         .next()
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if !matches!(extension.as_str(), "3mf" | "stl" | "obj") {
+    if !matches!(extension.as_str(), "3mf" | "stl" | "obj" | "zip") {
         return Err(CommandError::new("thumbnailUnsupported"));
     }
     let _permit = RENDER_SEMAPHORE.acquire();
     let absolute = resolve_absolute_path(&request.path)?;
+    if extension == "zip" {
+        let archive =
+            std::fs::File::open(&absolute).map_err(|_| CommandError::new("libraryUnavailable"))?;
+        let (model_extension, bytes) = preview::first_model_in_zip(archive).map_err(|error| {
+            CommandError::new(match error {
+                preview::PreviewError::TooLarge => "thumbnailTooLarge",
+                _ => "thumbnailInvalid",
+            })
+        })?;
+        return render_preview(&model_extension, bytes, cache_key, &state);
+    }
     // A local file is seekable, so a 3mf's embedded thumbnail (present on
     // nearly every slicer-exported file) can be read directly from disk
     // without loading the whole model into memory first.
@@ -2351,7 +2362,6 @@ fn render_preview(
     cache_key: String,
     state: &PreviewState,
 ) -> Result<FilePreviewResponse, CommandError> {
-    const MAX_RASTERIZE_BYTES: usize = 32 * 1024 * 1024;
     if extension == "3mf" {
         if let Some(thumbnail) = extract_3mf_thumbnail(Cursor::new(&bytes)) {
             let preview = FilePreviewResponse {
@@ -2361,7 +2371,7 @@ fn render_preview(
             cache_preview(state, &cache_key, &preview);
             return Ok(preview);
         }
-        if bytes.len() > MAX_RASTERIZE_BYTES {
+        if bytes.len() > preview::MAX_MODEL_BYTES {
             return Err(CommandError::new("thumbnailTooLarge"));
         }
         let png =
@@ -2374,7 +2384,7 @@ fn render_preview(
         return Ok(preview);
     }
     if matches!(extension, "stl" | "obj") {
-        if bytes.len() > MAX_RASTERIZE_BYTES {
+        if bytes.len() > preview::MAX_MODEL_BYTES {
             return Err(CommandError::new("thumbnailTooLarge"));
         }
         let png = preview::rasterize(extension, &bytes)
