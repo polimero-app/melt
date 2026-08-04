@@ -1,8 +1,46 @@
 /* Self-hosted so the UI keeps its typography on an offline LAN.
    Inter for sans (as tailwindcss.com/docs), Hack for mono. */
 @import "@fontsource-variable/inter";
-@import "hack-font/build/web/hack-subset.css";
 @import "tailwindcss";
+
+/* The package stylesheet points its italic WOFF fallback at a nonexistent
+   `hack-italic-webfont.woff`. Declare the shipped subset files directly so
+   every requested variant is bundled and the offline build stays complete. */
+@font-face {
+  font-family: Hack;
+  src: url("hack-font/build/web/fonts/hack-regular-subset.woff2") format("woff2"),
+    url("hack-font/build/web/fonts/hack-regular-subset.woff") format("woff");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: Hack;
+  src: url("hack-font/build/web/fonts/hack-bold-subset.woff2") format("woff2"),
+    url("hack-font/build/web/fonts/hack-bold-subset.woff") format("woff");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: Hack;
+  src: url("hack-font/build/web/fonts/hack-italic-subset.woff2") format("woff2"),
+    url("hack-font/build/web/fonts/hack-italic-subset.woff") format("woff");
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: Hack;
+  src: url("hack-font/build/web/fonts/hack-bolditalic-subset.woff2") format("woff2"),
+    url("hack-font/build/web/fonts/hack-bolditalic-subset.woff") format("woff");
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+}
 
 /* ponytail: reference library, not app source — keep it out of the utility scan. */
 
