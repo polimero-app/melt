@@ -7,7 +7,7 @@ import { locales, preferredLocale, translate, type Locale, type MessageKey } fro
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration } from './formatting'
 import { printTargetState } from './printing'
-import { cameraViewState, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
+import { cameraViewState, filamentColor, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import { shouldDeferLibraryCards } from './library'
@@ -279,7 +279,6 @@ interface MaterialSlot {
   type: string
   name: string
   color: string
-  remainingPercent?: number
   remainingGrams?: number
 }
 
@@ -620,8 +619,7 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
       status: tray.filamentType ? t('materials.inUse') : t('materials.empty'),
       type: tray.filamentType ?? '—',
       name: tray.filamentType ?? '—',
-      color: tray.color ? `#${tray.color}` : '#9ca3af',
-      remainingPercent: tray.remainingPercent,
+      color: filamentColor(tray.color),
       remainingGrams: tray.remainingGrams,
     })),
   }))
@@ -2219,10 +2217,10 @@ onUnmounted(() => {
                     <div
                       v-for="material in system.slots"
                       :key="`${system.name}-${material.slot}`"
-                      class="relative size-18 shrink-0 overflow-hidden rounded-md border border-gray-300 bg-gray-100 dark:border-white/15 dark:bg-white/10"
+                      class="size-18 shrink-0 overflow-hidden rounded-md border border-black/10 dark:border-white/15"
+                      :style="{ backgroundColor: material.color, color: textColorFor(material.color) }"
                     >
-                      <span class="absolute inset-x-0 bottom-0 transition-[height] duration-200" :style="{ height: `${material.remainingPercent ?? 100}%`, backgroundColor: material.color }"></span>
-                      <span class="relative z-10 flex h-full flex-col items-center justify-center gap-1 p-1 text-center font-mono" :style="{ color: textColorFor(material.color) }">
+                      <span class="flex h-full flex-col items-center justify-center gap-1 p-1 text-center font-mono">
                         <span class="text-xs font-bold">{{ material.slot }}</span>
                         <span v-if="material.type !== '—'" class="text-[10px] font-semibold tracking-wide uppercase wrap-anywhere">{{ material.type }}</span>
                         <span v-if="material.remainingGrams !== undefined" class="text-[10px] font-medium">{{ material.remainingGrams }} g</span>

@@ -40,3 +40,9 @@ export function serialNumberDisplay(serial: string, revealed: boolean): string {
   if (!serial) return '—'
   return revealed ? serial : '••••••••'
 }
+
+export function filamentColor(value: string | undefined): string {
+  const hex = value?.trim().replace(/^#/, '')
+  if (!hex || !/^(?:[\da-f]{6}|[\da-f]{8})$/i.test(hex) || hex.toUpperCase() === '00000000') return '#9CA3AF'
+  return `#${hex.slice(0, 6).toUpperCase()}`
+}

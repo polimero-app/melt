@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cameraViewState, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
+import { cameraViewState, filamentColor, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
 
 describe('cameraViewState', () => {
   it('distinguishes live transports from retained snapshots', () => {
@@ -48,5 +48,15 @@ describe('serialNumberDisplay', () => {
     expect(serialNumberDisplay('01P00A123456789', false)).toBe('••••••••')
     expect(serialNumberDisplay('01P00A123456789', true)).toBe('01P00A123456789')
     expect(serialNumberDisplay('', false)).toBe('—')
+  })
+})
+
+describe('filamentColor', () => {
+  it('normalizes Bambu RGB and RGBA colors to opaque CSS colors', () => {
+    expect(filamentColor('F6DA5AFF')).toBe('#F6DA5A')
+    expect(filamentColor('#7c3aed')).toBe('#7C3AED')
+    expect(filamentColor('00000000')).toBe('#9CA3AF')
+    expect(filamentColor('not-a-color')).toBe('#9CA3AF')
+    expect(filamentColor(undefined)).toBe('#9CA3AF')
   })
 })
