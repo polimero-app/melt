@@ -7,7 +7,7 @@ import { locales, preferredLocale, translate, type Locale, type MessageKey } fro
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration } from './formatting'
 import { printTargetState } from './printing'
-import { cameraViewState, isActiveJobState, printerStateMessageKey } from './presentation'
+import { cameraViewState, isActiveJobState, materialSystemLabel, printerStateMessageKey } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import { shouldDeferLibraryCards } from './library'
@@ -595,7 +595,7 @@ const lightLabel = (key: string) => {
 const materialSystems = computed<MaterialSystemView[]>(() => {
   const units = selectedStatus.value?.extensions?.['bambu-lan']?.ams?.units ?? []
   return units.map((unit) => ({
-    name: unit.id >= 254 ? t('materials.externalSpool') : `AMS ${unit.id}`,
+    name: materialSystemLabel(unit.id, t('materials.externalSpool')),
     temperature: unit.temperature,
     humidity: unit.humidityLevel,
     slots: unit.trays.map((tray) => ({
@@ -2198,8 +2198,8 @@ onUnmounted(() => {
                   <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <span class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ system.name }}</span>
                     <div v-if="system.temperature !== undefined || system.humidity !== undefined" class="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-                      <span v-if="system.humidity !== undefined" class="flex items-center gap-1"><PhDrop class="size-4" aria-hidden="true" /> {{ t('materials.humidity') }} <span class="font-mono">{{ system.humidity }}</span></span>
-                      <span v-if="system.temperature !== undefined" class="flex items-center gap-1"><PhThermometerSimple class="size-4" aria-hidden="true" /> {{ t('materials.temperature') }} <span class="font-mono">{{ formatTemperature(system.temperature) }} °C</span></span>
+                      <span v-if="system.humidity !== undefined" class="flex items-center gap-1"><PhDrop class="size-4" aria-hidden="true" /><span class="sr-only">{{ t('materials.humidity') }} </span><span class="font-mono">{{ system.humidity }}</span></span>
+                      <span v-if="system.temperature !== undefined" class="flex items-center gap-1"><PhThermometerSimple class="size-4" aria-hidden="true" /><span class="sr-only">{{ t('materials.temperature') }} </span><span class="font-mono">{{ formatTemperature(system.temperature) }} °C</span></span>
                     </div>
                   </div>
                   <div class="flex flex-wrap gap-3">

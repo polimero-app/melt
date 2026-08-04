@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cameraViewState, isActiveJobState, printerStateMessageKey } from './presentation'
+import { cameraViewState, isActiveJobState, materialSystemLabel, printerStateMessageKey } from './presentation'
 
 describe('cameraViewState', () => {
   it('distinguishes live transports from retained snapshots', () => {
@@ -29,5 +29,16 @@ describe('isActiveJobState', () => {
     expect(isActiveJobState('idle')).toBe(false)
     expect(isActiveJobState('error')).toBe(false)
     expect(isActiveJobState(undefined)).toBe(false)
+  })
+})
+
+describe('materialSystemLabel', () => {
+  it('matches Bambu Studio labels for regular, HT, and external units', () => {
+    expect(materialSystemLabel(0, 'External spool')).toBe('A')
+    expect(materialSystemLabel(1, 'External spool')).toBe('B')
+    expect(materialSystemLabel(25, 'External spool')).toBe('Z')
+    expect(materialSystemLabel(128, 'External spool')).toBe('HT')
+    expect(materialSystemLabel(254, 'External spool')).toBe('External spool')
+    expect(materialSystemLabel(42, 'External spool')).toBe('AMS 42')
   })
 })

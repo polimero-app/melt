@@ -28,3 +28,10 @@ export function printerStateMessageKey(state: string | undefined): MessageKey {
 export function isActiveJobState(state: string | undefined): boolean {
   return state === 'printing' || state === 'paused'
 }
+
+export function materialSystemLabel(id: number, externalLabel: string): string {
+  if (id === 128) return 'HT'
+  if (id >= 254) return externalLabel
+  if (id >= 0 && id < 26) return String.fromCharCode('A'.charCodeAt(0) + id)
+  return `AMS ${id}`
+}
