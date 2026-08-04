@@ -82,6 +82,7 @@ export type MessageKey =
   | "dashboard.loadFiles"
   | "dashboard.noFiles"
   | "dashboard.fileCount"
+  | "dashboard.moreFiles"
   | "dashboard.jobs"
   | "dashboard.print"
   | "dashboard.pause"
@@ -464,6 +465,7 @@ const messages: Record<Locale, Messages> = {
     "dashboard.loadFiles": "Load files",
     "dashboard.noFiles": "No files reported in the gcodes root.",
     "dashboard.fileCount": "{count} file entries",
+    "dashboard.moreFiles": "{count} more on the printer — open Files",
     "dashboard.jobs": "Print controls",
     "dashboard.print": "Print",
     "dashboard.pause": "Pause",
@@ -843,6 +845,7 @@ const messages: Record<Locale, Messages> = {
     "dashboard.loadFiles": "Carregar arquivos",
     "dashboard.noFiles": "Nenhum arquivo foi informado na raiz gcodes.",
     "dashboard.fileCount": "{count} entradas de arquivo",
+    "dashboard.moreFiles": "mais {count} na impressora — abrir Arquivos",
     "dashboard.jobs": "Controles de impressão",
     "dashboard.print": "Imprimir",
     "dashboard.pause": "Pausar",

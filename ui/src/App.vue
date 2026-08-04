@@ -1443,6 +1443,9 @@ const matchesSearch = (file: FileEntry) => !normalizedSearchTerm.value || file.n
 const visibleDirectories = computed(() => libraryFiles.value.filter((file) => file.type === 'directory' && matchesSearch(file)))
 const visibleFiles = computed(() => libraryFiles.value.filter((file) => file.type === 'file' && matchesSearch(file)))
 const printerFiles = computed(() => files.value.filter((file) => file.type === 'file'))
+const DASHBOARD_FILE_LIMIT = 3
+const dashboardFiles = computed(() => printerFiles.value.slice(0, DASHBOARD_FILE_LIMIT))
+const hiddenFileCount = computed(() => Math.max(0, printerFiles.value.length - DASHBOARD_FILE_LIMIT))
 const enabledSlicers = computed(() => slicers.value.filter((slicer) => slicer.enabled))
 const isModelFile = (file: FileEntry) => file.mediaType === 'model' && /\.(3mf|stl|obj)$/i.test(file.name)
 
@@ -2006,7 +2009,7 @@ onUnmounted(() => {
                   </thead>
                   <tbody class="divide-y divide-gray-200 dark:divide-white/10">
                     <tr
-                      v-for="file in printerFiles.slice(0, 3)"
+                      v-for="file in dashboardFiles"
                       :key="file.devicePath"
                       class="hover:bg-gray-50 dark:hover:bg-white/5"
                     >
@@ -2042,6 +2045,13 @@ onUnmounted(() => {
                     </tr>
                     <tr v-if="!printerFiles.length">
                       <td colspan="5" class="px-4 py-4 text-sm text-gray-500 sm:px-6 dark:text-gray-400">{{ filesLoading ? t('common.loading') : filesError ?? t('dashboard.noFiles') }}</td>
+                    </tr>
+                    <tr v-else-if="hiddenFileCount">
+                      <td colspan="5" class="px-4 py-3 text-sm text-gray-500 sm:px-6 dark:text-gray-400">
+                        <button type="button" class="font-medium text-cyan-700 hover:underline dark:text-cyan-400" @click="goTo('files')">
+                          {{ t('dashboard.moreFiles', { count: hiddenFileCount }) }}
+                        </button>
+                      </td>
                     </tr>
                   </tbody>
                 </table>
