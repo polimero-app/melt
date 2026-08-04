@@ -7,14 +7,14 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use openssl::rand::rand_bytes;
 use polimero_core::{
     AppInfo,
-    bambu::{CameraFrame, CameraFrameKind, CameraManager, CameraSubscription},
+    bambu::{CameraFrame, CameraFrameKind, CameraManager, CameraSubscription, PresenceCache},
     config::{Config, ConfigError, Profile, config_dir},
     diagnostics,
     drivers::{self, Capabilities, DriverError, Operation},
@@ -79,6 +79,12 @@ impl CommandError {
 #[derive(Default)]
 struct PreferencesState {
     write_lock: Mutex<()>,
+}
+
+#[derive(Clone, Default)]
+struct PresenceState {
+    cache: Arc<Mutex<PresenceCache>>,
+    scan_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Serialize)]
@@ -238,6 +244,17 @@ struct PrinterSummary {
     model: String,
     timeout: String,
     insecure: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    presence: Option<PrinterPresenceSummary>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PrinterPresenceSummary {
+    last_seen_unix_ms: u64,
+    model: String,
+    firmware: Option<String>,
+    suggested_host: Option<String>,
 }
 
 struct DesktopPrinter {
@@ -752,20 +769,35 @@ fn preview_cache_key(request: &FilePreviewRequest, printer_key: &str) -> String 
 }
 
 #[tauri::command(async)]
-fn configured_printers() -> Result<Vec<PrinterSummary>, CommandError> {
+fn configured_printers(
+    state: tauri::State<'_, PresenceState>,
+) -> Result<Vec<PrinterSummary>, CommandError> {
+    let presence = state
+        .cache
+        .lock()
+        .map_err(|_| CommandError::new("monitorUnavailable"))?;
     Config::load()
         .map(|config| {
             config
                 .sorted_profiles()
                 .into_iter()
-                .map(|profile| PrinterSummary {
-                    name: profile.name,
-                    driver: profile.profile.driver,
-                    host: profile.profile.host,
-                    serial: profile.profile.serial,
-                    model: profile.profile.model,
-                    timeout: profile.profile.timeout,
-                    insecure: profile.profile.insecure,
+                .map(|profile| {
+                    let observed = presence.get(&profile.profile.serial);
+                    PrinterSummary {
+                        name: profile.name,
+                        driver: profile.profile.driver,
+                        host: profile.profile.host,
+                        serial: profile.profile.serial,
+                        model: profile.profile.model,
+                        timeout: profile.profile.timeout,
+                        insecure: profile.profile.insecure,
+                        presence: observed.map(|observed| PrinterPresenceSummary {
+                            last_seen_unix_ms: observed.last_seen_unix_ms,
+                            model: observed.model.clone(),
+                            firmware: observed.firmware.clone(),
+                            suggested_host: observed.suggested_host.clone(),
+                        }),
+                    }
                 })
                 .collect()
         })
@@ -778,9 +810,17 @@ fn registered_drivers() -> Vec<drivers::DriverInfo> {
 }
 
 #[tauri::command(async)]
-fn discover_printers() -> Result<Vec<polimero_core::bambu::DiscoveredPrinter>, CommandError> {
-    polimero_core::bambu::discover(Duration::from_secs(5))
-        .map_err(|_| CommandError::new("discoveryFailed"))
+fn discover_printers(
+    state: tauri::State<'_, PresenceState>,
+) -> Result<Vec<polimero_core::bambu::DiscoveredPrinter>, CommandError> {
+    let _scan = state
+        .scan_lock
+        .lock()
+        .map_err(|_| CommandError::new("discoveryFailed"))?;
+    let discovered = polimero_core::bambu::discover(Duration::from_secs(5))
+        .map_err(|_| CommandError::new("discoveryFailed"))?;
+    update_presence_cache(&state, &discovered, Duration::from_secs(60));
+    Ok(discovered)
 }
 
 #[tauri::command(async)]
@@ -1008,6 +1048,65 @@ fn start_monitor_worker(app: tauri::AppHandle, state: MonitorState) {
             thread::sleep(Duration::from_secs(5).saturating_sub(cycle_started.elapsed()));
         }
     });
+}
+
+fn start_presence_worker(app: tauri::AppHandle, state: PresenceState) {
+    const SCAN_WINDOW: Duration = Duration::from_secs(4);
+    const CYCLE: Duration = Duration::from_secs(15);
+    const RETENTION: Duration = Duration::from_secs(60);
+    thread::spawn(move || {
+        loop {
+            let cycle_started = Instant::now();
+            let discovered = state
+                .scan_lock
+                .lock()
+                .ok()
+                .and_then(|_scan| polimero_core::bambu::discover(SCAN_WINDOW).ok());
+            if let Some(discovered) = discovered {
+                update_presence_cache(&state, &discovered, RETENTION);
+                let _ = app.emit("presence-updated", ());
+            }
+            thread::sleep(CYCLE.saturating_sub(cycle_started.elapsed()));
+        }
+    });
+}
+
+fn update_presence_cache(
+    state: &PresenceState,
+    discovered: &[polimero_core::bambu::DiscoveredPrinter],
+    retention: Duration,
+) {
+    let configured = Config::load()
+        .ok()
+        .map(|config| {
+            config
+                .sorted_profiles()
+                .into_iter()
+                .filter(|profile| profile.profile.driver == "bambu-lan")
+                .filter(|profile| !profile.profile.serial.trim().is_empty())
+                .map(|profile| {
+                    (
+                        profile.profile.serial.trim().to_ascii_uppercase(),
+                        profile.profile.host,
+                    )
+                })
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+    let now_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u64::MAX.into()) as u64;
+    if let Ok(mut cache) = state.cache.lock() {
+        for printer in discovered {
+            let host = configured
+                .get(&printer.serial.trim().to_ascii_uppercase())
+                .map(String::as_str);
+            cache.observe(printer, host, now_unix_ms);
+        }
+        cache.retain_seen_since(now_unix_ms.saturating_sub(retention.as_millis() as u64));
+    }
 }
 
 fn emit_status_notifications(app: &tauri::AppHandle, state: &MonitorState) {
@@ -2952,6 +3051,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(MonitorState::default())
+        .manage(PresenceState::default())
         .manage(CameraManager::default())
         .manage(CameraStreamState::default())
         .manage(CameraWebRtcState::default())
@@ -2961,6 +3061,8 @@ fn main() {
         .setup(|app| {
             let state = app.state::<MonitorState>().inner().clone();
             start_monitor_worker(app.handle().clone(), state);
+            let presence = app.state::<PresenceState>().inner().clone();
+            start_presence_worker(app.handle().clone(), presence);
             Ok(())
         })
         .manage(PreferencesState::default())

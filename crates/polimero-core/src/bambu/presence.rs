@@ -51,16 +51,27 @@ impl PresenceCache {
             interface: printer.interface.clone(),
             last_seen_unix_ms: now_unix_ms,
         };
-        self.entries.insert(printer.serial.clone(), presence);
-        self.entries.get(&printer.serial)
+        let key = normalize_serial(&printer.serial);
+        self.entries.insert(key.clone(), presence);
+        self.entries.get(&key)
     }
 
     pub fn get(&self, serial: &str) -> Option<&PrinterPresence> {
-        self.entries.get(serial)
+        self.entries.get(&normalize_serial(serial))
     }
+
     pub fn entries(&self) -> impl Iterator<Item = &PrinterPresence> {
         self.entries.values()
     }
+
+    pub fn retain_seen_since(&mut self, minimum_unix_ms: u64) {
+        self.entries
+            .retain(|_, presence| presence.last_seen_unix_ms >= minimum_unix_ms);
+    }
+}
+
+fn normalize_serial(serial: &str) -> String {
+    serial.trim().to_ascii_uppercase()
 }
 
 #[cfg(test)]
@@ -85,5 +96,27 @@ mod tests {
         let presence = cache.observe(&printer, Some("192.0.2.10"), 42).unwrap();
         assert_eq!(presence.suggested_host.as_deref(), Some("192.0.2.11"));
         assert_eq!(presence.last_seen_unix_ms, 42);
+        assert_eq!(cache.get(" sn001 ").unwrap().host, "192.0.2.11");
+    }
+
+    #[test]
+    fn stale_presence_can_be_expired_without_touching_profiles() {
+        let printer = DiscoveredPrinter {
+            driver: "bambu-lan",
+            host: "192.0.2.11".into(),
+            serial: "SN001".into(),
+            model: "P1S".into(),
+            name: "Printer".into(),
+            firmware: None,
+            schema_version: None,
+            connect_mode: None,
+            bind_state: None,
+            security_mode: None,
+            interface: None,
+        };
+        let mut cache = PresenceCache::default();
+        cache.observe(&printer, Some("192.0.2.10"), 42);
+        cache.retain_seen_since(43);
+        assert!(cache.get("SN001").is_none());
     }
 }

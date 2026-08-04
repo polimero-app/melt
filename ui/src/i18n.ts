@@ -193,6 +193,7 @@ export type MessageKey =
   | "printersView.removeNamed"
   | "printersView.status"
   | "printersView.host"
+  | "printersView.discoveredHost"
   | "printersView.tlsVerification"
   | "printersView.openControl"
   | "printersView.refreshCertificate"
@@ -566,6 +567,7 @@ const messages: Record<Locale, Messages> = {
     "printersView.removeNamed": "Remove {name}",
     "printersView.status": "Status",
     "printersView.host": "Host",
+    "printersView.discoveredHost": "Discovered host (not applied)",
     "printersView.tlsVerification": "TLS verification",
     "printersView.openControl": "Open control",
     "printersView.refreshCertificate": "Refresh certificate",
@@ -936,6 +938,7 @@ const messages: Record<Locale, Messages> = {
     "printersView.removeNamed": "Remover {name}",
     "printersView.status": "Status",
     "printersView.host": "Host",
+    "printersView.discoveredHost": "Host descoberto (não aplicado)",
     "printersView.tlsVerification": "Verificação TLS",
     "printersView.openControl": "Abrir controle",
     "printersView.refreshCertificate": "Atualizar certificado",

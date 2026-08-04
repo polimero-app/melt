@@ -118,6 +118,12 @@ the model family. Unknown models and unknown fields remain distinct from an
 explicitly unsupported feature, so new firmware can degrade conservatively
 without being misclassified.
 
+Desktop discovery also runs continuously on a bounded cadence. Presence is
+keyed by the normalized physical serial, retained for 60 seconds, and enriches
+configured profiles with last-seen model/firmware observations. A newly
+advertised address is displayed as a suggestion only: discovery never rewrites
+the configured endpoint, TLS identity, certificate pin, or credentials.
+
 ## Implemented compatibility behavior
 
 - Inspect sliced 3MF archives before upload, with limits on source size, entry

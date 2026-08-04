@@ -78,6 +78,12 @@ type Printer = {
   serial: string
   timeout: string
   insecure: boolean
+  presence?: {
+    lastSeenUnixMs: number
+    model: string
+    firmware?: string
+    suggestedHost?: string
+  }
 }
 
 // Commands reject with a stable code so the message can be localized here
@@ -377,6 +383,7 @@ const cameraTransportDetail = ref<string>()
 const cameraLoading = ref(false)
 const cameraError = ref<string>()
 let monitorUnlisten: UnlistenFn | undefined
+let presenceUnlisten: UnlistenFn | undefined
 let notificationUnlisten: UnlistenFn | undefined
 let transferUnlisten: UnlistenFn | undefined
 let printStageUnlisten: UnlistenFn | undefined
@@ -1514,6 +1521,13 @@ onMounted(() => {
       if (cached && monitoring.value.length === 0) monitoring.value = cached
     })
   })
+  void listen('presence-updated', () => {
+    void invoke<Printer[]>('configured_printers').then((profiles) => {
+      printers.value = profiles
+    })
+  }).then((unlisten) => {
+    presenceUnlisten = unlisten
+  })
   void listen<NotificationEvent>('printer-notification', (event) => {
     const labels: Record<NotificationEvent['kind'], MessageKey> = {
       completion: 'settingsView.notifyComplete',
@@ -1541,6 +1555,7 @@ onUnmounted(() => {
   void stopCamera()
   systemThemeQuery?.removeEventListener('change', handleSystemThemeChange)
   monitorUnlisten?.()
+  presenceUnlisten?.()
   notificationUnlisten?.()
   transferUnlisten?.()
   printStageUnlisten?.()
@@ -2027,6 +2042,10 @@ onUnmounted(() => {
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t('printersView.host') }}</dt>
                 <dd class="text-gray-900 dark:text-gray-300">{{ printer.host }}</dd>
+              </div>
+              <div v-if="printer.presence?.suggestedHost" class="flex items-center justify-between gap-3 py-2">
+                <dt class="text-gray-500 dark:text-gray-400">{{ t('printersView.discoveredHost') }}</dt>
+                <dd class="text-right font-mono text-amber-600 dark:text-amber-400">{{ printer.presence.suggestedHost }}</dd>
               </div>
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t('addition.timeout') }}</dt>
