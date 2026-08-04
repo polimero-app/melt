@@ -7,6 +7,7 @@ import { locales, preferredLocale, translate, type Locale, type MessageKey } fro
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration, relativeAge } from './formatting'
 import { printTargetState } from './printing'
+import { commandDetail, commandMessage, type CommandError } from './errors'
 import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
 import SlideOver from './components/SlideOver.vue'
@@ -88,15 +89,6 @@ type Printer = {
     firmware?: string
     suggestedHost?: string
   }
-}
-
-// Commands reject with a stable code so the message can be localized here
-// instead of arriving as English prose from the backend.
-type CommandError = {
-  code: string
-  operation?: string
-  state?: string
-  detail?: string
 }
 
 type Driver = {
@@ -619,20 +611,10 @@ const fleetStats = computed(() => [
   { label: t('printersView.printingNow'), value: printers.value.filter((printer) => badgeFor(printer.name) === 'busy').length, tone: 'text-yellow-600 dark:text-yellow-400' },
 ])
 
+// Commands reject with stable codes; unexpected runtime failures stay in logs
+// instead of leaking implementation details into user-facing surfaces.
 function message(reason: unknown) {
-  const error = reason as CommandError | null
-  if (!error || typeof error !== 'object' || typeof error.code !== 'string') {
-    return reason instanceof Error ? reason.message : String(reason)
-  }
-  return t(`errors.${error.code}` as MessageKey, {
-    operation: t(`operations.${error.operation ?? 'operation'}` as MessageKey),
-    state: t(`printerState.${error.state ?? 'unknown'}` as MessageKey),
-  })
-}
-
-function commandDetail(reason: unknown) {
-  const error = reason as CommandError | null
-  return error && typeof error === 'object' && typeof error.detail === 'string' ? error.detail : undefined
+  return commandMessage(reason, t)
 }
 
 function askConfirmation(
