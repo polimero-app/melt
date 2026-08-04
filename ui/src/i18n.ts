@@ -145,6 +145,7 @@ export type MessageKey =
   | "control.chamber"
   | "control.decreaseTemp"
   | "control.increaseTemp"
+  | "control.setTemp"
   | "control.fans"
   | "control.fanPartCooling"
   | "control.fanAuxiliary"
@@ -528,6 +529,7 @@ const messages: Record<Locale, Messages> = {
     "control.chamber": "Chamber",
     "control.decreaseTemp": "Decrease {sensor} target temperature",
     "control.increaseTemp": "Increase {sensor} target temperature",
+    "control.setTemp": "Target temperature for {sensor}",
     "control.fans": "Fans",
     "control.fanPartCooling": "Part cooling",
     "control.fanAuxiliary": "Auxiliary",
@@ -908,6 +910,7 @@ const messages: Record<Locale, Messages> = {
     "control.chamber": "Câmara",
     "control.decreaseTemp": "Diminuir a temperatura alvo de {sensor}",
     "control.increaseTemp": "Aumentar a temperatura alvo de {sensor}",
+    "control.setTemp": "Temperatura alvo para {sensor}",
     "control.fans": "Ventoinhas",
     "control.fanPartCooling": "Resfriamento da peça",
     "control.fanAuxiliary": "Auxiliar",

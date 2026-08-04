@@ -1040,14 +1040,9 @@ const temperatureMaximums: Record<'nozzle' | 'bed' | 'chamber', number> = {
 const temperatureTimers: Partial<Record<'nozzle' | 'bed' | 'chamber', number>> = {}
 const pendingTemperatures: Partial<Record<'nozzle' | 'bed' | 'chamber', number>> = {}
 
-function adjustTemperature(kind: 'nozzle' | 'bed' | 'chamber', delta: number) {
-  if (!activePrinter.value || !selectedStatus.value) return
-  const temperature = selectedStatus.value.temperatures?.[kind]
-  if (!temperature) return
+function queueTemperature(kind: 'nozzle' | 'bed' | 'chamber', next: number) {
   const maximum = temperatureMaximums[kind]
-  const base = pendingTemperatures[kind] ?? temperature.targetCelsius ?? temperature.currentCelsius
-  const next = Math.max(0, Math.min(maximum, Math.round((base + delta) / 5) * 5))
-  pendingTemperatures[kind] = next
+  pendingTemperatures[kind] = Math.max(0, Math.min(maximum, Math.round(next / 5) * 5))
   if (temperatureTimers[kind] !== undefined) window.clearTimeout(temperatureTimers[kind])
   temperatureTimers[kind] = window.setTimeout(async () => {
     const printerName = activePrinter.value?.name
@@ -1064,6 +1059,21 @@ function adjustTemperature(kind: 'nozzle' | 'bed' | 'chamber', delta: number) {
       showToast(message(reason), 'error')
     }
   }, 150)
+}
+
+function adjustTemperature(kind: 'nozzle' | 'bed' | 'chamber', delta: number) {
+  if (!activePrinter.value || !selectedStatus.value) return
+  const temperature = selectedStatus.value.temperatures?.[kind]
+  if (!temperature) return
+  const base = pendingTemperatures[kind] ?? temperature.targetCelsius ?? temperature.currentCelsius
+  queueTemperature(kind, base + delta)
+}
+
+function setTemperature(kind: 'nozzle' | 'bed' | 'chamber', event: Event) {
+  if (!activePrinter.value) return
+  const target = Number((event.target as HTMLInputElement).value)
+  if (!Number.isFinite(target)) return
+  queueTemperature(kind, target)
 }
 
 async function sendFan(fan: string, event: Event) {
@@ -1925,7 +1935,18 @@ onUnmounted(() => {
                     <p class="text-sm/6 font-light text-gray-900 dark:text-white">{{ t(temperatureKeys[row.key]) }}</p>
                     <p class="font-mono text-sm text-gray-500 dark:text-gray-400"><span class="font-bold">{{ formatTemperature(row.value.currentCelsius) }}</span> °C <span aria-hidden="true">/</span> <span class="font-bold">{{ row.value.targetCelsius === undefined ? '—' : formatTemperature(row.value.targetCelsius) }}</span> °C</p>
                   </div>
-                  <div v-if="capabilities?.temperatureWrite" class="flex gap-1">
+                  <div v-if="capabilities?.temperatureWrite" class="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min="0"
+                      step="5"
+                      :max="temperatureMaximums[row.key]"
+                      :value="row.value.targetCelsius ?? 0"
+                      :disabled="selectedStatus?.state !== 'idle'"
+                      :aria-label="t('control.setTemp', { sensor: t(temperatureKeys[row.key]) })"
+                      class="w-16 rounded-md bg-white px-2 py-1 text-right font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 dark:bg-white/5 dark:text-white dark:outline-white/10"
+                      @change="setTemperature(row.key, $event)"
+                    />
                     <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.decreaseTemp', { sensor: t(temperatureKeys[row.key]) })" @click="adjustTemperature(row.key, -5)"><PhMinus class="size-3.5" /></IconButton>
                     <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.increaseTemp', { sensor: t(temperatureKeys[row.key]) })" @click="adjustTemperature(row.key, 5)"><PhPlus class="size-3.5" /></IconButton>
                   </div>
