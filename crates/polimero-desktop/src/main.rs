@@ -1,10 +1,10 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     io::{Cursor, Read, Write},
-    net::{Shutdown, TcpListener, TcpStream},
+    net::{TcpListener, TcpStream},
     sync::{
         Arc, Condvar, LazyLock, Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -14,6 +14,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use openssl::rand::rand_bytes;
 use polimero_core::{
     AppInfo,
+    bambu::{CameraFrame, CameraFrameKind, CameraManager, CameraSubscription},
     config::{Config, ConfigError, Profile, config_dir},
     diagnostics,
     drivers::{self, Capabilities, DriverError, Operation},
@@ -325,7 +326,7 @@ struct CameraWebRtcState {
 
 struct CameraProxy {
     generation: u64,
-    shutdown: TcpStream,
+    stop: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Default)]
@@ -2381,17 +2382,33 @@ fn printer_emergency_stop(
 }
 
 #[tauri::command(async)]
-fn printer_camera_snapshot(name: String) -> Result<CameraSnapshot, CommandError> {
+fn printer_camera_snapshot(
+    name: String,
+    manager: tauri::State<'_, CameraManager>,
+) -> Result<CameraSnapshot, CommandError> {
     let printer = desktop_printer(&name, Operation::CameraSnapshot)?;
-    let image = drivers::camera_snapshot(
-        &printer.driver,
-        printer.access_code.as_deref(),
-        printer.tls_fingerprint.as_deref(),
-        Duration::from_secs(10),
-    )
-    .map_err(|error| operation_error(error, Operation::CameraSnapshot))?;
+    let subscription = subscribe_camera(
+        &manager,
+        &printer,
+        CameraFrameKind::Jpeg,
+        Operation::CameraSnapshot,
+    )?;
+    let image = if let Some(image) = subscription.latest_jpeg() {
+        image
+    } else {
+        loop {
+            match subscription.recv_timeout(Duration::from_secs(10)) {
+                Ok(frame) => {
+                    if let CameraFrame::Jpeg(image) = frame.as_ref() {
+                        break Arc::clone(image);
+                    }
+                }
+                Err(_) => return Err(CommandError::new("cameraPreviewUnavailable")),
+            }
+        }
+    };
     Ok(CameraSnapshot {
-        data_url: format!("data:image/jpeg;base64,{}", STANDARD.encode(image)),
+        data_url: format!("data:image/jpeg;base64,{}", STANDARD.encode(image.as_ref())),
     })
 }
 
@@ -2399,17 +2416,18 @@ fn printer_camera_snapshot(name: String) -> Result<CameraSnapshot, CommandError>
 fn printer_camera_stream(
     name: String,
     state: tauri::State<'_, CameraStreamState>,
+    manager: tauri::State<'_, CameraManager>,
 ) -> Result<CameraStream, CommandError> {
     let printer = desktop_printer(&name, Operation::CameraStream)?;
     let owner_key = printer.driver.physical_printer_key(&printer.name);
-    let stream = drivers::camera_stream(
-        &printer.driver,
-        printer.access_code.as_deref(),
-        printer.tls_fingerprint.as_deref(),
-        Duration::from_secs(10),
-    )
-    .map_err(|error| operation_error(error, Operation::CameraStream))?;
-    start_camera_server(stream, owner_key, state.inner().clone()).map(|url| CameraStream { url })
+    let subscription = subscribe_camera(
+        &manager,
+        &printer,
+        CameraFrameKind::Jpeg,
+        Operation::CameraStream,
+    )?;
+    start_camera_server(subscription, owner_key, state.inner().clone())
+        .map(|url| CameraStream { url })
 }
 
 #[tauri::command(async)]
@@ -2417,6 +2435,7 @@ fn printer_camera_webrtc_offer(
     name: String,
     offer: String,
     state: tauri::State<'_, CameraWebRtcState>,
+    manager: tauri::State<'_, CameraManager>,
 ) -> Result<CameraWebRtcAnswer, CommandError> {
     let printer = desktop_printer(&name, Operation::CameraStream)?;
     let profile_name = name.to_ascii_lowercase();
@@ -2431,13 +2450,14 @@ fn printer_camera_webrtc_offer(
         sessions.profile_keys.insert(profile_name, name.clone());
         sessions.active.remove(&name);
     }
-    let (sdp, session) = webrtc_camera::start(
-        printer.driver,
-        printer.access_code,
-        printer.tls_fingerprint,
-        offer,
-    )
-    .map_err(|error| CommandError::new("cameraPreviewUnavailable").with_detail(error))?;
+    let subscription = subscribe_camera(
+        &manager,
+        &printer,
+        CameraFrameKind::H264,
+        Operation::CameraStream,
+    )?;
+    let (sdp, session) = webrtc_camera::start(subscription, offer)
+        .map_err(|error| CommandError::new("cameraPreviewUnavailable").with_detail(error))?;
     let mut sessions = state
         .sessions
         .lock()
@@ -2480,7 +2500,7 @@ fn printer_camera_webrtc_stop(
 }
 
 fn start_camera_server(
-    mut stream: polimero_core::bambu::MjpegStream,
+    subscription: CameraSubscription,
     name: String,
     state: CameraStreamState,
 ) -> Result<String, CommandError> {
@@ -2492,16 +2512,16 @@ fn start_camera_server(
     let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|_| unavailable())?;
     let address = listener.local_addr().map_err(|_| unavailable())?;
     listener.set_nonblocking(true).map_err(|_| unavailable())?;
-    let shutdown = stream.shutdown_handle().map_err(|_| unavailable())?;
+    let stop = Arc::new(AtomicBool::new(false));
     let generation = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
     if let Some(previous) = state.active.lock().map_err(|_| unavailable())?.insert(
         name.clone(),
         CameraProxy {
             generation,
-            shutdown,
+            stop: Arc::clone(&stop),
         },
     ) {
-        let _ = previous.shutdown.shutdown(Shutdown::Both);
+        previous.stop.store(true, Ordering::Release);
     }
     let expected = path.clone();
     thread::spawn(move || {
@@ -2509,7 +2529,7 @@ fn start_camera_server(
         while Instant::now() < deadline {
             match listener.accept() {
                 Ok((socket, _)) => {
-                    proxy_camera_stream(&mut stream, socket, &expected);
+                    proxy_camera_stream(&subscription, socket, &expected, &stop);
                     break;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -2533,7 +2553,12 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn proxy_camera_stream(stream: &mut dyn Read, mut socket: TcpStream, expected: &str) {
+fn proxy_camera_stream(
+    subscription: &CameraSubscription,
+    mut socket: TcpStream,
+    expected: &str,
+    stop: &AtomicBool,
+) {
     let _ = socket.set_read_timeout(Some(Duration::from_secs(5)));
     let mut request = [0; 4096];
     let read = socket.read(&mut request).unwrap_or_default();
@@ -2547,8 +2572,47 @@ fn proxy_camera_stream(stream: &mut dyn Read, mut socket: TcpStream, expected: &
         )
         .is_ok()
     {
-        let _ = std::io::copy(stream, &mut socket);
+        while !stop.load(Ordering::Acquire) {
+            let frame = match subscription.recv_timeout(Duration::from_secs(1)) {
+                Ok(frame) => frame,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            };
+            let CameraFrame::Jpeg(jpeg) = frame.as_ref() else {
+                continue;
+            };
+            let header = format!(
+                "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n",
+                jpeg.len()
+            );
+            if socket.write_all(header.as_bytes()).is_err()
+                || socket.write_all(jpeg).is_err()
+                || socket.write_all(b"\r\n").is_err()
+            {
+                break;
+            }
+        }
     }
+}
+
+fn subscribe_camera(
+    manager: &CameraManager,
+    printer: &DesktopPrinter,
+    kind: CameraFrameKind,
+    operation: Operation,
+) -> Result<CameraSubscription, CommandError> {
+    let drivers::Profile::Bambu(profile) = &printer.driver else {
+        return Err(CommandError::new("cameraPreviewUnavailable"));
+    };
+    manager
+        .subscribe(
+            profile,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+            Duration::from_secs(10),
+            kind,
+        )
+        .map_err(|error| operation_error(DriverError::Camera(error), operation))
 }
 
 fn camera_preview_request(request: &[u8], expected: &str) -> bool {
@@ -2822,6 +2886,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(MonitorState::default())
+        .manage(CameraManager::default())
         .manage(CameraStreamState::default())
         .manage(CameraWebRtcState::default())
         .manage(PreviewState::default())

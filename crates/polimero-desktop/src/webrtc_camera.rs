@@ -1,5 +1,4 @@
 use std::{
-    net::{Shutdown, TcpStream},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -10,7 +9,7 @@ use std::{
 };
 
 use base64::Engine;
-use polimero_core::{bambu::H264Stream, drivers};
+use polimero_core::bambu::{CameraFrame, CameraSubscription};
 use tokio::runtime::Builder;
 use tokio::sync::mpsc as async_mpsc;
 use webrtc::{
@@ -35,16 +34,12 @@ const SETUP_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub struct Session {
     stop: Arc<AtomicBool>,
-    shutdown: Option<TcpStream>,
     thread: Option<thread::JoinHandle<()>>,
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        if let Some(socket) = self.shutdown.take() {
-            let _ = socket.shutdown(Shutdown::Both);
-        }
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -52,21 +47,9 @@ impl Drop for Session {
 }
 
 pub fn start(
-    profile: drivers::Profile,
-    access_code: Option<String>,
-    fingerprint: Option<String>,
+    subscription: CameraSubscription,
     offer_sdp: String,
 ) -> Result<(String, Session), String> {
-    let stream = drivers::camera_h264_stream(
-        &profile,
-        access_code.as_deref(),
-        fingerprint.as_deref(),
-        SETUP_TIMEOUT,
-    )
-    .map_err(|error| error.to_string())?;
-    let shutdown = stream
-        .shutdown_handle()
-        .map_err(|error| format!("camera shutdown handle: {error}"))?;
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
     let (answer_tx, answer_rx) = mpsc::sync_channel(1);
@@ -80,7 +63,7 @@ pub fn start(
         };
         let failure_tx = answer_tx.clone();
         let result = runtime.block_on(serve(
-            stream,
+            subscription,
             offer_sdp,
             Arc::clone(&thread_stop),
             answer_tx,
@@ -92,7 +75,6 @@ pub fn start(
 
     let session = Session {
         stop,
-        shutdown: Some(shutdown),
         thread: Some(thread),
     };
     await_answer(answer_rx, session, SETUP_TIMEOUT)
@@ -110,14 +92,16 @@ fn await_answer(
 }
 
 async fn serve(
-    stream: H264Stream,
+    subscription: CameraSubscription,
     offer_sdp: String,
     stop: Arc<AtomicBool>,
     answer_tx: mpsc::SyncSender<Result<String, String>>,
 ) -> Result<(), String> {
-    let (sps, pps) = stream.parameter_sets();
-    let sps = sps.to_vec();
-    let pps = pps.to_vec();
+    let parameters = subscription
+        .h264_parameters()
+        .ok_or_else(|| "camera owner is not an H.264 source".to_owned())?;
+    let sps = parameters.sps.to_vec();
+    let pps = parameters.pps.to_vec();
     let (codec, payload_type) = codec_capability(&sps, &pps, &offer_sdp)?;
     let mut media_engine = MediaEngine::default();
     media_engine
@@ -196,18 +180,14 @@ async fn serve(
     let (access_unit_tx, mut access_unit_rx) = async_mpsc::channel(2);
     let reader_stop = Arc::clone(&stop);
     tokio::task::spawn_blocking(move || {
-        let mut stream = stream;
-        let mut access_unit = Vec::new();
         while !reader_stop.load(Ordering::Acquire) {
-            let packet = match stream.next_rtp_packet() {
-                Ok(packet) => packet,
-                Err(_) => break,
+            let frame = match subscription.recv_timeout(Duration::from_secs(1)) {
+                Ok(frame) => frame,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
             };
-            let marker = packet.get(1).is_some_and(|byte| byte & 0x80 != 0);
-            access_unit.push(packet);
-            if marker {
-                let complete = std::mem::take(&mut access_unit);
-                match access_unit_tx.try_send(complete) {
+            if let CameraFrame::H264(access_unit) = frame.as_ref() {
+                match access_unit_tx.try_send(access_unit.rtp_packets.clone()) {
                     Ok(()) | Err(async_mpsc::error::TrySendError::Full(_)) => {}
                     Err(async_mpsc::error::TrySendError::Closed(_)) => break,
                 }
@@ -396,7 +376,6 @@ mod tests {
         let (_answer_tx, answer_rx) = mpsc::channel();
         let session = Session {
             stop,
-            shutdown: None,
             thread: Some(thread),
         };
 

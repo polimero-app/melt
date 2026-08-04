@@ -23,6 +23,11 @@ retained for snapshots. The first subscriber opens the upstream; dropping the
 last subscriber interrupts its socket, and connection changes invalidate the
 previous generation.
 
+Desktop MJPEG previews, WebRTC offers, and snapshots all subscribe through
+this manager. WebRTC subscriptions receive only H.264 access units, while
+preview subscriptions receive only JPEG frames, so one slow consumer cannot
+fill another media type's bounded queue.
+
 Polimero treats a reported Bambu model as a capability hint, not a complete
 contract. Runtime observations and safe protocol probes take precedence over
 the model family. Unknown models and unknown fields remain distinct from an
