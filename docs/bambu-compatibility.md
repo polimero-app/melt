@@ -10,6 +10,12 @@ the configured printer serial before storing its SHA-256 pin. Every later TLS
 transport requires that serial identity and the stored pin; a mismatch never
 falls back to insecure mode or silently rewrites a profile.
 
+Camera fan-out operates on complete encoded media units. RTSPS sources retain
+their original RTP packets for WebRTC and may produce a bounded JPEG preview
+from the same access unit; classic camera sources expose complete JPEG frames.
+This boundary permits snapshots and multiple viewers to share one upstream
+without transcoding the WebRTC path.
+
 Polimero treats a reported Bambu model as a capability hint, not a complete
 contract. Runtime observations and safe protocol probes take precedence over
 the model family. Unknown models and unknown fields remain distinct from an

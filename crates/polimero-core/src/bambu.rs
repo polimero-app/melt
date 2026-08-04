@@ -43,7 +43,7 @@ pub use quirks::{
     Qualification as QuirkQualification, QuirkEffect, QuirkEntry, applicable as applicable_quirks,
     registry as quirk_registry,
 };
-pub use rtsp::H264Stream;
+pub use rtsp::{H264AccessUnit, H264Stream};
 pub use transport::{Client, Error as TransportError, JobStartOptions};
 pub use workflow::{PrintPreflight, PrintStage, PrintStageEvent, preflight_print_package};
 
@@ -570,7 +570,7 @@ impl MjpegStream {
         }
     }
 
-    fn next_frame(&mut self) -> io::Result<Vec<u8>> {
+    pub fn next_frame(&mut self) -> io::Result<Vec<u8>> {
         match &mut self.source {
             MjpegSource::Classic(connection) => read_camera_frame(connection),
             MjpegSource::H264(stream) => stream.next_jpeg_frame(),
@@ -660,6 +660,20 @@ pub fn open_h264_stream(
         .filter(|value| !value.is_empty())
         .ok_or(CameraError::MissingAccessCode)?;
     rtsp::open_h264_stream(profile, access_code, fingerprint, timeout)
+}
+
+/// Opens the native H.264 stream with preview decoding enabled while retaining
+/// the original RTP access units for zero-transcode WebRTC forwarding.
+pub fn open_decoded_h264_stream(
+    profile: &Profile,
+    access_code: Option<&str>,
+    fingerprint: Option<&str>,
+    timeout: Duration,
+) -> Result<H264Stream, CameraError> {
+    let access_code = access_code
+        .filter(|value| !value.is_empty())
+        .ok_or(CameraError::MissingAccessCode)?;
+    rtsp::open_decoded_h264_stream(profile, access_code, fingerprint, timeout)
 }
 
 /// Captures one actual JPEG frame from the Bambu LAN camera endpoint.

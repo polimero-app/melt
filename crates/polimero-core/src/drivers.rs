@@ -366,6 +366,26 @@ pub fn camera_h264_stream(
     }
 }
 
+/// Opens an H.264 camera stream that also produces bounded JPEG previews from
+/// each decodable access unit. The original RTP packets remain available.
+pub fn camera_h264_stream_with_previews(
+    profile: &Profile,
+    access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
+    timeout: Duration,
+) -> Result<bambu::H264Stream, DriverError> {
+    match profile {
+        Profile::Bambu(profile) => {
+            bambu::open_decoded_h264_stream(profile, access_code, tls_fingerprint, timeout)
+                .map_err(DriverError::Camera)
+        }
+        Profile::Moonraker(_) => Err(DriverError::UnsupportedOperation(
+            Driver::Moonraker,
+            Operation::CameraStream,
+        )),
+    }
+}
+
 pub fn file_roots(
     profile: &Profile,
     access_code: Option<&str>,

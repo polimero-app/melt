@@ -142,6 +142,15 @@ pub struct H264Stream {
     fu_buffer: Option<Vec<u8>>,
 }
 
+/// One complete H.264 picture as received from the printer. RTP packet bytes
+/// are retained verbatim for WebRTC forwarding; decoded JPEG output is present
+/// only when the stream was opened with its bounded preview decoder enabled.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct H264AccessUnit {
+    pub rtp_packets: Vec<Vec<u8>>,
+    pub jpeg: Option<Vec<u8>>,
+}
+
 impl H264Stream {
     pub fn shutdown_handle(&self) -> io::Result<TcpStream> {
         self.connection.connection.get_ref().try_clone()
@@ -155,6 +164,35 @@ impl H264Stream {
         self.keepalive_if_due()
             .and_then(|()| self.connection.next_rtp_packet())
             .map_err(|error| io::Error::other(format!("{error}")))
+    }
+
+    pub fn next_access_unit(&mut self) -> io::Result<H264AccessUnit> {
+        let mut rtp_packets = Vec::new();
+        loop {
+            let packet = self.next_rtp_packet()?;
+            let Some((marker, payload)) = parse_rtp(&packet) else {
+                continue;
+            };
+            self.depacketize(payload);
+            rtp_packets.push(packet);
+            if !marker {
+                continue;
+            }
+            let jpeg = match (self.build_access_unit(), self.decoder.as_mut()) {
+                (Some(access_unit), Some(decoder)) => match decoder.decode(&access_unit) {
+                    Ok(Some(yuv)) => Some(encode_jpeg(&yuv)?),
+                    Ok(None) => None,
+                    Err(error) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("H.264 decode failed: {error}"),
+                        ));
+                    }
+                },
+                _ => None,
+            };
+            return Ok(H264AccessUnit { rtp_packets, jpeg });
+        }
     }
 
     fn keepalive_if_due(&mut self) -> Result<(), CameraError> {
@@ -464,30 +502,8 @@ fn parse_sdp(sdp: &str) -> Option<(String, Vec<u8>, Vec<u8>)> {
 impl H264Stream {
     pub(super) fn next_jpeg_frame(&mut self) -> io::Result<Vec<u8>> {
         loop {
-            let packet = self.next_rtp_packet()?;
-            let Some((marker, payload)) = parse_rtp(&packet) else {
-                continue;
-            };
-            self.depacketize(payload);
-            if !marker {
-                continue;
-            }
-            let Some(access_unit) = self.build_access_unit() else {
-                continue;
-            };
-            let decoder = self
-                .decoder
-                .as_mut()
-                .ok_or_else(|| io::Error::other("H.264 decoder is unavailable for JPEG output"))?;
-            match decoder.decode(&access_unit) {
-                Ok(Some(yuv)) => return encode_jpeg(&yuv),
-                Ok(None) => continue,
-                Err(error) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("H.264 decode failed: {error}"),
-                    ));
-                }
+            if let Some(jpeg) = self.next_access_unit()?.jpeg {
+                return Ok(jpeg);
             }
         }
     }
