@@ -433,6 +433,8 @@ function t(key: MessageKey, values?: Record<string, string | number>) {
 const cameraStage = ref<HTMLElement>()
 const toast = ref<{ text: string; tone: 'success' | 'error' }>()
 const searchTerm = ref('')
+type SortKey = 'name' | 'size' | 'modified'
+const sortKey = ref<SortKey>('name')
 const stepSize = ref('1 mm')
 const feedRate = ref(50)
 const jogBusy = ref(false)
@@ -1486,7 +1488,14 @@ const matchesSearch = (file: FileEntry) => !normalizedSearchTerm.value || file.n
 // The backend already scopes entries to the requested directory, so this
 // only needs to split by type and apply the client-side search echo.
 const visibleDirectories = computed(() => libraryFiles.value.filter((file) => file.type === 'directory' && matchesSearch(file)))
-const visibleFiles = computed(() => libraryFiles.value.filter((file) => file.type === 'file' && matchesSearch(file)))
+const visibleFiles = computed(() => {
+  const files = libraryFiles.value.filter((file) => file.type === 'file' && matchesSearch(file))
+  return [...files].sort((left, right) => {
+    if (sortKey.value === 'size') return (right.sizeBytes ?? 0) - (left.sizeBytes ?? 0)
+    if (sortKey.value === 'modified') return Date.parse(right.modifiedAt ?? '') - Date.parse(left.modifiedAt ?? '')
+    return left.name.localeCompare(right.name)
+  })
+})
 const printerFiles = computed(() => files.value.filter((file) => file.type === 'file'))
 const DASHBOARD_FILE_LIMIT = 3
 const dashboardFiles = computed(() => printerFiles.value.slice(0, DASHBOARD_FILE_LIMIT))
@@ -2422,8 +2431,20 @@ onUnmounted(() => {
               </li>
             </ol>
           </nav>
-          <!-- Input with leading icon -->
           <div class="ml-auto grid grid-cols-1">
+            <select
+              v-model="sortKey"
+              :aria-label="t('filesView.sortBy')"
+              class="col-start-1 row-start-1 w-auto appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800"
+            >
+              <option value="name">{{ t('filesView.sortName') }}</option>
+              <option value="size">{{ t('filesView.sortSize') }}</option>
+              <option value="modified">{{ t('filesView.sortModified') }}</option>
+            </select>
+            <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-2 size-4 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
+          </div>
+          <!-- Input with leading icon -->
+          <div class="grid grid-cols-1">
             <input
               name="file-search"
               v-model="searchTerm"

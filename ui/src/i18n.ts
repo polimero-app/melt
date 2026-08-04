@@ -263,6 +263,10 @@ export type MessageKey =
   | "filesView.changeFolder"
   | "filesView.breadcrumb"
   | "filesView.search"
+  | "filesView.sortBy"
+  | "filesView.sortName"
+  | "filesView.sortSize"
+  | "filesView.sortModified"
   | "filesView.folderModified"
   | "filesView.moreActions"
   | "filesView.openWith"
@@ -650,6 +654,10 @@ const messages: Record<Locale, Messages> = {
     "filesView.changeFolder": "Change folder",
     "filesView.breadcrumb": "Breadcrumb",
     "filesView.search": "Search files",
+    "filesView.sortBy": "Sort by",
+    "filesView.sortName": "Name",
+    "filesView.sortSize": "Largest first",
+    "filesView.sortModified": "Newest first",
     "filesView.folderModified": "Folder · {date}",
     "filesView.moreActions": "More file actions",
     "filesView.openWith": "Open with {name}",
@@ -1034,6 +1042,10 @@ const messages: Record<Locale, Messages> = {
     "filesView.changeFolder": "Trocar pasta",
     "filesView.breadcrumb": "Trilha de navegação",
     "filesView.search": "Buscar arquivos",
+    "filesView.sortBy": "Ordenar por",
+    "filesView.sortName": "Nome",
+    "filesView.sortSize": "Maiores primeiro",
+    "filesView.sortModified": "Mais recentes primeiro",
     "filesView.folderModified": "Pasta · {date}",
     "filesView.moreActions": "Mais ações do arquivo",
     "filesView.openWith": "Abrir com {name}",
