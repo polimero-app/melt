@@ -14,6 +14,7 @@ use thiserror::Error;
 
 use crate::trace::{SharedTracer, next_tracer_generation};
 
+mod authorization;
 mod camera_manager;
 mod capabilities;
 mod discovery;
@@ -29,6 +30,10 @@ mod transport;
 mod tunnel;
 mod workflow;
 
+pub use authorization::{
+    AuthorizationEvidenceKind, AuthorizationObservation, AuthorizationResolution,
+    resolve_authorization,
+};
 pub use camera_manager::{
     CameraFrame, CameraFrameKind, CameraManager, CameraOwnerStatus, CameraOwnerTransport,
     CameraSubscription, H264Parameters,
@@ -221,6 +226,7 @@ pub enum AuthorizationMode {
     Unknown,
     DeveloperMode,
     SigningRequired,
+    ConflictingEvidence,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -269,6 +275,7 @@ pub struct RuntimeCapabilities {
     pub observations: CapabilityObservations,
     pub model_family: ModelFamily,
     pub authorization: AuthorizationMode,
+    pub authorization_resolution: AuthorizationResolution,
     pub camera: CameraTransport,
     pub storage_transport: StorageTransport,
     pub storage_volumes: Vec<StorageVolume>,
@@ -341,6 +348,7 @@ impl RuntimeCapabilities {
             observations: CapabilityObservations::default(),
             model_family,
             authorization: AuthorizationMode::Unknown,
+            authorization_resolution: AuthorizationResolution::default(),
             camera,
             storage_transport,
             storage_volumes,

@@ -28,6 +28,20 @@ this manager. WebRTC subscriptions receive only H.264 access units, while
 preview subscriptions receive only JPEG frames, so one slow consumer cannot
 fill another media type's bounded queue.
 
+## Authorization policy
+
+Polimero resolves LAN authorization only from explicit live security fields or
+future evidence-qualified rules. A proven `signingRequired` mode blocks file
+writes, print start/control, motion, thermal, fan, light, speed, and emergency
+commands before any mutating transport work. Read-only status and diagnostics
+remain available. Unknown authorization retains attempt-and-observe behavior.
+
+The community-reported meaning of `print.fun` bit 29 is retained as an
+inactive, provisional observation. It is visible for qualification but cannot
+block a command until independent physical evidence scopes it to the affected
+model and module firmware. Conflicting explicit fields block mutations
+conservatively and are surfaced rather than guessed.
+
 Polimero treats a reported Bambu model as a capability hint, not a complete
 contract. Runtime observations and safe protocol probes take precedence over
 the model family. Unknown models and unknown fields remain distinct from an

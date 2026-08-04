@@ -28,10 +28,11 @@ use thiserror::Error;
 use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rfc3339};
 
 use super::{
-    BedLevelingSupport, FirmwareInventory, MQTT_USERNAME, MappingStatus, MqttTopics, PrintStage,
-    PrintStageEvent, Profile, RuntimeCapabilities, StorageTransport, StorageVolume, TlsPinError,
-    is_pushall_payload, is_valid_tls_fingerprint, payload_sequence_id, preflight_print_package,
-    pushall_payload, tls_fingerprint, tunnel, verify_tls_fingerprint,
+    AuthorizationMode, BedLevelingSupport, FirmwareInventory, MQTT_USERNAME, MappingStatus,
+    MqttTopics, PrintStage, PrintStageEvent, Profile, RuntimeCapabilities, StorageTransport,
+    StorageVolume, TlsPinError, is_pushall_payload, is_valid_tls_fingerprint, payload_sequence_id,
+    preflight_print_package, pushall_payload, resolve_authorization, tls_fingerprint, tunnel,
+    verify_tls_fingerprint,
 };
 
 const FTP_PORT: u16 = 990;
@@ -79,6 +80,10 @@ pub enum Error {
     CommandRejected,
     #[error("Bambu printer rejected an unsigned command")]
     UnsignedCommand,
+    #[error("Bambu printer requires signed commands for {0:?}")]
+    AuthorizationRequired(MutationClass),
+    #[error("conflicting Bambu authorization evidence blocks {0:?}")]
+    AuthorizationConflict(MutationClass),
     #[error("invalid Bambu device path")]
     InvalidDevicePath,
     #[error("Bambu file already exists")]
@@ -99,6 +104,20 @@ pub enum Error {
     LocalIo,
     #[error("print package preflight failed")]
     PreflightRejected,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MutationClass {
+    FileWrite,
+    PrintStart,
+    PrintControl,
+    EmergencyStop,
+    Motion,
+    Thermal,
+    Fan,
+    Light,
+    Speed,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -216,6 +235,30 @@ impl Client {
             .ok()
             .and_then(|capabilities| capabilities.clone())
             .unwrap_or_else(|| self.profile.default_capabilities())
+    }
+
+    fn authorize_mutation(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        class: MutationClass,
+    ) -> Result<(), Error> {
+        let cached = self
+            .capabilities
+            .lock()
+            .ok()
+            .and_then(|value| value.clone());
+        let authorization = cached
+            .or_else(|| self.runtime_capabilities(access_code, fingerprint).ok())
+            .map(|capabilities| capabilities.authorization)
+            .unwrap_or(AuthorizationMode::Unknown);
+        if authorization == AuthorizationMode::SigningRequired {
+            return Err(Error::AuthorizationRequired(class));
+        }
+        if authorization == AuthorizationMode::ConflictingEvidence {
+            return Err(Error::AuthorizationConflict(class));
+        }
+        Ok(())
     }
 
     fn storage_transport(&self) -> StorageTransport {
@@ -399,6 +442,7 @@ impl Client {
         device_path: &str,
         options: JobStartOptions,
     ) -> Result<JobResult, Error> {
+        self.authorize_mutation(access_code, fingerprint, MutationClass::PrintStart)?;
         let transport = self.ensure_storage_transport(access_code, fingerprint)?;
         let (mut storage, path) = storage_location(transport, device_path)?;
         if path == "/" {
@@ -433,6 +477,7 @@ impl Client {
         overwrite: bool,
         mut on_stage: impl FnMut(PrintStageEvent),
     ) -> Result<JobResult, Error> {
+        self.authorize_mutation(access_code, fingerprint, MutationClass::PrintStart)?;
         on_stage(stage_event(PrintStage::Inspect, Some(0), None, None));
         let preflight = preflight_print_package(
             source,
@@ -553,6 +598,7 @@ impl Client {
         access_code: Option<&str>,
         fingerprint: Option<&str>,
     ) -> Result<(), Error> {
+        self.authorize_mutation(access_code, fingerprint, MutationClass::EmergencyStop)?;
         self.exchange_fresh(
             access_code,
             fingerprint,
@@ -568,6 +614,7 @@ impl Client {
         fingerprint: Option<&str>,
         targets: TemperatureTargets,
     ) -> Result<TemperatureResult, Error> {
+        self.authorize_mutation(access_code, fingerprint, MutationClass::Thermal)?;
         validate_temperature_targets(&targets)?;
         if targets.nozzle_celsius.is_none()
             && targets.bed_celsius.is_none()
@@ -643,6 +690,7 @@ impl Client {
         fingerprint: Option<&str>,
         axes: &[crate::moonraker::Axis],
     ) -> Result<MotionResult, Error> {
+        self.authorize_mutation(access_code, fingerprint, MutationClass::Motion)?;
         let mut command = String::from("G28");
         for axis in axes {
             command.push(' ');
@@ -661,6 +709,7 @@ impl Client {
         fingerprint: Option<&str>,
         delta: crate::moonraker::JogDelta,
     ) -> Result<MotionResult, Error> {
+        self.authorize_mutation(access_code, fingerprint, MutationClass::Motion)?;
         validate_jog(delta)?;
         let mut movement = Vec::new();
         if let Some(value) = delta.x_millimeters {
@@ -690,6 +739,7 @@ impl Client {
         fan: &str,
         speed_percent: u8,
     ) -> Result<FanResult, Error> {
+        self.authorize_mutation(access_code, fingerprint, MutationClass::Fan)?;
         if speed_percent > 100 {
             return Err(Error::Unsupported("fan speed above 100%"));
         }
@@ -729,6 +779,7 @@ impl Client {
         light: &str,
         state: LightState,
     ) -> Result<LightResult, Error> {
+        self.authorize_mutation(access_code, fingerprint, MutationClass::Light)?;
         let report = self.exchange(
             access_code,
             fingerprint,
@@ -753,6 +804,7 @@ impl Client {
         fingerprint: Option<&str>,
         speed_profile: &str,
     ) -> Result<SpeedResult, Error> {
+        self.authorize_mutation(access_code, fingerprint, MutationClass::Speed)?;
         let level = match speed_profile {
             "silent" => 1,
             "standard" => 2,
@@ -929,6 +981,7 @@ impl Client {
         device_path: &str,
         overwrite: bool,
     ) -> Result<u64, Error> {
+        self.authorize_mutation(access_code, fingerprint, MutationClass::FileWrite)?;
         let metadata = fs::metadata(source).map_err(|_| Error::LocalIo)?;
         if !metadata.is_file() {
             return Err(Error::LocalIo);
@@ -972,6 +1025,7 @@ impl Client {
         fingerprint: Option<&str>,
         device_path: &str,
     ) -> Result<(), Error> {
+        self.authorize_mutation(access_code, fingerprint, MutationClass::FileWrite)?;
         let transport = self.ensure_storage_transport(access_code, fingerprint)?;
         let (storage, path) = storage_location(transport, device_path)?;
         if path == "/" {
@@ -1014,6 +1068,7 @@ impl Client {
         command: &str,
         state: PrinterState,
     ) -> Result<JobResult, Error> {
+        self.authorize_mutation(access_code, fingerprint, MutationClass::PrintControl)?;
         let payload = json!({
             "print": {
                 "sequence_id": next_sequence_id(),
@@ -2174,6 +2229,8 @@ fn refine_runtime_capabilities(
         capabilities
             .observations
             .merge_status(status, is_full_report(status));
+        capabilities.authorization_resolution = resolve_authorization(status);
+        capabilities.authorization = capabilities.authorization_resolution.effective;
     }
     let print = status
         .and_then(|status| status.get("print"))
@@ -3924,6 +3981,30 @@ mod tests {
             TlsPinError::Mismatch
         )));
         assert!(!storage_fallback_allowed(&Error::FileAlreadyExists));
+    }
+
+    #[test]
+    fn signing_required_blocks_before_file_or_network_work() {
+        let profile = Profile::new("192.0.2.1", "SN001", true).unwrap();
+        let client = Client::new(profile);
+        let mut capabilities = RuntimeCapabilities::default();
+        capabilities.authorization = AuthorizationMode::SigningRequired;
+        *client.capabilities.lock().unwrap() = Some(capabilities);
+
+        assert!(matches!(
+            client.upload_file(
+                None,
+                None,
+                Path::new("/path/that/does/not/exist"),
+                "sdcard:/part.3mf",
+                false
+            ),
+            Err(Error::AuthorizationRequired(MutationClass::FileWrite))
+        ));
+        assert!(matches!(
+            client.job_start(None, None, "sdcard:/part.3mf", JobStartOptions::default()),
+            Err(Error::AuthorizationRequired(MutationClass::PrintStart))
+        ));
     }
 
     #[test]
