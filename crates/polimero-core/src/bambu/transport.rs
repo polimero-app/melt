@@ -2961,15 +2961,20 @@ fn legacy_fan_controls(
         .and_then(Value::as_bool)
         .unwrap_or(false);
     fans.iter()
-        .map(|(id, speed)| {
+        .filter_map(|(id, speed)| {
             let (kind, controllable) = match id.as_str() {
                 "partCooling" => (FanKind::Parts, true),
-                "auxiliary" => (FanKind::Auxiliary, aux_supported),
-                "chamber" => (FanKind::Exhaust, chamber_supported),
+                "auxiliary" if aux_supported => (FanKind::Auxiliary, true),
+                "chamber" if chamber_supported => (FanKind::Exhaust, true),
+                // Legacy firmware publishes zero-valued slots for optional
+                // fans even when the hardware is absent. Bambu Studio uses
+                // these support flags, rather than field presence, to decide
+                // whether Aux and Exhaust exist.
+                "auxiliary" | "chamber" => return None,
                 "heatbreak" => (FanKind::Hotend, false),
                 _ => (FanKind::Unknown, false),
             };
-            (
+            Some((
                 id.clone(),
                 FanControl {
                     kind,
@@ -2979,7 +2984,7 @@ fn legacy_fan_controls(
                     maximum_percent: 100,
                     controllable,
                 },
-            )
+            ))
         })
         .collect()
 }
@@ -4422,18 +4427,31 @@ mod tests {
     }
 
     #[test]
-    fn keeps_legacy_fan_telemetry_visible_when_not_controllable() {
+    fn filters_unsupported_legacy_slots_but_keeps_real_fan_telemetry() {
         let status = parse_status(
             br#"{"print":{"gcode_state":"IDLE","support_aux_fan":false,"support_chamber_fan":true,"cooling_fan_speed":"6","big_fan1_speed":"3","big_fan2_speed":"9","heatbreak_fan_speed":"15"}}"#,
         )
         .unwrap();
 
         assert!(status.controls.fans["partCooling"].controllable);
-        assert!(!status.controls.fans["auxiliary"].controllable);
-        assert_eq!(status.controls.fans["auxiliary"].speed_percent, Some(20));
+        assert!(!status.controls.fans.contains_key("auxiliary"));
         assert!(status.controls.fans["chamber"].controllable);
         assert!(!status.controls.fans["heatbreak"].controllable);
         assert_eq!(status.controls.fans["heatbreak"].speed_percent, Some(100));
+
+        let a1_mini = parse_status(
+            br#"{"print":{"gcode_state":"IDLE","support_aux_fan":false,"support_chamber_fan":false,"cooling_fan_speed":"0","big_fan1_speed":"0","big_fan2_speed":"0","heatbreak_fan_speed":"0"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            a1_mini
+                .controls
+                .fans
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["heatbreak", "partCooling"]
+        );
     }
 
     #[test]

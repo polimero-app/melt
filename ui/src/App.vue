@@ -2145,7 +2145,7 @@ onUnmounted(() => {
                     <span class="text-sm/6 font-light text-gray-900 dark:text-white">{{ fanLabel(key) }}</span>
                     <span class="text-sm/6 text-gray-500 dark:text-gray-400">{{ fanDrafts[key] ?? value.speed ?? '—' }}{{ (fanDrafts[key] ?? value.speed) === undefined ? '' : '%' }}</span>
                   </span>
-                  <input v-if="capabilities?.fanControl && value.controllable && value.speed !== undefined" :key="`${key}-${value.speed}`" :value="value.speed" :name="`fan-${key}`" class="h-1 w-full cursor-pointer accent-cyan-600 dark:accent-cyan-400" type="range" :min="value.minimumPercent ?? 0" :max="value.maximumPercent ?? 100" :aria-label="t('control.fanPower', { fan: fanLabel(key) })" @input="previewFan(key, $event)" @change="sendFan(key, $event)" />
+                  <input v-if="value.controllable && value.speed !== undefined" :key="`${key}-${value.speed}`" :value="value.speed" :name="`fan-${key}`" class="h-1 w-full cursor-pointer accent-cyan-600 dark:accent-cyan-400" type="range" :min="value.minimumPercent ?? 0" :max="value.maximumPercent ?? 100" :aria-label="t('control.fanPower', { fan: fanLabel(key) })" @input="previewFan(key, $event)" @change="sendFan(key, $event)" />
                   <p v-else class="text-xs text-gray-400 dark:text-gray-500">{{ t('control.telemetryOnly') }}</p>
                 </div>
               </div>

@@ -102,6 +102,12 @@ speed. Dual-nozzle printers use `set_nozzle_temp` with Bambu's right/left
 extruder indices. Before any thermal, fan, or light mutation, Polimero refreshes
 status and rejects missing or telemetry-only inventory entries.
 
+Legacy firmware may publish zero-valued Aux and Exhaust speed slots on models
+without that hardware. Matching Bambu Studio, Polimero includes those items in
+the control inventory only when `support_aux_fan` or `support_chamber_fan`
+confirms them. Heatbreak/Hotend speed remains visible as telemetry because it is
+a real reported fan even though the legacy protocol does not expose a control.
+
 ## Port 6000 transport
 
 Control replies correlate by typed operation and sequence, and no more than 64
