@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatDuration, relativeAge } from './formatting'
+import { clampTarget, formatDuration, relativeAge } from './formatting'
 
 describe('relative age', () => {
   const now = Date.parse('2026-08-04T12:00:30.000Z')
@@ -40,5 +40,17 @@ describe('duration formatting', () => {
 
   it('drops a zero minute component', () => {
     expect(formatDuration(7200)).toBe('2h')
+  })
+})
+
+describe('temperature target clamping', () => {
+  it('clamps above the maximum and below zero', () => {
+    expect(clampTarget(300, 999)).toBe(300)
+    expect(clampTarget(300, -5)).toBe(0)
+  })
+
+  it('rounds to the nearest multiple of five', () => {
+    expect(clampTarget(300, 203)).toBe(205)
+    expect(clampTarget(300, 202)).toBe(200)
   })
 })

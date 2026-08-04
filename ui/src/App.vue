@@ -5,7 +5,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog'
 import { locales, preferredLocale, translate, type Locale, type MessageKey } from './i18n'
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
-import { formatDuration, relativeAge } from './formatting'
+import { clampTarget, formatDuration, relativeAge } from './formatting'
 import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
 import SlideOver from './components/SlideOver.vue'
@@ -476,6 +476,12 @@ const draft = ref({
 const editingPrinter = ref<string>()
 const editRemoved = ref(false)
 
+function resetAdditionPanelState() {
+  additionError.value = undefined
+  discoveryError.value = undefined
+  discovered.value = []
+}
+
 function openEdit(printer: Printer) {
   editingPrinter.value = printer.name
   draft.value = {
@@ -487,6 +493,7 @@ function openEdit(printer: Printer) {
     accessCode: '',
     insecure: printer.insecure,
   }
+  resetAdditionPanelState()
   additionOpen.value = true
 }
 
@@ -806,6 +813,7 @@ async function selectPrinter(name: string, refresh = true, focus = refresh) {
   await stopCamera()
   activePrinterId.value = name
   if (focus) activeView.value = 'control'
+  fanDrafts.value = {}
   capabilities.value = undefined
   files.value = []
   filesError.value = undefined
@@ -904,15 +912,14 @@ function openAddition() {
     insecure: false,
     accessCode: '',
   }
-  additionError.value = undefined
-  discoveryError.value = undefined
-  discovered.value = []
+  resetAdditionPanelState()
   additionOpen.value = true
   void discoverPrinters()
 }
 
 function closeAddition() {
-  if (!adding.value) additionOpen.value = false
+  if (adding.value) return
+  additionOpen.value = false
   editingPrinter.value = undefined
   editRemoved.value = false
 }
@@ -948,6 +955,7 @@ async function addPrinter() {
     if (replacing && !editRemoved.value) {
       await invoke('remove_configured_printer', { name: replacing })
       editRemoved.value = true
+      printers.value = printers.value.filter((entry) => entry.name !== replacing)
     }
     const profile = await invoke<Printer>('create_configured_printer', { request: draft.value })
     const printer = {
@@ -1075,7 +1083,7 @@ const pendingTemperatures: Partial<Record<'nozzle' | 'bed' | 'chamber', number>>
 
 function queueTemperature(kind: 'nozzle' | 'bed' | 'chamber', next: number) {
   const maximum = temperatureMaximums[kind]
-  pendingTemperatures[kind] = Math.max(0, Math.min(maximum, Math.round(next / 5) * 5))
+  pendingTemperatures[kind] = clampTarget(maximum, next)
   if (temperatureTimers[kind] !== undefined) window.clearTimeout(temperatureTimers[kind])
   temperatureTimers[kind] = window.setTimeout(async () => {
     const printerName = activePrinter.value?.name
@@ -1834,8 +1842,8 @@ onUnmounted(() => {
           </div>
           <section v-if="statusFaults.length" class="mb-5 space-y-2" :aria-label="t('control.faults')">
             <div
-              v-for="fault in statusFaults"
-              :key="`${fault.severity}-${fault.code}`"
+              v-for="(fault, faultIndex) in statusFaults"
+              :key="faultIndex"
               class="flex items-start gap-3 rounded-lg border px-4 py-3 text-sm"
               :class="fault.severity === 'error'
                 ? 'border-red-300 bg-red-50 text-red-900 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200'
@@ -1888,7 +1896,7 @@ onUnmounted(() => {
 
             <Card>
               <CardHeader :title="t('control.currentJob')" :icon="PhCheckSquareOffset">
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('control.complete', { percent: progressPercent }) }}</span>
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ preparingPercent !== undefined ? t('control.preparing') : t('control.complete', { percent: progressPercent }) }}</span>
               </CardHeader>
               <div class="px-4 py-5 sm:p-6">
                 <div class="flex items-start gap-3">
@@ -1994,7 +2002,7 @@ onUnmounted(() => {
                       min="0"
                       step="5"
                       :max="temperatureMaximums[row.key]"
-                      :value="row.value.targetCelsius ?? 0"
+                      :value="row.value.targetCelsius ?? row.value.currentCelsius"
                       :disabled="selectedStatus?.state !== 'idle'"
                       :aria-label="t('control.setTemp', { sensor: t(temperatureKeys[row.key]) })"
                       class="w-16 rounded-md bg-white px-2 py-1 text-right font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 dark:bg-white/5 dark:text-white dark:outline-white/10"
@@ -2566,7 +2574,7 @@ onUnmounted(() => {
           </div>
           <div>
             <label for="printer-access-code" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ editingPrinter ? t('addition.accessCodeReenter') : t('addition.accessCode') }}</label>
-            <input id="printer-access-code" name="printer-access-code" v-model="draft.accessCode" type="password" :required="editingPrinter !== undefined" autocomplete="new-password" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+            <input id="printer-access-code" name="printer-access-code" v-model="draft.accessCode" type="password" autocomplete="new-password" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
           </div>
           <div class="flex items-center justify-between">
             <span class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.insecure') }}</span>
@@ -2577,7 +2585,7 @@ onUnmounted(() => {
       </form>
       <template #footer>
         <Button :disabled="adding" @click="closeAddition">{{ t('common.cancel') }}</Button>
-        <Button variant="primary" type="submit" form="add-printer-form" :disabled="adding">{{ adding ? t('common.adding') : t('profiles.add') }}</Button>
+        <Button variant="primary" type="submit" form="add-printer-form" :disabled="adding">{{ editingPrinter ? (adding ? t('common.saving') : t('profiles.save')) : (adding ? t('common.adding') : t('profiles.add')) }}</Button>
       </template>
     </SlideOver>
 

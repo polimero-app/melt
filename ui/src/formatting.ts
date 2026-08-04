@@ -22,3 +22,7 @@ export function formatDuration(seconds: number): string {
   if (!hours) return `${minutes}m`
   return minutes ? `${hours}h ${minutes}m` : `${hours}h`
 }
+
+export function clampTarget(maximum: number, next: number): number {
+  return Math.max(0, Math.min(maximum, Math.round(next / 5) * 5))
+}

@@ -27,6 +27,7 @@ export type MessageKey =
   | "profiles.select"
   | "profiles.remove"
   | "profiles.add"
+  | "profiles.save"
   | "profiles.empty"
   | "profiles.loading"
   | "profiles.error"
@@ -35,6 +36,7 @@ export type MessageKey =
   | "common.cancel"
   | "common.removing"
   | "common.adding"
+  | "common.saving"
   | "common.loading"
   | "footer.starting"
   | "footer.private"
@@ -419,6 +421,7 @@ const messages: Record<Locale, Messages> = {
     "profiles.select": "Open",
     "profiles.remove": "Remove",
     "profiles.add": "Add printer",
+    "profiles.save": "Save changes",
     "profiles.empty": "No printers configured yet. Add one with the headless CLI while the setup flow is migrated.",
     "profiles.loading": "Loading local printer profiles…",
     "profiles.error": "We could not load your printer profiles.",
@@ -427,6 +430,7 @@ const messages: Record<Locale, Messages> = {
     "common.cancel": "Cancel",
     "common.removing": "Removing…",
     "common.adding": "Verifying…",
+    "common.saving": "Saving…",
     "common.loading": "Loading…",
     "footer.starting": "Starting core…",
     "footer.private": "no cloud · no telemetry",
@@ -808,6 +812,7 @@ const messages: Record<Locale, Messages> = {
     "profiles.select": "Abrir",
     "profiles.remove": "Remover",
     "profiles.add": "Adicionar impressora",
+    "profiles.save": "Salvar alterações",
     "profiles.empty": "Nenhuma impressora foi configurada. Adicione uma pela CLI enquanto o fluxo de configuração é migrado.",
     "profiles.loading": "Carregando perfis de impressora locais…",
     "profiles.error": "Não foi possível carregar seus perfis de impressora.",
@@ -816,6 +821,7 @@ const messages: Record<Locale, Messages> = {
     "common.cancel": "Cancelar",
     "common.removing": "Removendo…",
     "common.adding": "Verificando…",
+    "common.saving": "Salvando…",
     "common.loading": "Carregando…",
     "footer.starting": "Iniciando núcleo…",
     "footer.private": "sem nuvem · sem telemetria",
