@@ -95,16 +95,24 @@ struct Owner {
 
 impl Owner {
     fn subscribe(self: &Arc<Self>, kind: CameraFrameKind) -> CameraSubscription {
+        self.try_subscribe(kind)
+            .expect("a new camera owner must accept its initial subscriber")
+    }
+
+    fn try_subscribe(self: &Arc<Self>, kind: CameraFrameKind) -> Option<CameraSubscription> {
         let (sender, receiver) = mpsc::sync_channel(SUBSCRIBER_CAPACITY);
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if state.stopped {
+            return None;
+        }
         let id = state.next_subscriber;
         state.next_subscriber = state.next_subscriber.wrapping_add(1);
         state.subscribers.insert(id, (kind, sender));
-        CameraSubscription {
+        Some(CameraSubscription {
             owner: Arc::clone(self),
             id,
             receiver,
-        }
+        })
     }
 
     fn publish(&self, frame: CameraFrame) {
@@ -268,7 +276,9 @@ impl CameraManager {
                 {
                     return Err(CameraError::UnsupportedMedia);
                 }
-                return Ok(owner.subscribe(kind));
+                if let Some(subscription) = owner.try_subscribe(kind) {
+                    return Ok(subscription);
+                }
             }
             owner.stop();
         }
@@ -590,6 +600,16 @@ mod tests {
         assert!(!owner.state.lock().unwrap().stopped);
         drop(second);
         assert!(owner.state.lock().unwrap().stopped);
+    }
+
+    #[test]
+    fn stopped_owner_cannot_accept_a_replacement_subscriber() {
+        let owner = owner();
+        let subscription = owner.subscribe(CameraFrameKind::Jpeg);
+        drop(subscription);
+
+        assert!(owner.try_subscribe(CameraFrameKind::Jpeg).is_none());
+        assert!(owner.state.lock().unwrap().subscribers.is_empty());
     }
 
     #[test]
