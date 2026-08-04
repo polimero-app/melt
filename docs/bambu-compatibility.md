@@ -79,6 +79,29 @@ sequence namespace. Locally generated sequence IDs remain positive and within
 the signed 32-bit range, including after wrap, to avoid exposing future
 AMS-facing commands to known unsafe oversized identifiers.
 
+## Temperature, fan, and light inventory
+
+Detailed status exposes a `controls` inventory alongside the legacy portable
+`temperatures`, `fans`, and `lights` fields. Inventory keys are stable command
+identifiers; each entry carries its observed value, semantic kind, operating
+mode where applicable, bounds when reported, and a per-item `controllable`
+flag. The desktop renders every observed entry, but only shows an actuator when
+that item is controllable. Read-only chamber temperature, automatic or forced-
+off fans, hotend/mainboard fan telemetry, and unknown lights therefore remain
+visible without implying that Polimero can command them.
+
+Names follow Bambu Studio terminology: Nozzle (or Left Nozzle and Right
+Nozzle), Bed, Chamber; Parts, Aux, Hotend, Exhaust, MC Board, and Heat; and one
+logical Lamp. `chamber_light` and `chamber_light2` are combined into Lamp and
+are switched together. Other reported nodes, including Work Light, remain
+separate telemetry unless live data establishes a supported control path.
+
+Legacy fan commands retain their M106 routing. Printers reporting the device
+airduct schema use `set_fan` with the reported fan index and tenths-of-percent
+speed. Dual-nozzle printers use `set_nozzle_temp` with Bambu's right/left
+extruder indices. Before any thermal, fan, or light mutation, Polimero refreshes
+status and rejects missing or telemetry-only inventory entries.
+
 ## Port 6000 transport
 
 Control replies correlate by typed operation and sequence, and no more than 64
