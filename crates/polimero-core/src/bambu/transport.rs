@@ -646,6 +646,16 @@ impl Client {
         let nozzle = targets.nozzle_celsius.map(f64::round);
         let bed = targets.bed_celsius.map(f64::round);
         let chamber = targets.chamber_celsius.map(f64::round);
+        let status = self.status(access_code, fingerprint)?;
+        if let Some(target) = nozzle {
+            validate_temperature_control(&status, "nozzle", target)?;
+        }
+        if let Some(target) = bed {
+            validate_temperature_control(&status, "bed", target)?;
+        }
+        if let Some(target) = chamber {
+            validate_temperature_control(&status, "chamber", target)?;
+        }
         let mut lines = Vec::new();
         if let Some(value) = nozzle {
             lines.push(format!("M104 S{value:.0}"));
@@ -714,27 +724,7 @@ impl Client {
         self.authorize_mutation(access_code, fingerprint, MutationClass::Thermal)?;
         let target = target_celsius.round();
         let status = self.status(access_code, fingerprint)?;
-        let control = status
-            .controls
-            .temperatures
-            .get(item)
-            .ok_or(Error::Unsupported(
-                "requested temperature on this printer model",
-            ))?;
-        if !control.controllable {
-            return Err(Error::Unsupported(
-                "requested temperature is telemetry only",
-            ));
-        }
-        if control
-            .minimum_celsius
-            .is_some_and(|minimum| target < minimum)
-            || control
-                .maximum_celsius
-                .is_some_and(|maximum| target > maximum)
-        {
-            return Err(Error::InvalidTemperatureTarget);
-        }
+        validate_temperature_control(&status, item, target)?;
 
         let payload = if let Some(extruder_index) = nozzle_index(item) {
             set_nozzle_temperature_payload(extruder_index, target)
@@ -2256,6 +2246,35 @@ fn set_nozzle_temperature_payload(extruder_index: u8, target_celsius: f64) -> St
         }
     })
     .to_string()
+}
+
+fn validate_temperature_control(
+    status: &Status,
+    item: &str,
+    target_celsius: f64,
+) -> Result<(), Error> {
+    let control = status
+        .controls
+        .temperatures
+        .get(item)
+        .ok_or(Error::Unsupported(
+            "requested temperature on this printer model",
+        ))?;
+    if !control.controllable {
+        return Err(Error::Unsupported(
+            "requested temperature is telemetry only",
+        ));
+    }
+    if control
+        .minimum_celsius
+        .is_some_and(|minimum| target_celsius < minimum)
+        || control
+            .maximum_celsius
+            .is_some_and(|maximum| target_celsius > maximum)
+    {
+        return Err(Error::InvalidTemperatureTarget);
+    }
+    Ok(())
 }
 
 fn job_start_payload(
@@ -4376,6 +4395,30 @@ mod tests {
         );
         assert!(!status.controls.lights["work_light"].controllable);
         assert!(!status.controls.lights.contains_key("chamber_light2"));
+        assert!(validate_temperature_control(&status, "nozzleRight", 230.0).is_ok());
+        assert!(matches!(
+            validate_temperature_control(&status, "nozzle", 230.0),
+            Err(Error::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_mutation_of_a_telemetry_only_temperature() {
+        let status = parse_status(
+            br#"{"print":{"gcode_state":"IDLE","chamber_temper":25,"chamber_target_temper":0}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            status.controls.temperatures["chamber"].current_celsius,
+            Some(25.0)
+        );
+        assert!(matches!(
+            validate_temperature_control(&status, "chamber", 40.0),
+            Err(Error::Unsupported(
+                "requested temperature is telemetry only"
+            ))
+        ));
     }
 
     #[test]
