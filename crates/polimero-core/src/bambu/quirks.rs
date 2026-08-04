@@ -78,6 +78,13 @@ pub fn registry() -> &'static [QuirkEntry] {
     REGISTRY
 }
 
+pub fn matching(identity: &ModelIdentity) -> Vec<&'static QuirkEntry> {
+    REGISTRY
+        .iter()
+        .filter(|entry| entry.model == identity.canonical)
+        .collect()
+}
+
 pub fn applicable(
     identity: &ModelIdentity,
     firmware: &FirmwareInventory,

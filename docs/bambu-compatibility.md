@@ -88,6 +88,16 @@ axis, and no more than 16 million pixels before they enter memory/disk caches.
 The cache key includes physical printer identity, remote path, size, and
 modification marker; preview failure never affects download or printing.
 
+## Compatibility diagnostics
+
+Diagnostics identify printers only as report-local `printer-N` labels. They
+include raw/canonical model names, module software and hardware versions,
+capability field names with provenance and age, authorization resolution,
+camera/storage selection, active and inactive quirks, TLS-pin presence, and
+redacted camera-owner state. Module serials, unknown module values, observed
+URLs, hosts, complete fingerprints, credentials, and raw capability objects are
+never serialized. Unknown values are represented only by their JSON kind.
+
 Polimero treats a reported Bambu model as a capability hint, not a complete
 contract. Runtime observations and safe protocol probes take precedence over
 the model family. Unknown models and unknown fields remain distinct from an

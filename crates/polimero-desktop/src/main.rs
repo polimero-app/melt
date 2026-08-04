@@ -2665,17 +2665,58 @@ impl ConstantTimeEq for [u8] {
 }
 
 #[tauri::command(async)]
-fn diagnostics_report() -> Result<diagnostics::Report, CommandError> {
-    Config::load()
-        .map(|config| {
-            diagnostics::report(
-                config
-                    .sorted_profiles()
-                    .into_iter()
-                    .map(|profile| profile.profile),
+fn diagnostics_report(
+    monitor: tauri::State<'_, MonitorState>,
+    camera: tauri::State<'_, CameraManager>,
+) -> Result<diagnostics::Report, CommandError> {
+    let config = Config::load().map_err(|_| unreadable_config())?;
+    let profiles = config.sorted_profiles();
+    let base = diagnostics::report(profiles.iter().map(|profile| profile.profile.clone()));
+    let owners = camera.statuses();
+    let mut bambu_reports = Vec::new();
+    for (index, named) in profiles.iter().enumerate() {
+        let Ok(driver) = drivers::profile(&named.profile) else {
+            continue;
+        };
+        let drivers::Profile::Bambu(profile) = &driver else {
+            continue;
+        };
+        let kind = driver.driver();
+        let access_code = access_code(&named.profile.driver, &named.name, kind)
+            .ok()
+            .flatten();
+        let fingerprint = tls_fingerprint(
+            &named.profile.driver,
+            &named.name,
+            kind,
+            named.profile.insecure,
+        )
+        .ok()
+        .flatten();
+        let capabilities = monitor
+            .pool
+            .bambu_runtime_capabilities(
+                &named.name,
+                &driver,
+                access_code.as_deref(),
+                fingerprint.as_deref(),
             )
-        })
-        .map_err(|_| unreadable_config())
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| profile.default_capabilities());
+        let selection =
+            polimero_core::bambu::select_camera_transport(profile.host(), &capabilities);
+        let key = driver.physical_printer_key(&named.name);
+        let owner = owners.iter().find(|owner| owner.printer_key == key);
+        bambu_reports.push(diagnostics::bambu_compatibility_report(
+            index + 1,
+            &capabilities,
+            &selection,
+            fingerprint.is_some(),
+            owner,
+        ));
+    }
+    Ok(diagnostics::with_bambu(base, bambu_reports))
 }
 
 fn desktop_printer(name: &str, operation: Operation) -> Result<DesktopPrinter, CommandError> {

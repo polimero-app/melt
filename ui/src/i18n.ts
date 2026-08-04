@@ -230,6 +230,14 @@ export type MessageKey =
   | "settingsView.license"
   | "settingsView.source"
   | "settingsView.sourceLink"
+  | "settingsView.bambuCompatibility"
+  | "settingsView.model"
+  | "settingsView.authorization"
+  | "settingsView.cameraTransport"
+  | "settingsView.storageTransport"
+  | "settingsView.firmwareModules"
+  | "settingsView.quirks"
+  | "settingsView.none"
   | "settingsView.version"
   | "settingsView.platform"
   | "settingsView.profiles"
@@ -593,6 +601,14 @@ const messages: Record<Locale, Messages> = {
     "settingsView.license": "License",
     "settingsView.source": "Source code",
     "settingsView.sourceLink": "View source",
+    "settingsView.bambuCompatibility": "Bambu compatibility",
+    "settingsView.model": "Model",
+    "settingsView.authorization": "Authorization",
+    "settingsView.cameraTransport": "Camera transport",
+    "settingsView.storageTransport": "Storage transport",
+    "settingsView.firmwareModules": "Firmware modules",
+    "settingsView.quirks": "Firmware quirks",
+    "settingsView.none": "None",
     "settingsView.version": "Version",
     "settingsView.platform": "Platform",
     "settingsView.profiles": "Profiles",
@@ -953,6 +969,14 @@ const messages: Record<Locale, Messages> = {
     "settingsView.license": "Licença",
     "settingsView.source": "Código-fonte",
     "settingsView.sourceLink": "Ver código-fonte",
+    "settingsView.bambuCompatibility": "Compatibilidade Bambu",
+    "settingsView.model": "Modelo",
+    "settingsView.authorization": "Autorização",
+    "settingsView.cameraTransport": "Transporte da câmera",
+    "settingsView.storageTransport": "Transporte de armazenamento",
+    "settingsView.firmwareModules": "Módulos de firmware",
+    "settingsView.quirks": "Ajustes de firmware",
+    "settingsView.none": "Nenhum",
     "settingsView.version": "Versão",
     "settingsView.platform": "Plataforma",
     "settingsView.profiles": "Perfis",

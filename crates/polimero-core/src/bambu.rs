@@ -53,7 +53,7 @@ pub use package::{
 pub use presence::{PresenceCache, PrinterPresence};
 pub use quirks::{
     Qualification as QuirkQualification, QuirkEffect, QuirkEntry, applicable as applicable_quirks,
-    registry as quirk_registry,
+    matching as matching_quirks, registry as quirk_registry,
 };
 pub use rtsp::{H264AccessUnit, H264Stream};
 pub use transport::{Client, Error as TransportError, JobStartOptions};

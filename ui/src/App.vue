@@ -232,6 +232,20 @@ type Diagnostics = {
   monitorWorkers: number
   monitorIntervalSeconds: number
   protocolTracesIncluded: boolean
+  bambu: BambuCompatibilityDiagnostic[]
+}
+
+type BambuCompatibilityDiagnostic = {
+  printer: string
+  modelRaw: string
+  canonicalModel: string
+  modelFamily: string
+  firmwareModules: { name: string; software: string; hardware?: string }[]
+  authorization: { effective: string; conflict: boolean }
+  camera: { preferred: string; source: string; rejectedAdvertisement?: string; owner?: { transport: string; subscribers: number } }
+  storageTransport: string
+  quirks: { id: string; qualification: string; active: boolean }[]
+  tlsPinned: boolean
 }
 
 type CameraSnapshot = {
@@ -2151,6 +2165,18 @@ onUnmounted(() => {
                 <div v-if="diagnostics" class="flex items-center justify-between py-2">
                   <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.platform') }}</dt>
                   <dd class="font-mono text-gray-900 dark:text-gray-300">{{ diagnostics.platform }}</dd>
+                </div>
+                <div v-for="printer in diagnostics?.bambu ?? []" :key="printer.printer" class="py-3">
+                  <dt class="font-medium text-gray-900 dark:text-white">{{ t('settingsView.bambuCompatibility') }} · {{ printer.printer }}</dt>
+                  <dd class="mt-2 space-y-1 text-xs text-gray-600 dark:text-gray-300">
+                    <p><span class="text-gray-500 dark:text-gray-400">{{ t('settingsView.model') }}:</span> <span class="font-mono">{{ printer.modelRaw || printer.canonicalModel }}</span></p>
+                    <p><span class="text-gray-500 dark:text-gray-400">{{ t('settingsView.authorization') }}:</span> <span class="font-mono">{{ printer.authorization.effective }}</span></p>
+                    <p><span class="text-gray-500 dark:text-gray-400">{{ t('settingsView.cameraTransport') }}:</span> <span class="font-mono">{{ printer.camera.preferred }} · {{ printer.camera.source }}</span></p>
+                    <p><span class="text-gray-500 dark:text-gray-400">{{ t('settingsView.storageTransport') }}:</span> <span class="font-mono">{{ printer.storageTransport }}</span></p>
+                    <p v-if="printer.firmwareModules.length"><span class="text-gray-500 dark:text-gray-400">{{ t('settingsView.firmwareModules') }}:</span> <span class="font-mono">{{ printer.firmwareModules.map((module) => `${module.name} ${module.software}`).join(', ') }}</span></p>
+                    <p><span class="text-gray-500 dark:text-gray-400">{{ t('settingsView.quirks') }}:</span> {{ printer.quirks.length ? printer.quirks.map((quirk) => `${quirk.id} (${quirk.active ? 'active' : quirk.qualification})`).join(', ') : t('settingsView.none') }}</p>
+                    <p v-if="printer.camera.rejectedAdvertisement" class="text-amber-700 dark:text-amber-300">{{ printer.camera.rejectedAdvertisement }}</p>
+                  </dd>
                 </div>
                 <div v-if="diagnostics" class="flex items-center justify-between py-2">
                   <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.profiles') }}</dt>
