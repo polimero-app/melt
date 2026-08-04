@@ -2199,9 +2199,9 @@ onUnmounted(() => {
                 <div v-for="system in materialSystems" :key="system.name" class="px-4 py-5 sm:px-6">
                   <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <span class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ system.name }}</span>
-                    <div v-if="system.temperature !== undefined || system.humidity" class="flex items-center gap-3 font-mono text-xs text-gray-500 dark:text-gray-400">
-                      <span v-if="system.humidity" class="flex items-center gap-1"><PhDrop class="size-4" aria-hidden="true" /> {{ system.humidity }}</span>
-                      <span v-if="system.temperature !== undefined" class="flex items-center gap-1"><PhThermometerSimple class="size-4" aria-hidden="true" /> {{ formatTemperature(system.temperature) }} °C</span>
+                    <div v-if="system.temperature !== undefined || system.humidity !== undefined" class="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+                      <span v-if="system.humidity !== undefined" class="flex items-center gap-1"><PhDrop class="size-4" aria-hidden="true" /> {{ t('materials.humidity') }} <span class="font-mono">{{ system.humidity }}</span></span>
+                      <span v-if="system.temperature !== undefined" class="flex items-center gap-1"><PhThermometerSimple class="size-4" aria-hidden="true" /> {{ t('materials.temperature') }} <span class="font-mono">{{ formatTemperature(system.temperature) }} °C</span></span>
                     </div>
                   </div>
                   <div class="flex flex-wrap gap-3">
@@ -2657,13 +2657,15 @@ onUnmounted(() => {
     >
       <ul v-if="printers.length" class="divide-y divide-gray-200 dark:divide-white/10">
         <li v-for="printer in printers" :key="printer.name" class="flex items-center justify-between gap-3 py-3">
-          <span class="flex min-w-0 items-center gap-2">
-            <span class="size-1.5 shrink-0 rounded-full ring-3" :class="statusDotClasses[badgeFor(printer.name)]"></span>
-            <span class="truncate text-sm text-gray-900 dark:text-white">{{ printer.name }}</span>
+          <span class="flex min-w-0 flex-col items-start gap-1">
+            <span class="flex min-w-0 items-center gap-2">
+              <span class="size-1.5 shrink-0 rounded-full ring-3" :class="statusDotClasses[badgeFor(printer.name)]"></span>
+              <span class="truncate text-sm text-gray-900 dark:text-white">{{ printer.name }}</span>
+            </span>
+            <span v-if="!isReachable(badgeFor(printer.name))" class="ml-3.5 text-xs font-medium text-red-600 dark:text-red-400">{{ t('status.offlineLabel') }}</span>
           </span>
           <Button
             :disabled="printBusy || !isReachable(badgeFor(printer.name))"
-            :title="!isReachable(badgeFor(printer.name)) ? t('filesView.printerOffline', { name: printer.name }) : undefined"
             @click="printToPrinter(printer.name)"
           >{{ t('dashboard.print') }}</Button>
         </li>

@@ -195,6 +195,8 @@ export type MessageKey =
   | "materials.inUse"
   | "materials.active"
   | "materials.ready"
+  | "materials.humidity"
+  | "materials.temperature"
   | "printersView.title"
   | "printersView.description"
   | "printersView.discover"
@@ -591,6 +593,8 @@ const messages: Record<Locale, Messages> = {
     "materials.inUse": "In use",
     "materials.active": "Active",
     "materials.ready": "Ready",
+    "materials.humidity": "Humidity",
+    "materials.temperature": "Temperature",
     "printersView.title": "Printer management",
     "printersView.description": "Discover and maintain the printers available on your local network.",
     "printersView.discover": "Discover printers",
@@ -984,6 +988,8 @@ const messages: Record<Locale, Messages> = {
     "materials.inUse": "Em uso",
     "materials.active": "Ativo",
     "materials.ready": "Pronto",
+    "materials.humidity": "Umidade",
+    "materials.temperature": "Temperatura",
     "printersView.title": "Gerenciamento de impressoras",
     "printersView.description": "Descubra e mantenha as impressoras disponíveis na sua rede local.",
     "printersView.discover": "Descobrir impressoras",
