@@ -44,6 +44,7 @@ import {
   PhMinus,
   PhNetwork,
   PhPause,
+  PhPencilSimple,
   PhPlay,
   PhPlus,
   PhPrinter,
@@ -466,6 +467,21 @@ const draft = ref({
   insecure: false,
   accessCode: '',
 })
+const editingPrinter = ref<string>()
+
+function openEdit(printer: Printer) {
+  editingPrinter.value = printer.name
+  draft.value = {
+    name: printer.name,
+    driver: printer.driver,
+    host: printer.host,
+    serial: printer.serial,
+    timeout: printer.timeout,
+    accessCode: '',
+    insecure: printer.insecure,
+  }
+  additionOpen.value = true
+}
 
 const activePrinter = computed(() => printers.value.find((printer) => printer.name === activePrinterId.value) ?? printers.value[0])
 const hasPrinters = computed(() => printers.value.length > 0)
@@ -890,6 +906,7 @@ function openAddition() {
 
 function closeAddition() {
   if (!adding.value) additionOpen.value = false
+  editingPrinter.value = undefined
 }
 
 async function discoverPrinters() {
@@ -919,6 +936,8 @@ async function addPrinter() {
   additionError.value = undefined
 
   try {
+    const replacing = editingPrinter.value
+    if (replacing) await invoke('remove_configured_printer', { name: replacing })
     const profile = await invoke<Printer>('create_configured_printer', { request: draft.value })
     const printer = {
       name: profile.name,
@@ -928,8 +947,10 @@ async function addPrinter() {
       timeout: profile.timeout,
       insecure: profile.insecure,
     }
-    printers.value = [...printers.value, printer].sort((left, right) => left.name.localeCompare(right.name))
+    printers.value = [...printers.value.filter((entry) => entry.name !== replacing), printer]
+      .sort((left, right) => left.name.localeCompare(right.name))
     additionOpen.value = false
+    editingPrinter.value = undefined
     draft.value.accessCode = ''
     await selectPrinter(printer.name)
   } catch (reason) {
@@ -2187,9 +2208,16 @@ onUnmounted(() => {
                 <dt class="text-gray-500 dark:text-gray-400">{{ t('printersView.host') }}</dt>
                 <dd class="text-gray-900 dark:text-gray-300">{{ printer.host }}</dd>
               </div>
-              <div v-if="printer.presence?.suggestedHost" class="flex items-center justify-between gap-3 py-2">
+              <div v-if="printer.presence?.suggestedHost && printer.presence.suggestedHost !== printer.host" class="flex items-center justify-between gap-3 py-2">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t('printersView.discoveredHost') }}</dt>
-                <dd class="text-right font-mono text-amber-600 dark:text-amber-400">{{ printer.presence.suggestedHost }}</dd>
+                <dd class="text-right">
+                  <button
+                    type="button"
+                    class="font-mono text-amber-600 hover:underline dark:text-amber-400"
+                    :title="t('printersView.useDiscoveredHost')"
+                    @click="openEdit({ ...printer, host: printer.presence!.suggestedHost! })"
+                  >{{ printer.presence.suggestedHost }}</button>
+                </dd>
               </div>
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t('addition.timeout') }}</dt>
@@ -2202,6 +2230,7 @@ onUnmounted(() => {
             </dl>
             <div class="mt-5 flex gap-2">
               <Button class="flex-1" @click="selectPrinter(printer.name)"><PhCards class="size-4" /> {{ t('printersView.openControl') }}</Button>
+              <Button class="flex-1" @click="openEdit(printer)"><PhPencilSimple class="size-4" /> {{ t('printersView.editPrinter') }}</Button>
               <Button class="flex-1" :disabled="tlsRefreshing" :aria-label="t('printersView.refreshCertificateNamed', { name: printer.name })" @click="openTlsRefresh(printer.name)"><PhArrowsClockwise class="size-4" /> {{ t('printersView.refreshCertificate') }}</Button>
             </div>
           </Card>
@@ -2455,7 +2484,7 @@ onUnmounted(() => {
       </template>
     </main>
 
-    <SlideOver :open="additionOpen" :title="t('addition.title')" :description="t('addition.description')" :close-label="t('common.closePanel')" @close="closeAddition">
+    <SlideOver :open="additionOpen" :title="editingPrinter ? t('printersView.editPrinter') : t('addition.title')" :description="t('addition.description')" :close-label="t('common.closePanel')" @close="closeAddition">
       <form id="add-printer-form" @submit.prevent="addPrinter">
         <Button class="w-full" :disabled="discovering" @click="discoverPrinters"><PhBroadcast class="size-4" /> {{ discovering ? t('printersView.scanning') : t('printersView.discover') }}</Button>
         <p v-if="discoveryError" class="mt-2 text-xs text-red-600 dark:text-red-400" role="alert">{{ discoveryError }}</p>
@@ -2492,8 +2521,8 @@ onUnmounted(() => {
             <input id="printer-timeout" name="printer-timeout" v-model="draft.timeout" required class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
           </div>
           <div>
-            <label for="printer-access-code" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.accessCode') }}</label>
-            <input id="printer-access-code" name="printer-access-code" v-model="draft.accessCode" type="password" autocomplete="new-password" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+            <label for="printer-access-code" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ editingPrinter ? t('addition.accessCodeReenter') : t('addition.accessCode') }}</label>
+            <input id="printer-access-code" name="printer-access-code" v-model="draft.accessCode" type="password" :required="editingPrinter !== undefined" autocomplete="new-password" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
           </div>
           <div class="flex items-center justify-between">
             <span class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.insecure') }}</span>

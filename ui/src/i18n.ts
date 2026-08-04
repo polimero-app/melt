@@ -53,6 +53,7 @@ export type MessageKey =
   | "addition.serial"
   | "addition.timeout"
   | "addition.accessCode"
+  | "addition.accessCodeReenter"
   | "addition.insecure"
   | "addition.confirm"
   | "addition.error"
@@ -203,6 +204,8 @@ export type MessageKey =
   | "printersView.status"
   | "printersView.host"
   | "printersView.discoveredHost"
+  | "printersView.useDiscoveredHost"
+  | "printersView.editPrinter"
   | "printersView.tlsVerification"
   | "printersView.openControl"
   | "printersView.refreshCertificate"
@@ -437,6 +440,7 @@ const messages: Record<Locale, Messages> = {
     "addition.serial": "Serial number",
     "addition.timeout": "Connection timeout",
     "addition.accessCode": "Access code",
+    "addition.accessCodeReenter": "Access code (re-enter to save changes)",
     "addition.insecure": "Accept an untrusted TLS certificate",
     "addition.confirm": "Verify and save",
     "addition.error": "We could not save this profile.",
@@ -587,6 +591,8 @@ const messages: Record<Locale, Messages> = {
     "printersView.status": "Status",
     "printersView.host": "Host",
     "printersView.discoveredHost": "Discovered host (not applied)",
+    "printersView.useDiscoveredHost": "Use this address",
+    "printersView.editPrinter": "Edit printer",
     "printersView.tlsVerification": "TLS verification",
     "printersView.openControl": "Open control",
     "printersView.refreshCertificate": "Refresh certificate",
@@ -818,6 +824,7 @@ const messages: Record<Locale, Messages> = {
     "addition.serial": "Número de série",
     "addition.timeout": "Tempo limite de conexão",
     "addition.accessCode": "Código de acesso",
+    "addition.accessCodeReenter": "Código de acesso (informe novamente para salvar)",
     "addition.insecure": "Aceitar um certificado TLS não confiável",
     "addition.confirm": "Verificar e salvar",
     "addition.error": "Não foi possível salvar este perfil.",
@@ -968,6 +975,8 @@ const messages: Record<Locale, Messages> = {
     "printersView.status": "Status",
     "printersView.host": "Host",
     "printersView.discoveredHost": "Host descoberto (não aplicado)",
+    "printersView.useDiscoveredHost": "Usar este endereço",
+    "printersView.editPrinter": "Editar impressora",
     "printersView.tlsVerification": "Verificação TLS",
     "printersView.openControl": "Abrir controle",
     "printersView.refreshCertificate": "Atualizar certificado",
