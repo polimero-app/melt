@@ -1929,7 +1929,11 @@ onUnmounted(() => {
                     <PhCube v-else class="size-5" aria-hidden="true" />
                   </div>
                   <div class="min-w-0">
-                    <p class="truncate font-mono text-sm font-semibold text-gray-900 dark:text-white">{{ selectedStatus?.job?.name ?? t('dashboard.noJob') }}</p>
+                    <p
+                      class="truncate font-mono text-sm font-semibold text-gray-900 dark:text-white"
+                      :title="selectedStatus?.job?.name"
+                      translate="no"
+                    >{{ selectedStatus?.job?.name ?? t('dashboard.noJob') }}</p>
                     <p class="mt-1 font-mono text-xs text-gray-500 capitalize dark:text-gray-400">
                       {{ selectedStatus?.state ?? 'unknown' }}
                       <span v-if="selectedStatus?.printMeta?.plateIndex !== undefined">
@@ -2111,11 +2115,14 @@ onUnmounted(() => {
                 <IconButton :title="t('dashboard.loadFiles')" :aria-label="t('dashboard.loadFiles')" :disabled="filesLoading" @click="loadFiles"><PhArrowsClockwise class="size-4" aria-hidden="true" /></IconButton>
               </CardHeader>
               <div class="overflow-x-auto">
-                <table class="relative min-w-full divide-y divide-gray-300 text-left dark:divide-white/15">
+                <table class="relative w-full divide-y divide-gray-300 text-left dark:divide-white/15">
                   <thead>
                     <tr>
-                      <th v-for="column in [t('filesView.type'), t('filesView.size'), t('filesView.modified'), t('filesView.name')]" :key="column" scope="col" class="px-4 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase sm:px-6 dark:text-gray-400">{{ column }}</th>
-                      <th scope="col" class="px-4 py-3 text-right text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase sm:px-6 dark:text-gray-400">{{ t('filesView.actions') }}</th>
+                      <th scope="col" class="px-4 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase sm:px-6 dark:text-gray-400">{{ t('filesView.name') }}</th>
+                      <th scope="col" class="w-20 px-2 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase dark:text-gray-400">{{ t('filesView.type') }}</th>
+                      <th scope="col" class="hidden w-24 px-2 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase min-[1000px]:table-cell dark:text-gray-400">{{ t('filesView.size') }}</th>
+                      <th scope="col" class="hidden w-48 px-2 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase min-[1180px]:table-cell dark:text-gray-400">{{ t('filesView.modified') }}</th>
+                      <th scope="col" class="w-24 px-4 py-3 text-right text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase sm:px-6 dark:text-gray-400">{{ t('filesView.actions') }}</th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-200 dark:divide-white/10">
@@ -2124,12 +2131,12 @@ onUnmounted(() => {
                       :key="file.devicePath"
                       class="hover:bg-gray-50 dark:hover:bg-white/5"
                     >
-                      <td class="px-4 py-4 text-sm whitespace-nowrap sm:px-6">
+                      <td class="max-w-0 truncate px-4 py-4 font-mono text-sm font-medium text-gray-900 sm:px-6 dark:text-white" :title="file.name" translate="no">{{ file.name }}</td>
+                      <td class="px-2 py-4 text-sm whitespace-nowrap">
                         <span class="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 dark:bg-gray-400/10 dark:text-gray-400">{{ fileTypeLabel(file) }}</span>
                       </td>
-                      <td class="px-4 py-4 font-mono text-sm whitespace-nowrap text-gray-500 sm:px-6 dark:text-gray-400">{{ formatSize(file.sizeBytes) }}</td>
-                      <td class="px-4 py-4 font-mono text-sm whitespace-nowrap text-gray-500 sm:px-6 dark:text-gray-400">{{ formatDate(file.modifiedAt) }}</td>
-                      <td class="px-4 py-4 font-mono text-sm font-medium whitespace-nowrap text-gray-900 sm:px-6 dark:text-white">{{ file.name }}</td>
+                      <td class="hidden px-2 py-4 font-mono text-sm whitespace-nowrap text-gray-500 min-[1000px]:table-cell dark:text-gray-400">{{ formatSize(file.sizeBytes) }}</td>
+                      <td class="hidden px-2 py-4 font-mono text-sm whitespace-nowrap text-gray-500 min-[1180px]:table-cell dark:text-gray-400">{{ formatDate(file.modifiedAt) }}</td>
                       <td class="px-4 py-4 text-sm whitespace-nowrap sm:px-6">
                         <div class="flex justify-end gap-1">
                           <IconButton
@@ -2517,7 +2524,7 @@ onUnmounted(() => {
             @click="navigateToDirectory(directory.devicePath)"
           >
             <PhFolder class="size-7 text-cyan-600 dark:text-cyan-400" aria-hidden="true" />
-            <span class="mt-3 block truncate text-sm font-medium text-gray-900 dark:text-white">{{ directory.name }}</span>
+            <span class="mt-3 block truncate text-sm font-medium text-gray-900 dark:text-white" :title="directory.name" translate="no">{{ directory.name }}</span>
                     <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('filesView.folderModified', { date: formatDate(directory.modifiedAt) }) }}</span>
           </button>
         </div>
@@ -2547,7 +2554,7 @@ onUnmounted(() => {
             <div class="flex items-start gap-3 px-4 py-5 sm:p-6">
               <PhFile class="mt-0.5 size-4 shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
               <div class="min-w-0 flex-1">
-                <h3 class="truncate text-sm font-medium text-gray-900 dark:text-white">{{ file.name }}</h3>
+                <h3 class="truncate text-sm font-medium text-gray-900 dark:text-white" :title="file.name" translate="no">{{ file.name }}</h3>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ formatSize(file.sizeBytes) }} · {{ formatDate(file.modifiedAt) }}</p>
               </div>
               <ActionMenu v-if="fileActionItems(file).length" class="-mt-2 -mr-2" :label="t('filesView.moreActions')" :items="fileActionItems(file)" />
