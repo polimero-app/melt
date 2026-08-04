@@ -23,7 +23,7 @@ or a printer that merely reports a similar model string.
 Run the live compatibility command before and after the test session:
 
 ```sh
-polimero printer capabilities <profile> --json
+polimero printer capabilities <profile> --output json
 ```
 
 Retain the raw output only in a private scratch location. The committed copy

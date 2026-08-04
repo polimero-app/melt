@@ -45,7 +45,7 @@ conservatively and are surfaced rather than guessed.
 The CLI and desktop surface these as distinct actionable errors. Use
 `polimero printer capabilities <name>` to refresh and inspect the live model,
 module firmware, authorization resolution, selected transports, observation
-provenance, and active/inactive quirks. Add `--json` when capturing sanitized
+provenance, and active/inactive quirks. Add `--output json` when capturing sanitized
 qualification evidence; observed values that could contain endpoints or
 credentials remain summarized by type rather than serialized.
 
