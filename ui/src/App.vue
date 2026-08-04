@@ -501,9 +501,12 @@ function openEdit(printer: Printer) {
 }
 
 const activePrinter = computed(() => printers.value.find((printer) => printer.name === activePrinterId.value) ?? printers.value[0])
-const compactNavValue = computed(() => {
-  if (activeView.value !== 'control') return `view:${activeView.value}`
-  return activePrinter.value ? `printer:${activePrinter.value.name}` : 'view:printers'
+const compactNavValue = computed({
+  get: () => {
+    if (activeView.value !== 'control') return `view:${activeView.value}`
+    return activePrinter.value ? `printer:${activePrinter.value.name}` : 'view:printers'
+  },
+  set: navigateCompact,
 })
 const hasPrinters = computed(() => printers.value.length > 0)
 const selectedMonitor = computed(() => monitoring.value.find((entry) => entry.name === activePrinter.value?.name))
@@ -1713,10 +1716,9 @@ onUnmounted(() => {
           <div class="grid w-full grid-cols-1 py-2 lg:hidden">
             <select
               name="primary-navigation"
-              :value="compactNavValue"
+              v-model="compactNavValue"
               :aria-label="t('nav.ariaLabel')"
               class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-2 pr-9 pl-3 text-sm font-medium text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-gray-900 dark:text-white dark:outline-white/15 dark:*:bg-gray-800"
-              @change="navigateCompact(($event.target as HTMLSelectElement).value)"
             >
               <option v-for="printer in printers" :key="`compact-${printer.name}`" :value="`printer:${printer.name}`">
                 {{ printer.name }} · {{ statusLabel(badgeFor(printer.name)) }}
