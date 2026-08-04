@@ -129,6 +129,8 @@ export type MessageKey =
   | "control.unavailableDescription"
   | "control.refreshConnection"
   | "control.reconnecting"
+  | "control.faults"
+  | "control.faultUnrecoverable"
   | "control.currentJob"
   | "control.complete"
   | "control.remaining"
@@ -504,6 +506,8 @@ const messages: Record<Locale, Messages> = {
     "control.unavailableDescription": "Polimero cannot reach this printer right now. Check the printer connection and try again.",
     "control.refreshConnection": "Refresh connection",
     "control.reconnecting": "Trying to reconnect to printer",
+    "control.faults": "Printer alerts",
+    "control.faultUnrecoverable": "not recoverable",
     "control.currentJob": "Current job",
     "control.complete": "{percent}% complete",
     "control.remaining": "{minutes}m remaining",
@@ -876,6 +880,8 @@ const messages: Record<Locale, Messages> = {
     "control.unavailableDescription": "O Polimero não consegue alcançar esta impressora no momento. Verifique a conexão da impressora e tente novamente.",
     "control.refreshConnection": "Atualizar conexão",
     "control.reconnecting": "Tentando reconectar à impressora",
+    "control.faults": "Alertas da impressora",
+    "control.faultUnrecoverable": "não recuperável",
     "control.currentJob": "Trabalho atual",
     "control.complete": "{percent}% concluído",
     "control.remaining": "{minutes}min restantes",

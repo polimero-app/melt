@@ -164,7 +164,7 @@ type PrinterStatus = {
   temperatures?: { nozzle?: Temperature; bed?: Temperature; chamber?: Temperature }
   job?: { name: string }
   progress?: { percent: number; currentLayer?: number; totalLayers?: number }
-  errors: { code: string; message: string }[]
+  errors: { code: string; message: string; rawCode?: string; recoverable?: boolean }[]
   warnings: { code: string; message: string }[]
   fans?: Record<string, number>
   wifi?: { signalDbm: number }
@@ -486,6 +486,14 @@ const badgeMessageKeys: Record<PrinterBadge, MessageKey> = {
 }
 const statusLabel = (badge: PrinterBadge) => t(badgeMessageKeys[badge])
 const progressPercent = computed(() => selectedStatus.value?.progress?.percent ?? 0)
+const statusFaults = computed(() => {
+  const status = selectedStatus.value
+  if (!status) return []
+  return [
+    ...status.errors.map((entry) => ({ ...entry, severity: 'error' as const })),
+    ...status.warnings.map((entry) => ({ ...entry, severity: 'warning' as const, rawCode: undefined, recoverable: undefined })),
+  ]
+})
 const temperatureRows = computed(() => {
   const temperatures = selectedStatus.value?.temperatures ?? {}
   return (['nozzle', 'bed', 'chamber'] as const).flatMap((key) => {
@@ -1708,6 +1716,26 @@ onUnmounted(() => {
             <span class="flex items-center gap-2"><PhArrowsClockwise class="size-4 shrink-0" aria-hidden="true" />{{ t('control.reconnecting') }}</span>
             <Button variant="secondary" :disabled="refreshing" @click="refreshMonitoring">{{ t('control.refreshConnection') }}</Button>
           </div>
+          <section v-if="statusFaults.length" class="mb-5 space-y-2" :aria-label="t('control.faults')">
+            <div
+              v-for="fault in statusFaults"
+              :key="`${fault.severity}-${fault.code}`"
+              class="flex items-start gap-3 rounded-lg border px-4 py-3 text-sm"
+              :class="fault.severity === 'error'
+                ? 'border-red-300 bg-red-50 text-red-900 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200'
+                : 'border-amber-300/70 bg-amber-50 text-amber-900 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200'"
+              :role="fault.severity === 'error' ? 'alert' : 'status'"
+            >
+              <PhWarning class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              <div class="min-w-0 flex-1">
+                <p class="font-medium">{{ fault.message }}</p>
+                <p class="mt-0.5 font-mono text-xs opacity-75">
+                  {{ fault.rawCode ?? fault.code }}
+                  <span v-if="fault.recoverable === false"> · {{ t('control.faultUnrecoverable') }}</span>
+                </p>
+              </div>
+            </div>
+          </section>
           <section class="grid gap-5 grid-cols-[3fr_1fr]">
             <Card class="overflow-hidden">
               <CardHeader :title="t('camera.title')" :icon="PhVideoCamera">
