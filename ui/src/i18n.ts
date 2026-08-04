@@ -267,6 +267,7 @@ export type MessageKey =
   | "filesView.sentToPrinter"
   | "filesView.downloadStarted"
   | "filesView.downloadFile"
+  | "filesView.downloadingPercent"
   | "filesView.downloadNamed"
   | "filesView.printFile"
   | "filesView.printNamed"
@@ -646,6 +647,7 @@ const messages: Record<Locale, Messages> = {
     "filesView.sentToPrinter": "{name} sent to printer",
     "filesView.downloadStarted": "{name} download started",
     "filesView.downloadFile": "Download file",
+    "filesView.downloadingPercent": "Downloading… {percent}%",
     "filesView.downloadNamed": "Download {name}",
     "filesView.printFile": "Print file",
     "filesView.printNamed": "Print {name}",
@@ -1022,6 +1024,7 @@ const messages: Record<Locale, Messages> = {
     "filesView.sentToPrinter": "{name} enviado para a impressora",
     "filesView.downloadStarted": "Download de {name} iniciado",
     "filesView.downloadFile": "Baixar arquivo",
+    "filesView.downloadingPercent": "Baixando… {percent}%",
     "filesView.downloadNamed": "Baixar {name}",
     "filesView.printFile": "Imprimir arquivo",
     "filesView.printNamed": "Imprimir {name}",

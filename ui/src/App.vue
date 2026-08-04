@@ -55,6 +55,7 @@ import {
   PhUploadSimple,
   PhVideoCamera,
   PhWarning,
+  PhWarningCircle,
   PhWifiHigh,
   PhWifiLow,
   PhWifiMedium,
@@ -427,7 +428,7 @@ function t(key: MessageKey, values?: Record<string, string | number>) {
   return translate(locale.value, key, values)
 }
 const cameraStage = ref<HTMLElement>()
-const toast = ref('')
+const toast = ref<{ text: string; tone: 'success' | 'error' }>()
 const searchTerm = ref('')
 const stepSize = ref('1 mm')
 const feedRate = ref(50)
@@ -606,13 +607,18 @@ async function runConfirmation() {
   }
 }
 
-function showToast(text: string) {
-  toast.value = text
+// Errors persist until dismissed: 2.2s is not long enough to read a failure,
+// and a silently vanishing error is indistinguishable from no error at all.
+function showToast(text: string, tone: 'success' | 'error' = 'success') {
+  toast.value = { text, tone }
   if (toastTimer !== undefined) window.clearTimeout(toastTimer)
-  toastTimer = window.setTimeout(() => {
-    toast.value = ''
-    toastTimer = undefined
-  }, 2200)
+  toastTimer = undefined
+  if (tone === 'success') {
+    toastTimer = window.setTimeout(() => {
+      toast.value = undefined
+      toastTimer = undefined
+    }, 2200)
+  }
 }
 
 function applyPreferences(preferences: BackendPreferences) {
@@ -627,7 +633,7 @@ async function loadPreferences() {
   try {
     applyPreferences(await invoke<BackendPreferences>('get_preferences'))
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   }
 }
 
@@ -642,7 +648,7 @@ async function updateNotification(id: NotificationSetting['id'], enabled: boolea
     notifications.value = notifications.value.map((notification) => ({ ...notification, enabled: saved[notification.id] }))
   } catch (reason) {
     notifications.value = previous
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   }
 }
 
@@ -653,7 +659,7 @@ async function updateSlicerEnabled(name: string, enabled: boolean) {
     slicers.value = await invoke<SlicerSetting[]>('set_slicer_enabled', { request: { name, enabled } })
   } catch (reason) {
     slicers.value = previous
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   }
 }
 
@@ -685,7 +691,7 @@ async function confirmRemoveSlicer(name: string) {
   try {
     slicers.value = await invoke<SlicerSetting[]>('remove_slicer', { name })
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   }
 }
 
@@ -743,7 +749,7 @@ async function refreshMonitoring() {
     if (index === -1) monitoring.value.push(entry)
     else monitoring.value.splice(index, 1, entry)
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   } finally {
     refreshing.value = false
   }
@@ -768,7 +774,7 @@ async function selectPrinter(name: string, refresh = true, focus = refresh) {
     if (result.capabilities.fileList) void loadFiles()
     if (result.capabilities.cameraStream || result.capabilities.cameraSnapshot) void refreshCamera()
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   }
   if (refresh) await refreshMonitoring()
 }
@@ -933,7 +939,7 @@ async function confirmRemovePrinter(name: string) {
       activeView.value = 'printers'
     }
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   }
 }
 
@@ -947,7 +953,7 @@ async function openTlsRefresh(name: string) {
     tlsFingerprint.value = await invoke<string>('preview_printer_tls', { name })
     tlsOpen.value = true
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   } finally {
     tlsRefreshing.value = false
   }
@@ -1000,7 +1006,7 @@ async function runJobAction(action: 'start' | 'pause' | 'resume' | 'cancel', dev
     )
     void refreshMonitoring()
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   }
 }
 
@@ -1034,7 +1040,7 @@ function adjustTemperature(kind: 'nozzle' | 'bed' | 'chamber', delta: number) {
       })
       void refreshMonitoring()
     } catch (reason) {
-      showToast(message(reason))
+      showToast(message(reason), 'error')
     }
   }, 150)
 }
@@ -1050,7 +1056,7 @@ async function sendFan(fan: string, event: Event) {
     showToast(t('control.fanSet', { fan: fanLabel(fan), percent: speed }))
     void refreshMonitoring()
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
     void refreshMonitoring()
   }
 }
@@ -1062,7 +1068,7 @@ async function homeAxes() {
     showToast(t('control.homingStarted'))
     void refreshMonitoring()
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   }
 }
 
@@ -1090,7 +1096,7 @@ async function jog(axis: 'x' | 'y' | 'z', direction: 1 | -1) {
     showToast(t('control.moved', { axis: axis.toUpperCase(), distance: `${distance} mm` }))
     void refreshMonitoring()
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   } finally {
     jogBusy.value = false
   }
@@ -1105,7 +1111,7 @@ async function toggleLight(light: string, on: boolean) {
     showToast(t('control.lightSet', { light: lightLabel(light), state: t(on ? 'common.enabled' : 'common.disabled') }))
     void refreshMonitoring()
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
     void refreshMonitoring()
   }
 }
@@ -1126,7 +1132,7 @@ async function runEmergencyStop() {
     showToast(t('control.emergencyStopSent'))
     void refreshMonitoring()
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   }
 }
 
@@ -1150,7 +1156,7 @@ async function setSpeedProfile(event: Event) {
     showToast(t('control.speedSet', { profile: t(speedProfileKeys[value]) }))
     void refreshMonitoring()
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   } finally {
     speedBusy.value = false
   }
@@ -1168,7 +1174,7 @@ async function downloadFile(file: FileEntry) {
     })
     showToast(t('filesView.downloadStarted', { name: file.name }))
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   } finally {
     downloadingPath.value = undefined
     downloadProgress.value = undefined
@@ -1187,7 +1193,7 @@ async function uploadFile() {
     libraryFiles.value = result.entries
     showToast(t('filesView.uploadedTo', { directory: result.path }))
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   } finally {
     uploadBusy.value = false
   }
@@ -1479,7 +1485,7 @@ async function openWithSlicer(file: FileEntry, slicer: string) {
     await invoke('open_file_with_slicer', { request: { path: file.devicePath, slicer } })
     showToast(t('filesView.openingIn', { name: file.name, slicer }))
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   }
 }
 
@@ -1494,7 +1500,7 @@ async function requestPrint(file: FileEntry) {
       printPackage.value = inspected
       printPlate.value = inspected.plates.find((plate) => plate.gcodePath)?.index
     } catch (reason) {
-      showToast(message(reason))
+      showToast(message(reason), 'error')
       return
     }
   }
@@ -1518,7 +1524,7 @@ async function printToPrinter(name: string) {
     printTarget.value = undefined
     showToast(t('filesView.sentToPrinter', { name: file.name }))
   } catch (reason) {
-    showToast(message(reason))
+    showToast(message(reason), 'error')
   } finally {
     printBusy.value = false
     printStage.value = undefined
@@ -1651,20 +1657,22 @@ onUnmounted(() => {
             <div
               v-if="toast"
               class="pointer-events-auto w-full max-w-sm rounded-lg bg-white shadow-lg outline-1 outline-black/5 dark:bg-gray-800 dark:-outline-offset-1 dark:outline-white/10"
+              :role="toast.tone === 'error' ? 'alert' : 'status'"
             >
               <div class="p-4">
                 <div class="flex items-start">
                   <div class="shrink-0">
-                    <PhCheckCircle class="size-6 text-green-400" aria-hidden="true" />
+                    <PhWarningCircle v-if="toast.tone === 'error'" class="size-6 text-red-500 dark:text-red-400" aria-hidden="true" />
+                    <PhCheckCircle v-else class="size-6 text-green-400" aria-hidden="true" />
                   </div>
                   <div class="ml-3 w-0 flex-1 pt-0.5">
-                    <p class="text-sm font-medium text-gray-900 dark:text-white">{{ toast }}</p>
+                    <p class="text-sm font-medium text-gray-900 dark:text-white">{{ toast.text }}</p>
                   </div>
                   <div class="ml-4 flex shrink-0">
                     <button
                       type="button"
                       class="inline-flex rounded-md text-gray-400 hover:text-gray-500 dark:hover:text-white"
-                      @click="toast = ''"
+                      @click="toast = undefined"
                     >
                       <span class="sr-only">{{ t('common.close') }}</span>
                       <PhX class="size-5" aria-hidden="true" />
@@ -1977,11 +1985,16 @@ onUnmounted(() => {
                           ><PhPlay class="size-4" /></IconButton>
                           <IconButton
                             v-if="capabilities?.fileDownload"
-                            :title="t('filesView.downloadFile')"
+                            :title="downloadingPath === file.devicePath && downloadProgress !== undefined
+                              ? t('filesView.downloadingPercent', { percent: Math.round(downloadProgress) })
+                              : t('filesView.downloadFile')"
                             :aria-label="t('filesView.downloadNamed', { name: file.name })"
                             :disabled="downloadingPath === file.devicePath"
                             @click.stop="downloadFile(file)"
-                          ><PhDownloadSimple class="size-4" /></IconButton>
+                          >
+                            <span v-if="downloadingPath === file.devicePath && downloadProgress !== undefined" class="font-mono text-[10px]">{{ Math.round(downloadProgress) }}%</span>
+                            <PhDownloadSimple v-else class="size-4" />
+                          </IconButton>
                         </div>
                       </td>
                     </tr>
