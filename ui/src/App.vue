@@ -1999,7 +1999,7 @@ onUnmounted(() => {
             </Card>
           </section>
 
-          <section class="mt-5 grid gap-5 lg:grid-cols-2 xl:grid-cols-4">
+          <section class="mt-5 grid gap-5 lg:grid-cols-2 min-[1180px]:grid-cols-4">
             <Card v-if="temperatureRows.length">
               <CardHeader :title="t('dashboard.temperature')" :icon="PhThermometerSimple" />
               <div class="font-light space-y-4 px-4 py-5 sm:p-6">
@@ -2209,8 +2209,8 @@ onUnmounted(() => {
         </div>
 
         <!-- Stats -->
-        <dl v-if="hasPrinters" class="mb-5 grid gap-5 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-          <Card v-for="stat in fleetStats" :key="stat.label" as="div" class="px-4 py-5 sm:p-6">
+        <dl v-if="hasPrinters" class="mb-5 grid grid-cols-3 gap-2 sm:gap-5">
+          <Card v-for="stat in fleetStats" :key="stat.label" as="div" class="px-3 py-4 sm:p-6">
             <dt class="truncate text-sm font-medium text-gray-500 dark:text-gray-400">{{ stat.label }}</dt>
             <dd class="mt-1 text-3xl font-semibold tracking-tight" :class="stat.tone">{{ stat.value }}</dd>
           </Card>
