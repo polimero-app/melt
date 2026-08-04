@@ -83,9 +83,13 @@ pub enum Error {
     CommandRejected,
     #[error("Bambu printer rejected an unsigned command")]
     UnsignedCommand,
-    #[error("Bambu printer requires signed commands for {0:?}")]
+    #[error(
+        "Bambu printer requires signed commands for {0:?}; enable Developer Mode/LAN-only mode or use a signed client"
+    )]
     AuthorizationRequired(MutationClass),
-    #[error("conflicting Bambu authorization evidence blocks {0:?}")]
+    #[error(
+        "conflicting Bambu authorization evidence blocks {0:?}; refresh printer status and inspect compatibility diagnostics"
+    )]
     AuthorizationConflict(MutationClass),
     #[error("invalid Bambu device path")]
     InvalidDevicePath,

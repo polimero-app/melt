@@ -15,8 +15,9 @@ use std::{
 };
 
 use polimero_core::{
-    AppError, app_info,
+    AppError, app_info, bambu,
     config::{Config, ConfigError, NamedProfile, config_dir},
+    diagnostics,
     drivers::{self, DriverError},
     keychain::{SERVICE, SecretError, SecretStore, SystemKeychain, account},
     moonraker,
@@ -146,6 +147,12 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
         short: "Add a printer profile",
         args: "<name> [flags]",
         flags: "      --access-code-file string   file containing the access code\n      --driver string             driver name (e.g. bambu-lan)\n  -h, --help                      help for add\n      --host string               printer IP or hostname\n      --insecure                  skip TLS verification and auth check\n      --model string              printer model reported by discovery\n      --protocol-trace string     write protocol diagnostics to this file (JSON Lines)\n      --serial string             printer serial number (required by some drivers)\n      --timeout string            connection timeout (default \"10s\")",
+    },
+    LeafCommand {
+        path: &["printer", "capabilities"],
+        short: "Inspect observed Bambu model, firmware, transport, and quirk evidence",
+        args: "<name> [flags]",
+        flags: "  -h, --help                    help for capabilities\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)",
     },
     LeafCommand {
         path: &["printer", "discover"],
@@ -284,6 +291,10 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
         short: "Manage 3D printer profiles",
         commands: &[
             ("add", "Add a printer profile"),
+            (
+                "capabilities",
+                "Inspect observed Bambu model, firmware, transport, and quirk evidence",
+            ),
             (
                 "discover",
                 "Scan the local network for printers (mDNS, SSDP, UDP broadcast)",
@@ -475,6 +486,11 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             if printer.as_str() == "printer" && add.as_str() == "add" =>
         {
             add_profile(invocation.format, name, flags, out, err)
+        }
+        [printer, capabilities, rest @ ..]
+            if printer.as_str() == "printer" && capabilities.as_str() == "capabilities" =>
+        {
+            printer_capabilities(invocation.format, rest, out, err)
         }
         [status, rest @ ..] if status.as_str() == "status" => {
             printer_status(invocation.format, rest, out, err)
@@ -854,6 +870,131 @@ fn printer_status(
         }
         Err(error) => write_error("status", format, driver_error(error), out, err),
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PrinterCapabilitiesData {
+    profile: String,
+    compatibility: diagnostics::BambuCompatibilityReport,
+}
+
+fn printer_capabilities(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (positionals, options) =
+        match parse_options(args, &["insecure"], &["timeout", "protocol-trace"]) {
+            Ok(value) => value,
+            Err(error) => {
+                return write_error(
+                    "printer capabilities",
+                    format,
+                    AppError::usage(error),
+                    out,
+                    err,
+                );
+            }
+        };
+    let name = match one_positional("printer capabilities", &positionals) {
+        Ok(name) => name,
+        Err(error) => return write_error("printer capabilities", format, error, out, err),
+    };
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error("printer capabilities", format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::Status) {
+        Ok(printer) => printer,
+        Err(error) => return write_error("printer capabilities", format, error, out, err),
+    };
+    let drivers::Profile::Bambu(profile) = &printer.driver else {
+        return write_error(
+            "printer capabilities",
+            format,
+            AppError {
+                exit_code: 5,
+                code: "capability_unsupported",
+                message:
+                    "live compatibility evidence is currently available only for Bambu LAN profiles"
+                        .into(),
+            },
+            out,
+            err,
+        );
+    };
+    let client = bambu::Client::new(profile.clone());
+    let capabilities = match client.runtime_capabilities(
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+    ) {
+        Ok(capabilities) => capabilities,
+        Err(error) => {
+            return write_error(
+                "printer capabilities",
+                format,
+                driver_error(DriverError::Bambu(error)),
+                out,
+                err,
+            );
+        }
+    };
+    let selection = bambu::select_camera_transport(profile.host(), &capabilities);
+    let compatibility = diagnostics::bambu_compatibility_report(
+        1,
+        &capabilities,
+        &selection,
+        printer.tls_fingerprint.is_some(),
+        None,
+    );
+    let report = human_capabilities(&printer.name, &compatibility);
+    write_success(
+        "printer capabilities",
+        format,
+        PrinterCapabilitiesData {
+            profile: printer.name,
+            compatibility,
+        },
+        |out| writeln!(out, "{report}"),
+        out,
+    )
+}
+
+fn human_capabilities(profile: &str, report: &diagnostics::BambuCompatibilityReport) -> String {
+    let firmware = report
+        .firmware_modules
+        .iter()
+        .map(|module| format!("{}={}", sanitize(&module.name), sanitize(&module.software)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let active_quirks = report.quirks.iter().filter(|quirk| quirk.active).count();
+    let inactive_quirks = report.quirks.len().saturating_sub(active_quirks);
+    format!(
+        "Profile: {}\nModel: {} ({:?}, {:?})\nFirmware: {}\nAuthorization: {:?}{}\nCamera: {:?} ({:?})\nStorage: {:?}\nQuirks: {} active, {} matching but inactive\nObservations: {} (values redacted)",
+        sanitize(profile),
+        sanitize(&report.model_raw),
+        report.canonical_model,
+        report.model_family,
+        if firmware.is_empty() {
+            "unobserved"
+        } else {
+            &firmware
+        },
+        report.authorization.effective,
+        if report.authorization.conflict {
+            " (conflicting evidence)"
+        } else {
+            ""
+        },
+        report.camera.preferred,
+        report.camera.source,
+        report.storage_transport,
+        active_quirks,
+        inactive_quirks,
+        report.capability_observations.len(),
+    )
 }
 
 /// Printer-supplied text reaches a terminal here, so control characters are
@@ -3853,6 +3994,20 @@ fn driver_error(error: DriverError) -> AppError {
                 "printer rejected an unsigned command; enable Developer Mode or use a signed client"
                     .into(),
         },
+        DriverError::Bambu(polimero_core::bambu::TransportError::AuthorizationRequired(_)) => {
+            AppError {
+                exit_code: 5,
+                code: "signing_required",
+                message: "observed printer security requires signed commands; enable Developer Mode/LAN-only mode or use a signed client".into(),
+            }
+        }
+        DriverError::Bambu(polimero_core::bambu::TransportError::AuthorizationConflict(_)) => {
+            AppError {
+                exit_code: 5,
+                code: "authorization_conflict",
+                message: "conflicting live authorization evidence blocks this mutation; refresh status and run `polimero printer capabilities <name>` before retrying".into(),
+            }
+        }
         DriverError::Bambu(polimero_core::bambu::TransportError::Timeout) => AppError {
             exit_code: 4,
             code: "timeout",

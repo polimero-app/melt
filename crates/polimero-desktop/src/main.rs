@@ -2904,6 +2904,12 @@ fn operation_error(error: DriverError, operation: Operation) -> CommandError {
         DriverError::Bambu(polimero_core::bambu::TransportError::UnsignedCommand) => {
             "printerSigningRequired"
         }
+        DriverError::Bambu(polimero_core::bambu::TransportError::AuthorizationRequired(_)) => {
+            "printerSigningRequired"
+        }
+        DriverError::Bambu(polimero_core::bambu::TransportError::AuthorizationConflict(_)) => {
+            "printerAuthorizationConflict"
+        }
         DriverError::Moonraker(polimero_core::moonraker::Error::Timeout)
         | DriverError::Bambu(polimero_core::bambu::TransportError::Timeout) => "printerTimeout",
         DriverError::Camera(polimero_core::bambu::CameraError::MissingAccessCode) => {

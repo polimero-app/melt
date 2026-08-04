@@ -42,6 +42,13 @@ block a command until independent physical evidence scopes it to the affected
 model and module firmware. Conflicting explicit fields block mutations
 conservatively and are surfaced rather than guessed.
 
+The CLI and desktop surface these as distinct actionable errors. Use
+`polimero printer capabilities <name>` to refresh and inspect the live model,
+module firmware, authorization resolution, selected transports, observation
+provenance, and active/inactive quirks. Add `--json` when capturing sanitized
+qualification evidence; observed values that could contain endpoints or
+credentials remain summarized by type rather than serialized.
+
 ## Camera transport selection
 
 Fresh, host-validated `print.ipcam` advertisements outrank qualified quirks,

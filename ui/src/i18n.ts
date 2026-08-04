@@ -321,6 +321,8 @@ export type MessageKey =
   | "errors.temperatureTargetMissing"
   | "errors.driverUnsupported"
   | "errors.printerAuthFailed"
+  | "errors.printerSigningRequired"
+  | "errors.printerAuthorizationConflict"
   | "errors.printerTimeout"
   | "errors.printerOperationFailed"
   | "errors.printerWrongState"
@@ -692,6 +694,8 @@ const messages: Record<Locale, Messages> = {
     "errors.temperatureTargetMissing": "Choose a temperature target first.",
     "errors.driverUnsupported": "This driver does not support {operation}.",
     "errors.printerAuthFailed": "Printer authentication failed.",
+    "errors.printerSigningRequired": "The printer requires signed commands for {operation}. Enable Developer Mode/LAN-only mode, or use a signed client.",
+    "errors.printerAuthorizationConflict": "Conflicting printer security evidence blocks {operation}. Refresh status and inspect Compatibility diagnostics before retrying.",
     "errors.printerTimeout": "The printer timed out while {operation}.",
     "errors.printerOperationFailed": "The printer failed while {operation}.",
     "errors.printerWrongState": "The printer is {state}; it does not support {operation} right now.",
@@ -1060,6 +1064,8 @@ const messages: Record<Locale, Messages> = {
     "errors.temperatureTargetMissing": "Escolha primeiro uma temperatura alvo.",
     "errors.driverUnsupported": "Este driver não suporta {operation}.",
     "errors.printerAuthFailed": "A autenticação da impressora falhou.",
+    "errors.printerSigningRequired": "A impressora exige comandos assinados para {operation}. Ative o Modo de Desenvolvedor/modo somente LAN ou use um cliente com assinatura.",
+    "errors.printerAuthorizationConflict": "Evidências conflitantes de segurança bloqueiam {operation}. Atualize o status e verifique os diagnósticos de Compatibilidade antes de tentar novamente.",
     "errors.printerTimeout": "A impressora expirou durante {operation}.",
     "errors.printerOperationFailed": "A impressora falhou durante {operation}.",
     "errors.printerWrongState": "A impressora está {state} e não suporta {operation} agora.",
