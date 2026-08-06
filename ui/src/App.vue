@@ -736,6 +736,12 @@ async function runConfirmation() {
   try {
     await pending.run()
     pendingConfirm.value = undefined
+  } catch (reason) {
+    // Every confirmed action funnels through here, so one catch covers the
+    // handlers that surface their own errors and the ones that don't. Without
+    // it a rejecting `run` leaves the dialog open with no feedback at all.
+    pendingConfirm.value = undefined
+    showToast(message(reason), 'error')
   } finally {
     confirming.value = false
   }
