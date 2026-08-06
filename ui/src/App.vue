@@ -455,7 +455,12 @@ function t(key: MessageKey, values?: Record<string, string | number>) {
   return translate(locale.value, key, values)
 }
 const cameraStage = ref<HTMLElement>()
-const toast = ref<{ text: string; tone: 'success' | 'error' }>()
+const errorToast = ref<string>()
+const successToast = ref<string>()
+const toasts = computed(() => [
+  ...(errorToast.value ? [{ key: 'error' as const, text: errorToast.value, tone: 'error' as const }] : []),
+  ...(successToast.value ? [{ key: 'success' as const, text: successToast.value, tone: 'success' as const }] : []),
+])
 const searchTerm = ref('')
 type SortKey = 'name' | 'size' | 'modified'
 const sortKey = ref<SortKey>('name')
@@ -749,16 +754,26 @@ async function runConfirmation() {
 
 // Errors persist until dismissed: 2.2s is not long enough to read a failure,
 // and a silently vanishing error is indistinguishable from no error at all.
+//
+// Errors and successes hold separate slots and stack together, because
+// `printer-notification` fires from the monitor loop at arbitrary times — a
+// single slot let a background completion quietly delete an unread failure.
 function showToast(text: string, tone: 'success' | 'error' = 'success') {
-  toast.value = { text, tone }
-  if (toastTimer !== undefined) window.clearTimeout(toastTimer)
-  toastTimer = undefined
-  if (tone === 'success') {
-    toastTimer = window.setTimeout(() => {
-      toast.value = undefined
-      toastTimer = undefined
-    }, 2200)
+  if (tone === 'error') {
+    errorToast.value = text
+    return
   }
+  successToast.value = text
+  if (toastTimer !== undefined) window.clearTimeout(toastTimer)
+  toastTimer = window.setTimeout(() => {
+    successToast.value = undefined
+    toastTimer = undefined
+  }, 2200)
+}
+
+function dismissToast(key: 'error' | 'success') {
+  if (key === 'error') errorToast.value = undefined
+  else successToast.value = undefined
 }
 
 function applyPreferences(preferences: BackendPreferences) {
@@ -1874,43 +1889,44 @@ onUnmounted(() => {
       <h1 class="sr-only">{{ t('app.title') }}</h1>
       <!-- Notification -->
       <div aria-live="polite" class="pointer-events-none fixed inset-0 z-50 flex items-end px-4 py-6 sm:p-6">
-        <div class="flex w-full flex-col items-center space-y-4 sm:items-end">
-          <transition
-            enter-active-class="transform ease-out duration-300 transition"
-            enter-from-class="translate-y-2 opacity-0 sm:translate-y-0 sm:translate-x-2"
-            enter-to-class="translate-y-0 sm:translate-x-0"
-            leave-active-class="transition ease-in duration-100"
-            leave-to-class="opacity-0"
+        <transition-group
+          tag="div"
+          class="flex w-full flex-col items-center space-y-4 sm:items-end"
+          enter-active-class="transform ease-out duration-300 transition"
+          enter-from-class="translate-y-2 opacity-0 sm:translate-y-0 sm:translate-x-2"
+          enter-to-class="translate-y-0 sm:translate-x-0"
+          leave-active-class="transition ease-in duration-100"
+          leave-to-class="opacity-0"
+        >
+          <div
+            v-for="item in toasts"
+            :key="item.key"
+            class="pointer-events-auto w-full max-w-sm rounded-lg bg-white shadow-lg outline-1 outline-black/5 dark:bg-gray-800 dark:-outline-offset-1 dark:outline-white/10"
+            :role="item.tone === 'error' ? 'alert' : 'status'"
           >
-            <div
-              v-if="toast"
-              class="pointer-events-auto w-full max-w-sm rounded-lg bg-white shadow-lg outline-1 outline-black/5 dark:bg-gray-800 dark:-outline-offset-1 dark:outline-white/10"
-              :role="toast.tone === 'error' ? 'alert' : 'status'"
-            >
-              <div class="p-4">
-                <div class="flex items-start">
-                  <div class="shrink-0">
-                    <PhWarningCircle v-if="toast.tone === 'error'" class="size-6 text-red-500 dark:text-red-400" aria-hidden="true" />
-                    <PhCheckCircle v-else class="size-6 text-green-400" aria-hidden="true" />
-                  </div>
-                  <div class="ml-3 w-0 flex-1 pt-0.5">
-                    <p class="text-sm font-medium text-gray-900 dark:text-white">{{ toast.text }}</p>
-                  </div>
-                  <div class="ml-4 flex shrink-0">
-                    <button
-                      type="button"
-                      class="inline-flex rounded-md text-gray-400 hover:text-gray-500 dark:hover:text-white"
-                      @click="toast = undefined"
-                    >
-                      <span class="sr-only">{{ t('common.close') }}</span>
-                      <PhX class="size-5" aria-hidden="true" />
-                    </button>
-                  </div>
+            <div class="p-4">
+              <div class="flex items-start">
+                <div class="shrink-0">
+                  <PhWarningCircle v-if="item.tone === 'error'" class="size-6 text-red-500 dark:text-red-400" aria-hidden="true" />
+                  <PhCheckCircle v-else class="size-6 text-green-400" aria-hidden="true" />
+                </div>
+                <div class="ml-3 w-0 flex-1 pt-0.5">
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">{{ item.text }}</p>
+                </div>
+                <div class="ml-4 flex shrink-0">
+                  <button
+                    type="button"
+                    class="inline-flex rounded-md text-gray-400 hover:text-gray-500 dark:hover:text-white"
+                    @click="dismissToast(item.key)"
+                  >
+                    <span class="sr-only">{{ t('common.close') }}</span>
+                    <PhX class="size-5" aria-hidden="true" />
+                  </button>
                 </div>
               </div>
             </div>
-          </transition>
-        </div>
+          </div>
+        </transition-group>
       </div>
 
       <template v-if="activeView === 'control' && activePrinter">
