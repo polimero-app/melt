@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
+import { badgeDotClasses, badgeFillClasses, badgeSurfaceClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
+import type { PrinterBadge } from './monitoring'
+
+const allBadges: PrinterBadge[] = ['idle', 'busy', 'error', 'connecting', 'synchronizing', 'reconnecting', 'offline', 'unknown']
+
+describe('badge presentation', () => {
+  it('keeps cyan out of connectivity, reserving it for actions and selection', () => {
+    for (const map of [badgeDotClasses, badgeSurfaceClasses, badgeFillClasses]) {
+      for (const badge of allBadges) expect(map[badge]).not.toMatch(/cyan/)
+    }
+  })
+
+  it('gives every badge a dark-mode variant so surfaces cannot drift apart', () => {
+    for (const badge of allBadges) {
+      expect(badgeDotClasses[badge]).toMatch(/dark:/)
+      expect(badgeSurfaceClasses[badge]).toMatch(/dark:/)
+      expect(badgeFillClasses[badge]).toMatch(/dark:/)
+    }
+  })
+})
 
 describe('cameraViewState', () => {
   it('distinguishes live transports from retained snapshots', () => {

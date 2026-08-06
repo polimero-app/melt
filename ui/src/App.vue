@@ -7,7 +7,7 @@ import { locales, preferredLocale, translate, type Locale, type MessageKey } fro
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration } from './formatting'
 import { printTargetState } from './printing'
-import { cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
+import { badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import { shouldDeferLibraryCards } from './library'
@@ -336,17 +336,6 @@ type SlicerSetting = {
 type BackendPreferences = {
   notifications: Record<NotificationSetting['id'], boolean>
   slicers: SlicerSetting[]
-}
-
-const statusDotClasses: Record<PrinterBadge, string> = {
-  idle: 'bg-green-500 ring-green-500/10',
-  busy: 'bg-yellow-500 ring-yellow-500/10',
-  error: 'bg-red-600 ring-red-600/20',
-  reconnecting: 'bg-amber-500 ring-amber-500/10',
-  connecting: 'bg-gray-400 ring-gray-400/10',
-  synchronizing: 'bg-cyan-500 ring-cyan-500/10',
-  offline: 'bg-red-500 ring-red-500/10',
-  unknown: 'bg-gray-400 ring-gray-400/10',
 }
 
 const modelTones: Record<ModelTone, { preview: string; shape: string }> = {
@@ -704,7 +693,7 @@ const cameraStateLabel = computed(() => t({
 }[cameraState.value] as MessageKey))
 const cameraStateClasses = computed(() => ({
   live: 'bg-green-100 fill-green-500 text-green-700 dark:bg-green-400/10 dark:fill-green-400 dark:text-green-400',
-  snapshot: 'bg-cyan-100 fill-cyan-500 text-cyan-700 dark:bg-cyan-400/10 dark:fill-cyan-400 dark:text-cyan-400',
+  snapshot: 'bg-gray-100 fill-gray-400 text-gray-600 dark:bg-white/10 dark:fill-gray-500 dark:text-gray-400',
   loading: 'bg-yellow-100 fill-yellow-500 text-yellow-800 dark:bg-yellow-400/10 dark:fill-yellow-400 dark:text-yellow-500',
   offline: 'bg-gray-100 fill-gray-400 text-gray-600 dark:bg-white/10 dark:fill-gray-500 dark:text-gray-400',
 }[cameraState.value]))
@@ -1824,7 +1813,7 @@ onUnmounted(() => {
               :aria-current="activeView === 'control' && activePrinter?.name === printer.name ? 'page' : undefined"
               @click="selectPrinter(printer.name)"
             >
-              <span class="size-1.5 shrink-0 rounded-full ring-3" :class="statusDotClasses[badgeFor(printer.name)]"></span>{{ printer.name }}
+              <span class="size-1.5 shrink-0 rounded-full ring-3" :class="badgeDotClasses[badgeFor(printer.name)]"></span>{{ printer.name }}
             </button>
           </div>
           <div
@@ -1936,7 +1925,7 @@ onUnmounted(() => {
             <StatusBadge :status="activeBadge" :label="statusLabel(activeBadge)" />
             <span
               v-if="wifiDbm !== undefined"
-              class="inline-flex items-center gap-x-1.5 rounded-md bg-cyan-100 px-2 py-1 text-xs font-medium text-cyan-700 dark:bg-cyan-400/10 dark:text-cyan-400"
+              class="inline-flex items-center gap-x-1.5 rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 dark:bg-gray-400/10 dark:text-gray-400"
               :title="wifiSignal(wifiDbm).label"
             >
               <component :is="wifiSignal(wifiDbm).icon" class="size-3.5" aria-hidden="true" />{{ wifiDbm }} dBm
@@ -2774,7 +2763,7 @@ onUnmounted(() => {
         <li v-for="printer in printers" :key="printer.name" class="flex items-center justify-between gap-3 py-3">
           <span class="flex min-w-0 flex-col items-start gap-1">
             <span class="flex min-w-0 items-center gap-2">
-              <span class="size-1.5 shrink-0 rounded-full ring-3" :class="statusDotClasses[badgeFor(printer.name)]"></span>
+              <span class="size-1.5 shrink-0 rounded-full ring-3" :class="badgeDotClasses[badgeFor(printer.name)]"></span>
               <span class="truncate text-sm text-gray-900 dark:text-white">{{ printer.name }}</span>
             </span>
             <span v-if="!isReachable(badgeFor(printer.name))" class="ml-3.5 text-xs font-medium text-red-600 dark:text-red-400">{{ t('status.offlineLabel') }}</span>
