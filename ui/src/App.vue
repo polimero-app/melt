@@ -7,7 +7,7 @@ import { locales, preferredLocale, translate, type Locale, type MessageKey } fro
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration } from './formatting'
 import { printTargetState } from './printing'
-import { badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
+import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import { shouldDeferLibraryCards } from './library'
@@ -552,6 +552,7 @@ function badgeFor(name: string): PrinterBadge {
 const activeBadge = computed<PrinterBadge>(() => (activePrinter.value ? badgeFor(activePrinter.value.name) : 'offline'))
 const isReachable = (badge: PrinterBadge) => badge === 'idle' || badge === 'busy'
 const activeHasStatus = computed(() => isReachable(activeBadge.value) || activeBadge.value === 'reconnecting' || activeBadge.value === 'error')
+const awaitingFirstSample = computed(() => awaitsFirstSample(activeBadge.value))
 const badgeMessageKeys: Record<PrinterBadge, MessageKey> = {
   idle: 'status.onlineIdle',
   busy: 'status.onlineBusy',
@@ -1939,9 +1940,22 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Empty state -->
+        <!-- Awaiting the first sample: neutral, no alarm language, no recovery
+             CTA — nothing has failed yet. -->
         <div
-          v-if="!activeHasStatus"
+          v-if="!activeHasStatus && awaitingFirstSample"
+          class="mx-4 flex min-h-140 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-center sm:mx-0 dark:border-white/15"
+          role="status"
+          aria-live="polite"
+        >
+          <PhBroadcast class="mx-auto size-12 animate-pulse text-gray-400 dark:text-gray-500" aria-hidden="true" />
+          <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{{ t('control.awaitingTitle') }}</h3>
+          <p class="mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">{{ t('control.awaitingDescription') }}</p>
+        </div>
+
+        <!-- True outage: Polimero has no usable status and a polling error. -->
+        <div
+          v-else-if="!activeHasStatus"
           class="mx-4 flex min-h-140 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-center sm:mx-0 dark:border-white/15"
         >
           <PhWarning class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />

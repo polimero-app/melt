@@ -135,6 +135,8 @@ export type MessageKey =
   | "control.signalNone"
   | "control.unavailableTitle"
   | "control.unavailableDescription"
+  | "control.awaitingTitle"
+  | "control.awaitingDescription"
   | "control.refreshConnection"
   | "control.reconnecting"
   | "control.faults"
@@ -552,6 +554,8 @@ const messages: Record<Locale, Messages> = {
     "control.signalNone": "No signal",
     "control.unavailableTitle": "Printer unavailable",
     "control.unavailableDescription": "Polimero cannot reach this printer right now. Check the printer connection and try again.",
+    "control.awaitingTitle": "Waiting for the first status sample",
+    "control.awaitingDescription": "Polimero is establishing the printer heartbeat. Telemetry appears as soon as a sample arrives.",
     "control.refreshConnection": "Refresh connection",
     "control.reconnecting": "Trying to reconnect to printer",
     "control.faults": "Printer alerts",
@@ -966,6 +970,8 @@ const messages: Record<Locale, Messages> = {
     "control.signalNone": "Sem sinal",
     "control.unavailableTitle": "Impressora indisponível",
     "control.unavailableDescription": "O Polimero não consegue alcançar esta impressora no momento. Verifique a conexão da impressora e tente novamente.",
+    "control.awaitingTitle": "Aguardando a primeira amostra de status",
+    "control.awaitingDescription": "O Polimero está estabelecendo o heartbeat da impressora. A telemetria aparece assim que uma amostra chegar.",
     "control.refreshConnection": "Atualizar conexão",
     "control.reconnecting": "Tentando reconectar à impressora",
     "control.faults": "Alertas da impressora",

@@ -45,6 +45,11 @@ export const badgeFillClasses: Record<PrinterBadge, string> = {
   unknown: 'fill-gray-400 dark:fill-gray-500',
 }
 
+/** Badges that mean "no sample observed yet", not "this printer failed". */
+export function awaitsFirstSample(badge: PrinterBadge): boolean {
+  return badge === 'connecting' || badge === 'synchronizing' || badge === 'unknown'
+}
+
 export type CameraViewState = 'live' | 'snapshot' | 'loading' | 'offline'
 
 export function cameraViewState(input: {

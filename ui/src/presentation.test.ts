@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { badgeDotClasses, badgeFillClasses, badgeSurfaceClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
+import { awaitsFirstSample, badgeDotClasses, badgeFillClasses, badgeSurfaceClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
 import type { PrinterBadge } from './monitoring'
 
 const allBadges: PrinterBadge[] = ['idle', 'busy', 'error', 'connecting', 'synchronizing', 'reconnecting', 'offline', 'unknown']
@@ -16,6 +16,16 @@ describe('badge presentation', () => {
       expect(badgeDotClasses[badge]).toMatch(/dark:/)
       expect(badgeSurfaceClasses[badge]).toMatch(/dark:/)
       expect(badgeFillClasses[badge]).toMatch(/dark:/)
+    }
+  })
+
+  it('treats only pre-observation states as awaiting a first sample', () => {
+    expect(allBadges.filter(awaitsFirstSample)).toEqual(['connecting', 'synchronizing', 'unknown'])
+  })
+
+  it('never marks a badge that carries usable telemetry as awaiting', () => {
+    for (const badge of ['idle', 'busy', 'reconnecting', 'error', 'offline'] as PrinterBadge[]) {
+      expect(awaitsFirstSample(badge)).toBe(false)
     }
   })
 })
