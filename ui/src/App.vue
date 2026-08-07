@@ -2095,7 +2095,7 @@ onUnmounted(() => {
           <PhWarning class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />
           <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{{ t('control.unavailableTitle') }}</h3>
           <p class="mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">{{ selectedMonitor?.error ? message(selectedMonitor.error) : t('control.unavailableDescription') }}</p>
-          <Button class="mt-6" variant="primary" :disabled="refreshing" @click="refreshMonitoring"><PhArrowsClockwise class="size-4" aria-hidden="true" /> {{ t('control.refreshConnection') }}</Button>
+          <Button class="mt-6" variant="primary" :disabled="refreshing" @click="refreshMonitoring"><PhArrowsClockwise class="size-4" :class="refreshing && 'animate-spin'" aria-hidden="true" /> {{ t('control.refreshConnection') }}</Button>
         </div>
 
         <div v-show="activeHasStatus">
@@ -2105,7 +2105,7 @@ onUnmounted(() => {
             role="status"
           >
             <span class="flex items-center gap-2"><PhArrowsClockwise class="size-4 shrink-0" aria-hidden="true" />{{ t('control.reconnecting') }}</span>
-            <Button variant="secondary" :disabled="refreshing" @click="refreshMonitoring">{{ t('control.refreshConnection') }}</Button>
+            <Button variant="secondary" :disabled="refreshing" @click="refreshMonitoring"><PhArrowsClockwise class="size-4" :class="refreshing && 'animate-spin'" aria-hidden="true" /> {{ t('control.refreshConnection') }}</Button>
           </div>
           <section v-if="statusFaults.length" class="mb-5 space-y-2" :aria-label="t('control.faults')">
             <div
@@ -2139,7 +2139,7 @@ onUnmounted(() => {
                     <svg class="size-1.5" viewBox="0 0 6 6" aria-hidden="true"><circle cx="3" cy="3" r="3" /></svg>{{ cameraStateLabel }}
                   </span>
                 </template>
-                <IconButton :title="t('camera.refresh')" :aria-label="t('camera.refresh')" :disabled="cameraLoading || !cameraSupported" @click="refreshCamera"><PhArrowsClockwise class="size-4" aria-hidden="true" /></IconButton>
+                <IconButton :title="t('camera.refresh')" :aria-label="t('camera.refresh')" :disabled="cameraLoading || !cameraSupported" @click="refreshCamera"><PhArrowsClockwise class="size-4" :class="cameraLoading && 'animate-spin'" aria-hidden="true" /></IconButton>
                 <IconButton :title="t('camera.snapshot')" :aria-label="t('camera.snapshot')" :disabled="cameraLoading || !capabilities?.cameraSnapshot" @click="saveSnapshot"><PhCamera class="size-4" aria-hidden="true" /></IconButton>
                 <IconButton :title="t('camera.maximize')" :aria-label="t('camera.maximize')" :disabled="!cameraHasMedia" @click="toggleCameraFullscreen"><PhCornersOut class="size-4" aria-hidden="true" /></IconButton>
               </CardHeader>
@@ -2154,7 +2154,7 @@ onUnmounted(() => {
                   <PhWarning class="mx-auto size-8 text-yellow-600 dark:text-yellow-400" aria-hidden="true" />
                   <p class="mt-3 font-medium text-gray-900 dark:text-white">{{ t('camera.unavailable') }}</p>
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ cameraError ?? t('camera.checkConnection') }}</p>
-                  <Button v-if="cameraSupported" class="mt-4" :disabled="cameraLoading" @click="refreshCamera"><PhArrowsClockwise class="size-4" aria-hidden="true" /> {{ t('camera.refreshFeed') }}</Button>
+                  <Button v-if="cameraSupported" class="mt-4" :disabled="cameraLoading" @click="refreshCamera"><PhArrowsClockwise class="size-4" :class="cameraLoading && 'animate-spin'" aria-hidden="true" /> {{ t('camera.refreshFeed') }}</Button>
                 </div>
               </div>
             </Card>
@@ -2384,7 +2384,7 @@ onUnmounted(() => {
             <!-- Table -->
             <Card v-if="capabilities?.fileList" class="overflow-hidden">
               <CardHeader :title="t('dashboard.files')" :icon="PhFolder">
-                <IconButton :title="t('dashboard.loadFiles')" :aria-label="t('dashboard.loadFiles')" :disabled="filesLoading" @click="loadFiles"><PhArrowsClockwise class="size-4" aria-hidden="true" /></IconButton>
+                <IconButton :title="t('dashboard.loadFiles')" :aria-label="t('dashboard.loadFiles')" :disabled="filesLoading" @click="loadFiles"><PhArrowsClockwise class="size-4" :class="filesLoading && 'animate-spin'" aria-hidden="true" /></IconButton>
               </CardHeader>
               <div
                 class="max-h-80 overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:focus-visible:outline-cyan-400"
@@ -2847,8 +2847,8 @@ onUnmounted(() => {
           </div>
           <div class="mt-5 flex gap-2 lg:mt-0 lg:ml-4 max-lg:w-full">
             <Button class="max-lg:flex-1" :disabled="libraryFilesLoading" @click="chooseLibraryFolder"><PhFolderOpen class="size-4" aria-hidden="true" /> {{ t('filesView.changeFolder') }}</Button>
-            <Button class="max-lg:flex-1" :disabled="uploadBusy || !libraryPath" @click="uploadFile"><PhUploadSimple class="size-4" aria-hidden="true" /> {{ t('filesView.upload') }}</Button>
-            <Button class="max-lg:flex-1" :disabled="libraryFilesLoading" @click="loadLibraryFiles(libraryPath)"><PhArrowsClockwise class="size-4" aria-hidden="true" /> {{ t('dashboard.refresh') }}</Button>
+            <Button class="max-lg:flex-1" :disabled="uploadBusy || !libraryPath" @click="uploadFile"><PhUploadSimple class="size-4" :class="uploadBusy && 'animate-pulse'" aria-hidden="true" /> {{ t('filesView.upload') }}</Button>
+            <Button class="max-lg:flex-1" :disabled="libraryFilesLoading" @click="loadLibraryFiles(libraryPath)"><PhArrowsClockwise class="size-4" :class="libraryFilesLoading && 'animate-spin'" aria-hidden="true" /> {{ t('dashboard.refresh') }}</Button>
           </div>
         </div>
 
@@ -2955,7 +2955,7 @@ onUnmounted(() => {
 
     <SlideOver :open="additionOpen" :title="editingPrinter ? t('printersView.editPrinter') : t('addition.title')" :description="t('addition.description')" :close-label="t('common.closePanel')" @close="closeAddition">
       <form id="add-printer-form" @submit.prevent="addPrinter">
-        <Button class="w-full" :disabled="discovering" @click="discoverPrinters"><PhBroadcast class="size-4" aria-hidden="true" /> {{ discovering ? t('printersView.scanning') : t('printersView.discover') }}</Button>
+        <Button class="w-full" :disabled="discovering" @click="discoverPrinters"><PhBroadcast class="size-4" :class="discovering && 'animate-pulse'" aria-hidden="true" /> {{ discovering ? t('printersView.scanning') : t('printersView.discover') }}</Button>
         <p v-if="discoveryError" class="mt-2 text-xs text-red-600 dark:text-red-400" role="alert">{{ discoveryError }}</p>
         <ul v-if="discovered.length" class="mt-3 divide-y divide-gray-200 rounded-md border border-gray-200 dark:divide-white/10 dark:border-white/10">
           <li v-for="printer in discovered" :key="`${printer.serial}:${printer.host}`" class="flex items-center justify-between gap-2 px-3 py-2">
