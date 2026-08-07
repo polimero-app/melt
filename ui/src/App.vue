@@ -365,7 +365,15 @@ const modelTones: Record<ModelTone, { preview: string; shape: string }> = {
     shape: 'h-16.5 w-27.5 rounded-lg bg-violet-400/75 shadow-[17px_17px_0_var(--color-violet-800)]',
   },
 }
-const fileTones: ModelTone[] = ['cyan', 'amber', 'rose', 'violet']
+// Tone follows the backend's media classification, so the color on a library
+// card carries meaning. Hashing the filename produced a stable but arbitrary
+// color that users could easily read as a category.
+const mediaTones: Record<FileEntry['mediaType'], ModelTone> = {
+  model: 'cyan',
+  timelapse: 'violet',
+  video: 'amber',
+  other: 'rose',
+}
 
 const info = ref<AppInfo>()
 const printers = ref<Printer[]>([])
@@ -1729,8 +1737,8 @@ function fileTypeLabel(file: FileEntry) {
   return dot > 0 ? file.name.slice(dot + 1).toUpperCase() : 'FILE'
 }
 
-function fileToneFor(name: string) {
-  return modelTones[fileTones[Math.abs([...name].reduce((hash, char) => hash * 31 + char.charCodeAt(0), 0)) % fileTones.length]!]!
+function fileToneFor(file: FileEntry) {
+  return modelTones[mediaTones[file.mediaType]]
 }
 
 function textColorFor(color: string) {
@@ -2933,7 +2941,7 @@ onUnmounted(() => {
             class="transition hover:shadow-md dark:hover:outline-cyan-400/30"
             :class="deferLibraryCards && 'library-card-deferred'"
           >
-            <div class="relative min-h-45 overflow-hidden sm:rounded-t-lg" :class="fileToneFor(file.name).preview">
+            <div class="relative min-h-45 overflow-hidden sm:rounded-t-lg" :class="fileToneFor(file).preview">
               <ModelThumbnail
                 v-if="isModelFile(file)"
                 :path="file.devicePath"
@@ -2944,7 +2952,7 @@ onUnmounted(() => {
                 class="size-full min-h-45"
               />
               <div v-else class="grid min-h-45 place-items-center">
-                <span class="block transform-[perspective(200px)_rotateX(10deg)_rotateZ(-8deg)]" :class="fileToneFor(file.name).shape"></span>
+                <span class="block transform-[perspective(200px)_rotateX(10deg)_rotateZ(-8deg)]" :class="fileToneFor(file).shape"></span>
               </div>
               <span class="absolute right-3 bottom-2.5 text-[10px] font-bold text-gray-500 uppercase dark:text-slate-300/45">.{{ fileTypeLabel(file).toLowerCase() }}</span>
             </div>
