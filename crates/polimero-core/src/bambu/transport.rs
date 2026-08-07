@@ -261,7 +261,16 @@ impl Client {
         class: MutationClass,
     ) -> Result<(), Error> {
         if class != MutationClass::EmergencyStop && self.cached_authorization().is_none() {
-            self.status(access_code, fingerprint)?;
+            // Every other class ends in an MQTT command, so a failed resolve
+            // only surfaces the same transport error a step earlier. File
+            // writes travel over FTPS/:6000 and needed no MQTT at all before
+            // this gate existed, so an unreachable broker must not become a
+            // new failure mode there. The printer's own rejection of an
+            // unsigned write remains the backstop.
+            match self.status(access_code, fingerprint) {
+                Err(error) if class != MutationClass::FileWrite => return Err(error),
+                _ => {}
+            }
         }
         match self
             .cached_authorization()
@@ -5773,6 +5782,32 @@ mod tests {
         );
         assert!(
             cold.authorize_mutation(Some("code"), None, MutationClass::EmergencyStop)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn an_unreachable_printer_blocks_mqtt_mutations_but_not_file_writes() {
+        // Unroutable host: the gate's status resolve cannot succeed.
+        let cold = || {
+            Client::new(
+                Profile::with_timeout("203.0.113.1", "SN001", true, Duration::from_millis(50))
+                    .unwrap(),
+            )
+        };
+
+        // Classes that end in an MQTT command surface the transport error.
+        assert!(
+            cold()
+                .authorize_mutation(Some("code"), None, MutationClass::Fan)
+                .is_err()
+        );
+
+        // File writes travel over FTPS/:6000 and needed no MQTT before the
+        // gate existed, so an unreachable broker must not block them.
+        assert!(
+            cold()
+                .authorize_mutation(Some("code"), None, MutationClass::FileWrite)
                 .is_ok()
         );
     }
