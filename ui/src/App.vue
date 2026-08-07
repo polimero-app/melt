@@ -428,7 +428,11 @@ let fileRequest = 0
 let libraryRequest = 0
 let toastTimer: number | undefined
 
-const activeView = ref<View>('control')
+// Restored across launches like theme and locale: a desktop app that stays
+// open for hours should reopen where it was left. A stored view that is no
+// longer valid falls back to the control view.
+const views: View[] = ['control', 'printers', 'settings', 'files']
+const activeView = ref<View>(views.find((view) => view === localStorage.getItem('activeView')) ?? 'control')
 const sectionTabs = computed<{ view: View; label: string; icon: Component }[]>(() => [
   { view: 'printers', label: t('nav.printers'), icon: PhPrinter },
   { view: 'settings', label: t('nav.settings'), icon: PhGearSix },
@@ -438,7 +442,7 @@ const sectionTabs = computed<{ view: View; label: string; icon: Component }[]>((
 // starts scrolling and the active printer can end up off-screen.
 const PRINTER_TAB_LIMIT = 5
 const usePrinterMenu = computed(() => printers.value.length > PRINTER_TAB_LIMIT)
-const activePrinterId = ref('')
+const activePrinterId = ref(localStorage.getItem('activePrinterId') ?? '')
 const revealedSerials = ref(new Set<string>())
 const theme = ref<'light' | 'dark' | 'system'>(
   (['light', 'dark', 'system'] as const).find((value) => value === localStorage.getItem('theme')) ?? 'system',
@@ -455,6 +459,12 @@ watchEffect(() => {
 })
 watchEffect(() => {
   localStorage.setItem('theme', theme.value)
+})
+watchEffect(() => {
+  localStorage.setItem('activeView', activeView.value)
+})
+watchEffect(() => {
+  localStorage.setItem('activePrinterId', activePrinterId.value)
 })
 const locale = ref<Locale>(locales.find((value) => value === localStorage.getItem('locale')) ?? preferredLocale())
 watchEffect(() => {
@@ -1855,6 +1865,9 @@ onMounted(() => {
   systemPrefersDark.value = systemThemeQuery.matches
   systemThemeQuery.addEventListener('change', handleSystemThemeChange)
   void load()
+  // The library normally loads on the way in through goTo, which a restored
+  // view skips — without this, reopening on Files shows an empty grid.
+  if (activeView.value === 'files') void loadLibraryFiles(libraryPath.value)
   void listen<MonitorEntry[]>('monitoring-updated', (event) => {
     monitoring.value = event.payload
   }).then((unlisten) => {
