@@ -1021,10 +1021,19 @@ fn temperature_line(label: &str, reading: &moonraker::Temperature) -> String {
 
 fn fan_display_name(key: &str) -> &str {
     match key {
+        // Legacy slot names.
         "partCooling" => "Part cooling",
         "heatbreak" => "Heatbreak",
-        "auxiliary" => "Auxiliary",
         "chamber" => "Chamber",
+        // Airduct names; `auxiliary` is shared by both generations.
+        "parts" => "Part cooling",
+        "auxiliary" => "Auxiliary",
+        "auxiliarySecondary" => "Auxiliary (secondary)",
+        "hotend" => "Hotend",
+        "hotendSecondary" => "Hotend (secondary)",
+        "exhaust" => "Exhaust",
+        "mainboard" => "Mainboard",
+        "heat" => "Heat",
         other => other,
     }
 }
@@ -1066,20 +1075,36 @@ fn human_status(name: &str, status: &moonraker::Status, detailed: bool) -> Strin
             lines.push(format!("Chamber: {:.1} C", chamber.current_celsius));
         }
     }
-    if detailed && !status.fans.is_empty() {
+    if detailed && !status.controls.fans.is_empty() {
         lines.push("Fans:".into());
-        // Known fans lead in a fixed order; anything else follows sorted.
-        let order = ["partCooling", "heatbreak", "auxiliary", "chamber"];
+        // Known fans lead in a fixed order; anything else follows sorted. Both
+        // firmware generations appear here: legacy slot names and the airduct
+        // names H2-class reports. The control inventory is the only map that
+        // carries both, and it has already dropped the phantom slots legacy
+        // firmware publishes for hardware it does not have.
+        let order = [
+            "partCooling",
+            "heatbreak",
+            "auxiliary",
+            "chamber",
+            "parts",
+            "hotend",
+            "exhaust",
+            "heat",
+        ];
         let known = order
             .iter()
-            .filter_map(|key| status.fans.get(*key).map(|speed| (*key, *speed)));
+            .filter_map(|key| status.controls.fans.get(*key).map(|fan| (*key, fan)));
         let rest = status
+            .controls
             .fans
             .iter()
             .filter(|(key, _)| !order.contains(&key.as_str()))
-            .map(|(key, speed)| (key.as_str(), *speed));
-        for (key, speed) in known.chain(rest) {
-            lines.push(format!("  {}: {speed}%", fan_display_name(key)));
+            .map(|(key, fan)| (key.as_str(), fan));
+        for (key, fan) in known.chain(rest) {
+            if let Some(speed) = fan.speed_percent {
+                lines.push(format!("  {}: {speed}%", fan_display_name(key)));
+            }
         }
     }
     if detailed && let Some(wifi) = &status.wifi {
@@ -4462,7 +4487,29 @@ mod tests {
             lights: [("chamber_light".to_string(), "on".to_string())]
                 .into_iter()
                 .collect(),
-            controls: moonraker::ControlInventory::default(),
+            controls: moonraker::ControlInventory {
+                fans: [
+                    ("partCooling".to_string(), moonraker::FanControl {
+                        kind: moonraker::FanKind::Parts,
+                        speed_percent: Some(9),
+                        mode: moonraker::FanMode::Manual,
+                        minimum_percent: 0,
+                        maximum_percent: 100,
+                        controllable: true,
+                    }),
+                    ("auxiliary".to_string(), moonraker::FanControl {
+                        kind: moonraker::FanKind::Auxiliary,
+                        speed_percent: Some(15),
+                        mode: moonraker::FanMode::Manual,
+                        minimum_percent: 0,
+                        maximum_percent: 100,
+                        controllable: true,
+                    }),
+                ]
+                .into_iter()
+                .collect(),
+                ..moonraker::ControlInventory::default()
+            },
             print_meta: Some(moonraker::PrintMeta {
                 file_name: "cube.3mf".into(),
                 file_size: Some(2 * 1024 * 1024),
@@ -4527,6 +4574,35 @@ mod tests {
                 }),
             },
         }
+    }
+
+    #[test]
+    fn detailed_status_lists_airduct_fans_from_the_control_inventory() {
+        // H2-class firmware reports fans under `device.airduct`, which lands in
+        // `controls.fans`. `Status::fans` only ever carries legacy slot names,
+        // so reading it leaves these printers showing no fans at all.
+        let fan = |kind, speed| moonraker::FanControl {
+            kind,
+            speed_percent: Some(speed),
+            mode: moonraker::FanMode::Manual,
+            minimum_percent: 0,
+            maximum_percent: 100,
+            controllable: true,
+        };
+        let mut status = sample_status();
+        status.fans.clear();
+        status.controls.fans = [
+            ("parts".to_string(), fan(moonraker::FanKind::Parts, 75)),
+            ("exhaust".to_string(), fan(moonraker::FanKind::Exhaust, 40)),
+        ]
+        .into_iter()
+        .collect();
+
+        let detailed = human_status("dakota", &status, true);
+        assert!(
+            detailed.contains("Fans:\n  Part cooling: 75%\n  Exhaust: 40%"),
+            "{detailed}"
+        );
     }
 
     #[test]
