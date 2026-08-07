@@ -217,13 +217,16 @@ impl H264Stream {
 
 impl Drop for H264Stream {
     fn drop(&mut self) {
-        let _ = authorized_request(
+        // Fire-and-forget. Waiting for the TEARDOWN reply means draining every
+        // queued interleaved media frame first, blocking the dropping thread
+        // for the socket's whole idle budget for a response nothing reads.
+        let _ = write_request(
             &mut self.connection,
             rtsp_types::Method::Teardown,
             &self.uri,
-            &mut self.cseq,
-            &self.access_code,
+            self.cseq,
             &[(rtsp_types::headers::SESSION, self.session.clone())],
+            None,
         );
     }
 }
@@ -419,14 +422,15 @@ fn authorized_request(
     Ok(response)
 }
 
-fn send_request(
-    connection: &mut FramedConnection,
+/// Serializes one RTSP request. Kept separate from the socket so a teardown
+/// can be written without also committing to read a reply.
+fn request_bytes(
     method: rtsp_types::Method,
     uri: &rtsp_types::Url,
     cseq: u32,
     extra_headers: &[(rtsp_types::HeaderName, String)],
     authorization: Option<&str>,
-) -> Result<rtsp_types::Response<Vec<u8>>, CameraError> {
+) -> Result<Vec<u8>, CameraError> {
     let mut builder = rtsp_types::Request::builder(method, rtsp_types::Version::V1_0)
         .request_uri(uri.clone())
         .header(rtsp_types::headers::CSEQ, format!("{cseq}"));
@@ -436,12 +440,35 @@ fn send_request(
     if let Some(authorization) = authorization {
         builder = builder.header(rtsp_types::headers::AUTHORIZATION, authorization.to_owned());
     }
-    let request = builder.empty();
     let mut bytes = Vec::new();
-    request
+    builder
+        .empty()
         .write(&mut bytes)
         .map_err(|_| stream_error("failed to serialize RTSP request"))?;
-    connection.write_all(&bytes)?;
+    Ok(bytes)
+}
+
+fn write_request(
+    connection: &mut FramedConnection,
+    method: rtsp_types::Method,
+    uri: &rtsp_types::Url,
+    cseq: u32,
+    extra_headers: &[(rtsp_types::HeaderName, String)],
+    authorization: Option<&str>,
+) -> Result<(), CameraError> {
+    let bytes = request_bytes(method, uri, cseq, extra_headers, authorization)?;
+    connection.write_all(&bytes)
+}
+
+fn send_request(
+    connection: &mut FramedConnection,
+    method: rtsp_types::Method,
+    uri: &rtsp_types::Url,
+    cseq: u32,
+    extra_headers: &[(rtsp_types::HeaderName, String)],
+    authorization: Option<&str>,
+) -> Result<rtsp_types::Response<Vec<u8>>, CameraError> {
+    write_request(connection, method, uri, cseq, extra_headers, authorization)?;
     connection.next_response()
 }
 
@@ -663,4 +690,35 @@ fn encode_jpeg(yuv: &openh264::decoder::DecodedYUV) -> io::Result<Vec<u8>> {
         )
         .map_err(|error| io::Error::other(format!("JPEG encode failed: {error}")))?;
     Ok(jpeg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn teardown_is_serialized_without_waiting_for_a_response() {
+        let uri = rtsp_types::Url::parse("rtsps://printer.local:322/streaming/live/1").unwrap();
+        let bytes = request_bytes(
+            rtsp_types::Method::Teardown,
+            &uri,
+            9,
+            &[(rtsp_types::headers::SESSION, "abc123".to_owned())],
+            None,
+        )
+        .unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.starts_with("TEARDOWN rtsps://printer.local:322/streaming/live/1"));
+        assert!(text.contains("CSeq: 9"));
+        assert!(text.contains("Session: abc123"));
+    }
+
+    #[test]
+    fn digest_response_matches_the_live555_scheme() {
+        let header = digest_header("12345678", "DESCRIBE", "rtsps://printer.local:322/s", "n0nce");
+        assert!(header.contains("username=\"bblp\""));
+        assert!(header.contains("realm=\"LIVE555 Streaming Media\""));
+        assert!(header.contains("nonce=\"n0nce\""));
+        assert_eq!(extract_quoted(&header, "nonce").as_deref(), Some("n0nce"));
+    }
 }
