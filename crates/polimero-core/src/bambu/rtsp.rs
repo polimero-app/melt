@@ -697,7 +697,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn teardown_is_serialized_without_waiting_for_a_response() {
+    fn teardown_request_serializes_with_session_and_cseq() {
+        // ponytail: The fire-and-forget property of Drop (reading no response for
+        // TEARDOWN) is verified by inspection; exercising it fully requires a live
+        // TLS peer. This test covers only serialization format.
         let uri = rtsp_types::Url::parse("rtsps://printer.local:322/streaming/live/1").unwrap();
         let bytes = request_bytes(
             rtsp_types::Method::Teardown,
