@@ -1134,6 +1134,21 @@ async function addPrinter() {
   }
 }
 
+// Secondary printer actions live behind the overflow menu: three labelled
+// buttons could not fit a 280px card, which is reachable whenever the window
+// sits below the xl breakpoint.
+function printerActionItems(printer: Printer): ActionMenuItem[] {
+  return [
+    { label: t('printersView.editPrinter'), icon: PhPencilSimple, onSelect: () => openEdit(printer) },
+    {
+      label: t('printersView.refreshCertificate'),
+      icon: PhArrowsClockwise,
+      disabled: tlsRefreshing.value,
+      onSelect: () => void openTlsRefresh(printer.name),
+    },
+  ]
+}
+
 function removePrinter(name: string) {
   askConfirmation(
     { title: 'removal.title', description: 'removal.description', confirm: 'removal.confirm' },
@@ -2569,10 +2584,9 @@ onUnmounted(() => {
                 <dd :class="printer.insecure ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-300'">{{ printer.insecure ? t('printersView.tlsDisabled') : t('printersView.tlsVerified') }}</dd>
               </div>
             </dl>
-            <div class="mt-5 grid grid-cols-3 gap-2 xl:grid-cols-1">
-              <Button class="min-w-0 w-full" @click="selectPrinter(printer.name)"><PhCards class="size-4" aria-hidden="true" /> {{ t('printersView.openControl') }}</Button>
-              <Button class="min-w-0 w-full" @click="openEdit(printer)"><PhPencilSimple class="size-4" aria-hidden="true" /> {{ t('printersView.editPrinter') }}</Button>
-              <Button class="min-w-0 w-full" :disabled="tlsRefreshing" :aria-label="t('printersView.refreshCertificateNamed', { name: printer.name })" @click="openTlsRefresh(printer.name)"><PhArrowsClockwise class="size-4" aria-hidden="true" /> {{ t('printersView.refreshCertificate') }}</Button>
+            <div class="mt-5 flex items-center gap-2">
+              <Button class="min-w-0 flex-1" @click="selectPrinter(printer.name)"><PhCards class="size-4" aria-hidden="true" /> {{ t('printersView.openControl') }}</Button>
+              <ActionMenu :label="t('control.printerActions')" :items="printerActionItems(printer)" />
             </div>
           </Card>
           <button
