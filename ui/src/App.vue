@@ -607,6 +607,22 @@ const jobThumbnail = computed(() => {
   if (!name) return undefined
   return libraryFiles.value.find((file) => file.type === 'file' && file.name === name)
 })
+// aria-valuenow alone announces a bare "45". Spell out what the number means,
+// and fold in the layer and remaining time a sighted user reads beside the bar.
+const progressValueText = computed(() => {
+  if (preparingPercent.value !== undefined) return t('control.preparing')
+  const parts = [t('control.complete', { percent: progressPercent.value })]
+  const progress = selectedStatus.value?.progress
+  if (progress?.currentLayer !== undefined && progress.totalLayers !== undefined) {
+    parts.push(t('control.layer', { current: progress.currentLayer, total: progress.totalLayers }))
+  }
+  const remaining = selectedStatus.value?.timeEstimates?.remainingSeconds
+  if (hasActiveJob.value && remaining !== undefined) {
+    parts.push(t('control.remaining', { duration: formatDuration(remaining) }))
+  }
+  return parts.join(' · ')
+})
+
 const statusFaults = computed(() => {
   const status = selectedStatus.value
   if (!status) return []
@@ -2223,6 +2239,7 @@ onUnmounted(() => {
                     aria-valuemin="0"
                     aria-valuemax="100"
                     :aria-label="preparingPercent !== undefined ? t('control.preparing') : t('control.complete', { percent: progressPercent })"
+                    :aria-valuetext="progressValueText"
                   >
                     <div
                       class="h-2 rounded-full transition-[width]"
