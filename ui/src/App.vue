@@ -1904,10 +1904,14 @@ onUnmounted(() => {
               :aria-label="t('nav.ariaLabel')"
               class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-2 pr-9 pl-3 text-sm font-medium text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-gray-900 dark:text-white dark:outline-white/15 dark:*:bg-gray-800"
             >
-              <option v-for="printer in printers" :key="`compact-${printer.name}`" :value="`printer:${printer.name}`">
-                {{ printer.name }} · {{ statusLabel(badgeFor(printer.name)) }}
-              </option>
-              <option v-for="tab in sectionTabs" :key="`compact-${tab.view}`" :value="`view:${tab.view}`">{{ tab.label }}</option>
+              <optgroup v-if="printers.length" :label="t('nav.groupPrinters')">
+                <option v-for="printer in printers" :key="`compact-${printer.name}`" :value="`printer:${printer.name}`">
+                  {{ printer.name }} · {{ statusLabel(badgeFor(printer.name)) }}
+                </option>
+              </optgroup>
+              <optgroup :label="t('nav.groupSections')">
+                <option v-for="tab in sectionTabs" :key="`compact-${tab.view}`" :value="`view:${tab.view}`">{{ tab.label }}</option>
+              </optgroup>
             </select>
             <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-3 size-4 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
           </div>

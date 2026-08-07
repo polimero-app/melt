@@ -121,6 +121,8 @@ export type MessageKey =
   | "nav.settings"
   | "nav.files"
   | "nav.selectPrinter"
+  | "nav.groupPrinters"
+  | "nav.groupSections"
   | "status.idle"
   | "status.onlineIdle"
   | "status.onlineBusy"
@@ -561,6 +563,8 @@ const messages: Record<Locale, Messages> = {
     "nav.printers": "Manage printers",
     "nav.settings": "Configuration",
     "nav.files": "Files",
+    "nav.groupPrinters": "Printers",
+    "nav.groupSections": "Sections",
     "nav.selectPrinter": "Select printer",
     "status.idle": "Idle",
     "status.onlineIdle": "Online · idle",
@@ -999,6 +1003,8 @@ const messages: Record<Locale, Messages> = {
     "nav.printers": "Gerenciar impressoras",
     "nav.settings": "Configuração",
     "nav.files": "Arquivos",
+    "nav.groupPrinters": "Impressoras",
+    "nav.groupSections": "Seções",
     "nav.selectPrinter": "Selecionar impressora",
     "status.idle": "Ociosa",
     "status.onlineIdle": "Online · ociosa",
