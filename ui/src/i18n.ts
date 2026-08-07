@@ -295,6 +295,7 @@ export type MessageKey =
   | "filesView.changeFolder"
   | "filesView.breadcrumb"
   | "filesView.search"
+  | "filesView.previewUnavailable"
   | "filesView.sortBy"
   | "filesView.sortName"
   | "filesView.sortSize"
@@ -752,6 +753,7 @@ const messages: Record<Locale, Messages> = {
     "filesView.changeFolder": "Change folder",
     "filesView.breadcrumb": "Breadcrumb",
     "filesView.search": "Search files",
+    "filesView.previewUnavailable": "3D preview unavailable",
     "filesView.sortBy": "Sort by",
     "filesView.sortName": "Name",
     "filesView.sortSize": "Largest first",
@@ -1189,6 +1191,7 @@ const messages: Record<Locale, Messages> = {
     "filesView.changeFolder": "Trocar pasta",
     "filesView.breadcrumb": "Trilha de navegação",
     "filesView.search": "Buscar arquivos",
+    "filesView.previewUnavailable": "Pré-visualização 3D indisponível",
     "filesView.sortBy": "Ordenar por",
     "filesView.sortName": "Nome",
     "filesView.sortSize": "Maiores primeiro",

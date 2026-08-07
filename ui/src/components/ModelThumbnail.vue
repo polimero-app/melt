@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 
 type PreviewResponse = { kind: 'png' | 'model'; data: string }
 
-const props = defineProps<{ path: string; sizeBytes?: number; modifiedAt?: string; alt: string }>()
+const props = defineProps<{ path: string; sizeBytes?: number; modifiedAt?: string; alt: string; unavailableLabel: string }>()
 const container = ref<HTMLDivElement>()
 const canvas = ref<HTMLCanvasElement>()
 const failed = ref(false)
@@ -142,6 +142,6 @@ watch(() => props.path, () => {
 <template>
   <div ref="container" class="relative grid place-items-center overflow-hidden" :aria-label="alt" :aria-busy="loading" role="img">
     <canvas ref="canvas" class="size-full object-contain" aria-hidden="true" />
-    <span v-if="failed" class="absolute inset-0 grid place-items-center text-xs font-medium text-cyan-900/60 dark:text-cyan-100/60">3D preview unavailable</span>
+    <span v-if="failed" class="absolute inset-0 grid place-items-center text-xs font-medium text-cyan-900/60 dark:text-cyan-100/60">{{ props.unavailableLabel }}</span>
   </div>
 </template>

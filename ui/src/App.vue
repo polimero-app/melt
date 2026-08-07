@@ -2147,6 +2147,7 @@ onUnmounted(() => {
                     :size-bytes="jobThumbnail.sizeBytes"
                     :modified-at="jobThumbnail.modifiedAt"
                     :alt="jobThumbnail.name"
+                    :unavailable-label="t('filesView.previewUnavailable')"
                     class="size-10 shrink-0 overflow-hidden rounded-lg"
                   />
                   <div v-else class="grid size-10 shrink-0 place-items-center rounded-lg bg-cyan-50 text-cyan-600 dark:bg-cyan-400/10 dark:text-cyan-400">
@@ -2899,6 +2900,7 @@ onUnmounted(() => {
                 :size-bytes="file.sizeBytes"
                 :modified-at="file.modifiedAt"
                 :alt="file.name"
+                :unavailable-label="t('filesView.previewUnavailable')"
                 class="size-full min-h-45"
               />
               <div v-else class="grid min-h-45 place-items-center">
