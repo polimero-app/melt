@@ -314,9 +314,7 @@ type CameraTransport = 'webrtc' | 'mjpeg'
 
 interface MaterialSlot {
   slot: string
-  status: string
   type: string
-  name: string
   color: string
   remainingPercent: number
   remainingGrams?: number
@@ -703,9 +701,7 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
     humidity: unit.humidityLevel,
     slots: unit.trays.map((tray) => ({
       slot: unit.id >= 254 ? t('materials.slotExternal') : String(tray.slot + 1),
-      status: tray.filamentType ? t('materials.inUse') : t('materials.empty'),
       type: tray.filamentType ?? '—',
-      name: tray.filamentType ?? '—',
       color: filamentColor(tray.color),
       remainingPercent: filamentFillPercent(tray.remainingPercent),
       remainingGrams: tray.remainingGrams,

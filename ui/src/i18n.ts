@@ -213,8 +213,6 @@ export type MessageKey =
   | "materials.title"
   | "materials.externalSpool"
   | "materials.slotExternal"
-  | "materials.empty"
-  | "materials.inUse"
   | "materials.active"
   | "materials.ready"
   | "materials.humidity"
@@ -658,8 +656,6 @@ const messages: Record<Locale, Messages> = {
     "materials.title": "Filament Spools & Material Systems",
     "materials.externalSpool": "External spool",
     "materials.slotExternal": "EXT",
-    "materials.empty": "Empty",
-    "materials.inUse": "In use",
     "materials.active": "Active",
     "materials.ready": "Ready",
     "materials.humidity": "Humidity",
@@ -1100,8 +1096,6 @@ const messages: Record<Locale, Messages> = {
     "materials.title": "Carretéis de filamento e sistemas de material",
     "materials.externalSpool": "Carretel externo",
     "materials.slotExternal": "EXT",
-    "materials.empty": "Vazio",
-    "materials.inUse": "Em uso",
     "materials.active": "Ativo",
     "materials.ready": "Pronto",
     "materials.humidity": "Umidade",
