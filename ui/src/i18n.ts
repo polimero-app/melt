@@ -260,6 +260,8 @@ export type MessageKey =
   | "settingsView.noSlicers"
   | "settingsView.slicerName"
   | "settingsView.slicerPath"
+  | "settingsView.slicerPathPlaceholder"
+  | "settingsView.browse"
   | "settingsView.addSlicer"
   | "settingsView.slicerNameRequired"
   | "settingsView.slicerPathRequired"
@@ -703,6 +705,8 @@ const messages: Record<Locale, Messages> = {
     "settingsView.noSlicers": "No slicers configured.",
     "settingsView.slicerName": "Name",
     "settingsView.slicerPath": "Executable path",
+    "settingsView.slicerPathPlaceholder": "Choose the slicer executable…",
+    "settingsView.browse": "Browse…",
     "settingsView.addSlicer": "Add slicer",
     "settingsView.slicerNameRequired": "Enter a slicer name.",
     "settingsView.slicerPathRequired": "Enter the executable path.",
@@ -1143,6 +1147,8 @@ const messages: Record<Locale, Messages> = {
     "settingsView.noSlicers": "Nenhum fatiador configurado.",
     "settingsView.slicerName": "Nome",
     "settingsView.slicerPath": "Caminho do executável",
+    "settingsView.slicerPathPlaceholder": "Escolha o executável do fatiador…",
+    "settingsView.browse": "Procurar…",
     "settingsView.addSlicer": "Adicionar fatiador",
     "settingsView.slicerNameRequired": "Informe um nome para o fatiador.",
     "settingsView.slicerPathRequired": "Informe o caminho do executável.",

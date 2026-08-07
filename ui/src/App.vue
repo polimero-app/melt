@@ -486,11 +486,9 @@ const defaultNotifications: NotificationSetting[] = [
   { id: 'failure', label: 'settingsView.notifyFailure', description: 'settingsView.notifyFailureDescription', enabled: true },
   { id: 'disconnection', label: 'settingsView.notifyDisconnected', description: 'settingsView.notifyDisconnectedDescription', enabled: true },
 ]
-const defaultSlicers: SlicerSetting[] = [
-  { name: 'Bambu Studio', path: '/usr/bin/bambustudio', enabled: true },
-  { name: 'Orca Slicer', path: '/usr/bin/orcaslicer', enabled: true },
-  { name: 'PrusaSlicer', path: '/usr/bin/prusa-slicer', enabled: false },
-]
+// Backend preferences are the source of truth; seeding platform-specific
+// paths here only flashed wrong data on Windows and macOS before they load.
+const defaultSlicers: SlicerSetting[] = []
 const notifications = ref<NotificationSetting[]>(defaultNotifications)
 const slicers = ref<SlicerSetting[]>(defaultSlicers)
 const slicerDraft = ref({ name: '', path: '' })
@@ -828,6 +826,13 @@ async function updateSlicerEnabled(name: string, enabled: boolean) {
     slicers.value = previous
     showToast(message(reason), 'error')
   }
+}
+
+async function browseSlicerPath() {
+  const selected = await openFileDialog({ multiple: false })
+  if (!selected || Array.isArray(selected)) return
+  slicerDraft.value.path = selected
+  slicerPathError.value = undefined
 }
 
 async function addSlicer() {
@@ -2640,18 +2645,22 @@ onUnmounted(() => {
               </div>
               <div class="min-w-0">
                 <label for="slicer-path" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.slicerPath') }}</label>
-                <input
-                  ref="slicerPathInput"
-                  id="slicer-path"
-                  name="slicer-path"
-                  v-model="slicerDraft.path"
-                  type="text"
-                  autocomplete="off"
-                  :aria-invalid="Boolean(slicerPathError)"
-                  :aria-describedby="[slicerPathError && 'slicer-path-error', slicerError && 'slicer-error'].filter(Boolean).join(' ') || undefined"
-                  class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
-                  @input="slicerPathError = undefined"
-                />
+                <div class="mt-1 flex gap-2">
+                  <input
+                    ref="slicerPathInput"
+                    id="slicer-path"
+                    name="slicer-path"
+                    :value="slicerDraft.path"
+                    type="text"
+                    readonly
+                    autocomplete="off"
+                    :placeholder="t('settingsView.slicerPathPlaceholder')"
+                    :aria-invalid="Boolean(slicerPathError)"
+                    :aria-describedby="[slicerPathError && 'slicer-path-error', slicerError && 'slicer-error'].filter(Boolean).join(' ') || undefined"
+                    class="block w-full min-w-0 rounded-md bg-white px-3 py-1.5 font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:font-sans placeholder:text-gray-400 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:placeholder:text-gray-500"
+                  />
+                  <Button class="shrink-0" :disabled="slicerBusy" @click="browseSlicerPath">{{ t('settingsView.browse') }}</Button>
+                </div>
                 <p v-if="slicerPathError" id="slicer-path-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ slicerPathError }}</p>
               </div>
               <Button type="submit" class="w-full" :disabled="slicerBusy">{{ t('settingsView.addSlicer') }}</Button>
