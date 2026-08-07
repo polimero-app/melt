@@ -22,3 +22,4 @@ base64.workspace = true
 jpeg-encoder = "0.6.1"
 openh264 = "0.9.7"
 zip.workspace = true
+socket2.workspace = true

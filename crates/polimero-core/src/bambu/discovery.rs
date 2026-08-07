@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     io,
-    net::{IpAddr, Ipv4Addr, UdpSocket},
+    net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     time::{Duration, Instant},
 };
 
@@ -44,7 +44,7 @@ pub enum DiscoveryError {
 pub fn discover(timeout: Duration) -> Result<Vec<DiscoveredPrinter>, DiscoveryError> {
     let deadline = Instant::now() + timeout;
     let ssdp = open_ssdp();
-    let announcements = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, BAMBU_BROADCAST_PORT));
+    let announcements = open_announcements();
     if ssdp.is_err() && announcements.is_err() {
         return Err(DiscoveryError::Unavailable);
     }
@@ -97,6 +97,23 @@ fn open_ssdp() -> io::Result<UdpSocket> {
         SSDP_MULTICAST,
     )?;
     Ok(socket)
+}
+
+/// Binds the Bambu announcement port with address reuse, so a scan still works
+/// while Bambu Studio or OrcaSlicer holds the same port. Unix needs
+/// `SO_REUSEPORT` as well; Windows gets the sharing semantics from
+/// `SO_REUSEADDR` alone.
+fn open_announcements() -> io::Result<UdpSocket> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV4,
+        socket2::Type::DGRAM,
+        Some(socket2::Protocol::UDP),
+    )?;
+    socket.set_reuse_address(true)?;
+    #[cfg(unix)]
+    socket.set_reuse_port(true)?;
+    socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, BAMBU_BROADCAST_PORT)).into())?;
+    Ok(socket.into())
 }
 
 #[derive(Deserialize)]
@@ -267,5 +284,15 @@ mod tests {
         assert_eq!(entries[0].serial, "SN001");
         assert_eq!(entries[0].model, "P1S");
         assert_eq!(entries[0].name, "My P1S");
+    }
+
+    #[test]
+    fn announcement_socket_shares_the_port_with_another_slicer() {
+        // Bambu Studio and OrcaSlicer hold this port; a scan must not go
+        // silently SSDP-only just because one of them is open.
+        let first = open_announcements().expect("first bind");
+        let second = open_announcements().expect("second bind while the first is held");
+        assert_eq!(first.local_addr().unwrap().port(), BAMBU_BROADCAST_PORT);
+        assert_eq!(second.local_addr().unwrap().port(), BAMBU_BROADCAST_PORT);
     }
 }
