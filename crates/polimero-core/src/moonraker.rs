@@ -1280,6 +1280,14 @@ pub struct BambuExtension {
     pub status_transport: Option<String>,
     #[serde(rename = "reportedIP", skip_serializing_if = "Option::is_none")]
     pub reported_ip: Option<String>,
+    /// True when this firmware reports fans under `device.airduct`, which
+    /// selects the `set_fan` command family over legacy `M106` g-code.
+    #[serde(skip_serializing_if = "is_false")]
+    pub airduct_fans: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl BambuExtension {
@@ -1291,6 +1299,7 @@ impl BambuExtension {
             && self.mqtt_alive_supported.is_none()
             && self.status_transport.is_none()
             && self.reported_ip.is_none()
+            && !self.airduct_fans
     }
 }
 

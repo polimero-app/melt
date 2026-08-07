@@ -832,18 +832,12 @@ impl Client {
         if !control.controllable {
             return Err(Error::Unsupported("requested fan is telemetry only"));
         }
-        let payload = if let Some(index) = modern_fan_index(fan) {
-            set_fan_payload(index, speed_percent)
-        } else {
-            let prefix = match fan {
-                "partCooling" => "M106",
-                "auxiliary" => "M106 P2",
-                "chamber" => "M106 P3",
-                _ => return Err(Error::Unsupported("requested fan")),
-            };
-            let pwm = (u16::from(speed_percent) * 255 + 50) / 100;
-            gcode_payload(&format!("{prefix} S{pwm}"))
-        };
+        let airduct = status
+            .extensions
+            .bambu_lan
+            .as_ref()
+            .is_some_and(|extension| extension.airduct_fans);
+        let payload = fan_command_payload(airduct, fan, speed_percent)?;
         let report = self.exchange(access_code, fingerprint, payload, |report| {
             fan_speed_matches(report, fan, speed_percent)
         })?;
@@ -2224,6 +2218,24 @@ fn set_fan_payload(index: u8, speed_percent: u8) -> String {
     .to_string()
 }
 
+/// Chooses the command for the fan protocol this firmware actually reports.
+/// `auxiliary` exists in both key spaces, so the observed generation — never
+/// the key name — decides whether `set_fan` or legacy `M106` g-code is sent.
+fn fan_command_payload(airduct: bool, fan: &str, speed_percent: u8) -> Result<String, Error> {
+    if airduct {
+        let index = modern_fan_index(fan).ok_or(Error::Unsupported("requested fan"))?;
+        return Ok(set_fan_payload(index, speed_percent));
+    }
+    let prefix = match fan {
+        "partCooling" => "M106",
+        "auxiliary" => "M106 P2",
+        "chamber" => "M106 P3",
+        _ => return Err(Error::Unsupported("requested fan")),
+    };
+    let pwm = (u16::from(speed_percent) * 255 + 50) / 100;
+    Ok(gcode_payload(&format!("{prefix} S{pwm}")))
+}
+
 fn nozzle_index(item: &str) -> Option<u8> {
     match item {
         "nozzleRight" => Some(0),
@@ -2671,6 +2683,9 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
         name,
     });
     let errors = status_errors(print, state);
+    let fans = status_fans(print);
+    let lights = lights(report);
+    let (controls, airduct_fans) = control_inventory(print, &temperatures, &fans, &lights);
     let extension = BambuExtension {
         ams: ams_data(print),
         sd_card_state: sd_card_state(print),
@@ -2683,10 +2698,8 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
             .and_then(Value::as_str)
             .map(str::to_owned),
         reported_ip: string(print.get("wifi_ip")).filter(|value| !value.is_empty()),
+        airduct_fans,
     };
-    let fans = status_fans(print);
-    let lights = lights(report);
-    let controls = control_inventory(print, &temperatures, &fans, &lights);
     Ok(Status {
         state,
         temperatures,
@@ -2839,17 +2852,24 @@ fn status_fans(print: &Map<String, Value>) -> BTreeMap<String, u8> {
     .collect()
 }
 
+/// Builds the control inventory and reports which fan protocol produced it.
+/// The flag matters because `auxiliary` is a valid key in both generations.
 fn control_inventory(
     print: &Map<String, Value>,
     temperatures: &Option<Temperatures>,
     fans: &BTreeMap<String, u8>,
     lights: &BTreeMap<String, String>,
-) -> ControlInventory {
-    ControlInventory {
-        temperatures: temperature_controls(print, temperatures),
-        fans: airduct_fan_controls(print).unwrap_or_else(|| legacy_fan_controls(print, fans)),
-        lights: light_controls(lights),
-    }
+) -> (ControlInventory, bool) {
+    let airduct = airduct_fan_controls(print);
+    let airduct_fans = airduct.is_some();
+    (
+        ControlInventory {
+            temperatures: temperature_controls(print, temperatures),
+            fans: airduct.unwrap_or_else(|| legacy_fan_controls(print, fans)),
+            lights: light_controls(lights),
+        },
+        airduct_fans,
+    )
 }
 
 fn temperature_controls(
@@ -4248,6 +4268,49 @@ mod tests {
 
     use super::*;
     use crate::trace::{Direction, ProtocolTracer};
+
+    #[test]
+    fn fan_commands_follow_the_reported_protocol_generation_not_the_key_name() {
+        // `auxiliary` exists in both key spaces; only the generation decides.
+        let modern: Value =
+            serde_json::from_str(&fan_command_payload(true, "auxiliary", 50).unwrap()).unwrap();
+        assert_eq!(modern["print"]["command"], "set_fan");
+        assert_eq!(modern["print"]["fan_index"], 2);
+        assert_eq!(modern["print"]["speed"], 500);
+
+        let legacy: Value =
+            serde_json::from_str(&fan_command_payload(false, "auxiliary", 50).unwrap()).unwrap();
+        assert_eq!(legacy["print"]["command"], "gcode_line");
+        assert_eq!(legacy["print"]["param"], "M106 P2 S128");
+
+        assert!(matches!(
+            fan_command_payload(false, "parts", 50),
+            Err(Error::Unsupported("requested fan"))
+        ));
+        assert!(matches!(
+            fan_command_payload(true, "nonsense", 50),
+            Err(Error::Unsupported("requested fan"))
+        ));
+    }
+
+    #[test]
+    fn airduct_reports_flag_the_modern_fan_protocol() {
+        let h2 = parse_status(
+            br#"{"print":{"gcode_state":"IDLE","device":{"airduct":{"modeCur":0,"modeList":[],"parts":[{"id":16,"state":750,"range":65536000}]}}}}"#,
+        )
+        .unwrap();
+        assert!(h2.extensions.bambu_lan.as_ref().unwrap().airduct_fans);
+
+        let p1s = parse_status(
+            br#"{"print":{"gcode_state":"IDLE","support_aux_fan":true,"cooling_fan_speed":"9"}}"#,
+        )
+        .unwrap();
+        assert!(
+            p1s.extensions
+                .bambu_lan
+                .is_none_or(|extension| !extension.airduct_fans)
+        );
+    }
 
     #[derive(Debug)]
     struct BlockingResponseTracer {

@@ -4523,6 +4523,7 @@ mod tests {
                     mqtt_alive_supported: None,
                     status_transport: None,
                     reported_ip: None,
+                    airduct_fans: false,
                 }),
             },
         }
