@@ -11,6 +11,15 @@ import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, fil
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import { shouldDeferLibraryCards } from './library'
+import {
+  PRESET_NAME_MAX_LENGTH,
+  defaultPresets,
+  parseStoredPresets,
+  presetValidationFailed,
+  temperatureMaximums,
+  validatePresetDraft,
+  type TemperaturePreset,
+} from './temperatures'
 import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
 import SlideOver from './components/SlideOver.vue'
@@ -592,7 +601,10 @@ const statusFaults = computed(() => {
     ...status.warnings.map((entry) => ({ ...entry, severity: 'warning' as const, rawCode: undefined, recoverable: undefined })),
   ]
 })
-const temperatureRows = computed(() => {
+// Annotated so both branches unify on TemperatureControl: the legacy fallback
+// carries no advertised limits, and consumers must still see those fields as
+// optional rather than absent.
+const temperatureRows = computed<{ key: string; value: TemperatureControl }[]>(() => {
   const controls = Object.entries(selectedStatus.value?.controls?.temperatures ?? {})
   if (controls.length) return controls.map(([key, value]) => ({ key, value }))
   const temperatures = selectedStatus.value?.temperatures ?? {}
@@ -1209,12 +1221,6 @@ async function runJobAction(action: 'start' | 'pause' | 'resume' | 'cancel', dev
   }
 }
 
-const temperatureMaximums: Record<TemperatureControl['kind'], number> = {
-  nozzle: 300,
-  bed: 120,
-  chamber: 60,
-}
-
 const temperatureTimers: Record<string, number | undefined> = {}
 const pendingTemperatures: Record<string, number | undefined> = {}
 
@@ -1245,6 +1251,88 @@ function adjustTemperature(key: string, control: TemperatureControl, delta: numb
   const base = pendingTemperatures[key] ?? control.targetCelsius ?? control.currentCelsius
   if (base === undefined) return
   queueTemperature(key, control, base + delta)
+}
+
+// Typed entry, so reaching 250 °C doesn't cost fifty clicks on the steppers.
+// `queueTemperature` still clamps against the control's advertised limits, so
+// an out-of-range keystroke can never reach the printer.
+function setTemperature(key: string, control: TemperatureControl, event: Event) {
+  if (!activePrinter.value || !selectedStatus.value) return
+  const raw = (event.target as HTMLInputElement).value
+  if (raw.trim() === '') return
+  const next = Number(raw)
+  if (!Number.isFinite(next)) return
+  queueTemperature(key, control, Math.round(next))
+}
+
+const temperaturePresets = ref<TemperaturePreset[]>(parseStoredPresets(localStorage.getItem('temperaturePresets')))
+watchEffect(() => {
+  localStorage.setItem('temperaturePresets', JSON.stringify(temperaturePresets.value))
+})
+
+// A preset only touches the kinds it knows about; chamber targets and any
+// uncontrollable sensor are left exactly as they were.
+const presetTargetRows = computed(() =>
+  temperatureRows.value.filter((row) => row.value.controllable && (row.value.kind === 'nozzle' || row.value.kind === 'bed')),
+)
+const presetsAvailable = computed(() =>
+  Boolean(capabilities.value?.temperatureWrite) && presetTargetRows.value.length > 0,
+)
+
+function applyPreset(preset?: TemperaturePreset) {
+  if (!activePrinter.value || selectedStatus.value?.state !== 'idle') return
+  for (const row of presetTargetRows.value) {
+    // No preset means "cool down": every controllable heater goes to zero.
+    const target = preset ? (row.value.kind === 'nozzle' ? preset.nozzleCelsius : preset.bedCelsius) : 0
+    queueTemperature(row.key, row.value, target)
+  }
+  showToast(preset ? t('control.presetApplied', { name: preset.name }) : t('control.presetCooling'))
+}
+
+const presetDraft = ref({ name: '', nozzleCelsius: '', bedCelsius: '' })
+const presetErrors = ref<{ name?: string; nozzle?: string; bed?: string }>({})
+const presetNameInput = ref<HTMLInputElement>()
+
+function addPreset() {
+  const validation = validatePresetDraft(presetDraft.value)
+  presetErrors.value = {
+    name: validation.nameRequired
+      ? t('settingsView.presetNameRequired')
+      : validation.nameTooLong
+        ? t('settingsView.presetNameTooLong', { max: PRESET_NAME_MAX_LENGTH })
+        : undefined,
+    nozzle: validation.nozzleOutOfRange ? t('settingsView.presetNozzleInvalid', { max: temperatureMaximums.nozzle }) : undefined,
+    bed: validation.bedOutOfRange ? t('settingsView.presetBedInvalid', { max: temperatureMaximums.bed }) : undefined,
+  }
+  if (presetValidationFailed(validation)) {
+    void nextTick(() => presetNameInput.value?.focus())
+    return
+  }
+  temperaturePresets.value = [
+    ...temperaturePresets.value,
+    {
+      id: crypto.randomUUID(),
+      name: presetDraft.value.name.trim(),
+      nozzleCelsius: Number(presetDraft.value.nozzleCelsius),
+      bedCelsius: Number(presetDraft.value.bedCelsius),
+    },
+  ]
+  presetDraft.value = { name: '', nozzleCelsius: '', bedCelsius: '' }
+  presetErrors.value = {}
+}
+
+function removePreset(preset: TemperaturePreset) {
+  askConfirmation(
+    { title: 'settingsView.presetRemoveTitle', description: 'settingsView.presetRemoveDescription', confirm: 'settingsView.presetRemoveConfirm' },
+    { name: preset.name },
+    async () => {
+      temperaturePresets.value = temperaturePresets.value.filter((entry) => entry.id !== preset.id)
+    },
+  )
+}
+
+function restoreDefaultPresets() {
+  temperaturePresets.value = [...defaultPresets]
 }
 
 async function sendFan(fan: string, event: Event) {
@@ -2149,15 +2237,45 @@ onUnmounted(() => {
               <CardHeader :title="t('dashboard.temperature')" :icon="PhThermometerSimple" />
               <div class="font-light space-y-4 px-4 py-5 sm:p-6">
                 <div v-for="row in temperatureRows" :key="row.key" class="flex items-center justify-between gap-3">
-                  <div>
+                  <div class="min-w-0">
                     <p class="text-sm/6 font-light text-gray-900 dark:text-white">{{ temperatureLabel(row.key, row.value) }}</p>
                     <p class="font-mono text-sm text-gray-500 dark:text-gray-400"><span class="font-bold">{{ row.value.currentCelsius === undefined ? '—' : formatTemperature(row.value.currentCelsius) }}</span> °C <span aria-hidden="true">/</span> <span class="font-bold">{{ row.value.targetCelsius === undefined ? '—' : formatTemperature(row.value.targetCelsius) }}</span> °C</p>
                   </div>
-                  <div v-if="capabilities?.temperatureWrite && row.value.controllable" class="flex items-center gap-1">
+                  <div v-if="capabilities?.temperatureWrite && row.value.controllable" class="flex shrink-0 items-center gap-1">
                     <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.decreaseTemp', { sensor: temperatureLabel(row.key, row.value) })" @click="adjustTemperature(row.key, row.value, -5)"><PhMinus class="size-3.5" aria-hidden="true" /></IconButton>
+                    <input
+                      type="number"
+                      inputmode="numeric"
+                      :name="`temperature-${row.key}`"
+                      :value="row.value.targetCelsius === undefined ? '' : formatTemperature(row.value.targetCelsius)"
+                      :min="row.value.minimumCelsius ?? 0"
+                      :max="row.value.maximumCelsius ?? temperatureMaximums[row.value.kind]"
+                      :disabled="selectedStatus?.state !== 'idle'"
+                      :aria-label="t('control.setTemp', { sensor: temperatureLabel(row.key, row.value) })"
+                      class="w-16 rounded-md bg-white py-1.5 text-center font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 dark:bg-white/5 dark:text-white dark:outline-white/10"
+                      @change="setTemperature(row.key, row.value, $event)"
+                    />
                     <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.increaseTemp', { sensor: temperatureLabel(row.key, row.value) })" @click="adjustTemperature(row.key, row.value, 5)"><PhPlus class="size-3.5" aria-hidden="true" /></IconButton>
                   </div>
                   <p v-else-if="!row.value.controllable" class="shrink-0 text-right text-xs text-gray-400 dark:text-gray-500">{{ t('control.telemetryOnly') }}</p>
+                </div>
+
+                <!-- Material presets: set every controllable heater in one action. -->
+                <div v-if="presetsAvailable" class="border-t border-gray-200 pt-4 dark:border-white/10">
+                  <p id="preset-group-label" class="text-sm/6 font-light text-gray-900 dark:text-white">{{ t('control.presets') }}</p>
+                  <div class="mt-2 flex flex-wrap gap-2" role="group" aria-labelledby="preset-group-label">
+                    <Button
+                      v-for="preset in temperaturePresets"
+                      :key="preset.id"
+                      :disabled="selectedStatus?.state !== 'idle'"
+                      :title="`${preset.nozzleCelsius} °C / ${preset.bedCelsius} °C`"
+                      @click="applyPreset(preset)"
+                    >{{ preset.name }}</Button>
+                    <Button
+                      :disabled="selectedStatus?.state !== 'idle'"
+                      @click="applyPreset()"
+                    >{{ t('control.presetOff') }}</Button>
+                  </div>
                 </div>
               </div>
             </Card>
@@ -2534,6 +2652,86 @@ onUnmounted(() => {
               <Button type="submit" class="w-full" :disabled="slicerBusy">{{ t('settingsView.addSlicer') }}</Button>
             </form>
             <p v-if="slicerError" id="slicer-error" class="px-4 pb-4 text-xs text-red-600 sm:px-6 dark:text-red-400" role="alert">{{ slicerError }}</p>
+          </Card>
+          <Card as="section" class="overflow-hidden">
+            <CardHeader :title="t('settingsView.presets')" :icon="PhThermometerSimple">
+              <IconButton :title="t('settingsView.restorePresets')" :aria-label="t('settingsView.restorePresets')" @click="restoreDefaultPresets"><PhArrowsClockwise class="size-4" aria-hidden="true" /></IconButton>
+            </CardHeader>
+            <p class="px-4 pt-4 text-xs text-gray-500 sm:px-6 dark:text-gray-400">
+              {{ t('settingsView.presetsDescription', { nozzle: temperatureMaximums.nozzle, bed: temperatureMaximums.bed }) }}
+            </p>
+            <div class="mt-4 divide-y divide-gray-200 dark:divide-white/10">
+              <div v-for="preset in temperaturePresets" :key="preset.id" class="flex items-center justify-between gap-3 px-4 py-4 hover:bg-gray-50 sm:px-6 dark:hover:bg-white/5">
+                <div class="flex min-w-0 grow flex-col">
+                  <span class="truncate text-sm/6 font-medium text-gray-900 dark:text-white">{{ preset.name }}</span>
+                  <span class="font-mono text-xs text-gray-500 dark:text-gray-400">
+                    {{ t('settingsView.presetNozzle') }} {{ preset.nozzleCelsius }} <span aria-hidden="true">·</span> {{ t('settingsView.presetBed') }} {{ preset.bedCelsius }}
+                  </span>
+                </div>
+                <IconButton
+                  class="hover:text-red-600 dark:hover:text-red-400"
+                  :title="t('settingsView.removePreset')"
+                  :aria-label="t('settingsView.removeNamedPreset', { name: preset.name })"
+                  @click="removePreset(preset)"
+                ><PhTrash class="size-4" aria-hidden="true" /></IconButton>
+              </div>
+              <p v-if="!temperaturePresets.length" class="px-4 py-5 text-sm text-gray-500 sm:px-6 dark:text-gray-400">{{ t('settingsView.noPresets') }}</p>
+            </div>
+            <form autocomplete="off" class="grid gap-3 border-t border-gray-200 px-4 py-4 sm:px-6 dark:border-white/10" @submit.prevent="addPreset">
+              <div class="min-w-0">
+                <label for="preset-name" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.presetName') }}</label>
+                <input
+                  ref="presetNameInput"
+                  id="preset-name"
+                  name="preset-name"
+                  v-model="presetDraft.name"
+                  type="text"
+                  autocomplete="off"
+                  :maxlength="PRESET_NAME_MAX_LENGTH"
+                  :aria-invalid="Boolean(presetErrors.name)"
+                  :aria-describedby="presetErrors.name ? 'preset-name-error' : undefined"
+                  class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+                />
+                <p v-if="presetErrors.name" id="preset-name-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ presetErrors.name }}</p>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div class="min-w-0">
+                  <label for="preset-nozzle" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.presetNozzle') }}</label>
+                  <input
+                    id="preset-nozzle"
+                    name="preset-nozzle"
+                    v-model="presetDraft.nozzleCelsius"
+                    type="number"
+                    inputmode="numeric"
+                    min="0"
+                    :max="temperatureMaximums.nozzle"
+                    autocomplete="off"
+                    :aria-invalid="Boolean(presetErrors.nozzle)"
+                    :aria-describedby="presetErrors.nozzle ? 'preset-nozzle-error' : undefined"
+                    class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+                  />
+                  <p v-if="presetErrors.nozzle" id="preset-nozzle-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ presetErrors.nozzle }}</p>
+                </div>
+                <div class="min-w-0">
+                  <label for="preset-bed" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.presetBed') }}</label>
+                  <input
+                    id="preset-bed"
+                    name="preset-bed"
+                    v-model="presetDraft.bedCelsius"
+                    type="number"
+                    inputmode="numeric"
+                    min="0"
+                    :max="temperatureMaximums.bed"
+                    autocomplete="off"
+                    :aria-invalid="Boolean(presetErrors.bed)"
+                    :aria-describedby="presetErrors.bed ? 'preset-bed-error' : undefined"
+                    class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+                  />
+                  <p v-if="presetErrors.bed" id="preset-bed-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ presetErrors.bed }}</p>
+                </div>
+              </div>
+              <Button type="submit" class="w-full">{{ t('settingsView.addPreset') }}</Button>
+            </form>
           </Card>
           <Card as="section">
             <CardHeader :title="t('settingsView.appearance')" :icon="PhSun" />

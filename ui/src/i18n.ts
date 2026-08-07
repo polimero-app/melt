@@ -137,6 +137,10 @@ export type MessageKey =
   | "control.unavailableDescription"
   | "control.awaitingTitle"
   | "control.awaitingDescription"
+  | "control.presets"
+  | "control.presetOff"
+  | "control.presetApplied"
+  | "control.presetCooling"
   | "control.refreshConnection"
   | "control.reconnecting"
   | "control.faults"
@@ -416,7 +420,24 @@ export type MessageKey =
   | "printerState.unknown"
   | "status.unknownLabel"
   | "printersView.tlsVerified"
-  | "printersView.tlsDisabled";
+  | "printersView.tlsDisabled"
+  | "settingsView.presets"
+  | "settingsView.presetsDescription"
+  | "settingsView.presetName"
+  | "settingsView.presetNozzle"
+  | "settingsView.presetBed"
+  | "settingsView.addPreset"
+  | "settingsView.removePreset"
+  | "settingsView.removeNamedPreset"
+  | "settingsView.noPresets"
+  | "settingsView.restorePresets"
+  | "settingsView.presetNameRequired"
+  | "settingsView.presetNameTooLong"
+  | "settingsView.presetNozzleInvalid"
+  | "settingsView.presetBedInvalid"
+  | "settingsView.presetRemoveTitle"
+  | "settingsView.presetRemoveDescription"
+  | "settingsView.presetRemoveConfirm";
 
 type Messages = Record<MessageKey, string>;
 
@@ -556,6 +577,10 @@ const messages: Record<Locale, Messages> = {
     "control.unavailableDescription": "Polimero cannot reach this printer right now. Check the printer connection and try again.",
     "control.awaitingTitle": "Waiting for the first status sample",
     "control.awaitingDescription": "Polimero is establishing the printer heartbeat. Telemetry appears as soon as a sample arrives.",
+    "control.presets": "Material presets",
+    "control.presetOff": "Cool down",
+    "control.presetApplied": "{name} targets requested",
+    "control.presetCooling": "Cool down requested",
     "control.refreshConnection": "Refresh connection",
     "control.reconnecting": "Trying to reconnect to printer",
     "control.faults": "Printer alerts",
@@ -681,6 +706,23 @@ const messages: Record<Locale, Messages> = {
     "settingsView.slicerRemoveTitle": "Remove {name}?",
     "settingsView.slicerRemoveDescription": "This removes the slicer from Polimero. The application itself is not affected.",
     "settingsView.slicerRemoveConfirm": "Remove slicer",
+    "settingsView.presets": "Material presets",
+    "settingsView.presetsDescription": "Quick-set targets offered on the control view. Nozzle up to {nozzle} °C, bed up to {bed} °C.",
+    "settingsView.presetName": "Material",
+    "settingsView.presetNozzle": "Nozzle °C",
+    "settingsView.presetBed": "Bed °C",
+    "settingsView.addPreset": "Add preset",
+    "settingsView.removePreset": "Remove preset",
+    "settingsView.removeNamedPreset": "Remove preset {name}",
+    "settingsView.noPresets": "No presets configured.",
+    "settingsView.restorePresets": "Restore defaults",
+    "settingsView.presetNameRequired": "Enter a material name.",
+    "settingsView.presetNameTooLong": "Use {max} characters or fewer.",
+    "settingsView.presetNozzleInvalid": "Enter a whole number between 0 and {max}.",
+    "settingsView.presetBedInvalid": "Enter a whole number between 0 and {max}.",
+    "settingsView.presetRemoveTitle": "Remove {name}?",
+    "settingsView.presetRemoveDescription": "The preset disappears from the control view. Printer targets already set are unaffected.",
+    "settingsView.presetRemoveConfirm": "Remove preset",
     "settingsView.appearance": "Appearance",
     "settingsView.theme": "Theme",
     "settingsView.themeSystem": "System",
@@ -972,6 +1014,10 @@ const messages: Record<Locale, Messages> = {
     "control.unavailableDescription": "O Polimero não consegue alcançar esta impressora no momento. Verifique a conexão da impressora e tente novamente.",
     "control.awaitingTitle": "Aguardando a primeira amostra de status",
     "control.awaitingDescription": "O Polimero está estabelecendo o heartbeat da impressora. A telemetria aparece assim que uma amostra chegar.",
+    "control.presets": "Predefinições de material",
+    "control.presetOff": "Resfriar",
+    "control.presetApplied": "Alvos de {name} solicitados",
+    "control.presetCooling": "Resfriamento solicitado",
     "control.refreshConnection": "Atualizar conexão",
     "control.reconnecting": "Tentando reconectar à impressora",
     "control.faults": "Alertas da impressora",
@@ -1097,6 +1143,23 @@ const messages: Record<Locale, Messages> = {
     "settingsView.slicerRemoveTitle": "Remover {name}?",
     "settingsView.slicerRemoveDescription": "Isso remove o fatiador do Polimero. O aplicativo em si não é afetado.",
     "settingsView.slicerRemoveConfirm": "Remover fatiador",
+    "settingsView.presets": "Predefinições de material",
+    "settingsView.presetsDescription": "Alvos rápidos oferecidos na visão de controle. Bico até {nozzle} °C, mesa até {bed} °C.",
+    "settingsView.presetName": "Material",
+    "settingsView.presetNozzle": "Bico °C",
+    "settingsView.presetBed": "Mesa °C",
+    "settingsView.addPreset": "Adicionar predefinição",
+    "settingsView.removePreset": "Remover predefinição",
+    "settingsView.removeNamedPreset": "Remover predefinição {name}",
+    "settingsView.noPresets": "Nenhuma predefinição configurada.",
+    "settingsView.restorePresets": "Restaurar padrões",
+    "settingsView.presetNameRequired": "Informe um nome de material.",
+    "settingsView.presetNameTooLong": "Use no máximo {max} caracteres.",
+    "settingsView.presetNozzleInvalid": "Informe um número inteiro entre 0 e {max}.",
+    "settingsView.presetBedInvalid": "Informe um número inteiro entre 0 e {max}.",
+    "settingsView.presetRemoveTitle": "Remover {name}?",
+    "settingsView.presetRemoveDescription": "A predefinição some da visão de controle. Alvos já definidos na impressora não são afetados.",
+    "settingsView.presetRemoveConfirm": "Remover predefinição",
     "settingsView.appearance": "Aparência",
     "settingsView.theme": "Tema",
     "settingsView.themeSystem": "Sistema",
