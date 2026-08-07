@@ -2931,6 +2931,21 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- The search term survives directory navigation, so an empty folder
+             could just be an active filter. Say so, and offer a way out. -->
+        <div v-if="normalizedSearchTerm" class="mb-5 flex flex-wrap items-center gap-2 px-4 sm:px-0" role="status">
+          <span class="inline-flex items-center gap-x-2 rounded-md bg-cyan-50 px-2 py-1 text-xs font-medium text-cyan-700 dark:bg-cyan-400/10 dark:text-cyan-400">
+            {{ t('filesView.filteredBy', { term: searchTerm.trim(), count: visibleDirectories.length + visibleFiles.length }) }}
+            <button
+              type="button"
+              class="rounded-sm hover:text-cyan-900 dark:hover:text-cyan-200"
+              :aria-label="t('filesView.clearSearch')"
+              :title="t('filesView.clearSearch')"
+              @click="searchTerm = ''"
+            ><PhX class="size-3.5" aria-hidden="true" /></button>
+          </span>
+        </div>
+
         <div v-if="visibleDirectories.length" class="mb-5 grid gap-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
           <button
             v-for="directory in visibleDirectories"

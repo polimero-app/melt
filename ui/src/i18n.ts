@@ -298,6 +298,8 @@ export type MessageKey =
   | "filesView.breadcrumb"
   | "filesView.search"
   | "filesView.previewUnavailable"
+  | "filesView.filteredBy"
+  | "filesView.clearSearch"
   | "filesView.sortBy"
   | "filesView.sortName"
   | "filesView.sortSize"
@@ -758,6 +760,8 @@ const messages: Record<Locale, Messages> = {
     "filesView.breadcrumb": "Breadcrumb",
     "filesView.search": "Search files",
     "filesView.previewUnavailable": "3D preview unavailable",
+    "filesView.filteredBy": "Filtered by \u201c{term}\u201d · {count} shown",
+    "filesView.clearSearch": "Clear search",
     "filesView.sortBy": "Sort by",
     "filesView.sortName": "Name",
     "filesView.sortSize": "Largest first",
@@ -1198,6 +1202,8 @@ const messages: Record<Locale, Messages> = {
     "filesView.breadcrumb": "Trilha de navegação",
     "filesView.search": "Buscar arquivos",
     "filesView.previewUnavailable": "Pré-visualização 3D indisponível",
+    "filesView.filteredBy": "Filtrado por \u201c{term}\u201d · {count} exibidos",
+    "filesView.clearSearch": "Limpar busca",
     "filesView.sortBy": "Ordenar por",
     "filesView.sortName": "Nome",
     "filesView.sortSize": "Maiores primeiro",
