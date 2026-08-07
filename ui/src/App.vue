@@ -1513,7 +1513,7 @@ async function downloadFile(file: FileEntry) {
     await invoke('printer_file_download', {
       request: { name: activePrinter.value.name, devicePath: file.devicePath, destination, transferId, totalBytes: file.sizeBytes },
     })
-    showToast(t('filesView.downloadStarted', { name: file.name }))
+    showToast(t('filesView.downloaded', { name: file.name }))
   } catch (reason) {
     showToast(message(reason), 'error')
   } finally {

@@ -311,7 +311,7 @@ export type MessageKey =
   | "filesView.deleted"
   | "filesView.openingIn"
   | "filesView.sentToPrinter"
-  | "filesView.downloadStarted"
+  | "filesView.downloaded"
   | "filesView.downloadFile"
   | "filesView.downloadingPercent"
   | "filesView.downloadNamed"
@@ -771,7 +771,7 @@ const messages: Record<Locale, Messages> = {
     "filesView.deleted": "{name} deleted",
     "filesView.openingIn": "Opening {name} in Bambu Studio",
     "filesView.sentToPrinter": "{name} sent to printer",
-    "filesView.downloadStarted": "{name} download started",
+    "filesView.downloaded": "{name} downloaded",
     "filesView.downloadFile": "Download file",
     "filesView.downloadingPercent": "Downloading… {percent}%",
     "filesView.downloadNamed": "Download {name}",
@@ -1211,7 +1211,7 @@ const messages: Record<Locale, Messages> = {
     "filesView.deleted": "{name} excluído",
     "filesView.openingIn": "Abrindo {name} no Bambu Studio",
     "filesView.sentToPrinter": "{name} enviado para a impressora",
-    "filesView.downloadStarted": "Download de {name} iniciado",
+    "filesView.downloaded": "{name} baixado",
     "filesView.downloadFile": "Baixar arquivo",
     "filesView.downloadingPercent": "Baixando… {percent}%",
     "filesView.downloadNamed": "Baixar {name}",
