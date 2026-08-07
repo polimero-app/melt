@@ -2845,18 +2845,6 @@ onUnmounted(() => {
                   <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.platform') }}</dt>
                   <dd class="font-mono text-gray-900 dark:text-gray-300">{{ diagnostics.platform }}</dd>
                 </div>
-                <div v-for="printer in diagnostics?.bambu ?? []" :key="printer.printer" class="py-3">
-                  <dt class="font-medium text-gray-900 dark:text-white">{{ t('settingsView.bambuCompatibility') }} · {{ printer.printer }}</dt>
-                  <dd class="mt-2 space-y-1 text-xs text-gray-600 dark:text-gray-300">
-                    <p><span class="text-gray-500 dark:text-gray-400">{{ t('settingsView.model') }}:</span> <span class="font-mono">{{ printer.modelRaw || printer.canonicalModel }}</span></p>
-                    <p><span class="text-gray-500 dark:text-gray-400">{{ t('settingsView.authorization') }}:</span> <span class="font-mono">{{ printer.authorization.effective }}</span></p>
-                    <p><span class="text-gray-500 dark:text-gray-400">{{ t('settingsView.cameraTransport') }}:</span> <span class="font-mono">{{ printer.camera.preferred }} · {{ printer.camera.source }}</span></p>
-                    <p><span class="text-gray-500 dark:text-gray-400">{{ t('settingsView.storageTransport') }}:</span> <span class="font-mono">{{ printer.storageTransport }}</span></p>
-                    <p v-if="printer.firmwareModules.length"><span class="text-gray-500 dark:text-gray-400">{{ t('settingsView.firmwareModules') }}:</span> <span class="font-mono">{{ printer.firmwareModules.map((module) => `${module.name} ${module.software}`).join(', ') }}</span></p>
-                    <p><span class="text-gray-500 dark:text-gray-400">{{ t('settingsView.quirks') }}:</span> {{ printer.quirks.length ? printer.quirks.map((quirk) => `${quirk.id} (${quirk.active ? 'active' : quirk.qualification})`).join(', ') : t('settingsView.none') }}</p>
-                    <p v-if="printer.camera.rejectedAdvertisement" class="text-amber-700 dark:text-amber-300">{{ printer.camera.rejectedAdvertisement }}</p>
-                  </dd>
-                </div>
                 <div v-if="diagnostics" class="flex items-center justify-between py-2">
                   <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.profiles') }}</dt>
                   <dd class="font-mono text-gray-900 dark:text-gray-300">{{ diagnostics.configuredProfiles }}</dd>
@@ -2866,6 +2854,43 @@ onUnmounted(() => {
                   <dd class="font-mono text-gray-900 dark:text-gray-300">{{ t('settingsView.monitorValue', { workers: diagnostics.monitorWorkers, seconds: diagnostics.monitorIntervalSeconds }) }}</dd>
                 </div>
               </dl>
+
+              <!-- Per-printer compatibility is a set of nested reports, not a
+                   term/definition pair of the summary list above. -->
+              <section
+                v-for="printer in diagnostics?.bambu ?? []"
+                :key="printer.printer"
+                class="mt-4 border-t border-gray-200 pt-3 dark:border-white/10"
+              >
+                <h4 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('settingsView.bambuCompatibility') }} · {{ printer.printer }}</h4>
+                <dl class="mt-2 space-y-1 text-xs text-gray-600 dark:text-gray-300">
+                  <div class="flex flex-wrap gap-x-1">
+                    <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.model') }}:</dt>
+                    <dd class="font-mono">{{ printer.modelRaw || printer.canonicalModel }}</dd>
+                  </div>
+                  <div class="flex flex-wrap gap-x-1">
+                    <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.authorization') }}:</dt>
+                    <dd class="font-mono">{{ printer.authorization.effective }}</dd>
+                  </div>
+                  <div class="flex flex-wrap gap-x-1">
+                    <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.cameraTransport') }}:</dt>
+                    <dd class="font-mono">{{ printer.camera.preferred }} · {{ printer.camera.source }}</dd>
+                  </div>
+                  <div class="flex flex-wrap gap-x-1">
+                    <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.storageTransport') }}:</dt>
+                    <dd class="font-mono">{{ printer.storageTransport }}</dd>
+                  </div>
+                  <div v-if="printer.firmwareModules.length" class="flex flex-wrap gap-x-1">
+                    <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.firmwareModules') }}:</dt>
+                    <dd class="font-mono">{{ printer.firmwareModules.map((module) => `${module.name} ${module.software}`).join(', ') }}</dd>
+                  </div>
+                  <div class="flex flex-wrap gap-x-1">
+                    <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.quirks') }}:</dt>
+                    <dd>{{ printer.quirks.length ? printer.quirks.map((quirk) => `${quirk.id} (${quirk.active ? 'active' : quirk.qualification})`).join(', ') : t('settingsView.none') }}</dd>
+                  </div>
+                </dl>
+                <p v-if="printer.camera.rejectedAdvertisement" class="mt-1 text-xs text-amber-700 dark:text-amber-300">{{ printer.camera.rejectedAdvertisement }}</p>
+              </section>
               <p v-if="diagnosticsError" class="mt-3 text-xs text-red-600 dark:text-red-400" role="alert">{{ diagnosticsError }}</p>
               <Button class="mt-4 w-full" :disabled="diagnosticsLoading" @click="runDiagnostics"><PhDesktop class="size-4" aria-hidden="true" /> {{ diagnosticsLoading ? t('common.loading') : t('diagnostics.open') }}</Button>
             </div>
