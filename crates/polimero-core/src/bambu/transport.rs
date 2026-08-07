@@ -1492,7 +1492,7 @@ fn set_socket_timeout(socket: &TcpStream, deadline: Instant) -> Result<(), Error
 
 /// Bounds how long a single read or write may stall, rather than how long the
 /// whole operation may take, so bulk transfers are not cut off mid-file.
-fn set_socket_idle_timeout(socket: &TcpStream, timeout: Duration) -> Result<(), Error> {
+pub(super) fn set_socket_idle_timeout(socket: &TcpStream, timeout: Duration) -> Result<(), Error> {
     socket
         .set_read_timeout(Some(timeout))
         .and_then(|_| socket.set_write_timeout(Some(timeout)))
@@ -6172,6 +6172,20 @@ mod tests {
                 "transfer {attempt} did not resume the control session"
             );
         }
+    }
+
+    #[test]
+    fn idle_timeouts_can_be_rearmed_past_the_connect_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+
+        let deadline = Instant::now() + Duration::from_millis(50);
+        set_socket_timeout(&socket, deadline).unwrap();
+        assert!(socket.read_timeout().unwrap().unwrap() <= Duration::from_millis(50));
+
+        set_socket_idle_timeout(&socket, Duration::from_secs(10)).unwrap();
+        assert!(socket.read_timeout().unwrap().unwrap() > Duration::from_secs(9));
+        assert!(socket.write_timeout().unwrap().unwrap() > Duration::from_secs(9));
     }
 
     fn test_acceptor() -> SslAcceptor {

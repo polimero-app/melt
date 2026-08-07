@@ -260,6 +260,11 @@ fn open_h264_stream_with_decoder(
     let (connection, _) =
         transport::open_tls(&connector, profile, RTSP_PORT, fingerprint, true, deadline)
             .map_err(map_transport_error)?;
+    // The handshake budget must not become the live stream's read deadline: a
+    // slow connect (or a failed RTSPS probe ahead of this one) would otherwise
+    // leave the camera with a sub-second inter-frame timeout.
+    transport::set_socket_idle_timeout(connection.get_ref(), profile.timeout())
+        .map_err(map_transport_error)?;
     let mut connection = FramedConnection::new(connection);
 
     let uri_string = format!("rtsps://{}:{RTSP_PORT}{RTSP_PATH}", profile.host());

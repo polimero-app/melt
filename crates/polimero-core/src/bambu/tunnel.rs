@@ -74,6 +74,10 @@ impl Connection {
         let connector = transport::tls_connector()?;
         let (stream, _) =
             transport::open_tls(&connector, profile, PORT, fingerprint, true, deadline)?;
+        // Bulk transfers are bounded by an idle timeout, not a wall clock, so
+        // the socket must not keep whatever fraction of the connect budget the
+        // handshake happened to leave behind.
+        transport::set_socket_idle_timeout(stream.get_ref(), profile.timeout())?;
         let mut connection = Self {
             stream,
             sequence: 1,

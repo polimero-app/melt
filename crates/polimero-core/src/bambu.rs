@@ -739,7 +739,7 @@ fn open_camera_connection(
         .checked_add(timeout)
         .ok_or_else(|| CameraError::Connect(io::Error::from(io::ErrorKind::TimedOut)))?;
     let connector = transport::tls_connector().map_err(|_| CameraError::Tls)?;
-    transport::open_tls(
+    let (stream, _) = transport::open_tls(
         &connector,
         profile,
         CAMERA_PORT,
@@ -747,7 +747,6 @@ fn open_camera_connection(
         true,
         deadline,
     )
-    .map(|(stream, _)| stream)
     .map_err(|error| match error {
         TransportError::Pin(error) => CameraError::Pin(error),
         TransportError::MissingCertificate => CameraError::MissingCertificate,
@@ -755,7 +754,13 @@ fn open_camera_connection(
         TransportError::Tls => CameraError::Tls,
         TransportError::Timeout => CameraError::Connect(io::Error::from(io::ErrorKind::TimedOut)),
         _ => CameraError::Connect(io::Error::from(io::ErrorKind::ConnectionRefused)),
-    })
+    })?;
+    // `timeout` here is the remaining connect budget, which on the RTSPS
+    // fallback path can be a fraction of a second. A live stream needs the
+    // profile's steady-state idle budget instead.
+    transport::set_socket_idle_timeout(stream.get_ref(), profile.timeout())
+        .map_err(|_| CameraError::Tls)?;
+    Ok(stream)
 }
 
 fn send_camera_auth(connection: &mut impl Write, access_code: &str) -> io::Result<()> {
