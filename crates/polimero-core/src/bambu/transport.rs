@@ -2157,24 +2157,23 @@ fn next_sequence_id() -> String {
     next_sequence().to_string()
 }
 
+/// Bambu firmware treats the sequence id as a signed 32-bit value.
+const MAX_SAFE_SEQUENCE: u64 = i32::MAX as u64;
+
+fn wrap_sequence(previous: u64) -> u64 {
+    if previous >= MAX_SAFE_SEQUENCE {
+        1
+    } else {
+        previous + 1
+    }
+}
+
 fn next_sequence() -> u64 {
-    const MAX_SAFE_SEQUENCE: u64 = i32::MAX as u64;
     SEQUENCE
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |previous| {
-            Some(if previous >= MAX_SAFE_SEQUENCE {
-                1
-            } else {
-                previous + 1
-            })
+            Some(wrap_sequence(previous))
         })
-        .map(|previous| {
-            if previous >= MAX_SAFE_SEQUENCE {
-                1
-            } else {
-                previous + 1
-            }
-        })
-        .unwrap_or(1)
+        .map_or(1, wrap_sequence)
 }
 
 fn gcode_payload(gcode: &str) -> String {
@@ -6186,6 +6185,16 @@ mod tests {
         set_socket_idle_timeout(&socket, Duration::from_secs(10)).unwrap();
         assert!(socket.read_timeout().unwrap().unwrap() > Duration::from_secs(9));
         assert!(socket.write_timeout().unwrap().unwrap() > Duration::from_secs(9));
+    }
+
+    #[test]
+    fn sequence_ids_stay_in_the_firmware_safe_range_and_wrap_to_one() {
+        assert_eq!(wrap_sequence(0), 1);
+        assert_eq!(wrap_sequence(41), 42);
+        // Bambu firmware treats the sequence id as a signed 32-bit value.
+        assert_eq!(wrap_sequence(MAX_SAFE_SEQUENCE - 1), MAX_SAFE_SEQUENCE);
+        assert_eq!(wrap_sequence(MAX_SAFE_SEQUENCE), 1);
+        assert_eq!(wrap_sequence(u64::MAX), 1);
     }
 
     fn test_acceptor() -> SslAcceptor {

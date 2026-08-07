@@ -136,7 +136,9 @@ impl Connection {
     }
 
     pub(super) fn list(&mut self, storage: &str, path: &str) -> Result<FileList, Error> {
-        if path != "/" || !valid_wire_path(path) {
+        // Only the storage root is listable here; `normalize_device_path` has
+        // already rejected traversal and control characters upstream.
+        if path != "/" {
             return Err(Error::Unsupported("nested :6000 file listing"));
         }
         let sequence = self.next_sequence();
