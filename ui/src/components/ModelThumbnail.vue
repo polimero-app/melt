@@ -140,7 +140,15 @@ watch(() => props.path, () => {
 </script>
 
 <template>
-  <div ref="container" class="relative grid place-items-center overflow-hidden" :aria-label="alt" :aria-busy="loading" role="img">
+  <!-- Once rendering has failed there is no image to describe, so the element
+       stops claiming to be one and the fallback text is read instead. -->
+  <div
+    ref="container"
+    class="relative grid place-items-center overflow-hidden"
+    :role="failed ? undefined : 'img'"
+    :aria-label="failed ? undefined : alt"
+    :aria-busy="loading"
+  >
     <canvas ref="canvas" class="size-full object-contain" aria-hidden="true" />
     <span v-if="failed" class="absolute inset-0 grid place-items-center text-xs font-medium text-cyan-900/60 dark:text-cyan-100/60">{{ props.unavailableLabel }}</span>
   </div>
