@@ -845,11 +845,7 @@ impl Client {
             gcode_payload(&format!("{prefix} S{pwm}"))
         };
         let report = self.exchange(access_code, fingerprint, payload, |report| {
-            parse_status_value(report)
-                .ok()
-                .and_then(|status| status.fans.get(fan).copied())
-                // Reports use a 0-15 scale, so one step is about 7 points.
-                .is_some_and(|reported| reported.abs_diff(speed_percent) <= 7)
+            fan_speed_matches(report, fan, speed_percent)
         })?;
         parse_status(&report)?;
         Ok(FanResult {
@@ -2553,6 +2549,24 @@ fn report_state_is(report: &Value, states: &[PrinterState]) -> bool {
     parse_status_value(report)
         .map(|status| states.contains(&status.state))
         .unwrap_or(false)
+}
+
+/// Confirms a fan reached the requested speed using the same control map the
+/// command was dispatched from. `Status::fans` only ever carries the four
+/// legacy slot names, so an airduct key looked up there is never found and the
+/// exchange would spin until it timed out on a command the printer accepted.
+fn fan_speed_matches(report: &Value, fan: &str, speed_percent: u8) -> bool {
+    parse_status_value(report)
+        .ok()
+        .and_then(|status| {
+            status
+                .controls
+                .fans
+                .get(fan)
+                .and_then(|control| control.speed_percent)
+        })
+        // Legacy reports use a 0-15 scale, so one step is about 7 points.
+        .is_some_and(|reported| reported.abs_diff(speed_percent) <= 7)
 }
 
 fn light_state_is(report: &Value, light: &str, state: LightState) -> bool {
@@ -4482,6 +4496,28 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["heatbreak", "partCooling"]
         );
+    }
+
+    #[test]
+    fn fan_acceptance_reads_the_control_map_the_command_targets() {
+        // H2-class: fans live under device.airduct and never appear in
+        // `Status::fans`, so the legacy map cannot confirm the command.
+        let airduct: Value = serde_json::from_str(
+            r#"{"print":{"gcode_state":"IDLE","device":{"airduct":{"modeCur":0,"modeList":[{"modeId":0,"ctrl":[16,32],"off":[48]}],"parts":[{"id":16,"state":750,"range":65536000},{"id":48,"state":0,"range":65536000}]}}}}"#,
+        )
+        .unwrap();
+        assert!(fan_speed_matches(&airduct, "parts", 75));
+        assert!(!fan_speed_matches(&airduct, "parts", 40));
+        assert!(!fan_speed_matches(&airduct, "partCooling", 75));
+
+        // Legacy firmware still reports a 0-15 scale, so the tolerance holds.
+        let legacy: Value = serde_json::from_str(
+            r#"{"print":{"gcode_state":"IDLE","support_aux_fan":true,"cooling_fan_speed":"9","big_fan1_speed":"3"}}"#,
+        )
+        .unwrap();
+        assert!(fan_speed_matches(&legacy, "partCooling", 60));
+        assert!(fan_speed_matches(&legacy, "auxiliary", 20));
+        assert!(!fan_speed_matches(&legacy, "partCooling", 10));
     }
 
     #[test]
