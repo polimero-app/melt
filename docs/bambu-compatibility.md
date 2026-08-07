@@ -32,9 +32,13 @@ fill another media type's bounded queue.
 
 Polimero resolves LAN authorization only from explicit live security fields or
 future evidence-qualified rules. A proven `signingRequired` mode blocks file
-writes, print start/control, motion, thermal, fan, light, speed, and emergency
-commands before any mutating transport work. Read-only status and diagnostics
-remain available. Unknown authorization retains attempt-and-observe behavior.
+writes, print start/control, motion, thermal, fan, light, and speed commands
+before any mutating transport work, resolving live status first when the
+client has not yet observed it. Emergency stop is gated only by an already
+resolved mode: it must never block on a status exchange or the reusable
+session lock, and the printer's own rejection remains its backstop. Read-only
+status and diagnostics remain available. Unknown authorization retains
+attempt-and-observe behavior.
 
 The community-reported meaning of `print.fun` bit 29 is retained as an
 inactive, provisional observation. It is visible for qualification but cannot

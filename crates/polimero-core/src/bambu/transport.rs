@@ -246,26 +246,39 @@ impl Client {
             .unwrap_or_else(|| self.profile.default_capabilities())
     }
 
+    /// Resolves authorization before mutating. A cold client has no cached
+    /// capabilities, so without this refresh the documented `signingRequired`
+    /// block would silently fall through as `Unknown` on every one-shot client
+    /// the CLI builds, and on the first mutation of a pooled one.
+    ///
+    /// `EmergencyStop` deliberately opts out: it runs on a fresh session
+    /// precisely so it never waits on the reusable-session lock, and blocking a
+    /// stop behind a status exchange is worse than the gate it would enforce.
     fn authorize_mutation(
         &self,
-        _access_code: Option<&str>,
-        _fingerprint: Option<&str>,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
         class: MutationClass,
     ) -> Result<(), Error> {
-        let authorization = self
-            .capabilities
+        if class != MutationClass::EmergencyStop && self.cached_authorization().is_none() {
+            self.status(access_code, fingerprint)?;
+        }
+        match self
+            .cached_authorization()
+            .unwrap_or(AuthorizationMode::Unknown)
+        {
+            AuthorizationMode::SigningRequired => Err(Error::AuthorizationRequired(class)),
+            AuthorizationMode::ConflictingEvidence => Err(Error::AuthorizationConflict(class)),
+            AuthorizationMode::Unknown | AuthorizationMode::DeveloperMode => Ok(()),
+        }
+    }
+
+    fn cached_authorization(&self) -> Option<AuthorizationMode> {
+        self.capabilities
             .lock()
             .ok()
-            .and_then(|value| value.clone())
+            .and_then(|capabilities| capabilities.clone())
             .map(|capabilities| capabilities.authorization)
-            .unwrap_or(AuthorizationMode::Unknown);
-        if authorization == AuthorizationMode::SigningRequired {
-            return Err(Error::AuthorizationRequired(class));
-        }
-        if authorization == AuthorizationMode::ConflictingEvidence {
-            return Err(Error::AuthorizationConflict(class));
-        }
-        Ok(())
     }
 
     fn observe_runtime_status(&self, report: &[u8]) {
@@ -292,9 +305,12 @@ impl Client {
         if let Ok(mut observed) = self.observed_storage.lock() {
             *observed = Some(transport);
         }
-        if let Ok(mut capabilities) = self.capabilities.lock() {
-            let capabilities =
-                capabilities.get_or_insert_with(|| self.profile.default_capabilities());
+        // Only refine an existing observation. Creating one here would make
+        // `cached_authorization` report a resolved-but-unobserved Unknown and
+        // silently disable the mutation gate.
+        if let Ok(mut capabilities) = self.capabilities.lock()
+            && let Some(capabilities) = capabilities.as_mut()
+        {
             capabilities.storage_transport = transport;
         }
     }
@@ -5679,6 +5695,90 @@ mod tests {
     }
 
     #[test]
+    fn a_cold_client_resolves_authorization_before_it_mutates() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let host = address.ip().to_string();
+        let port = address.port();
+        let acceptor = test_acceptor();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            let connect = read_test_packet(&mut stream);
+            assert_eq!(connect.kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+
+            let poll = read_test_packet(&mut stream);
+            assert!(is_pushall_payload(
+                &mqtt_publish_payload(poll.kind, &poll.payload).unwrap()
+            ));
+            let report = json!({"print": {
+                "gcode_state": "IDLE",
+                "mc_percent": 0,
+                "security": {"signing_required": true}
+            }});
+            let mut payload = Vec::new();
+            mqtt_string(&mut payload, "device/SN001/report").unwrap();
+            payload.extend_from_slice(report.to_string().as_bytes());
+            let mut packet = vec![0x30];
+            mqtt_remaining_length(&mut packet, payload.len()).unwrap();
+            packet.extend_from_slice(&payload);
+            stream.write_all(&packet).unwrap();
+            stream.flush().unwrap();
+        });
+
+        let profile = Profile::with_timeout(host, "SN001", true, Duration::from_secs(5)).unwrap();
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) = open_tls(&connector, &profile, port, None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+        mqtt.subscribe().unwrap();
+        let identity = profile.connection_identity(Some("access-code"), None);
+        let client = Client::new(profile);
+        *client.mqtt.lock().unwrap() = Some(CachedConnection { identity, mqtt });
+
+        // The client has never resolved capabilities, so the gate must fetch
+        // status itself rather than falling through as Unknown.
+        assert!(matches!(
+            client.fan_set(Some("access-code"), None, "partCooling", 50),
+            Err(Error::AuthorizationRequired(MutationClass::Fan))
+        ));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn emergency_stop_uses_cached_authorization_without_fetching_status() {
+        let profile =
+            Profile::with_timeout("203.0.113.1", "SN001", true, Duration::from_millis(50))
+                .unwrap();
+        let client = Client::new(profile);
+        let mut capabilities = RuntimeCapabilities::for_model("X1C");
+        capabilities.authorization = AuthorizationMode::SigningRequired;
+        *client.capabilities.lock().unwrap() = Some(capabilities);
+
+        // Unroutable host: reaching the network at all would time out instead.
+        assert!(matches!(
+            client.authorize_mutation(Some("code"), None, MutationClass::EmergencyStop),
+            Err(Error::AuthorizationRequired(MutationClass::EmergencyStop))
+        ));
+
+        // A cold emergency stop stays permitted rather than blocking on status.
+        let cold = Client::new(
+            Profile::with_timeout("203.0.113.1", "SN001", true, Duration::from_millis(50))
+                .unwrap(),
+        );
+        assert!(
+            cold.authorize_mutation(Some("code"), None, MutationClass::EmergencyStop)
+                .is_ok()
+        );
+    }
+
+    #[test]
     fn emergency_stop_does_not_wait_for_the_reusable_session_lock() {
         let profile =
             Profile::with_timeout("127.0.0.1", "SN001", true, Duration::from_millis(20)).unwrap();
@@ -5835,6 +5935,17 @@ mod tests {
             let id = &subscribe.payload[..2];
             stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
             stream.flush().unwrap();
+
+            // The cold client's first mutation resolves authorization before
+            // it mutates, which costs one extra status exchange.
+            let resolve = read_test_packet(&mut stream);
+            assert!(is_pushall_payload(
+                &mqtt_publish_payload(resolve.kind, &resolve.payload).unwrap()
+            ));
+            write_test_report(
+                &mut stream,
+                &json!({"print": {"gcode_state": "IDLE", "mc_percent": 0}}),
+            );
 
             for _ in 0..2 {
                 let command = read_test_packet(&mut stream);
