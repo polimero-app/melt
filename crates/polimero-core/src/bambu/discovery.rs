@@ -99,10 +99,16 @@ fn open_ssdp() -> io::Result<UdpSocket> {
     Ok(socket)
 }
 
-/// Binds the Bambu announcement port with address reuse, so a scan still works
-/// while Bambu Studio or OrcaSlicer holds the same port. Unix needs
-/// `SO_REUSEPORT` as well; Windows gets the sharing semantics from
-/// `SO_REUSEADDR` alone.
+/// Binds the Bambu announcement port with address reuse, so a scan can share
+/// it with another listener (Bambu Studio, OrcaSlicer) that also opted into
+/// reuse. Unix needs `SO_REUSEPORT` as well; Windows gets the sharing
+/// semantics from `SO_REUSEADDR` alone. Bambu announcements are broadcast, so
+/// the kernel delivers a copy to every socket in the reuse group rather than
+/// load-balancing to one.
+// ponytail: a co-bound process that never set SO_REUSEPORT still wins the
+// bind and we fall back to SSDP-only, silently. Surface that in discover()'s
+// return value if it turns out developers need to know why a scan came up
+// short, rather than guessing from an empty printer list.
 fn open_announcements() -> io::Result<UdpSocket> {
     let socket = socket2::Socket::new(
         socket2::Domain::IPV4,
@@ -289,10 +295,30 @@ mod tests {
     #[test]
     fn announcement_socket_shares_the_port_with_another_slicer() {
         // Bambu Studio and OrcaSlicer hold this port; a scan must not go
-        // silently SSDP-only just because one of them is open.
-        let first = open_announcements().expect("first bind");
+        // silently SSDP-only just because one of them is open. What actually
+        // matters is that a broadcast announcement reaches both sockets, not
+        // just that both binds succeed.
+        let first = open_announcements().expect(
+            "first bind (if this fails, something else already holds UDP 2021 without SO_REUSEPORT)",
+        );
         let second = open_announcements().expect("second bind while the first is held");
         assert_eq!(first.local_addr().unwrap().port(), BAMBU_BROADCAST_PORT);
         assert_eq!(second.local_addr().unwrap().port(), BAMBU_BROADCAST_PORT);
+
+        let read_timeout = Some(Duration::from_secs(1));
+        first.set_read_timeout(read_timeout).unwrap();
+        second.set_read_timeout(read_timeout).unwrap();
+
+        let sender = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
+        sender.set_broadcast(true).unwrap();
+        sender
+            .send_to(b"announcement", (Ipv4Addr::BROADCAST, BAMBU_BROADCAST_PORT))
+            .unwrap();
+
+        let mut buffer = [0; 32];
+        let (size, _) = first.recv_from(&mut buffer).expect("first socket must receive the broadcast");
+        assert_eq!(&buffer[..size], b"announcement");
+        let (size, _) = second.recv_from(&mut buffer).expect("second socket must receive the broadcast");
+        assert_eq!(&buffer[..size], b"announcement");
     }
 }
