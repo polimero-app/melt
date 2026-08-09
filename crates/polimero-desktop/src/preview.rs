@@ -9,8 +9,11 @@ use vek::{Mat4, Vec3, Vec4};
 type Point = [f32; 3];
 type Triangle = [Point; 3];
 
-const WIDTH: usize = 640;
-const HEIGHT: usize = 360;
+/// Render sizes. Both are 16:9, so the perspective projection frames a model
+/// identically at either one and the large render is the grid thumbnail with
+/// more pixels rather than a different picture.
+pub const GRID_SIZE: (usize, usize) = (640, 360);
+pub const LARGE_SIZE: (usize, usize) = (1920, 1080);
 pub const MAX_PREVIEW_BYTES: usize = 16 << 20;
 pub const MAX_MODEL_BYTES: usize = 32 << 20;
 const MAX_PREVIEW_DIMENSION: u32 = 4096;
@@ -77,7 +80,11 @@ pub fn validate_png(bytes: &[u8]) -> bool {
         && u64::from(width) * u64::from(height) <= MAX_PREVIEW_PIXELS
 }
 
-pub fn rasterize(extension: &str, bytes: &[u8]) -> Result<Vec<u8>, PreviewError> {
+pub fn rasterize(
+    extension: &str,
+    bytes: &[u8],
+    size: (usize, usize),
+) -> Result<Vec<u8>, PreviewError> {
     let triangles = match extension {
         "obj" => parse_obj(bytes),
         "stl" => parse_stl(bytes),
@@ -86,10 +93,10 @@ pub fn rasterize(extension: &str, bytes: &[u8]) -> Result<Vec<u8>, PreviewError>
     if triangles.is_empty() {
         return Err(PreviewError::InvalidModel);
     }
-    encode_png(&render(&triangles))
+    encode_png(&render(&triangles, size), size)
 }
 
-pub fn rasterize_3mf(bytes: &[u8]) -> Result<Vec<u8>, PreviewError> {
+pub fn rasterize_3mf(bytes: &[u8], size: (usize, usize)) -> Result<Vec<u8>, PreviewError> {
     let mut archive =
         zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_| PreviewError::InvalidModel)?;
     let mut model = archive
@@ -133,7 +140,7 @@ pub fn rasterize_3mf(bytes: &[u8]) -> Result<Vec<u8>, PreviewError> {
     if triangles.is_empty() {
         return Err(PreviewError::InvalidModel);
     }
-    encode_png(&render(&triangles))
+    encode_png(&render(&triangles, size), size)
 }
 
 fn xml_attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
@@ -359,7 +366,7 @@ fn smooth_normal(
 /// hand-rolled bounding-box computation had a correctness bug that silently
 /// turned every render into a near full-canvas fill and pegged a CPU core
 /// on real meshes.
-fn render(triangles: &[Triangle]) -> Vec<u8> {
+fn render(triangles: &[Triangle], (width, height): (usize, usize)) -> Vec<u8> {
     let normals = normal_clusters(triangles);
     let mut vertices = Vec::with_capacity(triangles.len() * 3);
     let mut min = Vec3::broadcast(f32::INFINITY);
@@ -390,8 +397,8 @@ fn render(triangles: &[Triangle]) -> Vec<u8> {
     );
     let proj = Mat4::<f32>::perspective_fov_rh_no(
         30f32.to_radians(),
-        WIDTH as f32,
-        HEIGHT as f32,
+        width as f32,
+        height as f32,
         1.0,
         10.0,
     );
@@ -400,8 +407,8 @@ fn render(triangles: &[Triangle]) -> Vec<u8> {
         light_dir: Vec3::new(-0.4, 0.8, 0.45).normalized(),
     };
 
-    let mut color = Buffer2d::new([WIDTH, HEIGHT], [10u8, 40, 58]);
-    let mut depth = Buffer2d::new([WIDTH, HEIGHT], 1.0f32);
+    let mut color = Buffer2d::new([width, height], [10u8, 40, 58]);
+    let mut depth = Buffer2d::new([width, height], 1.0f32);
     pipeline.draw::<rasterizer::Triangles<_, rasterizer::BackfaceCullingDisabled>, _>(
         &vertices,
         &mut color,
@@ -411,9 +418,9 @@ fn render(triangles: &[Triangle]) -> Vec<u8> {
     color.as_ref().iter().flatten().copied().collect()
 }
 
-fn encode_png(rgb: &[u8]) -> Result<Vec<u8>, PreviewError> {
+fn encode_png(rgb: &[u8], (width, height): (usize, usize)) -> Result<Vec<u8>, PreviewError> {
     let mut output = Vec::new();
-    let mut encoder = png::Encoder::new(&mut output, WIDTH as u32, HEIGHT as u32);
+    let mut encoder = png::Encoder::new(&mut output, width as u32, height as u32);
     encoder.set_color(png::ColorType::Rgb);
     encoder.set_depth(png::BitDepth::Eight);
     let mut writer = encoder.write_header().map_err(|_| PreviewError::Png)?;
@@ -445,15 +452,32 @@ mod tests {
 
     #[test]
     fn rasterizes_a_small_binary_stl() {
-        let png = rasterize("stl", &binary_stl_with_triangles(1)).unwrap();
+        let png = rasterize("stl", &binary_stl_with_triangles(1), GRID_SIZE).unwrap();
         assert!(!png.is_empty());
     }
 
     #[test]
     fn rasterizes_an_obj() {
         let obj = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
-        let png = rasterize("obj", obj.as_bytes()).unwrap();
+        let png = rasterize("obj", obj.as_bytes(), GRID_SIZE).unwrap();
         assert!(!png.is_empty());
+    }
+
+    /// The preview dialog shows the render several times the size of the grid
+    /// thumbnail, so the requested size has to reach the PNG rather than being
+    /// silently ignored by a leftover constant.
+    #[test]
+    fn rasterizes_at_the_requested_size() {
+        let png = rasterize("stl", &binary_stl_with_triangles(1), LARGE_SIZE).unwrap();
+        assert!(validate_png(&png));
+        assert_eq!(
+            u32::from_be_bytes(png[16..20].try_into().unwrap()),
+            LARGE_SIZE.0 as u32
+        );
+        assert_eq!(
+            u32::from_be_bytes(png[20..24].try_into().unwrap()),
+            LARGE_SIZE.1 as u32
+        );
     }
 
     #[test]
@@ -507,7 +531,7 @@ mod tests {
             zip.write_all(model_xml.as_bytes()).unwrap();
             zip.finish().unwrap();
         }
-        let png = rasterize_3mf(&buffer).unwrap();
+        let png = rasterize_3mf(&buffer, GRID_SIZE).unwrap();
         assert!(!png.is_empty());
     }
 
@@ -559,7 +583,7 @@ mod tests {
     fn renders_a_high_poly_mesh_without_dropping_faces() {
         let bytes = binary_stl_with_triangles(500_000);
         let start = Instant::now();
-        let png = rasterize("stl", &bytes).unwrap();
+        let png = rasterize("stl", &bytes, GRID_SIZE).unwrap();
         assert!(!png.is_empty());
         assert!(
             start.elapsed().as_secs() < 8,
