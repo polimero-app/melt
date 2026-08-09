@@ -86,11 +86,15 @@ function select(item: ActionMenuItem) {
               </div>
 
               <div class="grid min-h-60 place-items-center bg-cyan-950/5 dark:bg-gray-950/40">
+                <!-- No `w-full`: a slicer's embedded thumbnail can be a few
+                     hundred pixels wide, and stretching it to the panel just
+                     magnifies its own blur. It renders at its natural size,
+                     shrinking only when it outgrows the dialog. -->
                 <img
                   v-if="source"
                   :src="source"
                   :alt="file?.name"
-                  class="max-h-[70vh] w-full object-contain transition-opacity"
+                  class="max-h-[70vh] max-w-full object-contain transition-opacity"
                 />
                 <p v-else class="px-4 py-16 text-sm text-cyan-900/60 dark:text-cyan-100/60">{{ failed ? unavailableLabel : '' }}</p>
               </div>
