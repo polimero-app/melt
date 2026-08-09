@@ -30,6 +30,7 @@ import Switch from './components/Switch.vue'
 import Card from './components/Card.vue'
 import CardHeader from './components/CardHeader.vue'
 import ModelThumbnail from './components/ModelThumbnail.vue'
+import FilePreviewDialog from './components/FilePreviewDialog.vue'
 import {
   PhArrowsClockwise,
   PhArrowsOutCardinal,
@@ -58,6 +59,7 @@ import {
   PhHouse,
   PhInfo,
   PhMagnifyingGlass,
+  PhMagnifyingGlassPlus,
   PhMinus,
   PhNetwork,
   PhPause,
@@ -1792,6 +1794,7 @@ const deferLibraryCards = computed(() => shouldDeferLibraryCards(visibleFiles.va
 const printerFiles = computed(() => files.value.filter((file) => file.type === 'file'))
 const enabledSlicers = computed(() => slicers.value.filter((slicer) => slicer.enabled))
 const isModelFile = (file: FileEntry) => /\.(3mf|stl|obj|zip)$/i.test(file.name)
+const previewFile = ref<FileEntry>()
 
 function fileActionItems(file: FileEntry): ActionMenuItem[] {
   const items: ActionMenuItem[] = [
@@ -2994,7 +2997,17 @@ onUnmounted(() => {
             class="transition hover:shadow-md dark:hover:outline-cyan-400/30"
             :class="deferLibraryCards && 'library-card-deferred'"
           >
-            <div class="relative min-h-45 overflow-hidden sm:rounded-t-lg" :class="fileToneFor(file).preview">
+            <!-- Only model files have a render worth enlarging, and a hover
+                 overlay alone reaches neither keyboard nor touch, so the ones
+                 that do become a real button. -->
+            <component
+              :is="isModelFile(file) ? 'button' : 'div'"
+              :type="isModelFile(file) ? 'button' : undefined"
+              :aria-label="isModelFile(file) ? t('filesView.openPreview', { name: file.name }) : undefined"
+              class="group relative block w-full min-h-45 overflow-hidden sm:rounded-t-lg"
+              :class="fileToneFor(file).preview"
+              @click="isModelFile(file) && (previewFile = file)"
+            >
               <ModelThumbnail
                 v-if="isModelFile(file)"
                 :path="file.devicePath"
@@ -3007,8 +3020,12 @@ onUnmounted(() => {
               <div v-else class="grid min-h-45 place-items-center">
                 <span class="block transform-[perspective(200px)_rotateX(10deg)_rotateZ(-8deg)]" :class="fileToneFor(file).shape"></span>
               </div>
+              <span
+                v-if="isModelFile(file)"
+                class="pointer-events-none absolute inset-0 grid place-items-center bg-gray-950/45 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+              ><PhMagnifyingGlassPlus class="size-8 text-white" aria-hidden="true" /></span>
               <span class="absolute right-3 bottom-2.5 text-[10px] font-bold text-gray-500 uppercase dark:text-slate-300/45">.{{ fileTypeLabel(file).toLowerCase() }}</span>
-            </div>
+            </component>
             <div class="flex items-start gap-3 px-4 py-5 sm:p-6">
               <PhFile class="mt-0.5 size-4 shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
               <div class="min-w-0 flex-1">
@@ -3139,6 +3156,15 @@ onUnmounted(() => {
         <Button :disabled="printBusy" @click="printTarget = undefined">{{ t('common.cancel') }}</Button>
       </template>
     </SlideOver>
+
+    <FilePreviewDialog
+      :file="previewFile"
+      :meta="previewFile ? `${formatSize(previewFile.sizeBytes)} · ${formatDate(previewFile.modifiedAt)}` : ''"
+      :items="previewFile ? fileActionItems(previewFile) : []"
+      :close-label="t('common.close')"
+      :unavailable-label="t('filesView.previewUnavailable')"
+      @close="previewFile = undefined"
+    />
 
     <ConfirmDialog
       :open="pendingConfirm !== undefined"
