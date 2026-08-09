@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
-
-type PreviewResponse = { kind: 'png' | 'model'; data: string }
+import { decodeBase64, loadPreview } from '../preview'
 
 const props = defineProps<{ path: string; sizeBytes?: number; modifiedAt?: string; alt: string; unavailableLabel: string }>()
 const container = ref<HTMLDivElement>()
@@ -11,39 +9,6 @@ const failed = ref(false)
 const loading = ref(false)
 const loadedKey = ref('')
 let observer: IntersectionObserver | undefined
-const previewCache = new Map<string, PreviewResponse>()
-
-// Rendering a thumbnail is CPU-heavy (Rust-side rasterization for models
-// without a baked-in preview), so opening a folder with dozens of visible
-// cards must not fire that many renders at once. Shared across every
-// instance of this component since it's a module-level singleton.
-const MAX_CONCURRENT_PREVIEWS = 2
-let activePreviews = 0
-const previewQueue: (() => void)[] = []
-
-function acquirePreviewSlot(): Promise<void> {
-  if (activePreviews < MAX_CONCURRENT_PREVIEWS) {
-    activePreviews += 1
-    return Promise.resolve()
-  }
-  return new Promise((resolve) => previewQueue.push(resolve))
-}
-
-function releasePreviewSlot() {
-  const next = previewQueue.shift()
-  if (next) {
-    next()
-    return
-  }
-  activePreviews = Math.max(0, activePreviews - 1)
-}
-
-function decodeBase64(value: string) {
-  const binary = atob(value)
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
-  return bytes
-}
 
 async function drawPng(bytes: Uint8Array) {
   const element = canvas.value
@@ -81,22 +46,11 @@ async function load() {
   failed.value = false
   loading.value = true
   try {
-    let preview = previewCache.get(key)
-    if (!preview) {
-      await acquirePreviewSlot()
-      try {
-        preview = await invoke<PreviewResponse>('library_file_preview', {
-          request: {
-            path: props.path,
-            sizeBytes: props.sizeBytes,
-            modifiedAt: props.modifiedAt,
-          },
-        })
-      } finally {
-        releasePreviewSlot()
-      }
-      previewCache.set(key, preview)
-    }
+    const preview = await loadPreview({
+      path: props.path,
+      sizeBytes: props.sizeBytes,
+      modifiedAt: props.modifiedAt,
+    })
     const bytes = decodeBase64(preview.data)
     if (preview.kind === 'png') {
       if (!await drawPng(bytes)) throw new Error('Invalid thumbnail')
