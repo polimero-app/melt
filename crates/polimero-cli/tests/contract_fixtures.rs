@@ -33,7 +33,7 @@ fn contract_fixtures_match_the_cli_envelope_and_exit_contract() {
     let inventory: Value = read_json("inventory.json");
     assert_eq!(inventory["schemaVersion"], 1);
     let commands = inventory["commands"].as_array().expect("commands array");
-    assert_eq!(commands.len(), 36);
+    assert_eq!(commands.len(), 37);
     assert!(
         commands
             .iter()
@@ -52,7 +52,7 @@ fn contract_fixtures_match_the_cli_envelope_and_exit_contract() {
 
     let manifest: Manifest = serde_json::from_value(read_json("manifest.json")).expect("manifest");
     assert_eq!(manifest.schema_version, 1);
-    assert_eq!(manifest.fixtures.len(), 7);
+    assert_eq!(manifest.fixtures.len(), 8);
     let mut fixture_ids = HashSet::new();
 
     for fixture in manifest.fixtures {

@@ -63,6 +63,15 @@
       "stdout": "golden/printer-tls-refresh-profile-not-found.json",
       "stderr": "",
       "ignoreJsonPointers": []
+    },
+    {
+      "id": "files-delete-profile-not-found-json",
+      "command": "files delete",
+      "args": ["files", "delete", "garage", "gcodes:/cube.gcode", "--yes", "--output", "json"],
+      "exitCode": 2,
+      "stdout": "golden/files-delete-profile-not-found.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
     }
   ]
 }

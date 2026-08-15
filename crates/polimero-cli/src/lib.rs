@@ -71,6 +71,12 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
         flags: "  -h, --help                    help for set\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
     },
     LeafCommand {
+        path: &["files", "delete"],
+        short: "Permanently delete a file from printer storage",
+        args: "<printer> <device-path> [flags]",
+        flags: "  -h, --help                    help for delete\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
+    },
+    LeafCommand {
         path: &["files", "download"],
         short: "Download a file from printer storage",
         args: "<printer> <device-path> [flags]",
@@ -253,6 +259,7 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
         path: &["files"],
         short: "File operations on a named printer",
         commands: &[
+            ("delete", "Permanently delete a file from printer storage"),
             ("download", "Download a file from printer storage"),
             ("list", "List files on printer storage"),
             ("roots", "List storage roots available on a printer"),
@@ -510,6 +517,11 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         }
         [files, list, rest @ ..] if files.as_str() == "files" && list.as_str() == "list" => {
             files_list(invocation.format, rest, out, err)
+        }
+        [files, delete, rest @ ..]
+            if files.as_str() == "files" && delete.as_str() == "delete" =>
+        {
+            files_delete(invocation.format, rest, out, err)
         }
         [jobs, action, rest @ ..]
             if jobs.as_str() == "jobs"
@@ -2705,6 +2717,7 @@ struct FileCapabilities {
     file_list: bool,
     file_download: bool,
     file_upload: bool,
+    file_delete: bool,
 }
 
 fn file_capabilities(capabilities: drivers::Capabilities) -> FileCapabilities {
@@ -2712,6 +2725,7 @@ fn file_capabilities(capabilities: drivers::Capabilities) -> FileCapabilities {
         file_list: capabilities.file_list,
         file_download: capabilities.file_download,
         file_upload: capabilities.file_upload,
+        file_delete: capabilities.file_delete,
     }
 }
 
@@ -3056,6 +3070,104 @@ struct FileTransferData {
     bytes_transferred: u64,
     warnings: Vec<String>,
     capabilities: FileCapabilities,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileDeleteData {
+    profile: String,
+    driver: &'static str,
+    device_path: String,
+    warnings: Vec<String>,
+    capabilities: FileCapabilities,
+}
+
+fn files_delete(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let command = "files delete";
+    let (positionals, options) = match parse_options(
+        args,
+        &["yes", "insecure"],
+        &["timeout", "protocol-trace"],
+    ) {
+        Ok(value) => value,
+        Err(error) => return write_error(command, format, AppError::usage(error), out, err),
+    };
+    let (name, requested_path) = match positionals.as_slice() {
+        [name, path] => (name.as_str(), path.as_str()),
+        _ => {
+            return write_error(
+                command,
+                format,
+                AppError::usage("files delete requires a printer profile and device path"),
+                out,
+                err,
+            );
+        }
+    };
+    if let Err(error) = validate_known_file_root(requested_path) {
+        return write_error(command, format, error, out, err);
+    }
+    if requested_path
+        .split_once(':')
+        .is_some_and(|(_, path)| path.is_empty() || path == "/")
+    {
+        return write_error(
+            command,
+            format,
+            AppError::usage("cannot delete a directory; specify a file path"),
+            out,
+            err,
+        );
+    }
+    if let Err(code) = require_confirmation(
+        command,
+        options.enabled("yes"),
+        &format!("Delete {requested_path} from {name}? Type 'yes' to continue: "),
+        format,
+        out,
+        err,
+    ) {
+        return code;
+    }
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error(command, format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::FileDelete) {
+        Ok(printer) => printer,
+        Err(error) => return write_error(command, format, error, out, err),
+    };
+    let device_path = match parse_device_path(requested_path, file_root(printer.driver_kind)) {
+        Ok(path) => path,
+        Err(error) => return write_error(command, format, error, out, err),
+    };
+    let display_path = device_path.1.clone();
+    match drivers::delete_file(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+        &device_path.0,
+    ) {
+        Ok(()) => write_success(
+            command,
+            format,
+            FileDeleteData {
+                profile: printer.name,
+                driver: printer.driver_kind.name(),
+                device_path: display_path.clone(),
+                warnings: Vec::new(),
+                capabilities: file_capabilities(printer.driver_kind.capabilities()),
+            },
+            |out| writeln!(out, "Deleted {display_path}."),
+            out,
+        ),
+        Err(error) => write_error(command, format, driver_error(error), out, err),
+    }
 }
 
 fn jobs_preflight(
@@ -5072,6 +5184,47 @@ mod tests {
             String::from_utf8(out)
                 .unwrap()
                 .contains("unsupported file root")
+        );
+    }
+
+    #[test]
+    fn file_deletion_requires_yes_when_not_interactive() {
+        let args = [
+            "files".into(),
+            "delete".into(),
+            "garage".into(),
+            "gcodes:/cube.gcode".into(),
+            "--output".into(),
+            "json".into(),
+        ];
+        let mut out = Vec::new();
+
+        assert_eq!(run(&args, &mut out, &mut Vec::new()), 2);
+        assert!(
+            String::from_utf8(out)
+                .unwrap()
+                .contains("non-interactive mode requires --yes")
+        );
+    }
+
+    #[test]
+    fn file_deletion_rejects_the_storage_root_before_loading_a_profile() {
+        let args = [
+            "files".into(),
+            "delete".into(),
+            "garage".into(),
+            "gcodes:/".into(),
+            "--yes".into(),
+            "--output".into(),
+            "json".into(),
+        ];
+        let mut out = Vec::new();
+
+        assert_eq!(run(&args, &mut out, &mut Vec::new()), 2);
+        assert!(
+            String::from_utf8(out)
+                .unwrap()
+                .contains("cannot delete a directory")
         );
     }
 

@@ -14,6 +14,7 @@
     {"path": "fans", "arguments": "", "flags": [], "implementation": "implemented"},
     {"path": "fans set", "arguments": "<printer> <fan> <percent>", "flags": ["--yes", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
     {"path": "files", "arguments": "", "flags": [], "implementation": "implemented"},
+    {"path": "files delete", "arguments": "<printer> <device-path>", "flags": ["--yes", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
     {"path": "files list", "arguments": "<printer> [<device-path>...]", "flags": ["--recursive", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
     {"path": "files roots", "arguments": "<printer>", "flags": ["--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
     {"path": "files upload", "arguments": "<printer> <local-path> [<device-path>]", "flags": ["--overwrite", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
