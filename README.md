@@ -221,6 +221,15 @@ physical captures qualify an exact model and module-firmware range.
 
 - [Moonraker documentation](https://moonraker.readthedocs.io/)
 
+## Credits
+
+The application icon is
+[melt](https://thenounproject.com/icon/melt-8239158/) by Paphada from
+[Noun Project](https://thenounproject.com/), used under
+[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). The icon is
+separately licensed from the rest of this project and is not covered by
+`AGPL-3.0-only`.
+
 ## Safety disclaimer
 
 Melt controls physical equipment and can move axes, heat components,

@@ -2922,6 +2922,12 @@ onUnmounted(() => {
                     <a :href="info?.sourceUrl ?? 'https://github.com/polimero-app/melt'" target="_blank" rel="noreferrer" class="text-cyan-700 underline hover:text-cyan-600 dark:text-cyan-400">{{ t('settingsView.sourceLink') }}</a>
                   </dd>
                 </div>
+                <div class="flex items-center justify-between gap-4 py-2">
+                  <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.icon') }}</dt>
+                  <dd class="text-right text-gray-900 dark:text-gray-300">
+                    <a href="https://thenounproject.com/icon/melt-8239158/" target="_blank" rel="noreferrer" class="text-cyan-700 underline hover:text-cyan-600 dark:text-cyan-400">{{ t('settingsView.iconCredit') }}</a>
+                  </dd>
+                </div>
                 <div v-if="diagnostics" class="flex items-center justify-between py-2">
                   <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.platform') }}</dt>
                   <dd class="font-mono text-gray-900 dark:text-gray-300">{{ diagnostics.platform }}</dd>

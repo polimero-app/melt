@@ -279,6 +279,8 @@ export type MessageKey =
   | "settingsView.license"
   | "settingsView.source"
   | "settingsView.sourceLink"
+  | "settingsView.icon"
+  | "settingsView.iconCredit"
   | "settingsView.bambuCompatibility"
   | "settingsView.model"
   | "settingsView.authorization"
@@ -750,6 +752,8 @@ const messages: Record<Locale, Messages> = {
     "settingsView.license": "License",
     "settingsView.source": "Source code",
     "settingsView.sourceLink": "View source",
+    "settingsView.icon": "Application icon",
+    "settingsView.iconCredit": "melt by Paphada from Noun Project (CC BY 3.0)",
     "settingsView.bambuCompatibility": "Bambu compatibility",
     "settingsView.model": "Model",
     "settingsView.authorization": "Authorization",
@@ -1201,6 +1205,8 @@ const messages: Record<Locale, Messages> = {
     "settingsView.license": "Licença",
     "settingsView.source": "Código-fonte",
     "settingsView.sourceLink": "Ver código-fonte",
+    "settingsView.icon": "Ícone do aplicativo",
+    "settingsView.iconCredit": "melt de Paphada, do Noun Project (CC BY 3.0)",
     "settingsView.bambuCompatibility": "Compatibilidade Bambu",
     "settingsView.model": "Modelo",
     "settingsView.authorization": "Autorização",
