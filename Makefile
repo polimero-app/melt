@@ -1,4 +1,4 @@
-.PHONY: build test lint ci contract bambu-evidence-check help license-check run release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test
+.PHONY: build test lint ci contract bambu-evidence-check help license-check run install-desktop uninstall-desktop release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test
 .DEFAULT_GOAL := help
 
 build: cargo-build ui-build ## Build the Rust workspace and UI
@@ -33,6 +33,48 @@ run: ## Start the desktop app in development mode
 	else \
 		cargo run -p melt-desktop --bin melt; \
 	fi
+
+XDG_DATA_HOME ?= $(HOME)/.local/share
+
+# A development build installs nothing, so a Wayland compositor has no desktop
+# entry to resolve the window icon from. Package builds carry their own entry;
+# these targets only mirror it for `make run`. The entry must keep
+# StartupWMClass matching the GTK application id, which Tauri leaves as the
+# binary name unless app.enableGTKAppId is set.
+install-desktop: ## Install a development desktop entry so the window icon resolves
+	@set -e; \
+	install -Dm644 crates/melt-desktop/icons/icon.svg \
+		"$(XDG_DATA_HOME)/icons/hicolor/scalable/apps/melt.svg"; \
+	install -Dm644 crates/melt-desktop/icons/32x32.png \
+		"$(XDG_DATA_HOME)/icons/hicolor/32x32/apps/melt.png"; \
+	install -Dm644 crates/melt-desktop/icons/128x128.png \
+		"$(XDG_DATA_HOME)/icons/hicolor/128x128/apps/melt.png"; \
+	install -Dm644 'crates/melt-desktop/icons/128x128@2x.png' \
+		"$(XDG_DATA_HOME)/icons/hicolor/256x256/apps/melt.png"; \
+	install -d "$(XDG_DATA_HOME)/applications"; \
+	printf '%s\n' \
+		'[Desktop Entry]' \
+		'Type=Application' \
+		'Name=Melt (development)' \
+		'Comment=Local-first 3D printer control' \
+		'Exec=$(CURDIR)/target/debug/melt' \
+		'Icon=melt' \
+		'StartupWMClass=melt' \
+		'Terminal=false' \
+		'Categories=Utility;' \
+		> "$(XDG_DATA_HOME)/applications/melt-dev.desktop"; \
+	update-desktop-database "$(XDG_DATA_HOME)/applications" 2>/dev/null || true; \
+	gtk-update-icon-cache -qtf "$(XDG_DATA_HOME)/icons/hicolor" 2>/dev/null || true; \
+	echo "Installed melt-dev.desktop and hicolor icons under $(XDG_DATA_HOME)"
+
+uninstall-desktop: ## Remove the development desktop entry and icons
+	@set -e; \
+	rm -f "$(XDG_DATA_HOME)/applications/melt-dev.desktop"; \
+	rm -f "$(XDG_DATA_HOME)"/icons/hicolor/*/apps/melt.png; \
+	rm -f "$(XDG_DATA_HOME)/icons/hicolor/scalable/apps/melt.svg"; \
+	update-desktop-database "$(XDG_DATA_HOME)/applications" 2>/dev/null || true; \
+	gtk-update-icon-cache -qtf "$(XDG_DATA_HOME)/icons/hicolor" 2>/dev/null || true; \
+	echo "Removed melt-dev.desktop and hicolor icons"
 
 release-gate: bambu-evidence-check contract cargo-build ## Run required release checks
 	$(MAKE) release-cli-check

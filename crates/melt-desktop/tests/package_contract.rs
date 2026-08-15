@@ -30,16 +30,17 @@ fn package_configuration_keeps_the_native_artifact_and_cli_contracts() {
     assert_eq!(config["app"]["windows"][0]["minHeight"], 800);
 
     // A declared but missing icon only fails on the macOS/Windows release
-    // runners, so resolve every path here instead.
+    // runners, so resolve every path here instead. Order matters: Tauri embeds
+    // the first PNG as the default window icon, so 32x32 must not lead.
     let icons = config["bundle"]["icon"]
         .as_array()
         .expect("declared bundle icons");
     assert_eq!(
         config["bundle"]["icon"],
         serde_json::json!([
-            "icons/32x32.png",
             "icons/128x128.png",
             "icons/128x128@2x.png",
+            "icons/32x32.png",
             "icons/icon.icns",
             "icons/icon.ico"
         ])

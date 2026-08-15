@@ -203,6 +203,18 @@ warnings. To run a built binary directly, use:
 GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 ./target/debug/melt
 ```
 
+A development build shows a placeholder icon in the window switcher because
+desktop shells do not read the icon from the running process. They resolve the
+window's application id against an installed desktop entry and use that
+entry's `Icon` key, and a `cargo run` build installs no entry. Run
+`make install-desktop` once to install a development entry and the `melt`
+hicolor icons under `XDG_DATA_HOME`; `make uninstall-desktop` removes them.
+
+Package builds carry their own desktop entry, so they do not need this. The
+entry Tauri generates sets `StartupWMClass` to the binary name, which matches
+the GTK application id only while `app.enableGTKAppId` stays unset — setting
+it switches the application id to the bundle identifier and breaks the match.
+
 ## Protocol references
 
 ### Bambu LAN
