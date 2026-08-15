@@ -10,7 +10,7 @@ import { printTargetState } from './printing'
 import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
-import { naturallyDescending, shouldDeferLibraryCards, sortedBy, type SortKey } from './library'
+import { naturallyDescending, nextSort, shouldDeferLibraryCards, sortedBy, type FileSort, type SortKey } from './library'
 import {
   PRESET_NAME_MAX_LENGTH,
   defaultPresets,
@@ -1786,7 +1786,12 @@ const visibleFiles = computed(() => sortedBy(
   { key: sortKey.value, descending: naturallyDescending[sortKey.value] },
 ))
 const deferLibraryCards = computed(() => shouldDeferLibraryCards(visibleFiles.value.length))
-const printerFiles = computed(() => files.value.filter((file) => file.type === 'file'))
+const printerSort = ref<FileSort>({ key: 'name', descending: false })
+const printerFiles = computed(() => sortedBy(files.value.filter((file) => file.type === 'file'), printerSort.value))
+const sortPrinterFiles = (key: SortKey) => { printerSort.value = nextSort(printerSort.value, key) }
+const printerSortOrder = (key: SortKey) => printerSort.value.key !== key
+  ? 'none'
+  : printerSort.value.descending ? 'descending' : 'ascending'
 const enabledSlicers = computed(() => slicers.value.filter((slicer) => slicer.enabled))
 const isModelFile = (file: FileEntry) => /\.(3mf|stl|obj|zip)$/i.test(file.name)
 const previewFile = ref<FileEntry>()
@@ -2427,10 +2432,25 @@ onUnmounted(() => {
                 <table class="relative w-full divide-y divide-gray-300 text-left dark:divide-white/15">
                   <thead class="sticky top-0 z-10 bg-white dark:bg-gray-800">
                     <tr>
-                      <th scope="col" class="px-4 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase sm:px-6 dark:text-gray-400">{{ t('filesView.name') }}</th>
+                      <th scope="col" :aria-sort="printerSortOrder('name')" class="px-4 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase sm:px-6 dark:text-gray-400">
+                        <button type="button" class="flex items-center gap-1 uppercase hover:text-gray-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600 dark:hover:text-gray-200 dark:focus-visible:outline-cyan-400" @click="sortPrinterFiles('name')">
+                          {{ t('filesView.name') }}
+                          <PhCaretDown v-if="printerSort.key === 'name'" class="size-3" :class="!printerSort.descending && 'rotate-180'" aria-hidden="true" />
+                        </button>
+                      </th>
                       <th scope="col" class="w-20 px-2 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase dark:text-gray-400">{{ t('filesView.type') }}</th>
-                      <th scope="col" class="hidden w-24 px-2 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase min-[1000px]:table-cell dark:text-gray-400">{{ t('filesView.size') }}</th>
-                      <th scope="col" class="hidden w-48 px-2 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase min-[1180px]:table-cell dark:text-gray-400">{{ t('filesView.modified') }}</th>
+                      <th scope="col" :aria-sort="printerSortOrder('size')" class="hidden w-24 px-2 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase min-[1000px]:table-cell dark:text-gray-400">
+                        <button type="button" class="flex items-center gap-1 uppercase hover:text-gray-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600 dark:hover:text-gray-200 dark:focus-visible:outline-cyan-400" @click="sortPrinterFiles('size')">
+                          {{ t('filesView.size') }}
+                          <PhCaretDown v-if="printerSort.key === 'size'" class="size-3" :class="!printerSort.descending && 'rotate-180'" aria-hidden="true" />
+                        </button>
+                      </th>
+                      <th scope="col" :aria-sort="printerSortOrder('modified')" class="hidden w-48 px-2 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase min-[1180px]:table-cell dark:text-gray-400">
+                        <button type="button" class="flex items-center gap-1 uppercase hover:text-gray-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600 dark:hover:text-gray-200 dark:focus-visible:outline-cyan-400" @click="sortPrinterFiles('modified')">
+                          {{ t('filesView.modified') }}
+                          <PhCaretDown v-if="printerSort.key === 'modified'" class="size-3" :class="!printerSort.descending && 'rotate-180'" aria-hidden="true" />
+                        </button>
+                      </th>
                       <th scope="col" class="w-24 px-4 py-3 text-right text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase sm:px-6 dark:text-gray-400">{{ t('filesView.actions') }}</th>
                     </tr>
                   </thead>
