@@ -2357,7 +2357,7 @@ onUnmounted(() => {
                     <p class="font-mono text-sm text-gray-500 dark:text-gray-400"><span class="font-bold">{{ row.value.currentCelsius === undefined ? '—' : formatTemperature(row.value.currentCelsius) }}</span> °C <span aria-hidden="true">/</span> <span class="font-bold">{{ row.value.targetCelsius === undefined ? '—' : formatTemperature(row.value.targetCelsius) }}</span> °C</p>
                   </div>
                   <div v-if="capabilities?.temperatureWrite && row.value.controllable" class="flex shrink-0 items-center gap-1">
-                    <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.decreaseTemp', { sensor: temperatureLabel(row.key, row.value) })" @click="adjustTemperature(row.key, row.value, -5)"><PhMinus class="size-3.5" aria-hidden="true" /></IconButton>
+                    <IconButton variant="outline" class="!size-8 !min-h-0 !min-w-0" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.decreaseTemp', { sensor: temperatureLabel(row.key, row.value) })" @click="adjustTemperature(row.key, row.value, -5)"><PhMinus class="size-3.5" aria-hidden="true" /></IconButton>
                     <input
                       type="number"
                       inputmode="numeric"
@@ -2370,7 +2370,7 @@ onUnmounted(() => {
                       class="w-16 rounded-md bg-white py-1.5 text-center font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 dark:bg-white/5 dark:text-white dark:outline-white/10"
                       @change="setTemperature(row.key, row.value, $event)"
                     />
-                    <IconButton variant="outline" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.increaseTemp', { sensor: temperatureLabel(row.key, row.value) })" @click="adjustTemperature(row.key, row.value, 5)"><PhPlus class="size-3.5" aria-hidden="true" /></IconButton>
+                    <IconButton variant="outline" class="!size-8 !min-h-0 !min-w-0" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.increaseTemp', { sensor: temperatureLabel(row.key, row.value) })" @click="adjustTemperature(row.key, row.value, 5)"><PhPlus class="size-3.5" aria-hidden="true" /></IconButton>
                   </div>
                   <p v-else-if="!row.value.controllable" class="shrink-0 text-right text-xs text-gray-400 dark:text-gray-500">{{ t('control.telemetryOnly') }}</p>
                 </div>
