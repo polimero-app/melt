@@ -80,5 +80,5 @@ help: ## Show this help
 	@printf "\033[37mUsage:\033[0m\n"
 	@printf "  \033[37mmake [target]\033[0m\n\n"
 	@printf "\033[34mAvailable targets:\033[0m\n"
-	@grep -E '^[0-9a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[0;36m%-12s\033[m %s\n", $$1, $$2}'
+	@grep -E '^[0-9a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[0;36m%-25s\033[m %s\n", $$1, $$2}'
 	@printf "\n"
