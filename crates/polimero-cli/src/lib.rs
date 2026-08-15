@@ -73,7 +73,7 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
     LeafCommand {
         path: &["files", "delete"],
         short: "Permanently delete a file from printer storage",
-        args: "<printer> <device-path> [flags]",
+        args: "<printer> <device-path>... [flags]",
         flags: "  -h, --help                    help for delete\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
     },
     LeafCommand {
@@ -3089,12 +3089,28 @@ struct FileTransfersData {
     capabilities: FileCapabilities,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FileDeleteData {
+    device_path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileDeleteResult {
     profile: String,
     driver: &'static str,
-    device_path: String,
+    file: FileDeleteData,
+    warnings: Vec<String>,
+    capabilities: FileCapabilities,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileDeletesData {
+    profile: String,
+    driver: &'static str,
+    files: Vec<FileDeleteData>,
     warnings: Vec<String>,
     capabilities: FileCapabilities,
 }
@@ -3114,8 +3130,8 @@ fn files_delete(
         Ok(value) => value,
         Err(error) => return write_error(command, format, AppError::usage(error), out, err),
     };
-    let (name, requested_path) = match positionals.as_slice() {
-        [name, path] => (name.as_str(), path.as_str()),
+    let (name, requested_paths) = match positionals.split_first() {
+        Some((name, paths)) if !paths.is_empty() => (name.as_str(), paths),
         _ => {
             return write_error(
                 command,
@@ -3126,25 +3142,37 @@ fn files_delete(
             );
         }
     };
-    if let Err(error) = validate_known_file_root(requested_path) {
-        return write_error(command, format, error, out, err);
-    }
-    if requested_path
-        .split_once(':')
-        .is_some_and(|(_, path)| path.is_empty() || path == "/")
-    {
-        return write_error(
-            command,
-            format,
-            AppError::usage("cannot delete a directory; specify a file path"),
-            out,
-            err,
-        );
+    let mut seen = BTreeSet::new();
+    for requested_path in requested_paths {
+        if let Err(error) = validate_known_file_root(requested_path) {
+            return write_error(command, format, error, out, err);
+        }
+        if requested_path
+            .split_once(':')
+            .is_some_and(|(_, path)| path.is_empty() || path == "/")
+        {
+            return write_error(
+                command,
+                format,
+                AppError::usage("cannot delete a directory; specify a file path"),
+                out,
+                err,
+            );
+        }
+        if !seen.insert(requested_path.as_str()) {
+            return write_error(
+                command,
+                format,
+                AppError::usage(format!("duplicate device path {requested_path:?}")),
+                out,
+                err,
+            );
+        }
     }
     if let Err(code) = require_confirmation(
         command,
         options.enabled("yes"),
-        &format!("Delete {requested_path} from {name}? Type 'yes' to continue: "),
+        &format!("Delete {} file(s) from {name}? Type 'yes' to continue: ", requested_paths.len()),
         format,
         out,
         err,
@@ -3159,31 +3187,36 @@ fn files_delete(
         Ok(printer) => printer,
         Err(error) => return write_error(command, format, error, out, err),
     };
-    let device_path = match parse_device_path(requested_path, file_root(printer.driver_kind)) {
-        Ok(path) => path,
+    let device_paths = match requested_paths
+        .iter()
+        .map(|path| parse_device_path(path, file_root(printer.driver_kind)))
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(paths) => paths,
         Err(error) => return write_error(command, format, error, out, err),
     };
-    let display_path = device_path.1.clone();
-    match drivers::delete_file(
-        &printer.driver,
-        printer.access_code.as_deref(),
-        printer.tls_fingerprint.as_deref(),
-        &device_path.0,
-    ) {
-        Ok(()) => write_success(
-            command,
-            format,
-            FileDeleteData {
-                profile: printer.name,
-                driver: printer.driver_kind.name(),
-                device_path: display_path.clone(),
-                warnings: Vec::new(),
-                capabilities: file_capabilities(printer.driver_kind.capabilities()),
-            },
-            |out| writeln!(out, "Deleted {display_path}."),
-            out,
-        ),
-        Err(error) => write_error(command, format, driver_error(error), out, err),
+    let files = device_paths
+        .iter()
+        .map(|(_, display_path)| FileDeleteData { device_path: display_path.clone() })
+        .collect::<Vec<_>>();
+    for (device_path, _) in &device_paths {
+        if let Err(error) = drivers::delete_file(
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+            device_path,
+        ) {
+            return write_error(command, format, driver_error(error), out, err);
+        }
+    }
+    let profile = printer.name;
+    let driver = printer.driver_kind.name();
+    let capabilities = file_capabilities(printer.driver_kind.capabilities());
+    if files.len() == 1 {
+        let file = files.into_iter().next().expect("one deleted file");
+        write_success(command, format, FileDeleteResult { profile, driver, file: file.clone(), warnings: Vec::new(), capabilities }, |out| writeln!(out, "Deleted {}.", file.device_path), out)
+    } else {
+        write_success(command, format, FileDeletesData { profile, driver, files: files.clone(), warnings: Vec::new(), capabilities }, |out| { for file in &files { writeln!(out, "Deleted {}.", file.device_path)?; } Ok(()) }, out)
     }
 }
 
@@ -5243,6 +5276,24 @@ mod tests {
                 .unwrap()
                 .contains("cannot delete a directory")
         );
+    }
+
+    #[test]
+    fn file_deletion_rejects_duplicate_paths_before_loading_a_profile() {
+        let args = [
+            "files".into(),
+            "delete".into(),
+            "garage".into(),
+            "gcodes:/cube.gcode".into(),
+            "gcodes:/cube.gcode".into(),
+            "--yes".into(),
+            "--output".into(),
+            "json".into(),
+        ];
+        let mut out = Vec::new();
+
+        assert_eq!(run(&args, &mut out, &mut Vec::new()), 2);
+        assert!(String::from_utf8(out).unwrap().contains("duplicate device path"));
     }
 
     #[test]
