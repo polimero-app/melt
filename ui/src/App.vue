@@ -10,7 +10,7 @@ import { printTargetState } from './printing'
 import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
-import { shouldDeferLibraryCards } from './library'
+import { naturallyDescending, shouldDeferLibraryCards, sortedBy, type SortKey } from './library'
 import {
   PRESET_NAME_MAX_LENGTH,
   defaultPresets,
@@ -489,7 +489,6 @@ const toasts = computed(() => [
   ...(successToast.value ? [{ key: 'success' as const, text: successToast.value, tone: 'success' as const }] : []),
 ])
 const searchTerm = ref('')
-type SortKey = 'name' | 'size' | 'modified'
 const sortKey = ref<SortKey>('name')
 const stepSize = ref('1 mm')
 const feedRate = ref(50)
@@ -1782,14 +1781,10 @@ const matchesSearch = (file: FileEntry) => !normalizedSearchTerm.value || file.n
 // The backend already scopes entries to the requested directory, so this
 // only needs to split by type and apply the client-side search echo.
 const visibleDirectories = computed(() => libraryFiles.value.filter((file) => file.type === 'directory' && matchesSearch(file)))
-const visibleFiles = computed(() => {
-  const files = libraryFiles.value.filter((file) => file.type === 'file' && matchesSearch(file))
-  return [...files].sort((left, right) => {
-    if (sortKey.value === 'size') return (right.sizeBytes ?? 0) - (left.sizeBytes ?? 0)
-    if (sortKey.value === 'modified') return Date.parse(right.modifiedAt ?? '') - Date.parse(left.modifiedAt ?? '')
-    return left.name.localeCompare(right.name)
-  })
-})
+const visibleFiles = computed(() => sortedBy(
+  libraryFiles.value.filter((file) => file.type === 'file' && matchesSearch(file)),
+  { key: sortKey.value, descending: naturallyDescending[sortKey.value] },
+))
 const deferLibraryCards = computed(() => shouldDeferLibraryCards(visibleFiles.value.length))
 const printerFiles = computed(() => files.value.filter((file) => file.type === 'file'))
 const enabledSlicers = computed(() => slicers.value.filter((slicer) => slicer.enabled))
