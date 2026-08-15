@@ -312,6 +312,11 @@ export type MessageKey =
   | "filesView.deleteDescription"
   | "filesView.deleteConfirm"
   | "filesView.deleted"
+  | "filesView.printerDeleteTitle"
+  | "filesView.printerDeleteDescription"
+  | "filesView.printerDeleteConfirm"
+  | "filesView.printerDeleted"
+  | "filesView.printerDeleteNamed"
   | "filesView.openingIn"
   | "filesView.sentToPrinter"
   | "filesView.downloaded"
@@ -772,9 +777,14 @@ const messages: Record<Locale, Messages> = {
     "filesView.moreActions": "More file actions",
     "filesView.openWith": "Open with {name}",
     "filesView.deleteTitle": "Delete {name}?",
-    "filesView.deleteDescription": "This permanently removes the file from printer storage.",
+    "filesView.deleteDescription": "This permanently removes the file from this computer.",
     "filesView.deleteConfirm": "Delete file",
     "filesView.deleted": "{name} deleted",
+    "filesView.printerDeleteTitle": "Delete {name} from the printer?",
+    "filesView.printerDeleteDescription": "This permanently removes the file from printer storage.",
+    "filesView.printerDeleteConfirm": "Delete file",
+    "filesView.printerDeleted": "{name} deleted from printer",
+    "filesView.printerDeleteNamed": "Delete {name} from printer",
     "filesView.openingIn": "Opening {name} in Bambu Studio",
     "filesView.sentToPrinter": "{name} sent to printer",
     "filesView.downloaded": "{name} downloaded",
@@ -1215,9 +1225,14 @@ const messages: Record<Locale, Messages> = {
     "filesView.moreActions": "Mais ações do arquivo",
     "filesView.openWith": "Abrir com {name}",
     "filesView.deleteTitle": "Excluir {name}?",
-    "filesView.deleteDescription": "Isso remove permanentemente o arquivo do armazenamento da impressora.",
+    "filesView.deleteDescription": "Isso remove permanentemente o arquivo deste computador.",
     "filesView.deleteConfirm": "Excluir arquivo",
     "filesView.deleted": "{name} excluído",
+    "filesView.printerDeleteTitle": "Excluir {name} da impressora?",
+    "filesView.printerDeleteDescription": "Isso remove permanentemente o arquivo do armazenamento da impressora.",
+    "filesView.printerDeleteConfirm": "Excluir arquivo",
+    "filesView.printerDeleted": "{name} excluído da impressora",
+    "filesView.printerDeleteNamed": "Excluir {name} da impressora",
     "filesView.openingIn": "Abrindo {name} no Bambu Studio",
     "filesView.sentToPrinter": "{name} enviado para a impressora",
     "filesView.downloaded": "{name} baixado",

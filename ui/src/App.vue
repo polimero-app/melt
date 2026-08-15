@@ -385,6 +385,7 @@ const loading = ref(true)
 const refreshing = ref(false)
 const filesLoading = ref(false)
 const filesError = ref<string>()
+const deletingPrinterPath = ref<string>()
 const libraryFiles = ref<FileEntry[]>([])
 const libraryFilesLoading = ref(false)
 const libraryFilesError = ref<string>()
@@ -1523,6 +1524,30 @@ async function downloadFile(file: FileEntry) {
   }
 }
 
+function deletePrinterFile(file: FileEntry) {
+  if (!activePrinter.value || !capabilities.value?.fileDelete || deletingPrinterPath.value) return
+  askConfirmation(
+    {
+      title: 'filesView.printerDeleteTitle',
+      description: 'filesView.printerDeleteDescription',
+      confirm: 'filesView.printerDeleteConfirm',
+    },
+    { name: file.name },
+    async () => {
+      const printerName = activePrinter.value?.name
+      if (!printerName) return
+      deletingPrinterPath.value = file.devicePath
+      try {
+        await invoke('printer_file_delete', { request: { name: printerName, devicePath: file.devicePath } })
+        showToast(t('filesView.printerDeleted', { name: file.name }))
+        await loadFiles()
+      } finally {
+        deletingPrinterPath.value = undefined
+      }
+    },
+  )
+}
+
 async function uploadFile() {
   if (uploadBusy.value || !libraryPath.value) return
   const source = await openFileDialog({ multiple: false })
@@ -2486,6 +2511,16 @@ onUnmounted(() => {
                           >
                             <span v-if="downloadingPath === file.devicePath && downloadProgress !== undefined" class="font-mono text-[10px]">{{ Math.round(downloadProgress) }}%</span>
                             <PhDownloadSimple v-else class="size-4" aria-hidden="true" />
+                          </IconButton>
+                          <IconButton
+                            v-if="capabilities?.fileDelete"
+                            class="text-rose-600 dark:text-rose-400"
+                            :title="t('filesView.printerDeleteNamed', { name: file.name })"
+                            :aria-label="t('filesView.printerDeleteNamed', { name: file.name })"
+                            :disabled="deletingPrinterPath === file.devicePath"
+                            @click.stop="deletePrinterFile(file)"
+                          >
+                            <PhTrash class="size-4" aria-hidden="true" />
                           </IconButton>
                         </div>
                       </td>
