@@ -2001,7 +2001,10 @@ onUnmounted(() => {
     <a href="#main-content" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-gray-900 dark:focus:bg-gray-800 dark:focus:text-white">Skip to content</a>
     <!-- Tabs with underline -->
     <header class="sticky top-0 z-20 bg-white/95 pt-[env(safe-area-inset-top)] backdrop-blur dark:bg-gray-900/95">
-      <div class="mx-auto max-w-[1500px] overflow-x-auto px-4 sm:px-8 lg:px-10">
+      <!-- Scrolling one axis clips the other, which would cut off the printer
+           menu. Only the compact layout below `lg` needs to scroll, and it
+           uses a native select that the clip cannot reach. -->
+      <div class="mx-auto max-w-[1500px] overflow-x-auto px-4 sm:px-8 lg:overflow-x-visible lg:px-10">
         <nav class="flex min-w-0 items-stretch border-b border-gray-200 sm:min-w-max dark:border-white/10" :aria-label="t('nav.ariaLabel')">
           <div class="grid w-full grid-cols-1 py-2 lg:hidden">
             <select
