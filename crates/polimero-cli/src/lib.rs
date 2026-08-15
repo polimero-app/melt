@@ -79,8 +79,8 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
     LeafCommand {
         path: &["files", "download"],
         short: "Download a file from printer storage",
-        args: "<printer> <device-path> [flags]",
-        flags: "  -h, --help                    help for download\n      --insecure                skip TLS fingerprint verification for this invocation\n      --overwrite               allow overwriting existing destination file\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --to string               destination file or directory path",
+        args: "<printer> <device-path>... [flags]",
+        flags: "  -h, --help                    help for download\n      --insecure                skip TLS fingerprint verification for this invocation\n      --overwrite               allow overwriting existing destination files\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --to string               destination file or directory (directory required for multiple files)",
     },
     LeafCommand {
         path: &["files", "list"],
@@ -2908,8 +2908,8 @@ fn files_download(
             return write_error("files download", format, AppError::usage(error), out, err);
         }
     };
-    let (name, requested_path) = match positionals.as_slice() {
-        [name, path] => (name.as_str(), path.as_str()),
+    let (name, requested_paths) = match positionals.split_first() {
+        Some((name, paths)) if !paths.is_empty() => (name.as_str(), paths),
         _ => {
             return write_error(
                 "files download",
@@ -2920,8 +2920,10 @@ fn files_download(
             );
         }
     };
-    if let Err(error) = validate_known_file_root(requested_path) {
-        return write_error("files download", format, error, out, err);
+    for requested_path in requested_paths {
+        if let Err(error) = validate_known_file_root(requested_path) {
+            return write_error("files download", format, error, out, err);
+        }
     }
     let connection = match connection_options(&options) {
         Ok(connection) => connection,
@@ -2931,133 +2933,120 @@ fn files_download(
         Ok(printer) => printer,
         Err(error) => return write_error("files download", format, error, out, err),
     };
-    let device_path = match parse_device_path(requested_path, file_root(printer.driver_kind)) {
-        Ok(path) => path,
+    let device_paths = match requested_paths
+        .iter()
+        .map(|path| parse_device_path(path, file_root(printer.driver_kind)))
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(paths) if paths.iter().all(|(path, _)| path != "/") => paths,
+        Ok(_) => return write_error("files download", format, AppError::usage("cannot download a directory; specify a file path"), out, err),
         Err(error) => return write_error("files download", format, error, out, err),
     };
-    if device_path.0 == "/" {
-        return write_error(
-            "files download",
-            format,
-            AppError::usage("cannot download a directory; specify a file path"),
-            out,
-            err,
-        );
-    }
-    let destination = match download_destination(options.value("to"), &device_path.0) {
-        Ok(path) => path,
+    let destinations = match download_destinations(&device_paths, options.value("to"), options.enabled("overwrite")) {
+        Ok(paths) => paths,
         Err(error) => return write_error("files download", format, error, out, err),
     };
-    if destination.exists() && !options.enabled("overwrite") {
-        return write_error(
-            "files download",
-            format,
-            AppError::usage(format!(
-                "destination file already exists: {} (use --overwrite to replace)",
-                destination.display()
-            )),
-            out,
-            err,
-        );
+    let mut transfers = Vec::with_capacity(device_paths.len());
+    for ((device_path, display_path), destination) in device_paths.into_iter().zip(destinations) {
+        let transferred = match download_file(&printer, &device_path, &destination, options.enabled("overwrite")) {
+            Ok(transferred) => transferred,
+            Err(error) => return write_error("files download", format, error, out, err),
+        };
+        transfers.push(DownloadedFile { source: display_path, destination: destination.display().to_string(), bytes_transferred: transferred });
     }
+    let profile = printer.name;
+    let driver = printer.driver_kind.name();
+    let capabilities = file_capabilities(printer.driver_kind.capabilities());
+    if transfers.len() == 1 {
+        let transfer = transfers.pop().expect("one transfer");
+        return write_success("files download", format, FileTransferResult { profile, driver, warnings: Vec::new(), capabilities, transfer: transfer.clone() }, |out| writeln!(out, "Downloaded file to {}.", transfer.destination), out);
+    }
+    write_success("files download", format, FileTransfersData { profile, driver, files: transfers.clone(), warnings: Vec::new(), capabilities }, |out| { for transfer in &transfers { writeln!(out, "Downloaded file to {}.", transfer.destination)?; } Ok(()) }, out)
+}
+
+fn download_file(printer: &ResolvedPrinter, device_path: &str, destination: &Path, overwrite: bool) -> Result<u64, AppError> {
     let parent = destination
         .parent()
         .expect("download destination has a parent");
     let mut temporary = match tempfile::NamedTempFile::new_in(parent) {
         Ok(file) => file,
         Err(_) => {
-            return write_error(
-                "files download",
-                format,
-                AppError {
+            return Err(AppError {
                     exit_code: 1,
                     code: "internal_error",
                     message: "cannot create destination file".into(),
-                },
-                out,
-                err,
-            );
+                });
         }
     };
     let transferred = match drivers::download_to(
         &printer.driver,
         printer.access_code.as_deref(),
         printer.tls_fingerprint.as_deref(),
-        &device_path.0,
+        device_path,
         temporary.as_file_mut(),
     ) {
         Ok(transferred) => transferred,
-        Err(error) => return write_error("files download", format, driver_error(error), out, err),
+        Err(error) => return Err(driver_error(error)),
     };
     if temporary.as_file_mut().sync_all().is_err() {
-        return write_error(
-            "files download",
-            format,
-            AppError {
+        return Err(AppError {
                 exit_code: 1,
                 code: "internal_error",
                 message: "cannot finalize downloaded file".into(),
-            },
-            out,
-            err,
-        );
+            });
     }
-    let commit = if options.enabled("overwrite") {
-        temporary.persist(&destination)
+    let commit = if overwrite {
+        temporary.persist(destination)
     } else {
-        temporary.persist_noclobber(&destination)
+        temporary.persist_noclobber(destination)
     };
     if commit.is_err() {
-        return write_error(
-            "files download",
-            format,
-            AppError {
+        return Err(AppError {
                 exit_code: 1,
                 code: "internal_error",
                 message: "cannot move downloaded file into place".into(),
-            },
-            out,
-            err,
-        );
+            });
     }
-    let destination = destination.display().to_string();
-    write_success(
-        "files download",
-        format,
-        FileTransferData {
-            profile: printer.name,
-            driver: printer.driver_kind.name(),
-            source: device_path.1,
-            destination: destination.clone(),
-            bytes_transferred: transferred,
-            warnings: Vec::new(),
-            capabilities: file_capabilities(printer.driver_kind.capabilities()),
-        },
-        |out| writeln!(out, "Downloaded file to {destination}."),
-        out,
-    )
+    Ok(transferred)
 }
 
-fn download_destination(destination: Option<&str>, device_path: &str) -> Result<PathBuf, AppError> {
+fn download_destinations(device_paths: &[(String, String)], destination: Option<&str>, overwrite: bool) -> Result<Vec<PathBuf>, AppError> {
+    let multiple = device_paths.len() > 1;
+    let directory = match destination {
+        Some(value) if multiple => match fs::metadata(value) {
+            Ok(metadata) if metadata.is_dir() => Some(PathBuf::from(value)),
+            _ => return Err(AppError::usage("--to must be an existing directory when downloading multiple files")),
+        },
+        Some(value) => return Ok(vec![download_destination(value, &device_paths[0].0)?]),
+        None => None,
+    };
+    let mut destinations = Vec::with_capacity(device_paths.len());
+    let mut seen = BTreeSet::new();
+    for (device_path, _) in device_paths {
+        let name = download_file_name(device_path)?;
+        let path = directory.as_ref().map_or_else(|| PathBuf::from(name), |directory| directory.join(name));
+        if !seen.insert(path.clone()) { return Err(AppError::usage(format!("multiple printer files would overwrite {}", path.display()))); }
+        if path.exists() && !overwrite { return Err(AppError::usage(format!("destination file already exists: {} (use --overwrite to replace)", path.display()))); }
+        destinations.push(path);
+    }
+    Ok(destinations)
+}
+
+fn download_destination(destination: &str, device_path: &str) -> Result<PathBuf, AppError> {
+    let name = download_file_name(device_path)?;
+    let destination = PathBuf::from(destination);
+    if destination.is_dir() { return Ok(destination.join(name)); }
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    match fs::metadata(parent) { Ok(metadata) if metadata.is_dir() => Ok(destination), _ => Err(AppError::usage(format!("destination directory does not exist: {}", parent.display()))) }
+}
+
+fn download_file_name(device_path: &str) -> Result<&str, AppError> {
     let name = device_path
         .rsplit('/')
         .next()
         .filter(|name| !name.is_empty())
         .ok_or_else(|| AppError::usage("cannot download a directory"))?;
-    let destination = destination
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(name));
-    if destination.is_dir() {
-        return Ok(destination.join(name));
-    }
-    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
-    match fs::metadata(parent) {
-        Ok(metadata) if metadata.is_dir() => Ok(destination),
-        _ => Err(AppError::usage(format!(
-            "destination directory does not exist: {}",
-            parent.display()
-        ))),
-    }
+    Ok(name)
 }
 
 #[derive(Serialize)]
@@ -3068,6 +3057,34 @@ struct FileTransferData {
     source: String,
     destination: String,
     bytes_transferred: u64,
+    warnings: Vec<String>,
+    capabilities: FileCapabilities,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadedFile {
+    source: String,
+    destination: String,
+    bytes_transferred: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileTransferResult {
+    profile: String,
+    driver: &'static str,
+    transfer: DownloadedFile,
+    warnings: Vec<String>,
+    capabilities: FileCapabilities,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileTransfersData {
+    profile: String,
+    driver: &'static str,
+    files: Vec<DownloadedFile>,
     warnings: Vec<String>,
     capabilities: FileCapabilities,
 }
@@ -5226,6 +5243,33 @@ mod tests {
                 .unwrap()
                 .contains("cannot delete a directory")
         );
+    }
+
+    #[test]
+    fn batch_download_requires_a_directory_and_rejects_name_collisions() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = vec![
+            ("/models/cube.gcode".to_owned(), "gcodes:/models/cube.gcode".to_owned()),
+            ("/backup/cube.gcode".to_owned(), "gcodes:/backup/cube.gcode".to_owned()),
+        ];
+
+        let error = download_destinations(&paths, Some("download.gcode"), false).unwrap_err();
+        assert!(error.message.contains("existing directory"));
+
+        let error = download_destinations(&paths, Some(directory.path().to_str().unwrap()), false).unwrap_err();
+        assert!(error.message.contains("would overwrite"));
+    }
+
+    #[test]
+    fn batch_download_maps_each_file_to_the_requested_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = vec![
+            ("/models/cube.gcode".to_owned(), "gcodes:/models/cube.gcode".to_owned()),
+            ("/models/benchy.gcode".to_owned(), "gcodes:/models/benchy.gcode".to_owned()),
+        ];
+
+        let destinations = download_destinations(&paths, Some(directory.path().to_str().unwrap()), false).unwrap();
+        assert_eq!(destinations, vec![directory.path().join("cube.gcode"), directory.path().join("benchy.gcode")]);
     }
 
     #[test]

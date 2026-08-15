@@ -18,7 +18,7 @@
     {"path": "files list", "arguments": "<printer> [<device-path>...]", "flags": ["--recursive", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
     {"path": "files roots", "arguments": "<printer>", "flags": ["--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
     {"path": "files upload", "arguments": "<printer> <local-path> [<device-path>]", "flags": ["--overwrite", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
-    {"path": "files download", "arguments": "<printer> <device-path>", "flags": ["--to <path>", "--overwrite", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
+    {"path": "files download", "arguments": "<printer> <device-path>...", "flags": ["--to <path> (directory for multiple files)", "--overwrite", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
     {"path": "jobs", "arguments": "", "flags": [], "implementation": "implemented"},
     {"path": "jobs start", "arguments": "<printer> <device-path>", "flags": ["--plate <number>", "--skip-leveling", "--yes", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
     {"path": "jobs pause", "arguments": "<printer>", "flags": ["--yes", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
