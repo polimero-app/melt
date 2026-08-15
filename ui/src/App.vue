@@ -20,6 +20,7 @@ import {
   validatePresetDraft,
   type TemperaturePreset,
 } from './temperatures'
+import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/vue'
 import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
 import SlideOver from './components/SlideOver.vue'
@@ -2040,19 +2041,53 @@ onUnmounted(() => {
             class="hidden items-center pr-4 lg:flex min-[1400px]:pr-8"
             :class="!usePrinterMenu && 'min-[1400px]:hidden'"
           >
-            <div class="grid grid-cols-1">
-              <select
-                name="printer-navigation"
-                :value="activeView === 'control' ? activePrinter?.name : ''"
+            <!-- A native option renders text only, so this mirrors the tab
+                 strip's status dot through a listbox instead of naming the
+                 state in the label. -->
+            <Listbox
+              as="div"
+              class="relative"
+              :model-value="activeView === 'control' ? activePrinter?.name ?? '' : ''"
+              @update:model-value="selectPrinter"
+            >
+              <ListboxButton
                 :aria-label="t('nav.selectPrinter')"
-                class="col-start-1 row-start-1 w-44 appearance-none truncate rounded-md bg-white py-1.5 pr-8 pl-3 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 min-[900px]:w-52 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800"
-                @change="selectPrinter(($event.target as HTMLSelectElement).value)"
+                class="flex w-44 items-center gap-x-2 rounded-md bg-white py-1.5 pr-8 pl-3 text-left text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 min-[900px]:w-52 dark:bg-white/5 dark:text-white dark:outline-white/10"
               >
-                <option value="" disabled>{{ t('nav.selectPrinter') }}</option>
-                <option v-for="printer in printers" :key="printer.name" :value="printer.name">{{ printer.name }} · {{ statusLabel(badgeFor(printer.name)) }}</option>
-              </select>
-              <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-2 size-4 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
-            </div>
+                <span
+                  v-if="activeView === 'control' && activePrinter"
+                  class="size-1.5 shrink-0 rounded-full ring-3"
+                  :class="badgeDotClasses[activeBadge]"
+                ></span>
+                <span class="truncate">{{ activeView === 'control' && activePrinter ? activePrinter.name : t('nav.selectPrinter') }}</span>
+                <span v-if="activeView === 'control' && activePrinter" class="sr-only">{{ statusLabel(activeBadge) }}</span>
+                <PhCaretDown class="pointer-events-none absolute inset-y-0 right-0 mr-2 size-4 self-center text-gray-500 dark:text-gray-400" aria-hidden="true" />
+              </ListboxButton>
+              <ListboxOptions
+                class="absolute left-0 z-30 mt-1 max-h-80 w-44 overflow-auto rounded-md bg-white py-1 shadow-lg outline-1 outline-black/5 min-[900px]:w-52 dark:bg-gray-800 dark:shadow-none dark:-outline-offset-1 dark:outline-white/10"
+              >
+                <ListboxOption
+                  v-for="printer in printers"
+                  :key="printer.name"
+                  v-slot="{ active, selected }"
+                  :value="printer.name"
+                  as="template"
+                >
+                  <li
+                    class="flex cursor-pointer items-center gap-x-2 px-3 py-2 text-sm"
+                    :class="[
+                      active ? 'bg-gray-100 outline-hidden dark:bg-white/5' : '',
+                      selected ? 'font-medium text-cyan-600 dark:text-cyan-400' : 'text-gray-700 dark:text-gray-300',
+                    ]"
+                  >
+                    <span class="size-1.5 shrink-0 rounded-full ring-3" :class="badgeDotClasses[badgeFor(printer.name)]"></span>
+                    <span class="truncate">{{ printer.name }}</span>
+                    <!-- The dot carries the state visually; keep it readable. -->
+                    <span class="sr-only">{{ statusLabel(badgeFor(printer.name)) }}</span>
+                  </li>
+                </ListboxOption>
+              </ListboxOptions>
+            </Listbox>
           </div>
           <span v-if="printers.length" class="my-3 hidden w-px shrink-0 bg-gray-200 lg:block dark:bg-white/15" aria-hidden="true"></span>
           <div class="hidden items-center space-x-4 pl-4 lg:flex min-[1400px]:space-x-8 min-[1400px]:pl-8">
