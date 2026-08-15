@@ -58,6 +58,7 @@ import {
   PhHexagon,
   PhHouse,
   PhInfo,
+  PhKey,
   PhMagnifyingGlass,
   PhMagnifyingGlassPlus,
   PhMinus,
@@ -227,6 +228,11 @@ type MonitorEntry = {
   observedAt?: string
 }
 
+type KeychainProbe = {
+  available: boolean
+  reason?: 'accessCodeMissing' | 'keychainUnavailable'
+}
+
 type NotificationEvent = { kind: 'completion' | 'failure' | 'disconnection'; printer: string }
 type TransferProgress = { transferId: string; bytesTransferred: number; totalBytes?: number; complete: boolean }
 type PrintStageEvent = { stage: string; percent?: number; bytesTransferred?: number; detail?: string }
@@ -383,6 +389,7 @@ const capabilities = ref<Capabilities>()
 const files = ref<FileEntry[]>([])
 const loading = ref(true)
 const refreshing = ref(false)
+const keychainChecking = ref(false)
 const filesLoading = ref(false)
 const filesError = ref<string>()
 const deletingPrinterPath = ref<string>()
@@ -966,6 +973,23 @@ async function refreshMonitoring() {
     showToast(message(reason), 'error')
   } finally {
     refreshing.value = false
+  }
+}
+
+async function checkKeychain() {
+  if (keychainChecking.value || !activePrinter.value) return
+  keychainChecking.value = true
+  try {
+    const probe = await invoke<KeychainProbe>('probe_keychain', { name: activePrinter.value.name })
+    if (probe.available && !probe.reason) {
+      showToast(t('control.keychainAvailable'))
+    } else {
+      showToast(message({ code: probe.reason ?? 'keychainUnavailable' }), 'error')
+    }
+  } catch (reason) {
+    showToast(message(reason), 'error')
+  } finally {
+    keychainChecking.value = false
   }
 }
 
@@ -2156,7 +2180,11 @@ onUnmounted(() => {
           <PhWarning class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />
           <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{{ t('control.unavailableTitle') }}</h3>
           <p class="mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">{{ selectedMonitor?.error ? message(selectedMonitor.error) : t('control.unavailableDescription') }}</p>
-          <Button class="mt-6" variant="primary" :disabled="refreshing" @click="refreshMonitoring"><PhArrowsClockwise class="size-4" :class="refreshing && 'animate-spin'" aria-hidden="true" /> {{ t('control.refreshConnection') }}</Button>
+          <div class="mt-6 flex flex-wrap justify-center gap-2">
+            <Button v-if="selectedMonitor?.error?.code === 'keychainFailed'" variant="secondary" :disabled="keychainChecking" @click="checkKeychain"><PhKey class="size-4" :class="keychainChecking && 'animate-pulse'" aria-hidden="true" /> {{ t('control.checkKeychain') }}</Button>
+            <Button v-if="selectedMonitor?.error?.code === 'keychainFailed' && activePrinter" variant="secondary" @click="openEdit(activePrinter)"><PhPencilSimple class="size-4" aria-hidden="true" /> {{ t('printersView.editPrinter') }}</Button>
+            <Button variant="primary" :disabled="refreshing" @click="refreshMonitoring"><PhArrowsClockwise class="size-4" :class="refreshing && 'animate-spin'" aria-hidden="true" /> {{ t('control.refreshConnection') }}</Button>
+          </div>
         </div>
 
         <div v-show="activeHasStatus">

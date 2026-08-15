@@ -300,6 +300,16 @@ struct MonitorEntry {
     observed_at: Option<String>,
 }
 
+/// A non-sensitive health check for the operating system credential store.
+/// It deliberately returns no credential material; its purpose is to let the
+/// interface distinguish a locked keychain from a printer that is unreachable.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KeychainProbe {
+    available: bool,
+    reason: Option<&'static str>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum MonitorConnectionState {
@@ -929,6 +939,40 @@ fn monitored_printers(
 #[tauri::command(async)]
 fn cached_monitoring() -> Option<serde_json::Value> {
     load_status_cache()
+}
+
+/// Tries to read the configured authentication credential without exposing it.
+/// On Secret Service based desktops this access can also cause the OS to
+/// present its normal unlock prompt; Polimero never attempts to unlock it
+/// itself.
+#[tauri::command(async)]
+fn probe_keychain(name: String) -> Result<KeychainProbe, CommandError> {
+    let config = Config::load().map_err(|_| unreadable_config())?;
+    let profile = config
+        .get_profile(&name.to_ascii_lowercase())
+        .ok_or_else(|| CommandError::new("profileNotFound"))?;
+    let driver = drivers::profile(profile).map_err(|_| CommandError::new("profileInvalid"))?;
+    let kind = driver.driver();
+
+    match access_code(&profile.driver, &name, kind) {
+        Ok(_) => Ok(KeychainProbe {
+            available: true,
+            reason: None,
+        }),
+        Err(error) if error.code == "accessCodeUnavailable" => {
+            return Ok(KeychainProbe {
+                available: true,
+                reason: Some("accessCodeMissing"),
+            });
+        }
+        Err(error) if error.code == "keychainFailed" => {
+            return Ok(KeychainProbe {
+                available: false,
+                reason: Some("keychainUnavailable"),
+            });
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Like [`monitored_printers`], but polls (and caches) just one printer —
@@ -3183,6 +3227,7 @@ fn main() {
             printer_capabilities,
             monitored_printers,
             cached_monitoring,
+            probe_keychain,
             printer_status,
             create_configured_printer,
             update_configured_printer,

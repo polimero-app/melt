@@ -137,6 +137,8 @@ export type MessageKey =
   | "control.signalNone"
   | "control.unavailableTitle"
   | "control.unavailableDescription"
+  | "control.checkKeychain"
+  | "control.keychainAvailable"
   | "control.awaitingTitle"
   | "control.awaitingDescription"
   | "control.presets"
@@ -373,6 +375,7 @@ export type MessageKey =
   | "errors.profileMissingAccessCode"
   | "errors.accessCodeUnavailable"
   | "errors.keychainFailed"
+  | "errors.keychainUnavailable"
   | "errors.tlsCredentialsUnavailable"
   | "errors.tlsUnconfirmed"
   | "errors.actionUnconfirmed"
@@ -588,6 +591,8 @@ const messages: Record<Locale, Messages> = {
     "control.signalNone": "No signal",
     "control.unavailableTitle": "Printer unavailable",
     "control.unavailableDescription": "Polimero cannot reach this printer right now. Check the printer connection and try again.",
+    "control.checkKeychain": "Check keychain",
+    "control.keychainAvailable": "Keychain is available. Retry the printer connection.",
     "control.awaitingTitle": "Waiting for the first status sample",
     "control.awaitingDescription": "Polimero is establishing the printer heartbeat. Telemetry appears as soon as a sample arrives.",
     "control.presets": "Material presets",
@@ -839,8 +844,9 @@ const messages: Record<Locale, Messages> = {
     "errors.profileInvalidAccessCode": "That access code is not valid.",
     "errors.profileInvalidFingerprint": "That TLS fingerprint is not valid.",
     "errors.profileMissingAccessCode": "This driver requires an access code.",
-    "errors.accessCodeUnavailable": "Printer authentication is unavailable.",
-    "errors.keychainFailed": "Keychain operation failed.",
+    "errors.accessCodeUnavailable": "The printer access code is missing. Open printer settings and enter it again.",
+    "errors.keychainFailed": "Polimero cannot access your system keychain, so it cannot read this printer’s access code. Unlock your keychain, then check it and retry the connection.",
+    "errors.keychainUnavailable": "Your system keychain is still locked or unavailable. Unlock it in your desktop session, then try again.",
     "errors.tlsCredentialsUnavailable": "Printer TLS credentials are unavailable.",
     "errors.tlsUnconfirmed": "Review and confirm the new TLS certificate before replacing the stored fingerprint.",
     "errors.actionUnconfirmed": "Confirm this printer action before sending it.",
@@ -1036,6 +1042,8 @@ const messages: Record<Locale, Messages> = {
     "control.signalNone": "Sem sinal",
     "control.unavailableTitle": "Impressora indisponível",
     "control.unavailableDescription": "O Polimero não consegue alcançar esta impressora no momento. Verifique a conexão da impressora e tente novamente.",
+    "control.checkKeychain": "Verificar chaveiro",
+    "control.keychainAvailable": "O chaveiro está disponível. Tente conectar à impressora novamente.",
     "control.awaitingTitle": "Aguardando a primeira amostra de status",
     "control.awaitingDescription": "O Polimero está estabelecendo o heartbeat da impressora. A telemetria aparece assim que uma amostra chegar.",
     "control.presets": "Predefinições de material",
@@ -1287,8 +1295,9 @@ const messages: Record<Locale, Messages> = {
     "errors.profileInvalidAccessCode": "Esse código de acesso não é válido.",
     "errors.profileInvalidFingerprint": "Essa impressão digital TLS não é válida.",
     "errors.profileMissingAccessCode": "Este driver exige um código de acesso.",
-    "errors.accessCodeUnavailable": "A autenticação da impressora está indisponível.",
-    "errors.keychainFailed": "A operação no chaveiro falhou.",
+    "errors.accessCodeUnavailable": "O código de acesso da impressora está ausente. Abra as configurações da impressora e informe-o novamente.",
+    "errors.keychainFailed": "O Polimero não consegue acessar o chaveiro do sistema e, por isso, não consegue ler o código de acesso desta impressora. Desbloqueie o chaveiro, verifique-o e tente conectar novamente.",
+    "errors.keychainUnavailable": "O chaveiro do sistema ainda está bloqueado ou indisponível. Desbloqueie-o na sua sessão de desktop e tente novamente.",
     "errors.tlsCredentialsUnavailable": "As credenciais TLS da impressora estão indisponíveis.",
     "errors.tlsUnconfirmed": "Revise e confirme o novo certificado TLS antes de substituir a impressão digital armazenada.",
     "errors.actionUnconfirmed": "Confirme esta ação antes de enviá-la à impressora.",
