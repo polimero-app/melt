@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process::Command;
 
 use serde_json::Value;
@@ -27,6 +28,26 @@ fn package_configuration_keeps_the_native_artifact_and_cli_contracts() {
     );
     assert_eq!(config["app"]["windows"][0]["minWidth"], 1280);
     assert_eq!(config["app"]["windows"][0]["minHeight"], 800);
+
+    // A declared but missing icon only fails on the macOS/Windows release
+    // runners, so resolve every path here instead.
+    let icons = config["bundle"]["icon"]
+        .as_array()
+        .expect("declared bundle icons");
+    assert_eq!(
+        config["bundle"]["icon"],
+        serde_json::json!([
+            "icons/32x32.png",
+            "icons/128x128.png",
+            "icons/128x128@2x.png",
+            "icons/icon.icns",
+            "icons/icon.ico"
+        ])
+    );
+    for icon in icons {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(icon.as_str().expect("icon path"));
+        assert!(path.is_file(), "missing bundle icon: {}", path.display());
+    }
 
     let output = Command::new(env!("CARGO_BIN_EXE_melt"))
         .args(["version", "--output", "json"])

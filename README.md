@@ -226,9 +226,13 @@ physical captures qualify an exact model and module-firmware range.
 The application icon is
 [melt](https://thenounproject.com/icon/melt-8239158/) by Paphada from
 [Noun Project](https://thenounproject.com/), used under
-[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). The icon is
-separately licensed from the rest of this project and is not covered by
-`AGPL-3.0-only`.
+[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) and modified: the
+embedded credit line was removed and the artboard was squared for use as an
+application icon. The icon is separately licensed from the rest of this
+project and is not covered by `AGPL-3.0-only`.
+
+`crates/melt-desktop/icons/icon.svg` is the master; the PNG, ICO, and ICNS
+variants beside it are generated from it.
 
 ## Safety disclaimer
 
