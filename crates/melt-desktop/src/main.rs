@@ -11,8 +11,7 @@ use std::{
 };
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use openssl::rand::rand_bytes;
-use polimero_core::{
+use melt_core::{
     AppInfo,
     bambu::{CameraFrame, CameraFrameKind, CameraManager, CameraSubscription, PresenceCache},
     config::{Config, ConfigError, Profile, config_dir},
@@ -24,6 +23,7 @@ use polimero_core::{
     preferences::{self, NotificationPreferences, PreferencesError, Slicer},
     profiles,
 };
+use openssl::rand::rand_bytes;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{Emitter, Manager};
@@ -34,7 +34,7 @@ mod webrtc_camera;
 
 #[tauri::command(async)]
 fn app_info() -> AppInfo {
-    polimero_core::app_info()
+    melt_core::app_info()
 }
 
 /// Errors cross the IPC boundary as stable codes so the interface can render
@@ -270,7 +270,7 @@ struct PrinterCapabilities {
     name: String,
     capabilities: Capabilities,
     #[serde(skip_serializing_if = "Option::is_none")]
-    bambu: Option<polimero_core::bambu::RuntimeCapabilities>,
+    bambu: Option<melt_core::bambu::RuntimeCapabilities>,
 }
 
 #[derive(Serialize)]
@@ -385,7 +385,7 @@ struct JobActionRequest {
     #[serde(default)]
     device_path: Option<String>,
     #[serde(default)]
-    options: polimero_core::bambu::JobStartOptions,
+    options: melt_core::bambu::JobStartOptions,
     confirmed: bool,
 }
 
@@ -552,7 +552,7 @@ fn resolve_absolute_path(value: &str) -> Result<std::path::PathBuf, CommandError
 
 /// Where the file library opens when no explicit path is given: the last
 /// folder the user browsed (persisted in preferences), falling back to a
-/// `Polimero` folder under the user's documents, created on first use.
+/// `Melt` folder under the user's documents, created on first use.
 fn default_library_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, CommandError> {
     if let Ok(preferences) = preferences::Preferences::load() {
         if let Some(path) = preferences.library_path {
@@ -567,7 +567,7 @@ fn default_library_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, Com
         .path()
         .document_dir()
         .map_err(|_| CommandError::new("libraryUnavailable"))?;
-    let dir = base.join("Polimero");
+    let dir = base.join("Melt");
     std::fs::create_dir_all(&dir).map_err(|_| CommandError::new("libraryUnavailable"))?;
     Ok(dir)
 }
@@ -836,12 +836,12 @@ fn registered_drivers() -> Vec<drivers::DriverInfo> {
 #[tauri::command(async)]
 fn discover_printers(
     state: tauri::State<'_, PresenceState>,
-) -> Result<Vec<polimero_core::bambu::DiscoveredPrinter>, CommandError> {
+) -> Result<Vec<melt_core::bambu::DiscoveredPrinter>, CommandError> {
     let _scan = state
         .scan_lock
         .lock()
         .map_err(|_| CommandError::new("discoveryFailed"))?;
-    let discovered = polimero_core::bambu::discover(Duration::from_secs(5))
+    let discovered = melt_core::bambu::discover(Duration::from_secs(5))
         .map_err(|_| CommandError::new("discoveryFailed"))?;
     update_presence_cache(&state, &discovered, Duration::from_secs(60));
     Ok(discovered)
@@ -899,14 +899,14 @@ fn printer_capabilities(
             runtime.ams_supported = Some(true);
         }
         if extension.emmc_storage == Some(true) {
-            runtime.storage_transport = polimero_core::bambu::StorageTransport::Tunnel6000;
+            runtime.storage_transport = melt_core::bambu::StorageTransport::Tunnel6000;
             if !runtime
                 .storage_volumes
-                .contains(&polimero_core::bambu::StorageVolume::Emmc)
+                .contains(&melt_core::bambu::StorageVolume::Emmc)
             {
                 runtime
                     .storage_volumes
-                    .push(polimero_core::bambu::StorageVolume::Emmc);
+                    .push(melt_core::bambu::StorageVolume::Emmc);
             }
         }
     }
@@ -943,7 +943,7 @@ fn cached_monitoring() -> Option<serde_json::Value> {
 
 /// Tries to read the configured authentication credential without exposing it.
 /// On Secret Service based desktops this access can also cause the OS to
-/// present its normal unlock prompt; Polimero never attempts to unlock it
+/// present its normal unlock prompt; Melt never attempts to unlock it
 /// itself.
 #[tauri::command(async)]
 fn probe_keychain(name: String) -> Result<KeychainProbe, CommandError> {
@@ -1052,7 +1052,7 @@ fn collect_monitored_printers(state: &MonitorState) -> Result<Vec<MonitorEntry>,
     Ok(collected)
 }
 
-const STATUS_CACHE_FILE: &str = "polimero-status-cache.json";
+const STATUS_CACHE_FILE: &str = "melt-status-cache.json";
 const MAX_UI_CACHE_AGE: Duration = Duration::from_secs(30);
 
 /// Last known `monitoring-updated` payload, persisted as raw JSON so a
@@ -1119,7 +1119,7 @@ fn start_presence_worker(app: tauri::AppHandle, state: PresenceState) {
                 .scan_lock
                 .lock()
                 .ok()
-                .and_then(|_scan| polimero_core::bambu::discover(SCAN_WINDOW).ok());
+                .and_then(|_scan| melt_core::bambu::discover(SCAN_WINDOW).ok());
             if let Some(discovered) = discovered {
                 update_presence_cache(&state, &discovered, RETENTION);
                 let _ = app.emit("presence-updated", ());
@@ -1131,7 +1131,7 @@ fn start_presence_worker(app: tauri::AppHandle, state: PresenceState) {
 
 fn update_presence_cache(
     state: &PresenceState,
-    discovered: &[polimero_core::bambu::DiscoveredPrinter],
+    discovered: &[melt_core::bambu::DiscoveredPrinter],
     retention: Duration,
 ) {
     let configured = Config::load()
@@ -1645,9 +1645,9 @@ fn set_library_path(
 #[tauri::command(async)]
 fn inspect_library_print(
     request: LibraryInspectRequest,
-) -> Result<polimero_core::bambu::PrintPackage, CommandError> {
+) -> Result<melt_core::bambu::PrintPackage, CommandError> {
     let absolute = resolve_absolute_path(&request.path)?;
-    polimero_core::bambu::inspect_print_package(&absolute)
+    melt_core::bambu::inspect_print_package(&absolute)
         .map_err(|_| CommandError::new("jobFileInvalid"))
 }
 
@@ -1664,7 +1664,7 @@ fn print_library_file(
         .ok_or_else(|| CommandError::new("libraryPathInvalid"))?;
     let (generation, printer) =
         pooled_desktop_printer(&state, &request.printer, Operation::FileUpload)?;
-    let mut options = polimero_core::bambu::JobStartOptions::default();
+    let mut options = melt_core::bambu::JobStartOptions::default();
     let device_path = if printer.driver.driver() == drivers::Driver::BambuLan
         && source_filename.to_ascii_lowercase().ends_with(".3mf")
     {
@@ -1675,7 +1675,7 @@ fn print_library_file(
             .and_then(|entries| entries.get(&request.printer)?.entry.status.clone())
             .and_then(|status| status.extensions.bambu_lan)
             .and_then(|extension| extension.ams);
-        let preflight = polimero_core::bambu::preflight_print_package(
+        let preflight = melt_core::bambu::preflight_print_package(
             &absolute,
             request.display_name.as_deref(),
             request.plate,
@@ -1694,8 +1694,8 @@ fn print_library_file(
         }
         let _ = app.emit(
             "print-stage",
-            polimero_core::bambu::PrintStageEvent {
-                stage: polimero_core::bambu::PrintStage::Inspect,
+            melt_core::bambu::PrintStageEvent {
+                stage: melt_core::bambu::PrintStage::Inspect,
                 percent: Some(10),
                 bytes_transferred: None,
                 detail: Some(preflight.names.display_name),
@@ -1707,8 +1707,8 @@ fn print_library_file(
     };
     let _ = app.emit(
         "print-stage",
-        polimero_core::bambu::PrintStageEvent {
-            stage: polimero_core::bambu::PrintStage::Upload,
+        melt_core::bambu::PrintStageEvent {
+            stage: melt_core::bambu::PrintStage::Upload,
             percent: Some(30),
             bytes_transferred: Some(0),
             detail: Some(device_path.clone()),
@@ -1725,8 +1725,8 @@ fn print_library_file(
     .map_err(|error| operation_error(error, Operation::FileUpload))?;
     let _ = app.emit(
         "print-stage",
-        polimero_core::bambu::PrintStageEvent {
-            stage: polimero_core::bambu::PrintStage::SendCommand,
+        melt_core::bambu::PrintStageEvent {
+            stage: melt_core::bambu::PrintStage::SendCommand,
             percent: Some(80),
             bytes_transferred: None,
             detail: None,
@@ -1753,8 +1753,8 @@ fn print_library_file(
     if result.is_ok() {
         let _ = app.emit(
             "print-stage",
-            polimero_core::bambu::PrintStageEvent {
-                stage: polimero_core::bambu::PrintStage::Finished,
+            melt_core::bambu::PrintStageEvent {
+                stage: melt_core::bambu::PrintStage::Finished,
                 percent: Some(100),
                 bytes_transferred: None,
                 detail: None,
@@ -2862,7 +2862,7 @@ fn subscribe_camera(
     let drivers::Profile::Bambu(profile) = &printer.driver else {
         return Err(CommandError::new("cameraPreviewUnavailable"));
     };
-    let capabilities = polimero_core::bambu::Client::new(profile.clone())
+    let capabilities = melt_core::bambu::Client::new(profile.clone())
         .runtime_capabilities(
             printer.access_code.as_deref(),
             printer.tls_fingerprint.as_deref(),
@@ -2950,8 +2950,7 @@ fn diagnostics_report(
             .ok()
             .flatten()
             .unwrap_or_else(|| profile.default_capabilities());
-        let selection =
-            polimero_core::bambu::select_camera_transport(profile.host(), &capabilities);
+        let selection = melt_core::bambu::select_camera_transport(profile.host(), &capabilities);
         let key = driver.physical_printer_key(&named.name);
         let owner = owners.iter().find(|owner| owner.printer_key == key);
         bambu_reports.push(diagnostics::bambu_compatibility_report(
@@ -3138,32 +3137,32 @@ fn operation_error(error: DriverError, operation: Operation) -> CommandError {
             return CommandError::new("profileInvalid");
         }
         DriverError::UnsupportedOperation(_, _)
-        | DriverError::Moonraker(polimero_core::moonraker::Error::Unsupported(_))
-        | DriverError::Bambu(polimero_core::bambu::TransportError::Unsupported(_)) => {
+        | DriverError::Moonraker(melt_core::moonraker::Error::Unsupported(_))
+        | DriverError::Bambu(melt_core::bambu::TransportError::Unsupported(_)) => {
             "driverUnsupported"
         }
-        DriverError::Moonraker(polimero_core::moonraker::Error::Authentication)
+        DriverError::Moonraker(melt_core::moonraker::Error::Authentication)
         | DriverError::Bambu(
-            polimero_core::bambu::TransportError::Authentication
-            | polimero_core::bambu::TransportError::Pin(_),
+            melt_core::bambu::TransportError::Authentication
+            | melt_core::bambu::TransportError::Pin(_),
         ) => "printerAuthFailed",
-        DriverError::Bambu(polimero_core::bambu::TransportError::UnsignedCommand) => {
+        DriverError::Bambu(melt_core::bambu::TransportError::UnsignedCommand) => {
             "printerSigningRequired"
         }
-        DriverError::Bambu(polimero_core::bambu::TransportError::AuthorizationRequired(_)) => {
+        DriverError::Bambu(melt_core::bambu::TransportError::AuthorizationRequired(_)) => {
             "printerSigningRequired"
         }
-        DriverError::Bambu(polimero_core::bambu::TransportError::AuthorizationConflict(_)) => {
+        DriverError::Bambu(melt_core::bambu::TransportError::AuthorizationConflict(_)) => {
             "printerAuthorizationConflict"
         }
-        DriverError::Moonraker(polimero_core::moonraker::Error::Timeout)
-        | DriverError::Bambu(polimero_core::bambu::TransportError::Timeout) => "printerTimeout",
-        DriverError::Camera(polimero_core::bambu::CameraError::MissingAccessCode) => {
+        DriverError::Moonraker(melt_core::moonraker::Error::Timeout)
+        | DriverError::Bambu(melt_core::bambu::TransportError::Timeout) => "printerTimeout",
+        DriverError::Camera(melt_core::bambu::CameraError::MissingAccessCode) => {
             "cameraAccessCodeUnavailable"
         }
         DriverError::Camera(
-            polimero_core::bambu::CameraError::Pin(_)
-            | polimero_core::bambu::CameraError::MissingCertificate,
+            melt_core::bambu::CameraError::Pin(_)
+            | melt_core::bambu::CameraError::MissingCertificate,
         ) => "cameraTlsFailed",
         DriverError::Moonraker(_) | DriverError::Bambu(_) | DriverError::Camera(_) => {
             "printerOperationFailed"
@@ -3187,7 +3186,7 @@ fn remove_configured_printer(
 fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if !args.is_empty() {
-        std::process::exit(polimero_cli::run(
+        std::process::exit(melt_cli::run(
             &args,
             &mut std::io::stdout(),
             &mut std::io::stderr(),
@@ -3265,7 +3264,7 @@ fn main() {
             remove_configured_printer
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Polimero");
+        .expect("error while running Melt");
 }
 
 #[cfg(test)]
@@ -3278,7 +3277,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use polimero_core::{
+    use melt_core::{
         drivers::{self, Operation},
         moonraker,
     };
@@ -3306,7 +3305,7 @@ mod tests {
     #[test]
     fn unsigned_commands_report_a_signing_requirement_not_bad_credentials() {
         let error = operation_error(
-            drivers::DriverError::Bambu(polimero_core::bambu::TransportError::UnsignedCommand),
+            drivers::DriverError::Bambu(melt_core::bambu::TransportError::UnsignedCommand),
             Operation::JobStart,
         );
 
@@ -3373,7 +3372,7 @@ mod tests {
                 sampled_at: now,
                 started_at: now,
                 observed_at: None,
-                backoff: polimero_core::monitor::Backoff::new(Duration::from_secs(5)),
+                backoff: melt_core::monitor::Backoff::new(Duration::from_secs(5)),
                 entry: MonitorEntry {
                     name: "printer".into(),
                     driver: "moonraker".into(),

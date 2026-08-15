@@ -39,4 +39,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build -p polimero-desktop --locked
+      - run: cargo build -p melt-desktop --locked

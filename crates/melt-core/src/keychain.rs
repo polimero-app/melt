@@ -1,7 +1,7 @@
 use keyring::Entry;
 use thiserror::Error;
 
-pub const SERVICE: &str = "polimero";
+pub const SERVICE: &str = "melt";
 
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum SecretError {

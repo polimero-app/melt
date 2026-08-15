@@ -13,14 +13,14 @@ license-check: ## Verify license declarations and files
 	test -f LICENSE
 	grep -Fqx 'license = "AGPL-3.0-only"' Cargo.toml
 	grep -Fq '"license": "AGPL-3.0-only"' ui/package.json
-	grep -Fq '"../../LICENSE"' crates/polimero-desktop/tauri.conf.json
+	grep -Fq '"../../LICENSE"' crates/melt-desktop/tauri.conf.json
 	! git grep -nE 'license = "MIT"|"license": "MIT"' -- ':!Cargo.lock' ':!Makefile'
 
 contract: ## Run CLI contract tests
-	cargo test -p polimero-cli --test contract_fixtures --locked
+	cargo test -p melt-cli --test contract_fixtures --locked
 
 bambu-evidence-check: ## Run Bambu evidence tests
-	cargo test -p polimero-core --test bambu_evidence --locked
+	cargo test -p melt-core --test bambu_evidence --locked
 
 run: ## Start the desktop app in development mode
 	@set -e; \
@@ -29,17 +29,17 @@ run: ## Start the desktop app in development mode
 	until curl --fail --silent http://127.0.0.1:1420 >/dev/null; do sleep 1; done; \
 	if test "$$XDG_SESSION_TYPE" = wayland && test -n "$$DISPLAY" && test -z "$$GDK_BACKEND"; then \
 		echo "Using X11 GTK fallback for this Wayland session"; \
-		GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER="$${WEBKIT_DISABLE_DMABUF_RENDERER:-1}" cargo run -p polimero-desktop --bin polimero; \
+		GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER="$${WEBKIT_DISABLE_DMABUF_RENDERER:-1}" cargo run -p melt-desktop --bin melt; \
 	else \
-		cargo run -p polimero-desktop --bin polimero; \
+		cargo run -p melt-desktop --bin melt; \
 	fi
 
 release-gate: bambu-evidence-check contract cargo-build ## Run required release checks
 	$(MAKE) release-cli-check
 
 release-cli-check: ## Verify the release CLI output
-	POLIMERO_CONFIG_DIR="$(CURDIR)/fixtures/cli-contract/config/empty" \
-		./target/debug/polimero version --output json
+	MELT_CONFIG_DIR="$(CURDIR)/fixtures/cli-contract/config/empty" \
+		./target/debug/melt version --output json
 
 release-qualification: ci release-cli-check ## Run the full release qualification suite
 

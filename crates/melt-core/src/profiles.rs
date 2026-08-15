@@ -851,7 +851,7 @@ mod tests {
             "key"
         );
         assert!(
-            !std::fs::read_to_string(dir.path().join("polimero.yaml"))
+            !std::fs::read_to_string(dir.path().join("melt.yaml"))
                 .unwrap()
                 .contains("key")
         );
@@ -943,7 +943,7 @@ mod tests {
         store
             .set(SERVICE, "moonraker:garage:access-code", "old-key")
             .unwrap();
-        let (host, server) = moonraker_server(Some(dir.path().join("polimero.yaml")));
+        let (host, server) = moonraker_server(Some(dir.path().join("melt.yaml")));
 
         let error = create(
             dir.path(),

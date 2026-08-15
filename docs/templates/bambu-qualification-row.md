@@ -1,6 +1,6 @@
 # Bambu qualification row
 
-Polimero commit:
+Melt commit:
 Operator and UTC date:
 Owner/consent record (private location or self-owned statement):
 Marketed model:

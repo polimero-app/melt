@@ -1,5 +1,5 @@
 [package]
-name = "polimero-core"
+name = "melt-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

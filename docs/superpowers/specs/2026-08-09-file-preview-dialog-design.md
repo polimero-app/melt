@@ -51,7 +51,7 @@ the large render when it arrives, so there is no perceived wait.
 
 ## Rust
 
-`crates/polimero-desktop/src/preview.rs` hardcodes `WIDTH`/`HEIGHT` module
+`crates/melt-desktop/src/preview.rs` hardcodes `WIDTH`/`HEIGHT` module
 constants. They become parameters threaded through `rasterize`, `rasterize_3mf`,
 `render` and `encode_png`, with two exported sizes replacing them:
 

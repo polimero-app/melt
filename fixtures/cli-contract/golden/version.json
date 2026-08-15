@@ -9,7 +9,7 @@
       "headless"
     ],
     "platform": "linux/amd64",
-    "sourceUrl": "https://github.com/polimero-app/app",
+    "sourceUrl": "https://github.com/polimero-app/melt",
     "version": "dev"
   },
   "error": null,

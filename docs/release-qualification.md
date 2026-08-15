@@ -3,7 +3,7 @@
 `make release-qualification` is the reproducible qualification gate. It
 installs the locked UI dependencies, runs Rust formatting and Clippy, all Rust
 and UI tests, builds the workspace and UI, checks every CLI fixture, and runs
-the installed `polimero version --output json` entry point with an empty
+the installed `melt version --output json` entry point with an empty
 configuration directory.
 
 The tagged release workflow runs that gate on Linux, then builds the native
@@ -61,7 +61,7 @@ target OS/device, exact action, and observed result.
 
 The packaging checklist must cover installing, launching, and uninstalling
 each produced installer on its target OS, including the packaged headless
-`polimero version --output json` command. It must also cover one configured
+`melt version --output json` command. It must also cover one configured
 Moonraker printer: status, a non-destructive control, emergency-stop handling,
 and confirmation that unsupported capabilities still report capability errors.
 For releases that change Bambu behavior, attach the relevant completed rows

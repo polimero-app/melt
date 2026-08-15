@@ -316,9 +316,13 @@ mod tests {
             .unwrap();
 
         let mut buffer = [0; 32];
-        let (size, _) = first.recv_from(&mut buffer).expect("first socket must receive the broadcast");
+        let (size, _) = first
+            .recv_from(&mut buffer)
+            .expect("first socket must receive the broadcast");
         assert_eq!(&buffer[..size], b"announcement");
-        let (size, _) = second.recv_from(&mut buffer).expect("second socket must receive the broadcast");
+        let (size, _) = second
+            .recv_from(&mut buffer)
+            .expect("second socket must receive the broadcast");
         assert_eq!(&buffer[..size], b"announcement");
     }
 }

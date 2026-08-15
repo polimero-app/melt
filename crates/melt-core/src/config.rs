@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
-const CONFIG_FILE: &str = "polimero.yaml";
+const CONFIG_FILE: &str = "melt.yaml";
 const CURRENT_VERSION: u8 = 1;
 
 #[derive(Debug, Error)]
@@ -186,7 +186,7 @@ impl Config {
 }
 
 pub fn config_dir() -> Result<PathBuf, ConfigError> {
-    if let Some(dir) = env::var_os("POLIMERO_CONFIG_DIR").filter(|value| !value.is_empty()) {
+    if let Some(dir) = env::var_os("MELT_CONFIG_DIR").filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(dir));
     }
 
@@ -201,7 +201,7 @@ pub fn config_dir() -> Result<PathBuf, ConfigError> {
         .map(PathBuf::from)
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")));
 
-    base.map(|path| path.join("polimero")).ok_or_else(|| {
+    base.map(|path| path.join("melt")).ok_or_else(|| {
         ConfigError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "locating config directory",
@@ -358,10 +358,7 @@ profiles:
             fs::read_dir(dir.path())
                 .unwrap()
                 .filter_map(Result::ok)
-                .filter(|entry| entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(".polimero-"))
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with(".melt-"))
                 .count(),
             0
         );

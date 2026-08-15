@@ -1,8 +1,8 @@
-# Polimero Interface System
+# Melt Interface System
 
 ## Direction and feel
 
-Polimero is an operational workspace for people supervising physical printers. It should feel calm, precise, and trustworthy: telemetry remains stable while transports recover, and strong alarm language is reserved for states that require attention.
+Melt is an operational workspace for people supervising physical printers. It should feel calm, precise, and trustworthy: telemetry remains stable while transports recover, and strong alarm language is reserved for states that require attention.
 
 Domain vocabulary: printer heartbeat, live telemetry, retained sample, reconnecting transport, print progress, material path, and true outage.
 
@@ -36,7 +36,7 @@ Rules:
 - Never replace retained telemetry with an empty unavailable screen during a transient reconnect.
 - Use a compact amber status notice with a manual refresh action when the active printer is reconnecting.
 - Fleet “online” totals and destructive or dispatch eligibility require a confirmed live sample unless the backend independently revalidates connectivity.
-- Use red only when Polimero has no usable printer state or receives a terminal printer state.
+- Use red only when Melt has no usable printer state or receives a terminal printer state.
 
 ## Reusable implementation
 

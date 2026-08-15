@@ -30,7 +30,7 @@
     },
     {
       "id": "unknown-command-json",
-      "command": "polimero",
+      "command": "melt",
       "args": ["bogus", "--output", "json"],
       "exitCode": 2,
       "stdout": "golden/unknown-command.json",

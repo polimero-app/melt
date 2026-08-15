@@ -500,7 +500,7 @@ pub fn is_pushall_payload(payload: &[u8]) -> bool {
 
 const TLS_FINGERPRINT_PREFIX: &str = "sha256:";
 
-/// Returns whether a fingerprint follows Polimero's pinned-certificate format.
+/// Returns whether a fingerprint follows Melt's pinned-certificate format.
 pub fn is_valid_tls_fingerprint(fingerprint: &str) -> bool {
     fingerprint.len() == TLS_FINGERPRINT_PREFIX.len() + 64
         && fingerprint.starts_with(TLS_FINGERPRINT_PREFIX)

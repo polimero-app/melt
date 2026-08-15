@@ -1608,7 +1608,7 @@ impl MqttConnection {
         // Keepalive is disabled: a connection lives for one operation and this
         // client never sends PINGREQ, so a long timeout must not be dropped.
         payload.extend_from_slice(&0_u16.to_be_bytes());
-        mqtt_string(&mut payload, &format!("polimero-{:016x}", next_sequence()))?;
+        mqtt_string(&mut payload, &format!("melt-{:016x}", next_sequence()))?;
         mqtt_string(&mut payload, MQTT_USERNAME)?;
         mqtt_string(&mut payload, access_code)?;
         self.write_packet(0x10, &payload)?;
@@ -1934,10 +1934,7 @@ impl MqttConnection {
         if let Some(source) = self.active_status_source
             && let Some(root) = snapshot.as_object_mut()
         {
-            root.insert(
-                "_polimero".into(),
-                json!({"status_transport": source.as_str()}),
-            );
+            root.insert("_melt".into(), json!({"status_transport": source.as_str()}));
         }
         serde_json::to_vec(&snapshot).map_err(|_| Error::InvalidResponse)
     }
@@ -2717,7 +2714,7 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
         extruder_count: observed_extruder_count(print),
         mqtt_alive_supported: print.get("support_mqtt_alive").and_then(Value::as_bool),
         status_transport: report
-            .get("_polimero")
+            .get("_melt")
             .and_then(|metadata| metadata.get("status_transport"))
             .and_then(Value::as_str)
             .map(str::to_owned),
@@ -5762,8 +5759,7 @@ mod tests {
     #[test]
     fn emergency_stop_uses_cached_authorization_without_fetching_status() {
         let profile =
-            Profile::with_timeout("203.0.113.1", "SN001", true, Duration::from_millis(50))
-                .unwrap();
+            Profile::with_timeout("203.0.113.1", "SN001", true, Duration::from_millis(50)).unwrap();
         let client = Client::new(profile);
         let mut capabilities = RuntimeCapabilities::for_model("X1C");
         capabilities.authorization = AuthorizationMode::SigningRequired;
@@ -5777,8 +5773,7 @@ mod tests {
 
         // A cold emergency stop stays permitted rather than blocking on status.
         let cold = Client::new(
-            Profile::with_timeout("203.0.113.1", "SN001", true, Duration::from_millis(50))
-                .unwrap(),
+            Profile::with_timeout("203.0.113.1", "SN001", true, Duration::from_millis(50)).unwrap(),
         );
         assert!(
             cold.authorize_mutation(Some("code"), None, MutationClass::EmergencyStop)

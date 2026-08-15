@@ -1,6 +1,6 @@
 # Bambu protocol evidence policy
 
-Polimero treats undocumented printer behavior as qualified evidence, not as a
+Melt treats undocumented printer behavior as qualified evidence, not as a
 permanent product truth. This policy covers identity aliases, capabilities,
 firmware quirks, transport probes, and physical-printer qualification.
 
@@ -47,6 +47,6 @@ Runtime behavior resolves in this order:
 
 Unknown identifiers remain operable. Every registry entry names its evidence,
 qualification status, owner, and removal condition. Expired or contradicted
-entries are diagnostic-only. Release evidence identifies the exact Polimero
-commit and requires informed consent for captures from printers Polimero's
+entries are diagnostic-only. Release evidence identifies the exact Melt
+commit and requires informed consent for captures from printers Melt's
 maintainers do not own.

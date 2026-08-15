@@ -1,4 +1,4 @@
-//! UI-agnostic Polimero domain types.
+//! UI-agnostic Melt domain types.
 
 pub mod bambu;
 pub mod config;
@@ -17,7 +17,7 @@ use thiserror::Error;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const LICENSE: &str = "AGPL-3.0-only";
-pub const SOURCE_URL: &str = "https://github.com/polimero-app/app";
+pub const SOURCE_URL: &str = "https://github.com/polimero-app/melt";
 
 #[derive(Debug, Error)]
 #[error("{message}")]

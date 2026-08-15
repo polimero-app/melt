@@ -718,7 +718,12 @@ mod tests {
 
     #[test]
     fn digest_response_matches_the_live555_scheme() {
-        let header = digest_header("12345678", "DESCRIBE", "rtsps://printer.local:322/s", "n0nce");
+        let header = digest_header(
+            "12345678",
+            "DESCRIBE",
+            "rtsps://printer.local:322/s",
+            "n0nce",
+        );
         assert!(header.contains("username=\"bblp\""));
         assert!(header.contains("realm=\"LIVE555 Streaming Media\""));
         assert!(header.contains("nonce=\"n0nce\""));

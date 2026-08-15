@@ -30,7 +30,7 @@ fill another media type's bounded queue.
 
 ## Authorization policy
 
-Polimero resolves LAN authorization only from explicit live security fields or
+Melt resolves LAN authorization only from explicit live security fields or
 future evidence-qualified rules. A proven `signingRequired` mode blocks file
 writes, print start/control, motion, thermal, fan, light, and speed commands
 before any mutating transport work, resolving live status first when the
@@ -47,7 +47,7 @@ model and module firmware. Conflicting explicit fields block mutations
 conservatively and are surfaced rather than guessed.
 
 The CLI and desktop surface these as distinct actionable errors. Use
-`polimero printer capabilities <name>` to refresh and inspect the live model,
+`melt printer capabilities <name>` to refresh and inspect the live model,
 module firmware, authorization resolution, selected transports, observation
 provenance, and active/inactive quirks. Add `--output json` when capturing sanitized
 qualification evidence; observed values that could contain endpoints or
@@ -63,7 +63,7 @@ identity failures are terminal and never cause a fallback.
 
 P1S deliberately has no unconditional camera default because current community
 implementations disagree between RTSPS and the classic TLS-MJPEG transport.
-Polimero probes RTSPS and then classic MJPEG within the caller's safety
+Melt probes RTSPS and then classic MJPEG within the caller's safety
 boundary, caches the successful transport in the physical camera owner, and
 keeps both disputed registry entries provisional.
 
@@ -92,7 +92,7 @@ mode where applicable, bounds when reported, and a per-item `controllable`
 flag. The desktop renders every observed entry, but only shows an actuator when
 that item is controllable. Read-only chamber temperature, automatic fans,
 hotend/mainboard fan telemetry, and unknown lights therefore remain visible
-without implying that Polimero can command them. On H2-class printers, an
+without implying that Melt can command them. On H2-class printers, an
 `off` airduct entry for Parts, Aux, or Exhaust is a user-adjustable switch state,
 so those controls remain commandable just as they are in Bambu Studio.
 Likewise, the H2 device-tree chamber controller (`device.ctc`) establishes a
@@ -108,11 +108,11 @@ separate telemetry unless live data establishes a supported control path.
 Legacy fan commands retain their M106 routing. Printers reporting the device
 airduct schema use `set_fan` with the reported fan index and tenths-of-percent
 speed. Dual-nozzle printers use `set_nozzle_temp` with Bambu's right/left
-extruder indices. Before any thermal, fan, or light mutation, Polimero refreshes
+extruder indices. Before any thermal, fan, or light mutation, Melt refreshes
 status and rejects missing or telemetry-only inventory entries.
 
 Legacy firmware may publish zero-valued Aux and Exhaust speed slots on models
-without that hardware. Matching Bambu Studio, Polimero includes those items in
+without that hardware. Matching Bambu Studio, Melt includes those items in
 the control inventory only when `support_aux_fan` or `support_chamber_fan`
 confirms them. Heatbreak/Hotend speed remains visible as telemetry because it is
 a real reported fan even though the legacy protocol does not expose a control.
@@ -150,7 +150,7 @@ RTSPS recovery also requires unchanged SPS/PPS parameter sets; otherwise
 subscribers are disconnected so a new WebRTC negotiation can establish the new
 codec description. Diagnostics report the reconnect-attempt count.
 
-Polimero treats a reported Bambu model as a capability hint, not a complete
+Melt treats a reported Bambu model as a capability hint, not a complete
 contract. Runtime observations and safe protocol probes take precedence over
 the model family. Unknown models and unknown fields remain distinct from an
 explicitly unsupported feature, so new firmware can degrade conservatively

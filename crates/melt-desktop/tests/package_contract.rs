@@ -7,9 +7,9 @@ fn package_configuration_keeps_the_native_artifact_and_cli_contracts() {
     let config: Value =
         serde_json::from_str(include_str!("../tauri.conf.json")).expect("valid Tauri config");
 
-    assert_eq!(config["productName"], "Polimero");
+    assert_eq!(config["productName"], "Melt");
     assert_eq!(config["version"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(config["identifier"], "app.polimero");
+    assert_eq!(config["identifier"], "app.polimero.melt");
     assert_eq!(config["bundle"]["active"], true);
     assert_eq!(config["bundle"]["targets"], "all");
     assert_eq!(env!("CARGO_PKG_LICENSE"), "AGPL-3.0-only");
@@ -28,7 +28,7 @@ fn package_configuration_keeps_the_native_artifact_and_cli_contracts() {
     assert_eq!(config["app"]["windows"][0]["minWidth"], 1280);
     assert_eq!(config["app"]["windows"][0]["minHeight"], 800);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_polimero"))
+    let output = Command::new(env!("CARGO_BIN_EXE_melt"))
         .args(["version", "--output", "json"])
         .output()
         .expect("run packaged CLI entry point");

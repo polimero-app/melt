@@ -1,6 +1,8 @@
-# Polimero
+# Melt
 
-Polimero is a local-first 3D printer control application with two surfaces from
+<https://melt.polimero.app>
+
+Melt is a local-first 3D printer control application with two surfaces from
 one executable:
 
 - a headless CLI for automation and scripting;
@@ -9,7 +11,7 @@ one executable:
 The CLI, GUI, desktop application, and shared source are licensed under the GNU
 Affero General Public License v3.0 only (`AGPL-3.0-only`). See
 [`LICENSE`](LICENSE). Corresponding source is available from
-<https://github.com/polimero-app/app>.
+<https://github.com/polimero-app/melt>.
 
 This Rust/Tauri workspace unifies and supersedes the legacy standalone CLI,
 Fyne GUI, and Go application implementations.
@@ -46,10 +48,10 @@ Install the UI dependencies once, then build the complete workspace:
 ```sh
 make ui-install
 make build
-./target/debug/polimero --help
+./target/debug/melt --help
 ```
 
-Launch `./target/debug/polimero` without arguments to open the desktop
+Launch `./target/debug/melt` without arguments to open the desktop
 application. Passing command arguments selects headless CLI mode instead.
 
 Source builds require Rust 1.85 or newer, Bun, and the platform dependencies
@@ -82,12 +84,12 @@ global options are:
 Examples:
 
 ```sh
-polimero printer discover
-polimero printer add workshop --driver bambu-lan --host 192.0.2.10 \
+melt printer discover
+melt printer add workshop --driver bambu-lan --host 192.0.2.10 \
   --serial SANITIZED_SERIAL --access-code-file ./access-code.txt
-polimero status workshop --detailed
-polimero printer capabilities workshop --output json
-polimero jobs preflight ./part.gcode.3mf --output json
+melt status workshop --detailed
+melt printer capabilities workshop --output json
+melt jobs preflight ./part.gcode.3mf --output json
 ```
 
 On Unix, credential files supplied to `--access-code-file` must be regular
@@ -99,11 +101,11 @@ operation.
 
 ## Project layout
 
-- `crates/polimero-core` contains UI-independent drivers, profiles, protocol
+- `crates/melt-core` contains UI-independent drivers, profiles, protocol
   transports, validation, monitoring, and printer workflows.
-- `crates/polimero-cli` adapts shared behavior to the public command, output,
+- `crates/melt-cli` adapts shared behavior to the public command, output,
   and exit-code contract.
-- `crates/polimero-desktop` selects CLI mode when arguments are present and
+- `crates/melt-desktop` selects CLI mode when arguments are present and
   starts Tauri for a no-argument launch.
 - `ui` contains the Vue, TypeScript, Tailwind CSS, and Headless UI frontend.
 - `fixtures` contains CLI contract fixtures and sanitized, manifest-governed
@@ -134,7 +136,7 @@ credential.
 
 Mutating Bambu commands are gated by explicit live authorization evidence.
 When firmware reports that signing is required—or supplies conflicting
-security evidence—Polimero blocks the mutation and keeps read-only status and
+security evidence—Melt blocks the mutation and keeps read-only status and
 diagnostics available.
 
 ## Current capability boundary
@@ -198,7 +200,7 @@ the process loads, avoiding compositor protocol failures and GBM buffer
 warnings. To run a built binary directly, use:
 
 ```sh
-GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 ./target/debug/polimero
+GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 ./target/debug/melt
 ```
 
 ## Protocol references
@@ -221,7 +223,7 @@ physical captures qualify an exact model and module-firmware range.
 
 ## Safety disclaimer
 
-Polimero controls physical equipment and can move axes, heat components,
+Melt controls physical equipment and can move axes, heat components,
 transfer or delete files, and start prints. Review the selected printer and
 command, keep the machine attended during qualification and first use, and
 maintain immediate access to its physical safety controls. The software is
@@ -230,10 +232,10 @@ risk.
 
 Legacy implementations reported testing on Bambu Lab A1 Mini and H2C hardware.
 That historical statement does not qualify this implementation or any current
-model/firmware pair. Polimero records physical qualification only through the
+model/firmware pair. Melt records physical qualification only through the
 evidence workflow linked above.
 
 ## License
 
-Polimero is licensed under the
+Melt is licensed under the
 [GNU Affero General Public License v3.0 only](LICENSE).

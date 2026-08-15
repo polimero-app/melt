@@ -1,12 +1,12 @@
 [package]
-name = "polimero-cli"
+name = "melt-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-polimero-core = { path = "../polimero-core" }
+melt-core = { path = "../melt-core" }
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

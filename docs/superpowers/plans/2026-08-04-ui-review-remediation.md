@@ -4,7 +4,7 @@
 
 **Goal:** Surface the printer state the backend already reports but the UI discards, and fix the controls and feedback that currently mislead the operator.
 
-**Architecture:** All work is in the Vue frontend (`ui/src/`). No Rust changes are required — every field this plan renders is already parsed and serialized by `polimero-core`. Logic that can be tested is extracted into pure functions in `ui/src/monitoring.ts` or a new `ui/src/formatting.ts` and covered by vitest; template wiring is verified by running the app.
+**Architecture:** All work is in the Vue frontend (`ui/src/`). No Rust changes are required — every field this plan renders is already parsed and serialized by `melt-core`. Logic that can be tested is extracted into pure functions in `ui/src/monitoring.ts` or a new `ui/src/formatting.ts` and covered by vitest; template wiring is verified by running the app.
 
 **Tech Stack:** Vue 3 `<script setup>` + TypeScript, Tailwind v4, vitest, Tauri 2, Phosphor icons.
 

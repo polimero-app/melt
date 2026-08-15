@@ -9,7 +9,7 @@ use std::{
 };
 
 use base64::Engine;
-use polimero_core::bambu::{CameraFrame, CameraSubscription};
+use melt_core::bambu::{CameraFrame, CameraSubscription};
 use tokio::runtime::Builder;
 use tokio::sync::mpsc as async_mpsc;
 use webrtc::{

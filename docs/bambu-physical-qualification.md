@@ -8,7 +8,7 @@ or a printer that merely reports a similar model string.
 
 1. Use a printer you own, or record the informed consent of its owner. Never
    capture a printer, network, or account outside that permission.
-2. Start from a clean, frozen Polimero commit and record its full SHA. Run
+2. Start from a clean, frozen Melt commit and record its full SHA. Run
    `make release-qualification` before physical tests.
 3. Use a disposable sliced object, clear build volume, known material, attended
    printer, and immediate physical access to its power and emergency controls.
@@ -23,12 +23,12 @@ or a printer that merely reports a similar model string.
 Run the live compatibility command before and after the test session:
 
 ```sh
-polimero printer capabilities <profile> --output json
+melt printer capabilities <profile> --output json
 ```
 
 Retain the raw output only in a private scratch location. The committed copy
 must pass `make bambu-evidence-check`. Record the marketed model separately from
-the raw/canonical model Polimero observed, plus every returned module software
+the raw/canonical model Melt observed, plus every returned module software
 and hardware version. If a needed module version is absent, the row cannot
 qualify a firmware-bounded quirk.
 
@@ -85,7 +85,7 @@ fixtures/bambu/camera/p2s-ota-01.02.03.04-rtp-timestamps/
 
 The manifest's printer identity must use stable synthetic labels such as
 `SANITIZED_P2S_DEVICE`; do not encode a real serial in filenames, hashes, or
-replacement labels. `sourceRevision` identifies the Polimero commit used for
+replacement labels. `sourceRevision` identifies the Melt commit used for
 an executable or source-derived assertion. In `qualification`, name the exact
 marketed model, hardware configuration, module/range being qualified, test
 steps, result, operator/date, and owner-consent record location. Do not commit

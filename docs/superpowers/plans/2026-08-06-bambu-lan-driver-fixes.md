@@ -4,14 +4,14 @@
 
 **Goal:** Fix four correctness defects and three cleanups found in a full review of the `bambu-lan` driver, so H2-class fan control works, the documented signing-required gate actually fires, and long-lived streams stop inheriting their connect budget as a permanent idle timeout.
 
-**Architecture:** All changes are local to `crates/polimero-core/src/bambu/` plus one field on `BambuExtension` in `moonraker.rs` and one workspace dependency. The recurring theme is *dispatch on observed protocol generation, not on a string that both generations can produce* — the fan fixes make that explicit, and the timeout fixes apply the re-arm pattern that MQTT and FTPS already use to the three transports that skipped it.
+**Architecture:** All changes are local to `crates/melt-core/src/bambu/` plus one field on `BambuExtension` in `moonraker.rs` and one workspace dependency. The recurring theme is *dispatch on observed protocol generation, not on a string that both generations can produce* — the fan fixes make that explicit, and the timeout fixes apply the re-arm pattern that MQTT and FTPS already use to the three transports that skipped it.
 
 **Tech Stack:** Rust 2024, `openssl` (TLS), `serde_json`, `rtsp-types`, `socket2` (new direct dependency, already in the lockfile at 0.6.5 via the tokio/reqwest tree).
 
 ## Global Constraints
 
 - Rust edition and toolchain: unchanged. Do not bump any existing dependency version.
-- `cargo test --workspace` must be green after every task. The baseline is **160 passing tests in the `polimero-core` lib target, plus 1 in `tests/bambu_evidence.rs`**; every task adds tests and none may be removed.
+- `cargo test --workspace` must be green after every task. The baseline is **160 passing tests in the `melt-core` lib target, plus 1 in `tests/bambu_evidence.rs`**; every task adds tests and none may be removed.
 - `cargo clippy --workspace --all-targets -- -D warnings` must be clean after every task.
 - Never widen a `pub` surface beyond what the task states. `set_socket_idle_timeout` becomes `pub(super)`, not `pub`.
 - Comments explaining a deliberate shortcut use the existing `// ponytail:` prefix convention already present in this module (`transport.rs:2734`, `transport.rs:3282`).
@@ -25,9 +25,9 @@
 **Problem:** `fan_set` picks the fan from `status.controls.fans` (airduct keys: `parts`, `exhaust`, `hotend`, `heat`, …) but verifies against `status.fans`, which `status_fans()` only ever fills with four legacy keys (`partCooling`, `heatbreak`, `auxiliary`, `chamber`). On an H2, `fan_set("parts", 50)` sends a correct `set_fan`, the printer applies it, and the exchange then loops to `Error::Timeout` because `status.fans.get("parts")` is always `None`.
 
 **Files:**
-- Modify: `crates/polimero-core/src/bambu/transport.rs:847-853` (the predicate inside `fan_set`)
-- Modify: `crates/polimero-core/src/bambu/transport.rs` (add `fan_speed_matches` next to `light_state_is`, around line 2558)
-- Test: `crates/polimero-core/src/bambu/transport.rs` `mod tests` (add next to `filters_unsupported_legacy_slots_but_keeps_real_fan_telemetry`, around line 4459)
+- Modify: `crates/melt-core/src/bambu/transport.rs:847-853` (the predicate inside `fan_set`)
+- Modify: `crates/melt-core/src/bambu/transport.rs` (add `fan_speed_matches` next to `light_state_is`, around line 2558)
+- Test: `crates/melt-core/src/bambu/transport.rs` `mod tests` (add next to `filters_unsupported_legacy_slots_but_keeps_real_fan_telemetry`, around line 4459)
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
@@ -35,7 +35,7 @@
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `mod tests` in `crates/polimero-core/src/bambu/transport.rs`:
+Add to `mod tests` in `crates/melt-core/src/bambu/transport.rs`:
 
 ```rust
     #[test]
@@ -63,13 +63,13 @@ Add to `mod tests` in `crates/polimero-core/src/bambu/transport.rs`:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p polimero-core fan_acceptance_reads_the_control_map`
+Run: `cargo test -p melt-core fan_acceptance_reads_the_control_map`
 
 Expected: FAIL to compile with `cannot find function 'fan_speed_matches' in this scope`.
 
 - [ ] **Step 3: Add the predicate**
 
-Insert immediately before `fn light_state_is` in `crates/polimero-core/src/bambu/transport.rs`:
+Insert immediately before `fn light_state_is` in `crates/melt-core/src/bambu/transport.rs`:
 
 ```rust
 /// Confirms a fan reached the requested speed using the same control map the
@@ -93,7 +93,7 @@ fn fan_speed_matches(report: &Value, fan: &str, speed_percent: u8) -> bool {
 
 - [ ] **Step 4: Use it in `fan_set`**
 
-In `crates/polimero-core/src/bambu/transport.rs`, replace the closure at lines 847-853:
+In `crates/melt-core/src/bambu/transport.rs`, replace the closure at lines 847-853:
 
 ```rust
         let report = self.exchange(access_code, fingerprint, payload, |report| {
@@ -117,12 +117,12 @@ with:
 
 Run: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings`
 
-Expected: PASS, 161 tests in the `polimero-core` lib target (160 baseline + 1 new).
+Expected: PASS, 161 tests in the `melt-core` lib target (160 baseline + 1 new).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/polimero-core/src/bambu/transport.rs
+git add crates/melt-core/src/bambu/transport.rs
 git commit -m "fix(bambu): verify fan speed against the targeted control map"
 ```
 
@@ -133,12 +133,12 @@ git commit -m "fix(bambu): verify fan speed against the targeted control map"
 **Problem:** `modern_fan_index("auxiliary")` returns `Some(2)`, so the modern branch in `fan_set` always wins and the `"auxiliary" => "M106 P2"` legacy arm is unreachable. A P1S with an aux fan receives `set_fan{fan_index:2}` instead of `M106 P2 S128`. The key name cannot decide the protocol because `auxiliary` exists in both key spaces; the *reported* generation must.
 
 **Files:**
-- Modify: `crates/polimero-core/src/moonraker.rs:1268-1295` (`BambuExtension` field + `is_empty`)
-- Modify: `crates/polimero-core/src/bambu/transport.rs:2828-2839` (`control_inventory` returns the generation flag)
-- Modify: `crates/polimero-core/src/bambu/transport.rs:2660-2675` (`parse_status_value` ordering)
-- Modify: `crates/polimero-core/src/bambu/transport.rs:835-846` (`fan_set` dispatch)
-- Modify: `crates/polimero-cli/src/lib.rs:4525` (exhaustive fixture literal)
-- Test: `crates/polimero-core/src/bambu/transport.rs` `mod tests`
+- Modify: `crates/melt-core/src/moonraker.rs:1268-1295` (`BambuExtension` field + `is_empty`)
+- Modify: `crates/melt-core/src/bambu/transport.rs:2828-2839` (`control_inventory` returns the generation flag)
+- Modify: `crates/melt-core/src/bambu/transport.rs:2660-2675` (`parse_status_value` ordering)
+- Modify: `crates/melt-core/src/bambu/transport.rs:835-846` (`fan_set` dispatch)
+- Modify: `crates/melt-cli/src/lib.rs:4525` (exhaustive fixture literal)
+- Test: `crates/melt-core/src/bambu/transport.rs` `mod tests`
 
 **Interfaces:**
 - Consumes: Task 1's `fan_speed_matches` stays untouched.
@@ -149,7 +149,7 @@ git commit -m "fix(bambu): verify fan speed against the targeted control map"
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `mod tests` in `crates/polimero-core/src/bambu/transport.rs`:
+Add to `mod tests` in `crates/melt-core/src/bambu/transport.rs`:
 
 ```rust
     #[test]
@@ -198,13 +198,13 @@ Add to `mod tests` in `crates/polimero-core/src/bambu/transport.rs`:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p polimero-core fan_commands_follow airduct_reports_flag`
+Run: `cargo test -p melt-core fan_commands_follow airduct_reports_flag`
 
 Expected: FAIL to compile with `cannot find function 'fan_command_payload'` and `no field 'airduct_fans' on type 'BambuExtension'`.
 
 - [ ] **Step 3: Add the `BambuExtension` field**
 
-In `crates/polimero-core/src/moonraker.rs`, add to `pub struct BambuExtension` (after `reported_ip`, line 1282):
+In `crates/melt-core/src/moonraker.rs`, add to `pub struct BambuExtension` (after `reported_ip`, line 1282):
 
 ```rust
     /// True when this firmware reports fans under `device.airduct`, which
@@ -230,7 +230,7 @@ Extend `is_empty` (line 1286) to end with:
 
 - [ ] **Step 4: Return the generation from `control_inventory`**
 
-In `crates/polimero-core/src/bambu/transport.rs`, replace `fn control_inventory` (lines 2828-2839) with:
+In `crates/melt-core/src/bambu/transport.rs`, replace `fn control_inventory` (lines 2828-2839) with:
 
 ```rust
 /// Builds the control inventory and reports which fan protocol produced it.
@@ -256,7 +256,7 @@ fn control_inventory(
 
 - [ ] **Step 5: Reorder `parse_status_value` so the extension can carry the flag**
 
-In `crates/polimero-core/src/bambu/transport.rs`, the current block at lines 2660-2675 builds `extension` before `controls`. Replace it so `controls` comes first:
+In `crates/melt-core/src/bambu/transport.rs`, the current block at lines 2660-2675 builds `extension` before `controls`. Replace it so `controls` comes first:
 
 ```rust
     let fans = status_fans(print);
@@ -269,7 +269,7 @@ In `crates/polimero-core/src/bambu/transport.rs`, the current block at lines 266
         extruder_count: observed_extruder_count(print),
         mqtt_alive_supported: print.get("support_mqtt_alive").and_then(Value::as_bool),
         status_transport: report
-            .get("_polimero")
+            .get("_melt")
             .and_then(|metadata| metadata.get("status_transport"))
             .and_then(Value::as_str)
             .map(str::to_owned),
@@ -282,7 +282,7 @@ The `Ok(Status { ... })` literal below is unchanged — it already refers to `fa
 
 - [ ] **Step 6: Add `fan_command_payload` and use it**
 
-Insert immediately after `fn set_fan_payload` in `crates/polimero-core/src/bambu/transport.rs`:
+Insert immediately after `fn set_fan_payload` in `crates/melt-core/src/bambu/transport.rs`:
 
 ```rust
 /// Chooses the command for the fan protocol this firmware actually reports.
@@ -334,7 +334,7 @@ with:
 
 - [ ] **Step 7: Fix the exhaustive fixture literal in the CLI**
 
-`crates/polimero-cli/src/lib.rs:4490` builds a `moonraker::BambuExtension` with every field named rather than `..Default::default()`, so the new field breaks it. After `reported_ip: None,` on line 4525, add:
+`crates/melt-cli/src/lib.rs:4490` builds a `moonraker::BambuExtension` with every field named rather than `..Default::default()`, so the new field breaks it. After `reported_ip: None,` on line 4525, add:
 
 ```rust
                     airduct_fans: false,
@@ -346,7 +346,7 @@ This fixture models a legacy printer, so `false` is the correct value and its ex
 
 Run: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings`
 
-Expected: PASS, 163 tests in the `polimero-core` lib target (160 baseline + 3). If the compiler reports any other exhaustive `BambuExtension` literal, add `airduct_fans: false` there too — it names each site.
+Expected: PASS, 163 tests in the `melt-core` lib target (160 baseline + 3). If the compiler reports any other exhaustive `BambuExtension` literal, add `airduct_fans: false` there too — it names each site.
 
 - [ ] **Step 9: Check the UI contract is unaffected**
 
@@ -357,7 +357,7 @@ Expected: PASS with no fixture changes. `airductFans` is omitted when false, so 
 - [ ] **Step 10: Commit**
 
 ```bash
-git add crates/polimero-core/src/moonraker.rs crates/polimero-core/src/bambu/transport.rs crates/polimero-cli/src/lib.rs
+git add crates/melt-core/src/moonraker.rs crates/melt-core/src/bambu/transport.rs crates/melt-cli/src/lib.rs
 git commit -m "fix(bambu): dispatch fan commands on the reported protocol generation"
 ```
 
@@ -370,10 +370,10 @@ git commit -m "fix(bambu): dispatch fan commands on the reported protocol genera
 `MutationClass::EmergencyStop` is deliberately excluded from the refresh: `emergency_stop` uses `exchange_fresh` specifically so it never waits on the reusable-session lock (see the existing test `emergency_stop_does_not_wait_for_the_reusable_session_lock`), and blocking a stop behind a status exchange would be worse than the gate it enforces.
 
 **Files:**
-- Modify: `crates/polimero-core/src/bambu/transport.rs:249-269` (`authorize_mutation`)
-- Modify: `crates/polimero-core/src/bambu/transport.rs:291-300` (`remember_storage_transport`)
+- Modify: `crates/melt-core/src/bambu/transport.rs:249-269` (`authorize_mutation`)
+- Modify: `crates/melt-core/src/bambu/transport.rs:291-300` (`remember_storage_transport`)
 - Modify: `docs/bambu-compatibility.md:31-37` (record the emergency-stop exception)
-- Test: `crates/polimero-core/src/bambu/transport.rs` `mod tests`
+- Test: `crates/melt-core/src/bambu/transport.rs` `mod tests`
 
 **Interfaces:**
 - Consumes: nothing from Tasks 1-2.
@@ -381,7 +381,7 @@ git commit -m "fix(bambu): dispatch fan commands on the reported protocol genera
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `mod tests` in `crates/polimero-core/src/bambu/transport.rs`:
+Add to `mod tests` in `crates/melt-core/src/bambu/transport.rs`:
 
 ```rust
     #[test]
@@ -471,13 +471,13 @@ Add to `mod tests` in `crates/polimero-core/src/bambu/transport.rs`:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p polimero-core a_cold_client_resolves emergency_stop_uses_cached`
+Run: `cargo test -p melt-core a_cold_client_resolves emergency_stop_uses_cached`
 
 Expected: `a_cold_client_resolves_authorization_before_it_mutates` FAILS — `fan_set` returns `Err(Error::Timeout)` or `Ok(..)` rather than `AuthorizationRequired`, because the cold cache resolves to `Unknown` and the mutation proceeds. The second test may already pass; it is a regression guard for Step 3's exception.
 
 - [ ] **Step 3: Resolve authorization before mutating**
 
-In `crates/polimero-core/src/bambu/transport.rs`, replace `fn authorize_mutation` (lines 249-269) with:
+In `crates/melt-core/src/bambu/transport.rs`, replace `fn authorize_mutation` (lines 249-269) with:
 
 ```rust
     /// Resolves authorization before mutating. A cold client has no cached
@@ -520,7 +520,7 @@ In `crates/polimero-core/src/bambu/transport.rs`, replace `fn authorize_mutation
 
 `cached_authorization()` treats "capabilities present" as "authorization observed". `remember_storage_transport` currently conjures a default capability set out of nothing, which would make a later mutation skip the refresh with a bogus `Unknown`. It is unreachable today (every mutating caller authorizes first), but the coupling is load-bearing now, so remove it. `storage_transport()` already consults `observed_storage` first, so nothing is lost.
 
-In `crates/polimero-core/src/bambu/transport.rs`, replace `fn remember_storage_transport` (lines 291-300) with:
+In `crates/melt-core/src/bambu/transport.rs`, replace `fn remember_storage_transport` (lines 291-300) with:
 
 ```rust
     fn remember_storage_transport(&self, transport: StorageTransport) {
@@ -542,7 +542,7 @@ In `crates/polimero-core/src/bambu/transport.rs`, replace `fn remember_storage_t
 
 Run: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings`
 
-Expected: PASS, 165 tests in the `polimero-core` lib target. `emergency_stop_does_not_wait_for_the_reusable_session_lock` and `emergency_stop_succeeds_while_the_reusable_session_is_locked` must both still pass — they are the guards on the exception in Step 3.
+Expected: PASS, 165 tests in the `melt-core` lib target. `emergency_stop_does_not_wait_for_the_reusable_session_lock` and `emergency_stop_succeeds_while_the_reusable_session_is_locked` must both still pass — they are the guards on the exception in Step 3.
 
 - [ ] **Step 6: Record the emergency-stop exception in the compatibility doc**
 
@@ -568,7 +568,7 @@ session lock, and the printer's own rejection remains its backstop.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add crates/polimero-core/src/bambu/transport.rs docs/bambu-compatibility.md
+git add crates/melt-core/src/bambu/transport.rs docs/bambu-compatibility.md
 git commit -m "fix(bambu): resolve authorization before gating mutations"
 ```
 
@@ -581,11 +581,11 @@ git commit -m "fix(bambu): resolve authorization before gating mutations"
 `profile.timeout()` is the right steady-state value: it is the configured per-printer budget and is stable regardless of how much of it the handshake consumed.
 
 **Files:**
-- Modify: `crates/polimero-core/src/bambu/transport.rs:1489` (visibility)
-- Modify: `crates/polimero-core/src/bambu/rtsp.rs:260-263`
-- Modify: `crates/polimero-core/src/bambu/tunnel.rs:74-80`
-- Modify: `crates/polimero-core/src/bambu.rs:733-759`
-- Test: `crates/polimero-core/src/bambu/transport.rs` `mod tests`
+- Modify: `crates/melt-core/src/bambu/transport.rs:1489` (visibility)
+- Modify: `crates/melt-core/src/bambu/rtsp.rs:260-263`
+- Modify: `crates/melt-core/src/bambu/tunnel.rs:74-80`
+- Modify: `crates/melt-core/src/bambu.rs:733-759`
+- Test: `crates/melt-core/src/bambu/transport.rs` `mod tests`
 
 **Interfaces:**
 - Consumes: nothing from Tasks 1-3.
@@ -593,7 +593,7 @@ git commit -m "fix(bambu): resolve authorization before gating mutations"
 
 - [ ] **Step 1: Write the test that pins the helper contract**
 
-Add to `mod tests` in `crates/polimero-core/src/bambu/transport.rs`:
+Add to `mod tests` in `crates/melt-core/src/bambu/transport.rs`:
 
 ```rust
     #[test]
@@ -613,13 +613,13 @@ Add to `mod tests` in `crates/polimero-core/src/bambu/transport.rs`:
 
 - [ ] **Step 2: Run the test**
 
-Run: `cargo test -p polimero-core idle_timeouts_can_be_rearmed`
+Run: `cargo test -p melt-core idle_timeouts_can_be_rearmed`
 
 Expected: PASS. This test pins the helper's contract; the defect is at the three call sites that never invoke it, which is what Steps 3-6 fix. Call-site coverage is not automatable without a live printer — Step 7 is the structural check.
 
 - [ ] **Step 3: Widen the helper's visibility**
 
-In `crates/polimero-core/src/bambu/transport.rs:1489`, change:
+In `crates/melt-core/src/bambu/transport.rs:1489`, change:
 
 ```rust
 fn set_socket_idle_timeout(socket: &TcpStream, timeout: Duration) -> Result<(), Error> {
@@ -633,7 +633,7 @@ pub(super) fn set_socket_idle_timeout(socket: &TcpStream, timeout: Duration) -> 
 
 - [ ] **Step 4: Re-arm the RTSPS camera socket**
 
-In `crates/polimero-core/src/bambu/rtsp.rs`, replace lines 260-263:
+In `crates/melt-core/src/bambu/rtsp.rs`, replace lines 260-263:
 
 ```rust
     let (connection, _) =
@@ -658,7 +658,7 @@ with:
 
 - [ ] **Step 5: Re-arm the `:6000` tunnel socket**
 
-In `crates/polimero-core/src/bambu/tunnel.rs`, replace lines 74-80:
+In `crates/melt-core/src/bambu/tunnel.rs`, replace lines 74-80:
 
 ```rust
         let connector = transport::tls_connector()?;
@@ -688,7 +688,7 @@ with:
 
 - [ ] **Step 6: Re-arm the classic MJPEG camera socket**
 
-In `crates/polimero-core/src/bambu.rs`, replace the tail of `fn open_camera_connection` (lines 742-758):
+In `crates/melt-core/src/bambu.rs`, replace the tail of `fn open_camera_connection` (lines 742-758):
 
 ```rust
     transport::open_tls(
@@ -741,16 +741,16 @@ with:
 
 Run: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings`
 
-Expected: PASS, 166 tests in the `polimero-core` lib target.
+Expected: PASS, 166 tests in the `melt-core` lib target.
 
-Then: `rg -n 'set_socket_idle_timeout' crates/polimero-core/src/bambu/`
+Then: `rg -n 'set_socket_idle_timeout' crates/melt-core/src/bambu/`
 
 Expected: hits in `transport.rs` (definition plus its existing MQTT/FTPS uses), `rtsp.rs` (1), `tunnel.rs` (1), and `bambu.rs` (1).
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add crates/polimero-core/src/bambu.rs crates/polimero-core/src/bambu/transport.rs crates/polimero-core/src/bambu/rtsp.rs crates/polimero-core/src/bambu/tunnel.rs
+git add crates/melt-core/src/bambu.rs crates/melt-core/src/bambu/transport.rs crates/melt-core/src/bambu/rtsp.rs crates/melt-core/src/bambu/tunnel.rs
 git commit -m "fix(bambu): rearm stream sockets with a steady-state idle timeout"
 ```
 
@@ -764,9 +764,9 @@ On Unix both `SO_REUSEADDR` and `SO_REUSEPORT` are required for two processes to
 
 **Files:**
 - Modify: `Cargo.toml` (workspace dependency)
-- Modify: `crates/polimero-core/Cargo.toml`
-- Modify: `crates/polimero-core/src/bambu/discovery.rs:1-6, 44-60`
-- Test: `crates/polimero-core/src/bambu/discovery.rs` `mod tests`
+- Modify: `crates/melt-core/Cargo.toml`
+- Modify: `crates/melt-core/src/bambu/discovery.rs:1-6, 44-60`
+- Test: `crates/melt-core/src/bambu/discovery.rs` `mod tests`
 
 **Interfaces:**
 - Consumes: nothing from Tasks 1-4.
@@ -774,7 +774,7 @@ On Unix both `SO_REUSEADDR` and `SO_REUSEPORT` are required for two processes to
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `mod tests` in `crates/polimero-core/src/bambu/discovery.rs`:
+Add to `mod tests` in `crates/melt-core/src/bambu/discovery.rs`:
 
 ```rust
     #[test]
@@ -790,7 +790,7 @@ Add to `mod tests` in `crates/polimero-core/src/bambu/discovery.rs`:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p polimero-core announcement_socket_shares_the_port`
+Run: `cargo test -p melt-core announcement_socket_shares_the_port`
 
 Expected: FAIL to compile with `cannot find function 'open_announcements' in this scope`.
 
@@ -802,7 +802,7 @@ In the workspace `Cargo.toml`, add to `[workspace.dependencies]` (after `zip`, l
 socket2 = "0.6"
 ```
 
-In `crates/polimero-core/Cargo.toml`, add to `[dependencies]` (after `zip.workspace = true`, line 24):
+In `crates/melt-core/Cargo.toml`, add to `[dependencies]` (after `zip.workspace = true`, line 24):
 
 ```toml
 socket2.workspace = true
@@ -810,7 +810,7 @@ socket2.workspace = true
 
 - [ ] **Step 4: Add the reusable bind**
 
-In `crates/polimero-core/src/bambu/discovery.rs`, change the `std::net` import on line 4 to include `SocketAddr`:
+In `crates/melt-core/src/bambu/discovery.rs`, change the `std::net` import on line 4 to include `SocketAddr`:
 
 ```rust
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
@@ -839,7 +839,7 @@ fn open_announcements() -> io::Result<UdpSocket> {
 
 - [ ] **Step 5: Use it in `discover`**
 
-In `crates/polimero-core/src/bambu/discovery.rs:47`, replace:
+In `crates/melt-core/src/bambu/discovery.rs:47`, replace:
 
 ```rust
     let announcements = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, BAMBU_BROADCAST_PORT));
@@ -853,7 +853,7 @@ with:
 
 - [ ] **Step 6: Run the discovery tests**
 
-Run: `cargo test -p polimero-core bambu::discovery`
+Run: `cargo test -p melt-core bambu::discovery`
 
 Expected: PASS, 3 tests in `bambu::discovery::tests`. If the new test fails to bind at all, something on the machine holds UDP 2021 without `SO_REUSEPORT`; confirm with `ss -lunp | grep 2021` before treating it as a code defect.
 
@@ -861,12 +861,12 @@ Expected: PASS, 3 tests in `bambu::discovery::tests`. If the new test fails to b
 
 Run: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings`
 
-Expected: PASS, 167 tests in the `polimero-core` lib target.
+Expected: PASS, 167 tests in the `melt-core` lib target.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add Cargo.toml Cargo.lock crates/polimero-core/Cargo.toml crates/polimero-core/src/bambu/discovery.rs
+git add Cargo.toml Cargo.lock crates/melt-core/Cargo.toml crates/melt-core/src/bambu/discovery.rs
 git commit -m "fix(bambu): share the discovery announcement port with other slicers"
 ```
 
@@ -877,9 +877,9 @@ git commit -m "fix(bambu): share the discovery announcement port with other slic
 **Problem:** `Drop for H264Stream` (`rtsp.rs:218`) sends TEARDOWN through `authorized_request`, which calls `next_response()` and therefore drains every queued interleaved media frame before it sees the reply. Dropping a stream can block the calling thread for the socket's idle timeout — and after Task 4 that timeout is the full profile budget, making this worse, not better. Nothing is done with the response.
 
 **Files:**
-- Modify: `crates/polimero-core/src/bambu/rtsp.rs:417-441` (split `send_request`)
-- Modify: `crates/polimero-core/src/bambu/rtsp.rs:218-229` (`Drop`)
-- Test: `crates/polimero-core/src/bambu/rtsp.rs` (new `mod tests` — this file currently has none)
+- Modify: `crates/melt-core/src/bambu/rtsp.rs:417-441` (split `send_request`)
+- Modify: `crates/melt-core/src/bambu/rtsp.rs:218-229` (`Drop`)
+- Test: `crates/melt-core/src/bambu/rtsp.rs` (new `mod tests` — this file currently has none)
 
 **Interfaces:**
 - Consumes: Task 4 raised the socket idle timeout on this connection, which is what makes the blocking drop worth fixing now.
@@ -889,7 +889,7 @@ git commit -m "fix(bambu): share the discovery announcement port with other slic
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `crates/polimero-core/src/bambu/rtsp.rs`:
+Append to `crates/melt-core/src/bambu/rtsp.rs`:
 
 ```rust
 #[cfg(test)]
@@ -926,13 +926,13 @@ mod tests {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p polimero-core bambu::rtsp`
+Run: `cargo test -p melt-core bambu::rtsp`
 
 Expected: FAIL to compile with `cannot find function 'request_bytes' in this scope`.
 
 - [ ] **Step 3: Split serialization from the round trip**
 
-In `crates/polimero-core/src/bambu/rtsp.rs`, replace `fn send_request` (lines 417-441) with these three functions:
+In `crates/melt-core/src/bambu/rtsp.rs`, replace `fn send_request` (lines 417-441) with these three functions:
 
 ```rust
 /// Serializes one RTSP request. Kept separate from the socket so a teardown
@@ -988,7 +988,7 @@ fn send_request(
 
 - [ ] **Step 4: Make `Drop` fire-and-forget**
 
-In `crates/polimero-core/src/bambu/rtsp.rs`, replace `impl Drop for H264Stream` (lines 218-229) with:
+In `crates/melt-core/src/bambu/rtsp.rs`, replace `impl Drop for H264Stream` (lines 218-229) with:
 
 ```rust
 impl Drop for H264Stream {
@@ -1012,12 +1012,12 @@ impl Drop for H264Stream {
 
 Run: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings`
 
-Expected: PASS, 169 tests in the `polimero-core` lib target. `authorized_request` is unchanged and still uses `send_request`.
+Expected: PASS, 169 tests in the `melt-core` lib target. `authorized_request` is unchanged and still uses `send_request`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/polimero-core/src/bambu/rtsp.rs
+git add crates/melt-core/src/bambu/rtsp.rs
 git commit -m "fix(bambu): tear down RTSP streams without blocking the dropping thread"
 ```
 
@@ -1028,9 +1028,9 @@ git commit -m "fix(bambu): tear down RTSP streams without blocking the dropping 
 **Problem:** Two small pieces of dead logic. `next_sequence` (`transport.rs:2154`) repeats its wrap-around arithmetic in both the `fetch_update` closure and the `map` that follows, so a future edit has to change it in two places to stay correct. `tunnel::Connection::list` (`tunnel.rs:135`) guards with `path != "/" || !valid_wire_path(path)`, whose second half is unreachable — `valid_wire_path("/")` is always true, and the only path that reaches the second operand is `"/"`.
 
 **Files:**
-- Modify: `crates/polimero-core/src/bambu/transport.rs:2150-2172`
-- Modify: `crates/polimero-core/src/bambu/tunnel.rs:135-137`
-- Test: `crates/polimero-core/src/bambu/transport.rs` `mod tests`
+- Modify: `crates/melt-core/src/bambu/transport.rs:2150-2172`
+- Modify: `crates/melt-core/src/bambu/tunnel.rs:135-137`
+- Test: `crates/melt-core/src/bambu/transport.rs` `mod tests`
 
 **Interfaces:**
 - Consumes: nothing from Tasks 1-6.
@@ -1040,7 +1040,7 @@ git commit -m "fix(bambu): tear down RTSP streams without blocking the dropping 
 
 `SEQUENCE` is a process-global atomic shared by every test in the binary, so it cannot be asserted on directly without flaking under the parallel test runner. Test the extracted pure function instead.
 
-Add to `mod tests` in `crates/polimero-core/src/bambu/transport.rs`:
+Add to `mod tests` in `crates/melt-core/src/bambu/transport.rs`:
 
 ```rust
     #[test]
@@ -1056,13 +1056,13 @@ Add to `mod tests` in `crates/polimero-core/src/bambu/transport.rs`:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p polimero-core sequence_ids_stay_in_the_firmware_safe_range`
+Run: `cargo test -p melt-core sequence_ids_stay_in_the_firmware_safe_range`
 
 Expected: FAIL to compile with `cannot find function 'wrap_sequence'` and `cannot find value 'MAX_SAFE_SEQUENCE' in this scope`.
 
 - [ ] **Step 3: Extract the wrap**
 
-In `crates/polimero-core/src/bambu/transport.rs`, replace `fn next_sequence` (lines 2154-2172) with:
+In `crates/melt-core/src/bambu/transport.rs`, replace `fn next_sequence` (lines 2154-2172) with:
 
 ```rust
 /// Bambu firmware treats the sequence id as a signed 32-bit value.
@@ -1087,7 +1087,7 @@ fn next_sequence() -> u64 {
 
 - [ ] **Step 4: Drop the unreachable tunnel guard**
 
-In `crates/polimero-core/src/bambu/tunnel.rs`, replace lines 135-137:
+In `crates/melt-core/src/bambu/tunnel.rs`, replace lines 135-137:
 
 ```rust
         if path != "/" || !valid_wire_path(path) {
@@ -1109,12 +1109,12 @@ with:
 
 Run: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings`
 
-Expected: PASS, 170 tests in the `polimero-core` lib target. Clippy must not report `valid_wire_path` as dead code — it is still used by `download`, `sub_file`, `upload`, and `delete`.
+Expected: PASS, 170 tests in the `melt-core` lib target. Clippy must not report `valid_wire_path` as dead code — it is still used by `download`, `sub_file`, `upload`, and `delete`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/polimero-core/src/bambu/transport.rs crates/polimero-core/src/bambu/tunnel.rs
+git add crates/melt-core/src/bambu/transport.rs crates/melt-core/src/bambu/tunnel.rs
 git commit -m "refactor(bambu): collapse duplicated sequence wrap and dead list guard"
 ```
 
@@ -1126,7 +1126,7 @@ git commit -m "refactor(bambu): collapse duplicated sequence wrap and dead list 
 
 Run: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings`
 
-Expected: PASS. `polimero-core` lib target at 170 tests (160 baseline + 10 added), `tests/bambu_evidence.rs` still at 1.
+Expected: PASS. `melt-core` lib target at 170 tests (160 baseline + 10 added), `tests/bambu_evidence.rs` still at 1.
 
 - [ ] **UI contract unchanged**
 

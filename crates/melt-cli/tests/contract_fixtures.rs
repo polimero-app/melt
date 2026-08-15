@@ -98,7 +98,7 @@ fn contract_fixtures_match_the_cli_envelope_and_exit_contract() {
 
         let mut actual_stdout = Vec::new();
         let mut actual_stderr = Vec::new();
-        let actual_exit = polimero_cli::run(&fixture.args, &mut actual_stdout, &mut actual_stderr);
+        let actual_exit = melt_cli::run(&fixture.args, &mut actual_stdout, &mut actual_stderr);
         assert_eq!(actual_exit, fixture.exit_code, "{} exit code", fixture.id);
         assert_eq!(
             actual_stderr,
@@ -119,10 +119,10 @@ struct ConfigDirGuard(Option<OsString>);
 
 impl ConfigDirGuard {
     fn set(path: impl AsRef<Path>) -> Self {
-        let previous = env::var_os("POLIMERO_CONFIG_DIR");
+        let previous = env::var_os("MELT_CONFIG_DIR");
         // The integration fixture is serialized above, so the process-wide
         // config location cannot leak between fixture executions.
-        unsafe { env::set_var("POLIMERO_CONFIG_DIR", path.as_ref()) };
+        unsafe { env::set_var("MELT_CONFIG_DIR", path.as_ref()) };
         Self(previous)
     }
 }
@@ -130,8 +130,8 @@ impl ConfigDirGuard {
 impl Drop for ConfigDirGuard {
     fn drop(&mut self) {
         match self.0.take() {
-            Some(value) => unsafe { env::set_var("POLIMERO_CONFIG_DIR", value) },
-            None => unsafe { env::remove_var("POLIMERO_CONFIG_DIR") },
+            Some(value) => unsafe { env::set_var("MELT_CONFIG_DIR", value) },
+            None => unsafe { env::remove_var("MELT_CONFIG_DIR") },
         }
     }
 }

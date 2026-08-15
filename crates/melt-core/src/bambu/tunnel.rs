@@ -97,7 +97,7 @@ impl Connection {
                 "t_av": 1,
                 "mtype": MTYPE_CTRL,
                 "peer_t": 3,
-                "pid": "polimero",
+                "pid": "melt",
                 "ver": env!("CARGO_PKG_VERSION"),
             }
         });

@@ -2645,6 +2645,64 @@ dependencies = [
 ]
 
 [[package]]
+name = "melt-cli"
+version = "0.1.0"
+dependencies = [
+ "melt-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "melt-core"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "jpeg-encoder",
+ "keyring",
+ "openh264",
+ "openssl",
+ "reqwest",
+ "rtsp-types",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "socket2 0.6.5",
+ "tempfile",
+ "thiserror 2.0.19",
+ "time",
+ "url",
+ "zip",
+]
+
+[[package]]
+name = "melt-desktop"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "euc",
+ "melt-cli",
+ "melt-core",
+ "openssl",
+ "png 0.17.16",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-notification",
+ "tempfile",
+ "time",
+ "tokio",
+ "vek",
+ "webrtc",
+ "zip",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3470,64 +3528,6 @@ dependencies = [
  "fdeflate",
  "flate2",
  "miniz_oxide",
-]
-
-[[package]]
-name = "polimero-cli"
-version = "0.1.0"
-dependencies = [
- "polimero-core",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "polimero-core"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "jpeg-encoder",
- "keyring",
- "openh264",
- "openssl",
- "reqwest",
- "rtsp-types",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "socket2 0.6.5",
- "tempfile",
- "thiserror 2.0.19",
- "time",
- "url",
- "zip",
-]
-
-[[package]]
-name = "polimero-desktop"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "euc",
- "openssl",
- "png 0.17.16",
- "polimero-cli",
- "polimero-core",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-notification",
- "tempfile",
- "time",
- "tokio",
- "vek",
- "webrtc",
- "zip",
 ]
 
 [[package]]

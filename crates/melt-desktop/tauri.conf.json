@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Polimero",
+  "productName": "Melt",
   "version": "0.1.0",
-  "identifier": "app.polimero",
+  "identifier": "app.polimero.melt",
   "build": {
     "frontendDist": "../../ui/dist",
     "devUrl": "http://127.0.0.1:1420"
@@ -10,7 +10,7 @@
   "app": {
     "windows": [
       {
-        "title": "Polimero",
+        "title": "Melt",
         "width": 1600,
         "height": 1000,
         "minWidth": 1280,

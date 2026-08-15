@@ -1,15 +1,15 @@
 [workspace]
 members = [
-  "crates/polimero-core",
-  "crates/polimero-cli",
-  "crates/polimero-desktop",
+  "crates/melt-core",
+  "crates/melt-cli",
+  "crates/melt-desktop",
 ]
 resolver = "2"
 
 [workspace.package]
 edition = "2024"
 license = "AGPL-3.0-only"
-repository = "https://github.com/polimero-app/app"
+repository = "https://github.com/polimero-app/melt"
 rust-version = "1.85"
 version = "0.1.0"
 

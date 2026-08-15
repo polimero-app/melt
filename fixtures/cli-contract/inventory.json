@@ -7,7 +7,7 @@
   },
   "globalFlags": ["--output <human|json>", "--verbose"],
   "commands": [
-    {"path": "polimero", "arguments": "", "flags": [], "implementation": "implemented"},
+    {"path": "melt", "arguments": "", "flags": [], "implementation": "implemented"},
     {"path": "camera", "arguments": "", "flags": [], "implementation": "implemented"},
     {"path": "camera snapshot", "arguments": "<printer>", "flags": ["--to <path>", "--overwrite", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
     {"path": "camera stream", "arguments": "<printer>", "flags": ["--format <format>", "--port <port>", "--insecure", "--protocol-trace <path>", "--timeout <duration>", "--duration <duration>"], "implementation": "implemented"},

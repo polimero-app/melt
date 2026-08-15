@@ -13,17 +13,17 @@ not present in the local Go clone; replace these captures after obtaining it.
 
 ## Running a fixture
 
-Run the selected binary with the fixture `args`, `POLIMERO_CONFIG_DIR` set to
+Run the selected binary with the fixture `args`, `MELT_CONFIG_DIR` set to
 `fixtures/cli-contract/config/empty`, and compare the process exit code and
 JSON stdout. The harness must delete each `ignoreJsonPointers` location before
 comparison; those values depend on the build host or timing. Stderr must remain
 empty for every JSON fixture.
 
 ```sh
-POLIMERO_CONFIG_DIR="$PWD/fixtures/cli-contract/config/empty" \
-  ./target/debug/polimero version --output json
+MELT_CONFIG_DIR="$PWD/fixtures/cli-contract/config/empty" \
+  ./target/debug/melt version --output json
 ```
 
-The Rust contract test executes every fixture against `polimero-cli`, compares
+The Rust contract test executes every fixture against `melt-cli`, compares
 the exit code, stderr, and JSON envelope, and removes only the documented
 host-dependent JSON pointers before comparison.

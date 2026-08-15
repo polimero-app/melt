@@ -1,5 +1,5 @@
 /target/
-/crates/polimero-desktop/gen/
+/crates/melt-desktop/gen/
 /ui/node_modules/
 /ui/dist/
 /ui/tsconfig.tsbuildinfo

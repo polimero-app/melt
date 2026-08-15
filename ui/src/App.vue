@@ -2172,7 +2172,7 @@ onUnmounted(() => {
           <p class="mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">{{ t('control.awaitingDescription') }}</p>
         </div>
 
-        <!-- True outage: Polimero has no usable status and a polling error. -->
+        <!-- True outage: Melt has no usable status and a polling error. -->
         <div
           v-else-if="!activeHasStatus"
           class="mx-4 flex min-h-140 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-center sm:mx-0 dark:border-white/15"
@@ -2919,7 +2919,7 @@ onUnmounted(() => {
                 <div class="flex items-center justify-between gap-4 py-2">
                   <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.source') }}</dt>
                   <dd class="text-right text-gray-900 dark:text-gray-300">
-                    <a :href="info?.sourceUrl ?? 'https://github.com/polimero-app/app'" target="_blank" rel="noreferrer" class="text-cyan-700 underline hover:text-cyan-600 dark:text-cyan-400">{{ t('settingsView.sourceLink') }}</a>
+                    <a :href="info?.sourceUrl ?? 'https://github.com/polimero-app/melt'" target="_blank" rel="noreferrer" class="text-cyan-700 underline hover:text-cyan-600 dark:text-cyan-400">{{ t('settingsView.sourceLink') }}</a>
                   </dd>
                 </div>
                 <div v-if="diagnostics" class="flex items-center justify-between py-2">

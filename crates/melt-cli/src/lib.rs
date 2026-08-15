@@ -1,4 +1,4 @@
-//! CLI rendering for shared Polimero operations.
+//! CLI rendering for shared Melt operations.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use polimero_core::{
+use melt_core::{
     AppError, app_info, bambu,
     config::{Config, ConfigError, NamedProfile, config_dir},
     diagnostics,
@@ -450,7 +450,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     }
     let invocation = match Invocation::parse(args) {
         Ok(invocation) => invocation,
-        Err(error) => return write_error("polimero", OutputFormat::Human, error, out, err),
+        Err(error) => return write_error("melt", OutputFormat::Human, error, out, err),
     };
     let command = command_name(&invocation.command);
 
@@ -468,7 +468,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                 modes: ["gui", "headless"],
             },
             |out| {
-                writeln!(out, "polimero version {}", app_info().version)?;
+                writeln!(out, "melt version {}", app_info().version)?;
                 writeln!(out, "License: {}", app_info().license)?;
                 writeln!(out, "Source: {}", app_info().source_url)
             },
@@ -518,9 +518,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         [files, list, rest @ ..] if files.as_str() == "files" && list.as_str() == "list" => {
             files_list(invocation.format, rest, out, err)
         }
-        [files, delete, rest @ ..]
-            if files.as_str() == "files" && delete.as_str() == "delete" =>
-        {
+        [files, delete, rest @ ..] if files.as_str() == "files" && delete.as_str() == "delete" => {
             files_delete(invocation.format, rest, out, err)
         }
         [jobs, action, rest @ ..]
@@ -587,9 +585,9 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             refresh_tls(invocation.format, rest, out, err)
         }
         _ => write_error(
-            "polimero",
+            "melt",
             invocation.format,
-            AppError::usage(format!("unknown command {command:?} for \"polimero\"")),
+            AppError::usage(format!("unknown command {command:?} for \"melt\"")),
             out,
             err,
         ),
@@ -663,7 +661,7 @@ fn run_bare_group(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> 
 fn write_leaf_help(leaf: &LeafCommand, out: &mut dyn Write) -> i32 {
     let command = leaf.path.join(" ");
     let help = format!(
-        "{}\n\nUsage:\n  polimero {command} {}\n\nFlags:\n{}\n\nGlobal Flags:\n      --output string   output format: human or json (default \"human\")\n  -v, --verbose         show detailed progress output\n",
+        "{}\n\nUsage:\n  melt {command} {}\n\nFlags:\n{}\n\nGlobal Flags:\n      --output string   output format: human or json (default \"human\")\n  -v, --verbose         show detailed progress output\n",
         leaf.short, leaf.args, leaf.flags
     );
     out.write_all(help.as_bytes()).map_or(1, |_| 0)
@@ -671,14 +669,14 @@ fn write_leaf_help(leaf: &LeafCommand, out: &mut dyn Write) -> i32 {
 
 fn group_command_name(group: &CommandGroup) -> String {
     match group.path {
-        [] => "polimero".into(),
+        [] => "melt".into(),
         path => path.join(" "),
     }
 }
 
 fn write_group_help(group: &CommandGroup, out: &mut dyn Write) -> i32 {
     let command = group_command_name(group);
-    let mut help = format!("{}\n\nUsage:\n  polimero", group.short);
+    let mut help = format!("{}\n\nUsage:\n  melt", group.short);
     if !group.path.is_empty() {
         help.push(' ');
         help.push_str(&command);
@@ -697,10 +695,10 @@ fn write_group_help(group: &CommandGroup, out: &mut dyn Write) -> i32 {
     }
     if group.path.is_empty() {
         help.push_str(
-            "\nFlags:\n  -h, --help            help for polimero\n      --output string   output format: human or json (default \"human\")\n  -v, --verbose         show detailed progress output\n      --version         version for polimero\n",
+            "\nFlags:\n  -h, --help            help for melt\n      --output string   output format: human or json (default \"human\")\n  -v, --verbose         show detailed progress output\n      --version         version for melt\n",
         );
         help.push_str(
-            "\nPolimero is free software under AGPL-3.0-only, without warranty.\nSource: https://github.com/polimero-app/app\nLicense: https://www.gnu.org/licenses/agpl-3.0.html\n",
+            "\nMelt is free software under AGPL-3.0-only, without warranty.\nSource: https://github.com/polimero-app/melt\nLicense: https://www.gnu.org/licenses/agpl-3.0.html\n",
         );
     } else {
         help.push_str(&format!(
@@ -709,7 +707,7 @@ fn write_group_help(group: &CommandGroup, out: &mut dyn Write) -> i32 {
         ));
     }
     help.push_str(&format!(
-        "\nUse \"polimero{} [command] --help\" for more information about a command.\n",
+        "\nUse \"melt{} [command] --help\" for more information about a command.\n",
         if group.path.is_empty() {
             String::new()
         } else {
@@ -1264,7 +1262,7 @@ struct StatusData {
     profile: String,
     driver: &'static str,
     #[serde(flatten)]
-    status: polimero_core::moonraker::Status,
+    status: melt_core::moonraker::Status,
     capabilities: drivers::Capabilities,
 }
 
@@ -1493,7 +1491,7 @@ fn require_confirmation(
 fn require_state(
     command: &str,
     printer: &ResolvedPrinter,
-    allowed: &[polimero_core::moonraker::PrinterState],
+    allowed: &[melt_core::moonraker::PrinterState],
 ) -> Result<(), AppError> {
     let status = drivers::status(
         &printer.driver,
@@ -1845,7 +1843,7 @@ struct CameraStreamData {
 
 fn serve_camera_stream(
     listener: TcpListener,
-    stream: polimero_core::bambu::MjpegStream,
+    stream: melt_core::bambu::MjpegStream,
     duration: Option<Duration>,
     upstream_shutdown: Option<TcpStream>,
 ) {
@@ -2094,7 +2092,7 @@ fn lights_set(
         Ok(light) => light,
         Err(error) => return write_error("lights set", format, error, out, err),
     };
-    let state = match polimero_core::moonraker::LightState::parse(state_name) {
+    let state = match melt_core::moonraker::LightState::parse(state_name) {
         Some(state) => state,
         None => {
             return write_error(
@@ -2118,10 +2116,10 @@ fn lights_set(
         "lights set",
         &printer,
         &[
-            polimero_core::moonraker::PrinterState::Idle,
-            polimero_core::moonraker::PrinterState::Printing,
-            polimero_core::moonraker::PrinterState::Paused,
-            polimero_core::moonraker::PrinterState::Error,
+            melt_core::moonraker::PrinterState::Idle,
+            melt_core::moonraker::PrinterState::Printing,
+            melt_core::moonraker::PrinterState::Paused,
+            melt_core::moonraker::PrinterState::Error,
         ],
     ) {
         return write_error("lights set", format, error, out, err);
@@ -2153,8 +2151,8 @@ fn lights_set(
                 _ => result.light.clone(),
             };
             let state = match result.state {
-                polimero_core::moonraker::LightState::On => "on",
-                polimero_core::moonraker::LightState::Off => "off",
+                melt_core::moonraker::LightState::On => "on",
+                melt_core::moonraker::LightState::Off => "off",
             };
             write_success(
                 "lights set",
@@ -2196,7 +2194,7 @@ struct LightSetData {
     profile: String,
     driver: &'static str,
     light: String,
-    state: polimero_core::moonraker::LightState,
+    state: melt_core::moonraker::LightState,
     warnings: Vec<String>,
     capabilities: drivers::Capabilities,
 }
@@ -2281,7 +2279,7 @@ fn discover_printers(
             return write_error("printer discover", format, config_error(error), out, err);
         }
     };
-    match polimero_core::bambu::discover(timeout) {
+    match melt_core::bambu::discover(timeout) {
         Ok(printers) => {
             let printers = printers
                 .into_iter()
@@ -2733,7 +2731,7 @@ fn file_capabilities(capabilities: drivers::Capabilities) -> FileCapabilities {
 struct FileRootsData {
     profile: String,
     driver: &'static str,
-    roots: Vec<polimero_core::moonraker::FileRoot>,
+    roots: Vec<melt_core::moonraker::FileRoot>,
     warnings: Vec<String>,
     capabilities: FileCapabilities,
 }
@@ -2742,7 +2740,7 @@ struct FileRootsData {
 #[serde(rename_all = "camelCase")]
 struct FilePathData {
     device_path: String,
-    entries: Vec<polimero_core::moonraker::FileEntry>,
+    entries: Vec<melt_core::moonraker::FileEntry>,
 }
 
 #[derive(Serialize)]
@@ -2939,32 +2937,87 @@ fn files_download(
         .collect::<Result<Vec<_>, _>>()
     {
         Ok(paths) if paths.iter().all(|(path, _)| path != "/") => paths,
-        Ok(_) => return write_error("files download", format, AppError::usage("cannot download a directory; specify a file path"), out, err),
+        Ok(_) => {
+            return write_error(
+                "files download",
+                format,
+                AppError::usage("cannot download a directory; specify a file path"),
+                out,
+                err,
+            );
+        }
         Err(error) => return write_error("files download", format, error, out, err),
     };
-    let destinations = match download_destinations(&device_paths, options.value("to"), options.enabled("overwrite")) {
+    let destinations = match download_destinations(
+        &device_paths,
+        options.value("to"),
+        options.enabled("overwrite"),
+    ) {
         Ok(paths) => paths,
         Err(error) => return write_error("files download", format, error, out, err),
     };
     let mut transfers = Vec::with_capacity(device_paths.len());
     for ((device_path, display_path), destination) in device_paths.into_iter().zip(destinations) {
-        let transferred = match download_file(&printer, &device_path, &destination, options.enabled("overwrite")) {
+        let transferred = match download_file(
+            &printer,
+            &device_path,
+            &destination,
+            options.enabled("overwrite"),
+        ) {
             Ok(transferred) => transferred,
             Err(error) => return write_error("files download", format, error, out, err),
         };
-        transfers.push(DownloadedFile { source: display_path, destination: destination.display().to_string(), bytes_transferred: transferred });
+        transfers.push(DownloadedFile {
+            source: display_path,
+            destination: destination.display().to_string(),
+            bytes_transferred: transferred,
+        });
     }
     let profile = printer.name;
     let driver = printer.driver_kind.name();
     let capabilities = file_capabilities(printer.driver_kind.capabilities());
     if transfers.len() == 1 {
         let transfer = transfers.pop().expect("one transfer");
-        return write_success("files download", format, FileTransferResult { profile, driver, warnings: Vec::new(), capabilities, transfer: transfer.clone() }, |out| writeln!(out, "Downloaded file to {}.", transfer.destination), out);
+        return write_success(
+            "files download",
+            format,
+            FileTransferResult {
+                profile,
+                driver,
+                warnings: Vec::new(),
+                capabilities,
+                transfer: transfer.clone(),
+            },
+            |out| writeln!(out, "Downloaded file to {}.", transfer.destination),
+            out,
+        );
     }
-    write_success("files download", format, FileTransfersData { profile, driver, files: transfers.clone(), warnings: Vec::new(), capabilities }, |out| { for transfer in &transfers { writeln!(out, "Downloaded file to {}.", transfer.destination)?; } Ok(()) }, out)
+    write_success(
+        "files download",
+        format,
+        FileTransfersData {
+            profile,
+            driver,
+            files: transfers.clone(),
+            warnings: Vec::new(),
+            capabilities,
+        },
+        |out| {
+            for transfer in &transfers {
+                writeln!(out, "Downloaded file to {}.", transfer.destination)?;
+            }
+            Ok(())
+        },
+        out,
+    )
 }
 
-fn download_file(printer: &ResolvedPrinter, device_path: &str, destination: &Path, overwrite: bool) -> Result<u64, AppError> {
+fn download_file(
+    printer: &ResolvedPrinter,
+    device_path: &str,
+    destination: &Path,
+    overwrite: bool,
+) -> Result<u64, AppError> {
     let parent = destination
         .parent()
         .expect("download destination has a parent");
@@ -2972,10 +3025,10 @@ fn download_file(printer: &ResolvedPrinter, device_path: &str, destination: &Pat
         Ok(file) => file,
         Err(_) => {
             return Err(AppError {
-                    exit_code: 1,
-                    code: "internal_error",
-                    message: "cannot create destination file".into(),
-                });
+                exit_code: 1,
+                code: "internal_error",
+                message: "cannot create destination file".into(),
+            });
         }
     };
     let transferred = match drivers::download_to(
@@ -2990,10 +3043,10 @@ fn download_file(printer: &ResolvedPrinter, device_path: &str, destination: &Pat
     };
     if temporary.as_file_mut().sync_all().is_err() {
         return Err(AppError {
-                exit_code: 1,
-                code: "internal_error",
-                message: "cannot finalize downloaded file".into(),
-            });
+            exit_code: 1,
+            code: "internal_error",
+            message: "cannot finalize downloaded file".into(),
+        });
     }
     let commit = if overwrite {
         temporary.persist(destination)
@@ -3002,20 +3055,28 @@ fn download_file(printer: &ResolvedPrinter, device_path: &str, destination: &Pat
     };
     if commit.is_err() {
         return Err(AppError {
-                exit_code: 1,
-                code: "internal_error",
-                message: "cannot move downloaded file into place".into(),
-            });
+            exit_code: 1,
+            code: "internal_error",
+            message: "cannot move downloaded file into place".into(),
+        });
     }
     Ok(transferred)
 }
 
-fn download_destinations(device_paths: &[(String, String)], destination: Option<&str>, overwrite: bool) -> Result<Vec<PathBuf>, AppError> {
+fn download_destinations(
+    device_paths: &[(String, String)],
+    destination: Option<&str>,
+    overwrite: bool,
+) -> Result<Vec<PathBuf>, AppError> {
     let multiple = device_paths.len() > 1;
     let directory = match destination {
         Some(value) if multiple => match fs::metadata(value) {
             Ok(metadata) if metadata.is_dir() => Some(PathBuf::from(value)),
-            _ => return Err(AppError::usage("--to must be an existing directory when downloading multiple files")),
+            _ => {
+                return Err(AppError::usage(
+                    "--to must be an existing directory when downloading multiple files",
+                ));
+            }
         },
         Some(value) => return Ok(vec![download_destination(value, &device_paths[0].0)?]),
         None => None,
@@ -3024,9 +3085,21 @@ fn download_destinations(device_paths: &[(String, String)], destination: Option<
     let mut seen = BTreeSet::new();
     for (device_path, _) in device_paths {
         let name = download_file_name(device_path)?;
-        let path = directory.as_ref().map_or_else(|| PathBuf::from(name), |directory| directory.join(name));
-        if !seen.insert(path.clone()) { return Err(AppError::usage(format!("multiple printer files would overwrite {}", path.display()))); }
-        if path.exists() && !overwrite { return Err(AppError::usage(format!("destination file already exists: {} (use --overwrite to replace)", path.display()))); }
+        let path = directory
+            .as_ref()
+            .map_or_else(|| PathBuf::from(name), |directory| directory.join(name));
+        if !seen.insert(path.clone()) {
+            return Err(AppError::usage(format!(
+                "multiple printer files would overwrite {}",
+                path.display()
+            )));
+        }
+        if path.exists() && !overwrite {
+            return Err(AppError::usage(format!(
+                "destination file already exists: {} (use --overwrite to replace)",
+                path.display()
+            )));
+        }
         destinations.push(path);
     }
     Ok(destinations)
@@ -3035,9 +3108,17 @@ fn download_destinations(device_paths: &[(String, String)], destination: Option<
 fn download_destination(destination: &str, device_path: &str) -> Result<PathBuf, AppError> {
     let name = download_file_name(device_path)?;
     let destination = PathBuf::from(destination);
-    if destination.is_dir() { return Ok(destination.join(name)); }
+    if destination.is_dir() {
+        return Ok(destination.join(name));
+    }
     let parent = destination.parent().unwrap_or_else(|| Path::new("."));
-    match fs::metadata(parent) { Ok(metadata) if metadata.is_dir() => Ok(destination), _ => Err(AppError::usage(format!("destination directory does not exist: {}", parent.display()))) }
+    match fs::metadata(parent) {
+        Ok(metadata) if metadata.is_dir() => Ok(destination),
+        _ => Err(AppError::usage(format!(
+            "destination directory does not exist: {}",
+            parent.display()
+        ))),
+    }
 }
 
 fn download_file_name(device_path: &str) -> Result<&str, AppError> {
@@ -3122,14 +3203,11 @@ fn files_delete(
     err: &mut dyn Write,
 ) -> i32 {
     let command = "files delete";
-    let (positionals, options) = match parse_options(
-        args,
-        &["yes", "insecure"],
-        &["timeout", "protocol-trace"],
-    ) {
-        Ok(value) => value,
-        Err(error) => return write_error(command, format, AppError::usage(error), out, err),
-    };
+    let (positionals, options) =
+        match parse_options(args, &["yes", "insecure"], &["timeout", "protocol-trace"]) {
+            Ok(value) => value,
+            Err(error) => return write_error(command, format, AppError::usage(error), out, err),
+        };
     let (name, requested_paths) = match positionals.split_first() {
         Some((name, paths)) if !paths.is_empty() => (name.as_str(), paths),
         _ => {
@@ -3172,7 +3250,10 @@ fn files_delete(
     if let Err(code) = require_confirmation(
         command,
         options.enabled("yes"),
-        &format!("Delete {} file(s) from {name}? Type 'yes' to continue: ", requested_paths.len()),
+        &format!(
+            "Delete {} file(s) from {name}? Type 'yes' to continue: ",
+            requested_paths.len()
+        ),
         format,
         out,
         err,
@@ -3197,7 +3278,9 @@ fn files_delete(
     };
     let files = device_paths
         .iter()
-        .map(|(_, display_path)| FileDeleteData { device_path: display_path.clone() })
+        .map(|(_, display_path)| FileDeleteData {
+            device_path: display_path.clone(),
+        })
         .collect::<Vec<_>>();
     for (device_path, _) in &device_paths {
         if let Err(error) = drivers::delete_file(
@@ -3214,9 +3297,38 @@ fn files_delete(
     let capabilities = file_capabilities(printer.driver_kind.capabilities());
     if files.len() == 1 {
         let file = files.into_iter().next().expect("one deleted file");
-        write_success(command, format, FileDeleteResult { profile, driver, file: file.clone(), warnings: Vec::new(), capabilities }, |out| writeln!(out, "Deleted {}.", file.device_path), out)
+        write_success(
+            command,
+            format,
+            FileDeleteResult {
+                profile,
+                driver,
+                file: file.clone(),
+                warnings: Vec::new(),
+                capabilities,
+            },
+            |out| writeln!(out, "Deleted {}.", file.device_path),
+            out,
+        )
     } else {
-        write_success(command, format, FileDeletesData { profile, driver, files: files.clone(), warnings: Vec::new(), capabilities }, |out| { for file in &files { writeln!(out, "Deleted {}.", file.device_path)?; } Ok(()) }, out)
+        write_success(
+            command,
+            format,
+            FileDeletesData {
+                profile,
+                driver,
+                files: files.clone(),
+                warnings: Vec::new(),
+                capabilities,
+            },
+            |out| {
+                for file in &files {
+                    writeln!(out, "Deleted {}.", file.device_path)?;
+                }
+                Ok(())
+            },
+            out,
+        )
     }
 }
 
@@ -3259,7 +3371,7 @@ fn jobs_preflight(
         },
         None => None,
     };
-    let preflight = match polimero_core::bambu::preflight_print_package(
+    let preflight = match melt_core::bambu::preflight_print_package(
         &source,
         options.value("display-name"),
         plate,
@@ -3407,7 +3519,7 @@ fn job_action(
     };
     let start_options = match options.value("plate") {
         Some(value) => match value.parse() {
-            Ok(plate) => polimero_core::bambu::JobStartOptions {
+            Ok(plate) => melt_core::bambu::JobStartOptions {
                 plate: Some(plate),
                 skip_leveling: options.enabled("skip-leveling"),
                 ..Default::default()
@@ -3422,19 +3534,19 @@ fn job_action(
                 );
             }
         },
-        None => polimero_core::bambu::JobStartOptions {
+        None => melt_core::bambu::JobStartOptions {
             plate: None,
             skip_leveling: options.enabled("skip-leveling"),
             ..Default::default()
         },
     };
     let allowed = match action {
-        "start" => &[polimero_core::moonraker::PrinterState::Idle][..],
-        "pause" => &[polimero_core::moonraker::PrinterState::Printing][..],
-        "resume" => &[polimero_core::moonraker::PrinterState::Paused][..],
+        "start" => &[melt_core::moonraker::PrinterState::Idle][..],
+        "pause" => &[melt_core::moonraker::PrinterState::Printing][..],
+        "resume" => &[melt_core::moonraker::PrinterState::Paused][..],
         "cancel" => &[
-            polimero_core::moonraker::PrinterState::Printing,
-            polimero_core::moonraker::PrinterState::Paused,
+            melt_core::moonraker::PrinterState::Printing,
+            melt_core::moonraker::PrinterState::Paused,
         ][..],
         _ => unreachable!("job action is matched by dispatch"),
     };
@@ -3508,7 +3620,7 @@ struct JobActionData {
     profile: String,
     driver: &'static str,
     action: String,
-    state: polimero_core::moonraker::PrinterState,
+    state: melt_core::moonraker::PrinterState,
     #[serde(skip_serializing_if = "Option::is_none")]
     device_path: Option<String>,
     warnings: Vec<String>,
@@ -3612,7 +3724,7 @@ fn temperature_set(
     if let Err(error) = require_state(
         "temperature set",
         &printer,
-        &[polimero_core::moonraker::PrinterState::Idle],
+        &[melt_core::moonraker::PrinterState::Idle],
     ) {
         return write_error("temperature set", format, error, out, err);
     }
@@ -3654,7 +3766,7 @@ fn temperature_set(
 
 fn temperature_targets(
     options: &ParsedOptions,
-) -> Result<polimero_core::moonraker::TemperatureTargets, AppError> {
+) -> Result<melt_core::moonraker::TemperatureTargets, AppError> {
     let parse = |name: &str| {
         options
             .value(name)
@@ -3665,7 +3777,7 @@ fn temperature_targets(
             })
             .transpose()
     };
-    let targets = polimero_core::moonraker::TemperatureTargets {
+    let targets = melt_core::moonraker::TemperatureTargets {
         nozzle_celsius: parse("nozzle")?,
         bed_celsius: parse("bed")?,
         chamber_celsius: parse("chamber")?,
@@ -3685,7 +3797,7 @@ fn temperature_targets(
 struct TemperatureSetData {
     profile: String,
     driver: &'static str,
-    targets: polimero_core::moonraker::TemperatureTargets,
+    targets: melt_core::moonraker::TemperatureTargets,
     warnings: Vec<String>,
     capabilities: drivers::Capabilities,
 }
@@ -3723,7 +3835,7 @@ fn motion_home(
     if let Err(error) = require_state(
         "motion home",
         &printer,
-        &[polimero_core::moonraker::PrinterState::Idle],
+        &[melt_core::moonraker::PrinterState::Idle],
     ) {
         return write_error("motion home", format, error, out, err);
     }
@@ -3761,7 +3873,7 @@ fn motion_home(
     }
 }
 
-fn home_axes(value: Option<&str>) -> Result<Vec<polimero_core::moonraker::Axis>, AppError> {
+fn home_axes(value: Option<&str>) -> Result<Vec<melt_core::moonraker::Axis>, AppError> {
     let value = value.unwrap_or("x,y,z");
     let mut axes = Vec::new();
     for axis in value
@@ -3770,9 +3882,9 @@ fn home_axes(value: Option<&str>) -> Result<Vec<polimero_core::moonraker::Axis>,
         .filter(|axis| !axis.is_empty())
     {
         let axis = match axis.to_ascii_lowercase().as_str() {
-            "x" => polimero_core::moonraker::Axis::X,
-            "y" => polimero_core::moonraker::Axis::Y,
-            "z" => polimero_core::moonraker::Axis::Z,
+            "x" => melt_core::moonraker::Axis::X,
+            "y" => melt_core::moonraker::Axis::Y,
+            "z" => melt_core::moonraker::Axis::Z,
             _ => {
                 return Err(AppError::usage(format!(
                     "invalid axis {axis:?}: use x, y, or z"
@@ -3822,7 +3934,7 @@ fn motion_jog(
     if let Err(error) = require_state(
         "motion jog",
         &printer,
-        &[polimero_core::moonraker::PrinterState::Idle],
+        &[melt_core::moonraker::PrinterState::Idle],
     ) {
         return write_error("motion jog", format, error, out, err);
     }
@@ -3860,7 +3972,7 @@ fn motion_jog(
     }
 }
 
-fn jog_delta(options: &ParsedOptions) -> Result<polimero_core::moonraker::JogDelta, AppError> {
+fn jog_delta(options: &ParsedOptions) -> Result<melt_core::moonraker::JogDelta, AppError> {
     let parse = |name: &str| {
         options
             .value(name)
@@ -3871,7 +3983,7 @@ fn jog_delta(options: &ParsedOptions) -> Result<polimero_core::moonraker::JogDel
             })
             .transpose()
     };
-    let delta = polimero_core::moonraker::JogDelta {
+    let delta = melt_core::moonraker::JogDelta {
         x_millimeters: parse("x")?,
         y_millimeters: parse("y")?,
         z_millimeters: parse("z")?,
@@ -3899,7 +4011,7 @@ struct MotionData {
     profile: String,
     driver: &'static str,
     action: &'static str,
-    state: polimero_core::moonraker::MotionState,
+    state: melt_core::moonraker::MotionState,
     warnings: Vec<String>,
     capabilities: drivers::Capabilities,
 }
@@ -3959,10 +4071,10 @@ fn fan_set(
         "fans set",
         &printer,
         &[
-            polimero_core::moonraker::PrinterState::Idle,
-            polimero_core::moonraker::PrinterState::Printing,
-            polimero_core::moonraker::PrinterState::Paused,
-            polimero_core::moonraker::PrinterState::Error,
+            melt_core::moonraker::PrinterState::Idle,
+            melt_core::moonraker::PrinterState::Printing,
+            melt_core::moonraker::PrinterState::Paused,
+            melt_core::moonraker::PrinterState::Error,
         ],
     ) {
         return write_error("fans set", format, error, out, err);
@@ -4062,8 +4174,8 @@ fn speed_set(
         "speed set",
         &printer,
         &[
-            polimero_core::moonraker::PrinterState::Printing,
-            polimero_core::moonraker::PrinterState::Paused,
+            melt_core::moonraker::PrinterState::Printing,
+            melt_core::moonraker::PrinterState::Paused,
         ],
     ) {
         return write_error("speed set", format, error, out, err);
@@ -4124,22 +4236,22 @@ fn driver_error(error: DriverError) -> AppError {
             code: "capability_unsupported",
             message: error.to_string(),
         },
-        DriverError::Moonraker(polimero_core::moonraker::Error::Authentication) => AppError {
+        DriverError::Moonraker(melt_core::moonraker::Error::Authentication) => AppError {
             exit_code: 3,
             code: "authentication_failed",
             message: "printer authentication failed".into(),
         },
-        DriverError::Moonraker(polimero_core::moonraker::Error::Timeout) => AppError {
+        DriverError::Moonraker(melt_core::moonraker::Error::Timeout) => AppError {
             exit_code: 4,
             code: "timeout",
             message: "printer operation timed out".into(),
         },
-        DriverError::Moonraker(polimero_core::moonraker::Error::Transport(_)) => AppError {
+        DriverError::Moonraker(melt_core::moonraker::Error::Transport(_)) => AppError {
             exit_code: 4,
             code: "connection_failed",
             message: "printer connection failed".into(),
         },
-        DriverError::Moonraker(polimero_core::moonraker::Error::HttpStatus(status))
+        DriverError::Moonraker(melt_core::moonraker::Error::HttpStatus(status))
             if matches!(status.as_u16(), 502..=504) =>
         {
             AppError {
@@ -4148,86 +4260,86 @@ fn driver_error(error: DriverError) -> AppError {
                 message: "printer connection failed".into(),
             }
         }
-        DriverError::Moonraker(polimero_core::moonraker::Error::Unsupported(_)) => AppError {
+        DriverError::Moonraker(melt_core::moonraker::Error::Unsupported(_)) => AppError {
             exit_code: 5,
             code: "capability_unsupported",
             message: error.to_string(),
         },
-        DriverError::Moonraker(polimero_core::moonraker::Error::InvalidDevicePath)
-        | DriverError::Moonraker(polimero_core::moonraker::Error::InvalidTemperatureTarget)
-        | DriverError::Moonraker(polimero_core::moonraker::Error::InvalidJog)
-        | DriverError::Moonraker(polimero_core::moonraker::Error::InvalidSpeedProfile)
-        | DriverError::Moonraker(polimero_core::moonraker::Error::FileAlreadyExists)
-        | DriverError::Moonraker(polimero_core::moonraker::Error::DirectoryDestination) => {
+        DriverError::Moonraker(melt_core::moonraker::Error::InvalidDevicePath)
+        | DriverError::Moonraker(melt_core::moonraker::Error::InvalidTemperatureTarget)
+        | DriverError::Moonraker(melt_core::moonraker::Error::InvalidJog)
+        | DriverError::Moonraker(melt_core::moonraker::Error::InvalidSpeedProfile)
+        | DriverError::Moonraker(melt_core::moonraker::Error::FileAlreadyExists)
+        | DriverError::Moonraker(melt_core::moonraker::Error::DirectoryDestination) => {
             AppError::usage(error.to_string())
         }
-        DriverError::Moonraker(polimero_core::moonraker::Error::LocalIo(_)) => AppError {
+        DriverError::Moonraker(melt_core::moonraker::Error::LocalIo(_)) => AppError {
             exit_code: 1,
             code: "internal_error",
             message: "local file operation failed".into(),
         },
         DriverError::Bambu(
-            polimero_core::bambu::TransportError::Authentication
-            | polimero_core::bambu::TransportError::Pin(_),
+            melt_core::bambu::TransportError::Authentication
+            | melt_core::bambu::TransportError::Pin(_),
         ) => AppError {
             exit_code: 3,
             code: "authentication_failed",
             message: "printer authentication failed".into(),
         },
-        DriverError::Bambu(polimero_core::bambu::TransportError::UnsignedCommand) => AppError {
+        DriverError::Bambu(melt_core::bambu::TransportError::UnsignedCommand) => AppError {
             exit_code: 5,
             code: "signing_required",
             message:
                 "printer rejected an unsigned command; enable Developer Mode or use a signed client"
                     .into(),
         },
-        DriverError::Bambu(polimero_core::bambu::TransportError::AuthorizationRequired(_)) => {
+        DriverError::Bambu(melt_core::bambu::TransportError::AuthorizationRequired(_)) => {
             AppError {
                 exit_code: 5,
                 code: "signing_required",
                 message: "observed printer security requires signed commands; enable Developer Mode/LAN-only mode or use a signed client".into(),
             }
         }
-        DriverError::Bambu(polimero_core::bambu::TransportError::AuthorizationConflict(_)) => {
+        DriverError::Bambu(melt_core::bambu::TransportError::AuthorizationConflict(_)) => {
             AppError {
                 exit_code: 5,
                 code: "authorization_conflict",
-                message: "conflicting live authorization evidence blocks this mutation; refresh status and run `polimero printer capabilities <name>` before retrying".into(),
+                message: "conflicting live authorization evidence blocks this mutation; refresh status and run `melt printer capabilities <name>` before retrying".into(),
             }
         }
-        DriverError::Bambu(polimero_core::bambu::TransportError::Timeout) => AppError {
+        DriverError::Bambu(melt_core::bambu::TransportError::Timeout) => AppError {
             exit_code: 4,
             code: "timeout",
             message: "printer operation timed out".into(),
         },
         DriverError::Bambu(
-            polimero_core::bambu::TransportError::Connection
-            | polimero_core::bambu::TransportError::Tls
-            | polimero_core::bambu::TransportError::MissingCertificate
-            | polimero_core::bambu::TransportError::FileTransfer,
+            melt_core::bambu::TransportError::Connection
+            | melt_core::bambu::TransportError::Tls
+            | melt_core::bambu::TransportError::MissingCertificate
+            | melt_core::bambu::TransportError::FileTransfer,
         ) => AppError {
             exit_code: 4,
             code: "connection_failed",
             message: "printer connection failed".into(),
         },
         DriverError::Bambu(
-            polimero_core::bambu::TransportError::Unsupported(_)
-            | polimero_core::bambu::TransportError::InvalidSpeedProfile,
+            melt_core::bambu::TransportError::Unsupported(_)
+            | melt_core::bambu::TransportError::InvalidSpeedProfile,
         ) => AppError {
             exit_code: 5,
             code: "capability_unsupported",
             message: error.to_string(),
         },
         DriverError::Bambu(
-            polimero_core::bambu::TransportError::MissingAccessCode
-            | polimero_core::bambu::TransportError::InvalidAccessCode
-            | polimero_core::bambu::TransportError::InvalidDevicePath
-            | polimero_core::bambu::TransportError::FileAlreadyExists
-            | polimero_core::bambu::TransportError::DirectoryDestination
-            | polimero_core::bambu::TransportError::InvalidTemperatureTarget
-            | polimero_core::bambu::TransportError::InvalidMotion,
+            melt_core::bambu::TransportError::MissingAccessCode
+            | melt_core::bambu::TransportError::InvalidAccessCode
+            | melt_core::bambu::TransportError::InvalidDevicePath
+            | melt_core::bambu::TransportError::FileAlreadyExists
+            | melt_core::bambu::TransportError::DirectoryDestination
+            | melt_core::bambu::TransportError::InvalidTemperatureTarget
+            | melt_core::bambu::TransportError::InvalidMotion,
         ) => AppError::usage(error.to_string()),
-        DriverError::Bambu(polimero_core::bambu::TransportError::LocalIo) => AppError {
+        DriverError::Bambu(melt_core::bambu::TransportError::LocalIo) => AppError {
             exit_code: 1,
             code: "internal_error",
             message: "local file operation failed".into(),
@@ -4296,7 +4408,7 @@ fn remove_profile(
         }
     }
 
-    let dir = match polimero_core::config::config_dir() {
+    let dir = match melt_core::config::config_dir() {
         Ok(dir) => dir,
         Err(error) => {
             return write_error(
@@ -4651,22 +4763,28 @@ mod tests {
                 .collect(),
             controls: moonraker::ControlInventory {
                 fans: [
-                    ("partCooling".to_string(), moonraker::FanControl {
-                        kind: moonraker::FanKind::Parts,
-                        speed_percent: Some(9),
-                        mode: moonraker::FanMode::Manual,
-                        minimum_percent: 0,
-                        maximum_percent: 100,
-                        controllable: true,
-                    }),
-                    ("auxiliary".to_string(), moonraker::FanControl {
-                        kind: moonraker::FanKind::Auxiliary,
-                        speed_percent: Some(15),
-                        mode: moonraker::FanMode::Manual,
-                        minimum_percent: 0,
-                        maximum_percent: 100,
-                        controllable: true,
-                    }),
+                    (
+                        "partCooling".to_string(),
+                        moonraker::FanControl {
+                            kind: moonraker::FanKind::Parts,
+                            speed_percent: Some(9),
+                            mode: moonraker::FanMode::Manual,
+                            minimum_percent: 0,
+                            maximum_percent: 100,
+                            controllable: true,
+                        },
+                    ),
+                    (
+                        "auxiliary".to_string(),
+                        moonraker::FanControl {
+                            kind: moonraker::FanKind::Auxiliary,
+                            speed_percent: Some(15),
+                            mode: moonraker::FanMode::Manual,
+                            minimum_percent: 0,
+                            maximum_percent: 100,
+                            controllable: true,
+                        },
+                    ),
                 ]
                 .into_iter()
                 .collect(),
@@ -4828,7 +4946,7 @@ mod tests {
     }
 
     use super::*;
-    use polimero_core::config::Profile;
+    use melt_core::config::Profile;
 
     #[test]
     fn tables_align_every_column_but_the_last() {
@@ -4881,7 +4999,7 @@ mod tests {
             let output = String::from_utf8(out).unwrap();
             assert!(output.starts_with(leaf.short), "{:?}", leaf.path);
             assert!(
-                output.contains(&format!("polimero {} {}", leaf.path.join(" "), leaf.args)),
+                output.contains(&format!("melt {} {}", leaf.path.join(" "), leaf.args)),
                 "{:?}",
                 leaf.path
             );
@@ -4904,10 +5022,10 @@ mod tests {
             assert!(err.is_empty(), "{:?}", group.path);
             let output = String::from_utf8(out).unwrap();
             let command = group_command_name(group);
-            assert!(output.starts_with(&format!("{}\n\nUsage:\n  polimero", group.short)));
+            assert!(output.starts_with(&format!("{}\n\nUsage:\n  melt", group.short)));
             assert!(
                 output.contains(&format!(
-                    "Use \"polimero{} [command] --help\"",
+                    "Use \"melt{} [command] --help\"",
                     if group.path.is_empty() {
                         String::new()
                     } else {
@@ -4937,7 +5055,7 @@ mod tests {
             String::from_utf8(out).unwrap(),
             concat!(
                 "Camera operations on a named printer\n\n",
-                "Usage:\n  polimero camera [command]\n\n",
+                "Usage:\n  melt camera [command]\n\n",
                 "Available Commands:\n",
                 "  snapshot    Capture one still image from a printer camera\n",
                 "  stream      Stream camera feed from a printer via a local HTTP server\n\n",
@@ -4945,7 +5063,7 @@ mod tests {
                 "Global Flags:\n",
                 "      --output string   output format: human or json (default \"human\")\n",
                 "  -v, --verbose         show detailed progress output\n\n",
-                "Use \"polimero camera [command] --help\" for more information about a command.\n"
+                "Use \"melt camera [command] --help\" for more information about a command.\n"
             )
         );
     }
@@ -5059,9 +5177,7 @@ mod tests {
 
     #[test]
     fn moonraker_timeout_uses_the_connection_exit_contract() {
-        let error = driver_error(DriverError::Moonraker(
-            polimero_core::moonraker::Error::Timeout,
-        ));
+        let error = driver_error(DriverError::Moonraker(melt_core::moonraker::Error::Timeout));
 
         assert_eq!(error.exit_code, 4);
         assert_eq!(error.code, "timeout");
@@ -5070,7 +5186,7 @@ mod tests {
     #[test]
     fn unsigned_bambu_commands_use_the_capability_exit_contract() {
         let error = driver_error(DriverError::Bambu(
-            polimero_core::bambu::TransportError::UnsignedCommand,
+            melt_core::bambu::TransportError::UnsignedCommand,
         ));
 
         assert_eq!(error.exit_code, 5);
@@ -5293,21 +5409,32 @@ mod tests {
         let mut out = Vec::new();
 
         assert_eq!(run(&args, &mut out, &mut Vec::new()), 2);
-        assert!(String::from_utf8(out).unwrap().contains("duplicate device path"));
+        assert!(
+            String::from_utf8(out)
+                .unwrap()
+                .contains("duplicate device path")
+        );
     }
 
     #[test]
     fn batch_download_requires_a_directory_and_rejects_name_collisions() {
         let directory = tempfile::tempdir().unwrap();
         let paths = vec![
-            ("/models/cube.gcode".to_owned(), "gcodes:/models/cube.gcode".to_owned()),
-            ("/backup/cube.gcode".to_owned(), "gcodes:/backup/cube.gcode".to_owned()),
+            (
+                "/models/cube.gcode".to_owned(),
+                "gcodes:/models/cube.gcode".to_owned(),
+            ),
+            (
+                "/backup/cube.gcode".to_owned(),
+                "gcodes:/backup/cube.gcode".to_owned(),
+            ),
         ];
 
         let error = download_destinations(&paths, Some("download.gcode"), false).unwrap_err();
         assert!(error.message.contains("existing directory"));
 
-        let error = download_destinations(&paths, Some(directory.path().to_str().unwrap()), false).unwrap_err();
+        let error = download_destinations(&paths, Some(directory.path().to_str().unwrap()), false)
+            .unwrap_err();
         assert!(error.message.contains("would overwrite"));
     }
 
@@ -5315,12 +5442,25 @@ mod tests {
     fn batch_download_maps_each_file_to_the_requested_directory() {
         let directory = tempfile::tempdir().unwrap();
         let paths = vec![
-            ("/models/cube.gcode".to_owned(), "gcodes:/models/cube.gcode".to_owned()),
-            ("/models/benchy.gcode".to_owned(), "gcodes:/models/benchy.gcode".to_owned()),
+            (
+                "/models/cube.gcode".to_owned(),
+                "gcodes:/models/cube.gcode".to_owned(),
+            ),
+            (
+                "/models/benchy.gcode".to_owned(),
+                "gcodes:/models/benchy.gcode".to_owned(),
+            ),
         ];
 
-        let destinations = download_destinations(&paths, Some(directory.path().to_str().unwrap()), false).unwrap();
-        assert_eq!(destinations, vec![directory.path().join("cube.gcode"), directory.path().join("benchy.gcode")]);
+        let destinations =
+            download_destinations(&paths, Some(directory.path().to_str().unwrap()), false).unwrap();
+        assert_eq!(
+            destinations,
+            vec![
+                directory.path().join("cube.gcode"),
+                directory.path().join("benchy.gcode")
+            ]
+        );
     }
 
     #[test]
@@ -5431,9 +5571,9 @@ mod tests {
         assert_eq!(normalize_light("work-light").unwrap(), "work-light");
         assert!(normalize_light("bad light").is_err());
         assert_eq!(
-            polimero_core::moonraker::LightState::parse("on"),
-            Some(polimero_core::moonraker::LightState::On)
+            melt_core::moonraker::LightState::parse("on"),
+            Some(melt_core::moonraker::LightState::On)
         );
-        assert!(polimero_core::moonraker::LightState::parse("ON").is_none());
+        assert!(melt_core::moonraker::LightState::parse("ON").is_none());
     }
 }

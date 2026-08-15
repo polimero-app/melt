@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
-const PREFERENCES_FILE: &str = "polimero-preferences.yaml";
+const PREFERENCES_FILE: &str = "melt-preferences.yaml";
 const CURRENT_VERSION: u8 = 1;
 
 #[derive(Debug, Error)]
@@ -180,7 +180,7 @@ impl Preferences {
 }
 
 pub fn preferences_dir() -> Result<PathBuf, PreferencesError> {
-    if let Some(dir) = env::var_os("POLIMERO_CONFIG_DIR").filter(|value| !value.is_empty()) {
+    if let Some(dir) = env::var_os("MELT_CONFIG_DIR").filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(dir));
     }
     #[cfg(target_os = "windows")]
@@ -193,7 +193,7 @@ pub fn preferences_dir() -> Result<PathBuf, PreferencesError> {
     let base = env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")));
-    base.map(|path| path.join("polimero")).ok_or_else(|| {
+    base.map(|path| path.join("melt")).ok_or_else(|| {
         PreferencesError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "locating preferences directory",
