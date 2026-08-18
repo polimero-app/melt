@@ -31,14 +31,6 @@
       "icons/32x32.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "linux": {
-      "deb": {
-        "depends": ["ffmpeg"]
-      },
-      "rpm": {
-        "depends": ["ffmpeg"]
-      }
-    }
+    ]
   }
 }

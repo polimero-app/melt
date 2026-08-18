@@ -55,10 +55,9 @@ Launch `./target/debug/melt` without arguments to open the desktop
 application. Passing command arguments selects headless CLI mode instead.
 
 Source builds require Rust 1.85 or newer, Bun, and the platform dependencies
-required by Tauri 2. Linux packages declare FFmpeg as a runtime dependency for
-the baseline camera media policy. Printer credentials are stored through the
-platform keychain, so a usable Secret Service or desktop keychain must be
-available for authenticated profiles.
+required by Tauri 2. Printer credentials are stored through the platform
+keychain, so a usable Secret Service or desktop keychain must be available
+for authenticated profiles.
 
 ## CLI
 

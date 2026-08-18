@@ -18,14 +18,6 @@ fn package_configuration_keeps_the_native_artifact_and_cli_contracts() {
         config["bundle"]["resources"],
         serde_json::json!(["../../LICENSE"])
     );
-    assert_eq!(
-        config["bundle"]["linux"]["deb"]["depends"],
-        serde_json::json!(["ffmpeg"])
-    );
-    assert_eq!(
-        config["bundle"]["linux"]["rpm"]["depends"],
-        serde_json::json!(["ffmpeg"])
-    );
     assert_eq!(config["app"]["windows"][0]["minWidth"], 1280);
     assert_eq!(config["app"]["windows"][0]["minHeight"], 800);
 
