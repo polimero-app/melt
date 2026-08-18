@@ -160,6 +160,26 @@ impl H264Stream {
         (&self.sps, &self.pps)
     }
 
+    /// Enables the software preview decoder only while a JPEG consumer is
+    /// attached. Starting from a fresh decoder also resets access-unit
+    /// startup so the next IDR is prefixed with the cached SPS/PPS.
+    pub fn set_preview_decode_enabled(&mut self, enabled: bool) -> io::Result<()> {
+        if enabled == self.decoder.is_some() {
+            return Ok(());
+        }
+        self.decoder = enabled
+            .then(|| {
+                Decoder::new().map_err(|error| {
+                    io::Error::other(format!("H.264 decoder init failed: {error}"))
+                })
+            })
+            .transpose()?;
+        self.started = false;
+        self.access_unit.clear();
+        self.fu_buffer = None;
+        Ok(())
+    }
+
     pub fn next_rtp_packet(&mut self) -> io::Result<Vec<u8>> {
         self.keepalive_if_due()
             .and_then(|()| self.connection.next_rtp_packet())

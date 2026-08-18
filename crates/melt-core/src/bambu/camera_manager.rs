@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use super::{
     CameraError, CameraSelection, CameraSelectionSource, CameraTransport, H264AccessUnit,
     H264Stream, MjpegStream, Profile, QuirkEffect, RuntimeCapabilities, applicable_quirks,
-    open_classic_mjpeg_stream, open_decoded_h264_stream, select_camera_transport,
+    open_classic_mjpeg_stream, open_h264_stream, select_camera_transport,
 };
 
 const SUBSCRIBER_CAPACITY: usize = 2;
@@ -177,6 +177,15 @@ impl Owner {
             .unwrap_or_else(|error| error.into_inner())
             .subscribers
             .is_empty()
+    }
+
+    fn has_subscribers_for(&self, kind: CameraFrameKind) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .subscribers
+            .values()
+            .any(|(interest, _)| *interest == kind)
     }
 
     fn status(&self) -> CameraOwnerStatus {
@@ -411,7 +420,7 @@ fn open_transport(
         .ok_or_else(|| CameraError::Connect(std::io::ErrorKind::TimedOut.into()))?;
     match transport {
         CameraTransport::RtspsH264 => {
-            open_decoded_h264_stream(profile, access_code, fingerprint, remaining)
+            open_h264_stream(profile, access_code, fingerprint, remaining)
                 .map(Box::new)
                 .map(Source::H264)
         }
@@ -452,12 +461,15 @@ fn run_owner(owner: Arc<Owner>, mut source: Source, config: SourceConfig) {
             Source::Mjpeg(stream) => stream.next_frame().map(|jpeg| {
                 owner.publish(CameraFrame::Jpeg(Arc::from(jpeg)));
             }),
-            Source::H264(stream) => stream.next_access_unit().map(|access_unit| {
-                if let Some(jpeg) = &access_unit.jpeg {
-                    owner.publish(CameraFrame::Jpeg(Arc::from(jpeg.clone())));
-                }
-                owner.publish(CameraFrame::H264(Arc::new(access_unit)));
-            }),
+            Source::H264(stream) => stream
+                .set_preview_decode_enabled(owner.has_subscribers_for(CameraFrameKind::Jpeg))
+                .and_then(|()| stream.next_access_unit())
+                .map(|access_unit| {
+                    if let Some(jpeg) = &access_unit.jpeg {
+                        owner.publish(CameraFrame::Jpeg(Arc::from(jpeg.clone())));
+                    }
+                    owner.publish(CameraFrame::H264(Arc::new(access_unit)));
+                }),
         };
         if result.is_ok() {
             consecutive_failures = 0;
@@ -628,6 +640,20 @@ mod tests {
                 .as_ref(),
             CameraFrame::H264(_)
         ));
+    }
+
+    #[test]
+    fn media_interest_tracks_subscriber_lifetime() {
+        let owner = owner();
+        let h264 = owner.subscribe(CameraFrameKind::H264);
+        assert!(owner.has_subscribers_for(CameraFrameKind::H264));
+        assert!(!owner.has_subscribers_for(CameraFrameKind::Jpeg));
+
+        let jpeg = owner.subscribe(CameraFrameKind::Jpeg);
+        assert!(owner.has_subscribers_for(CameraFrameKind::Jpeg));
+        drop(jpeg);
+        assert!(!owner.has_subscribers_for(CameraFrameKind::Jpeg));
+        drop(h264);
     }
 
     #[test]
