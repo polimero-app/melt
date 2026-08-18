@@ -2835,10 +2835,40 @@ fn status_errors(print: &Map<String, Value>, state: PrinterState) -> Vec<StatusE
         let attr = integer(item.get("attr")).unwrap_or_default();
         let code = integer(item.get("code")).unwrap_or_default();
         if attr != 0 || code != 0 {
+            // Bambu encodes the HMS severity in the high 16 bits; the low 16
+            // bits identify the fault. Match the fault, not its current severity.
+            let message_code = code & 0xffff;
+            let (code_name, message) = match (attr, message_code) {
+                // Bambu HMS 0300-9700-*-0001. Keep the raw code below for
+                // support alongside the printer's own, actionable wording.
+                (0x0300_9700, 0x0001) => ("top_cover_open", "The top cover is open."),
+                // Documented cover and laser-protection alerts from Bambu's
+                // HMS index. These are deliberately separate so a sensor or
+                // missing protection plate is never presented as a simple open cover.
+                (0x0300_9700, 0x0002) => (
+                    "top_cover_front_right_sensor",
+                    "The top cover Hall sensor (front right) is abnormal. Check whether its connection wire is loose.",
+                ),
+                (0x0300_9700, 0x0003) => (
+                    "top_cover_rear_left_sensor",
+                    "The top cover Hall sensor (rear left) is abnormal. Check whether its connection wire is loose.",
+                ),
+                (0x0300_9700, 0x0004) => (
+                    "top_laser_protection_plate_missing",
+                    "The top laser protection plate is not detected. Install it according to the Bambu Lab Wiki, then restart the task.",
+                ),
+                _ => ("hardware_error", "printer reported a hardware error"),
+            };
             errors.push(StatusError {
-                code: "hardware_error",
-                message: "printer reported a hardware error".into(),
-                raw_code: Some(format!("{attr:08X}-{code:08X}")),
+                code: code_name,
+                message: message.into(),
+                raw_code: Some(format!(
+                    "{:04X}-{:04X}-{:04X}-{:04X}",
+                    (attr >> 16) & 0xffff,
+                    attr & 0xffff,
+                    (code >> 16) & 0xffff,
+                    code & 0xffff,
+                )),
                 image_id: None,
                 recoverable: None,
             });
@@ -4394,7 +4424,58 @@ mod tests {
         assert_eq!(status.errors[0].image_id.as_deref(), Some("E17"));
         assert_eq!(
             status.errors[1].raw_code.as_deref(),
-            Some("00000001-00000002")
+            Some("0000-0001-0000-0002")
+        );
+    }
+
+    #[test]
+    fn explains_the_known_top_cover_hms_alert() {
+        let status = parse_status(
+            br#"{"print":{"gcode_state":"IDLE","hms":[{"attr":50370304,"code":196609}]}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(status.errors.len(), 1);
+        assert_eq!(status.errors[0].code, "top_cover_open");
+        assert_eq!(status.errors[0].message, "The top cover is open.");
+        assert_eq!(
+            status.errors[0].raw_code.as_deref(),
+            Some("0300-9700-0003-0001")
+        );
+    }
+
+    #[test]
+    fn explains_documented_top_cover_hms_alerts() {
+        let status = parse_status(
+            br#"{"print":{"gcode_state":"IDLE","hms":[
+                {"attr":50370304,"code":65537},
+                {"attr":50370304,"code":65538},
+                {"attr":50370304,"code":65539},
+                {"attr":50370304,"code":65540}
+            ]}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            status
+                .errors
+                .iter()
+                .map(|error| error.code)
+                .collect::<Vec<_>>(),
+            [
+                "top_cover_open",
+                "top_cover_front_right_sensor",
+                "top_cover_rear_left_sensor",
+                "top_laser_protection_plate_missing",
+            ]
+        );
+        assert_eq!(
+            status.errors[1].message,
+            "The top cover Hall sensor (front right) is abnormal. Check whether its connection wire is loose."
+        );
+        assert_eq!(
+            status.errors[3].raw_code.as_deref(),
+            Some("0300-9700-0001-0004")
         );
     }
 

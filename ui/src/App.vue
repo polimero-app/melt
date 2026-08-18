@@ -9,6 +9,7 @@ import { clampTarget, formatDuration } from './formatting'
 import { printTargetState } from './printing'
 import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
+import { hmsGuideUrl, hmsSeverity, type HmsSeverity } from './hms'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import { naturallyDescending, nextSort, shouldDeferLibraryCards, sortedBy, type FileSort, type SortKey } from './library'
 import {
@@ -35,6 +36,7 @@ import FilePreviewDialog from './components/FilePreviewDialog.vue'
 import {
   PhArrowsClockwise,
   PhArrowsOutCardinal,
+  PhArrowSquareOut,
   PhArrowUp,
   PhBroadcast,
   PhCamera,
@@ -217,6 +219,15 @@ type PrinterStatus = {
     lights?: Record<string, LightControl>
   }
   extensions?: { 'bambu-lan'?: { ams?: { units: AmsUnitStatus[] } } }
+}
+
+type StatusFault = {
+  code: string
+  message: string
+  rawCode?: string
+  recoverable?: boolean
+  severity: HmsSeverity
+  guideUrl?: string
 }
 
 type MonitorEntry = {
@@ -633,12 +644,22 @@ const progressValueText = computed(() => {
   return parts.join(' · ')
 })
 
-const statusFaults = computed(() => {
+const faultSeverityKeys: Record<HmsSeverity, MessageKey> = {
+  error: 'control.faultSeverityError',
+  warning: 'control.faultSeverityWarning',
+  info: 'control.faultSeverityInfo',
+}
+
+const statusFaults = computed<StatusFault[]>(() => {
   const status = selectedStatus.value
   if (!status) return []
   return [
-    ...status.errors.map((entry) => ({ ...entry, severity: 'error' as const })),
-    ...status.warnings.map((entry) => ({ ...entry, severity: 'warning' as const, rawCode: undefined, recoverable: undefined })),
+    ...status.errors.map((entry) => ({
+      ...entry,
+      severity: hmsSeverity(entry.rawCode),
+      guideUrl: hmsGuideUrl(entry.rawCode),
+    })),
+    ...status.warnings.map((entry) => ({ ...entry, severity: 'warning' as const })),
   ]
 })
 // Annotated so both branches unify on TemperatureControl: the legacy fallback
@@ -2239,18 +2260,37 @@ onUnmounted(() => {
               v-for="(fault, faultIndex) in statusFaults"
               :key="faultIndex"
               class="flex items-start gap-3 rounded-lg border px-4 py-3 text-sm"
-              :class="fault.severity === 'error'
-                ? 'border-red-300 bg-red-50 text-red-900 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200'
-                : 'border-amber-300/70 bg-amber-50 text-amber-900 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200'"
+              :class="{
+                'border-red-300 bg-red-50 text-red-900 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200': fault.severity === 'error',
+                'border-amber-300/70 bg-amber-50 text-amber-900 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200': fault.severity === 'warning',
+                'border-sky-300/70 bg-sky-50 text-sky-900 dark:border-sky-400/20 dark:bg-sky-400/10 dark:text-sky-200': fault.severity === 'info',
+              }"
               :role="fault.severity === 'error' ? 'alert' : 'status'"
             >
-              <PhWarning class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              <PhWarningCircle v-if="fault.severity === 'error'" class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              <PhWarning v-else-if="fault.severity === 'warning'" class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              <PhInfo v-else class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
               <div class="min-w-0 flex-1">
-                <p class="font-medium">{{ fault.message }}</p>
-                <p class="mt-0.5 font-mono text-xs opacity-75">
-                  {{ fault.rawCode ?? fault.code }}
-                  <span v-if="fault.recoverable === false"> · {{ t('control.faultUnrecoverable') }}</span>
-                </p>
+                <div class="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+                  <p class="font-medium">{{ fault.message }}</p>
+                  <span class="rounded-full border border-current/20 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide opacity-80">{{ t(faultSeverityKeys[fault.severity]) }}</span>
+                </div>
+                <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                  <p class="font-mono opacity-75">
+                    {{ fault.rawCode ?? fault.code }}
+                    <span v-if="fault.recoverable === false"> · {{ t('control.faultUnrecoverable') }}</span>
+                  </p>
+                  <a
+                    v-if="fault.guideUrl"
+                    :href="fault.guideUrl"
+                    target="_blank"
+                    rel="noreferrer"
+                    class="inline-flex items-center gap-1 font-medium underline underline-offset-2 hover:no-underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
+                  >
+                    {{ t('control.faultGuide') }}
+                    <PhArrowSquareOut class="size-3.5" aria-hidden="true" />
+                  </a>
+                </div>
               </div>
             </div>
           </section>

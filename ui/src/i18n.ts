@@ -149,6 +149,10 @@ export type MessageKey =
   | "control.reconnecting"
   | "control.faults"
   | "control.faultUnrecoverable"
+  | "control.faultSeverityError"
+  | "control.faultSeverityWarning"
+  | "control.faultSeverityInfo"
+  | "control.faultGuide"
   | "control.currentJob"
   | "control.complete"
   | "control.preparing"
@@ -605,6 +609,10 @@ const messages: Record<Locale, Messages> = {
     "control.reconnecting": "Trying to reconnect to printer",
     "control.faults": "Printer alerts",
     "control.faultUnrecoverable": "not recoverable",
+    "control.faultSeverityError": "Action required",
+    "control.faultSeverityWarning": "Attention",
+    "control.faultSeverityInfo": "Status",
+    "control.faultGuide": "Troubleshooting guide",
     "control.currentJob": "Current job",
     "control.complete": "{percent}% complete",
     "control.preparing": "Preparing — heating and levelling",
@@ -1058,6 +1066,10 @@ const messages: Record<Locale, Messages> = {
     "control.reconnecting": "Tentando reconectar à impressora",
     "control.faults": "Alertas da impressora",
     "control.faultUnrecoverable": "não recuperável",
+    "control.faultSeverityError": "Ação necessária",
+    "control.faultSeverityWarning": "Atenção",
+    "control.faultSeverityInfo": "Status",
+    "control.faultGuide": "Guia de solução de problemas",
     "control.currentJob": "Trabalho atual",
     "control.complete": "{percent}% concluído",
     "control.preparing": "Preparando — aquecendo e nivelando",
