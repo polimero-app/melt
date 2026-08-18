@@ -285,6 +285,13 @@ struct CameraStream {
     url: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CameraH264Stream {
+    url: String,
+    codec: String,
+}
+
 #[derive(Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MonitorEntry {
@@ -354,6 +361,12 @@ struct CameraWebRtcState {
 struct CameraProxy {
     generation: u64,
     stop: Arc<AtomicBool>,
+}
+
+#[derive(Clone, Copy)]
+enum CameraProxyFormat {
+    Mjpeg,
+    H264,
 }
 
 #[derive(Clone, Default)]
@@ -2684,8 +2697,58 @@ fn printer_camera_stream(
         CameraFrameKind::Jpeg,
         Operation::CameraStream,
     )?;
-    start_camera_server(subscription, owner_key, state.inner().clone())
-        .map(|url| CameraStream { url })
+    start_camera_server(
+        subscription,
+        owner_key,
+        state.inner().clone(),
+        CameraProxyFormat::Mjpeg,
+    )
+    .map(|url| CameraStream { url })
+}
+
+#[tauri::command(async)]
+fn printer_camera_h264_stream(
+    name: String,
+    state: tauri::State<'_, CameraStreamState>,
+    manager: tauri::State<'_, CameraManager>,
+) -> Result<CameraH264Stream, CommandError> {
+    let printer = desktop_printer(&name, Operation::CameraStream)?;
+    let owner_key = printer.driver.physical_printer_key(&printer.name);
+    let subscription = subscribe_camera(
+        &manager,
+        &printer,
+        CameraFrameKind::H264,
+        Operation::CameraStream,
+    )?;
+    let codec = subscription
+        .h264_parameters()
+        .and_then(|parameters| h264_codec(&parameters.sps))
+        .ok_or_else(|| {
+            CommandError::new("cameraPreviewUnavailable")
+                .with_detail("camera SDP has no usable H.264 codec parameters")
+        })?;
+    start_camera_server(
+        subscription,
+        owner_key,
+        state.inner().clone(),
+        CameraProxyFormat::H264,
+    )
+    .map(|url| CameraH264Stream { url, codec })
+}
+
+#[tauri::command(async)]
+fn printer_camera_stream_stop(
+    state: tauri::State<'_, CameraStreamState>,
+) -> Result<(), CommandError> {
+    let mut active = state
+        .active
+        .lock()
+        .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?;
+    for proxy in active.values() {
+        proxy.stop.store(true, Ordering::Release);
+    }
+    active.clear();
+    Ok(())
 }
 
 #[tauri::command(async)]
@@ -2761,6 +2824,7 @@ fn start_camera_server(
     subscription: CameraSubscription,
     name: String,
     state: CameraStreamState,
+    format: CameraProxyFormat,
 ) -> Result<String, CommandError> {
     let unavailable = || CommandError::new("cameraPreviewUnavailable");
     let mut token = [0_u8; 16];
@@ -2784,10 +2848,17 @@ fn start_camera_server(
     let expected = path.clone();
     thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(30);
-        while Instant::now() < deadline {
+        while Instant::now() < deadline && !stop.load(Ordering::Acquire) {
             match listener.accept() {
                 Ok((socket, _)) => {
-                    proxy_camera_stream(&subscription, socket, &expected, &stop);
+                    match format {
+                        CameraProxyFormat::Mjpeg => {
+                            proxy_camera_stream(&subscription, socket, &expected, &stop);
+                        }
+                        CameraProxyFormat::H264 => {
+                            proxy_h264_stream(&subscription, socket, &expected, &stop);
+                        }
+                    }
                     break;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -2805,6 +2876,11 @@ fn start_camera_server(
         }
     });
     Ok(format!("http://127.0.0.1:{}{path}", address.port()))
+}
+
+fn h264_codec(sps: &[u8]) -> Option<String> {
+    (sps.len() >= 4 && sps[0] & 0x1f == 7)
+        .then(|| format!("avc1.{:02x}{:02x}{:02x}", sps[1], sps[2], sps[3]))
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -2849,6 +2925,69 @@ fn proxy_camera_stream(
             {
                 break;
             }
+        }
+    }
+}
+
+const H264_FRAME_HEADER_LEN: usize = 13;
+
+fn h264_frame_header(
+    length: u32,
+    timestamp_us: u64,
+    keyframe: bool,
+) -> [u8; H264_FRAME_HEADER_LEN] {
+    let mut header = [0; H264_FRAME_HEADER_LEN];
+    header[..4].copy_from_slice(&length.to_be_bytes());
+    header[4..12].copy_from_slice(&timestamp_us.to_be_bytes());
+    header[12] = u8::from(keyframe);
+    header
+}
+
+fn proxy_h264_stream(
+    subscription: &CameraSubscription,
+    mut socket: TcpStream,
+    expected: &str,
+    stop: &AtomicBool,
+) {
+    let _ = socket.set_read_timeout(Some(Duration::from_secs(5)));
+    let mut request = [0; 4096];
+    let read = socket.read(&mut request).unwrap_or_default();
+    if !camera_preview_request(&request[..read], expected) {
+        let _ = socket.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
+        return;
+    }
+    if socket
+        .write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
+        )
+        .is_err()
+    {
+        return;
+    }
+    let started = Instant::now();
+    let mut last_timestamp = 0_u64;
+    while !stop.load(Ordering::Acquire) {
+        let frame = match subscription.recv_timeout(Duration::from_secs(1)) {
+            Ok(frame) => frame,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+        let CameraFrame::H264(access_unit) = frame.as_ref() else {
+            continue;
+        };
+        let Some(annex_b) = access_unit.annex_b.as_deref() else {
+            continue;
+        };
+        let Ok(length) = u32::try_from(annex_b.len()) else {
+            break;
+        };
+        let timestamp = u64::try_from(started.elapsed().as_micros())
+            .unwrap_or(u64::MAX)
+            .max(last_timestamp.saturating_add(1));
+        last_timestamp = timestamp;
+        let header = h264_frame_header(length, timestamp, access_unit.keyframe);
+        if socket.write_all(&header).is_err() || socket.write_all(annex_b).is_err() {
+            break;
         }
     }
 }
@@ -3258,6 +3397,8 @@ fn main() {
             printer_emergency_stop,
             printer_camera_snapshot,
             printer_camera_stream,
+            printer_camera_h264_stream,
+            printer_camera_stream_stop,
             printer_camera_webrtc_offer,
             printer_camera_webrtc_stop,
             diagnostics_report,
@@ -3285,8 +3426,8 @@ mod tests {
     use super::{
         CachedMonitor, DesktopPrinter, MonitorConnectionState, MonitorEntry, MonitorState, Profile,
         cached_monitor_entry_at, cached_ui_monitor_entry, camera_preview_request, ensure_state,
-        extract_3mf_thumbnail, load_status_cache_from, monitor_connection_state, operation_error,
-        save_status_cache_to,
+        extract_3mf_thumbnail, h264_codec, h264_frame_header, load_status_cache_from,
+        monitor_connection_state, operation_error, save_status_cache_to,
     };
 
     const TOKEN: &str = "/stream/0123456789abcdef0123456789abcdef";
@@ -3647,5 +3788,23 @@ mod tests {
             TOKEN
         ));
         assert!(!camera_preview_request(b"", TOKEN));
+    }
+
+    #[test]
+    fn h264_codec_comes_from_the_sps_profile_and_level() {
+        assert_eq!(
+            h264_codec(&[0x67, 0x64, 0x0c, 0x1f]),
+            Some("avc1.640c1f".to_owned())
+        );
+        assert_eq!(h264_codec(&[0x68, 0x64, 0x0c, 0x1f]), None);
+        assert_eq!(h264_codec(&[0x67, 0x64]), None);
+    }
+
+    #[test]
+    fn h264_frame_header_is_network_ordered() {
+        assert_eq!(
+            h264_frame_header(0x01020304, 0x0102030405060708, true),
+            [1, 2, 3, 4, 1, 2, 3, 4, 5, 6, 7, 8, 1]
+        );
     }
 }

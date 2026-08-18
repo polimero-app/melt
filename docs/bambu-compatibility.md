@@ -11,10 +11,11 @@ transport requires that serial identity and the stored pin; a mismatch never
 falls back to insecure mode or silently rewrites a profile.
 
 Camera fan-out operates on complete encoded media units. RTSPS sources retain
-their original RTP packets for WebRTC and may produce a bounded JPEG preview
-from the same access unit; classic camera sources expose complete JPEG frames.
-This boundary permits snapshots and multiple viewers to share one upstream
-without transcoding the WebRTC path.
+their original RTP packets for WebRTC and Annex-B access units for WebCodecs;
+they enable the software JPEG decoder only while a snapshot or MJPEG consumer
+is attached. Classic camera sources expose complete JPEG frames. This boundary
+permits snapshots and multiple viewers to share one upstream without
+transcoding native H.264 viewers.
 
 The shared camera manager is keyed by the normalized printer serial and a
 credential-free connection revision. Subscriber queues hold at most two media
@@ -23,10 +24,11 @@ retained for snapshots. The first subscriber opens the upstream; dropping the
 last subscriber interrupts its socket, and connection changes invalidate the
 previous generation.
 
-Desktop MJPEG previews, WebRTC offers, and snapshots all subscribe through
-this manager. WebRTC subscriptions receive only H.264 access units, while
-preview subscriptions receive only JPEG frames, so one slow consumer cannot
-fill another media type's bounded queue.
+Desktop MJPEG previews, WebRTC offers, WebCodecs streams, and snapshots all
+subscribe through this manager. Native-video subscriptions receive only H.264
+access units, while preview subscriptions receive only JPEG frames, so one slow
+consumer cannot fill another media type's bounded queue. The WebCodecs bridge
+uses an authenticated loopback binary stream rather than base64 IPC messages.
 
 ## Authorization policy
 

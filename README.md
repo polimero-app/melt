@@ -26,8 +26,8 @@ Fyne GUI, and Go application implementations.
   inventory. Background monitors retain the last useful status during bounded
   reconnect attempts.
 - **Camera** — share one authenticated upstream per physical Bambu printer
-  across snapshots, browser MJPEG previews, and WebRTC viewers, with bounded
-  fan-out and reconnect behavior.
+  across snapshots, native H.264 WebRTC/WebCodecs viewers, and MJPEG fallback,
+  with bounded fan-out and reconnect behavior.
 - **File and print workflow** — browse printer storage, upload and download
   files, preview supported models, inspect sliced 3MF packages, reconcile
   filament/nozzle assignments, select a plate, and start a print only after

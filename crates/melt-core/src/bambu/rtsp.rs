@@ -135,6 +135,7 @@ pub struct H264Stream {
     cseq: u32,
     next_keepalive: Instant,
     decoder: Option<Decoder>,
+    decoder_started: bool,
     sps: Vec<u8>,
     pps: Vec<u8>,
     started: bool,
@@ -143,11 +144,16 @@ pub struct H264Stream {
 }
 
 /// One complete H.264 picture as received from the printer. RTP packet bytes
-/// are retained verbatim for WebRTC forwarding; decoded JPEG output is present
-/// only when the stream was opened with its bounded preview decoder enabled.
+/// are retained verbatim for WebRTC forwarding, while an Annex-B copy feeds
+/// browser decoders. JPEG output is present only while the bounded software
+/// preview decoder is enabled.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct H264AccessUnit {
     pub rtp_packets: Vec<Vec<u8>>,
+    /// Annex-B byte stream for browser decoders. It starts at an IDR and
+    /// includes the current SPS/PPS before every keyframe.
+    pub annex_b: Option<Vec<u8>>,
+    pub keyframe: bool,
     pub jpeg: Option<Vec<u8>>,
 }
 
@@ -161,8 +167,8 @@ impl H264Stream {
     }
 
     /// Enables the software preview decoder only while a JPEG consumer is
-    /// attached. Starting from a fresh decoder also resets access-unit
-    /// startup so the next IDR is prefixed with the cached SPS/PPS.
+    /// attached. Starting from a fresh decoder waits for the next IDR; the
+    /// normalized access unit already carries the cached SPS/PPS.
     pub fn set_preview_decode_enabled(&mut self, enabled: bool) -> io::Result<()> {
         if enabled == self.decoder.is_some() {
             return Ok(());
@@ -174,7 +180,7 @@ impl H264Stream {
                 })
             })
             .transpose()?;
-        self.started = false;
+        self.decoder_started = false;
         self.access_unit.clear();
         self.fu_buffer = None;
         Ok(())
@@ -198,20 +204,35 @@ impl H264Stream {
             if !marker {
                 continue;
             }
-            let jpeg = match (self.build_access_unit(), self.decoder.as_mut()) {
-                (Some(access_unit), Some(decoder)) => match decoder.decode(&access_unit) {
-                    Ok(Some(yuv)) => Some(encode_jpeg(&yuv)?),
-                    Ok(None) => None,
-                    Err(error) => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!("H.264 decode failed: {error}"),
-                        ));
+            let access_unit = self.build_access_unit();
+            let keyframe = access_unit.as_ref().is_some_and(|(_, keyframe)| *keyframe);
+            let should_decode = self.decoder.is_some()
+                && access_unit.is_some()
+                && (self.decoder_started || keyframe);
+            let jpeg = match (access_unit.as_ref(), self.decoder.as_mut(), should_decode) {
+                (Some((access_unit, _)), Some(decoder), true) => {
+                    match decoder.decode(access_unit) {
+                        Ok(Some(yuv)) => Some(encode_jpeg(&yuv)?),
+                        Ok(None) => None,
+                        Err(error) => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("H.264 decode failed: {error}"),
+                            ));
+                        }
                     }
-                },
+                }
                 _ => None,
             };
-            return Ok(H264AccessUnit { rtp_packets, jpeg });
+            if should_decode {
+                self.decoder_started = true;
+            }
+            return Ok(H264AccessUnit {
+                rtp_packets,
+                annex_b: access_unit.map(|(bytes, _)| bytes),
+                keyframe,
+                jpeg,
+            });
         }
     }
 
@@ -382,6 +403,7 @@ fn open_h264_stream_with_decoder(
         cseq,
         next_keepalive: Instant::now() + KEEPALIVE_INTERVAL,
         decoder,
+        decoder_started: false,
         sps,
         pps,
         started: false,
@@ -625,18 +647,17 @@ impl H264Stream {
         }
     }
 
-    /// Prepends the cached SPS/PPS to the first access unit that actually
-    /// contains a keyframe (the decoder cannot start mid-GOP without them),
-    /// then streams subsequent access units through unchanged — matching
-    /// the approach the reference Go implementation uses for this printer.
-    fn build_access_unit(&mut self) -> Option<Vec<u8>> {
+    /// Waits for the first keyframe and produces Annex-B access units. Cached
+    /// SPS/PPS are repeated before every IDR so a decoder joining an existing
+    /// owner can start without forcing a second printer connection.
+    fn build_access_unit(&mut self) -> Option<(Vec<u8>, bool)> {
         let nals = std::mem::take(&mut self.access_unit);
         let has_idr = nals.iter().any(|nal| !nal.is_empty() && nal[0] & 0x1f == 5);
-
-        let output: Vec<Vec<u8>> = if self.started {
-            nals
-        } else {
-            if !has_idr || self.sps.is_empty() || self.pps.is_empty() {
+        if !self.started && !has_idr {
+            return None;
+        }
+        let output: Vec<Vec<u8>> = if has_idr {
+            if self.sps.is_empty() || self.pps.is_empty() {
                 return None;
             }
             let mut output = Vec::with_capacity(nals.len() + 2);
@@ -651,6 +672,8 @@ impl H264Stream {
             }
             self.started = true;
             output
+        } else {
+            nals
         };
 
         if output.is_empty() {
@@ -661,7 +684,7 @@ impl H264Stream {
             data.extend_from_slice(&[0, 0, 0, 1]);
             data.extend_from_slice(&nal);
         }
-        Some(data)
+        Some((data, has_idr))
     }
 }
 

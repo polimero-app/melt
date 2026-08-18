@@ -10,6 +10,7 @@ import { printTargetState } from './printing'
 import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { hmsGuideUrl, hmsSeverity, type HmsSeverity } from './hms'
+import { startH264Playback, supportsH264WebCodecs, type H264Playback } from './camera-stream'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import { naturallyDescending, nextSort, shouldDeferLibraryCards, sortedBy, type FileSort, type SortKey } from './library'
 import {
@@ -325,12 +326,16 @@ type CameraStream = {
   url: string
 }
 
+type CameraH264Stream = CameraStream & {
+  codec: string
+}
+
 type CameraWebRtcAnswer = {
   type: 'answer'
   sdp: string
 }
 
-type CameraTransport = 'webrtc' | 'mjpeg'
+type CameraTransport = 'webrtc' | 'webcodecs' | 'mjpeg'
 
 interface MaterialSlot {
   slot: string
@@ -440,6 +445,9 @@ const cameraUrl = ref<string>()
 const cameraPeer = shallowRef<RTCPeerConnection>()
 const cameraMediaStream = shallowRef<MediaStream>()
 const cameraVideo = ref<HTMLVideoElement>()
+const cameraCanvas = ref<HTMLCanvasElement>()
+const cameraCanvasActive = ref(false)
+const cameraCanvasLive = ref(false)
 const cameraTransport = ref<CameraTransport>()
 const cameraTransportDetail = ref<string>()
 const cameraLoading = ref(false)
@@ -452,6 +460,7 @@ let printStageUnlisten: UnlistenFn | undefined
 let fileQueryTimer: number | undefined
 let selectionRequest = 0
 let cameraRequest = 0
+let cameraH264Playback: H264Playback | undefined
 let fileRequest = 0
 let libraryRequest = 0
 let toastTimer: number | undefined
@@ -755,11 +764,11 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
     })),
   }))
 })
-const cameraHasMedia = computed(() => Boolean(cameraPeer.value || cameraUrl.value))
+const cameraHasMedia = computed(() => Boolean(cameraPeer.value || cameraCanvasLive.value || cameraUrl.value))
 const cameraState = computed(() => cameraViewState({
   loading: cameraLoading.value,
   hasPeer: Boolean(cameraPeer.value),
-  hasMedia: Boolean(cameraUrl.value),
+  hasMedia: Boolean(cameraCanvasLive.value || cameraUrl.value),
   hasStreamTransport: cameraTransport.value !== undefined,
 }))
 const cameraStateLabel = computed(() => t({
@@ -790,6 +799,10 @@ const fleetStats = computed(() => [
 // instead of leaking implementation details into user-facing surfaces.
 function message(reason: unknown) {
   return commandMessage(reason, t)
+}
+
+function cameraFailureDetail(reason: unknown) {
+  return commandDetail(reason) ?? (reason instanceof Error ? reason.message : message(reason))
 }
 
 function askConfirmation(
@@ -1653,7 +1666,7 @@ async function refreshCamera() {
       } catch (reason) {
         peer?.close()
         if (request === cameraRequest) {
-          await fallbackCamera(printerName, request, commandDetail(reason) ?? message(reason))
+          await fallbackCamera(printerName, request, cameraFailureDetail(reason))
         }
       }
     } else if (capabilities.value?.cameraSnapshot) {
@@ -1700,6 +1713,58 @@ async function fallbackCamera(printerName: string, request: number, reason: stri
   cameraMediaStream.value?.getTracks().forEach((track) => track.stop())
   cameraMediaStream.value = undefined
   await stopCameraSession()
+  try {
+    const stream = await invoke<CameraH264Stream>('printer_camera_h264_stream', { name: printerName })
+    if (!await supportsH264WebCodecs(stream.codec)) {
+      throw new Error(`WebCodecs does not support ${stream.codec}`)
+    }
+    if (request !== cameraRequest || activePrinter.value?.name !== printerName) return
+    cameraCanvasActive.value = true
+    cameraCanvasLive.value = false
+    cameraTransport.value = 'webcodecs'
+    await nextTick()
+    const canvas = cameraCanvas.value
+    if (!canvas) throw new Error('Camera canvas is unavailable')
+    const playback = startH264Playback(canvas, stream.url, stream.codec)
+    cameraH264Playback = playback
+    let ready = false
+    void playback.done.catch((playbackError) => {
+      if (!ready || cameraH264Playback !== playback || request !== cameraRequest) return
+      cameraLoading.value = true
+      void fallbackMjpegCamera(
+        printerName,
+        request,
+        `${reason}; WebCodecs playback failed: ${cameraFailureDetail(playbackError)}`,
+      ).catch((fallbackError) => {
+        if (request === cameraRequest) cameraError.value = message(fallbackError)
+      }).finally(() => {
+        if (request === cameraRequest) cameraLoading.value = false
+      })
+    })
+    await withTimeout(playback.firstFrame, 10_000, 'WebCodecs media timed out')
+    if (request !== cameraRequest || activePrinter.value?.name !== printerName) {
+      playback.stop()
+      return
+    }
+    ready = true
+    cameraCanvasLive.value = true
+    return
+  } catch (webCodecsError) {
+    if (request !== cameraRequest || activePrinter.value?.name !== printerName) return
+    await fallbackMjpegCamera(
+      printerName,
+      request,
+      `${reason}; WebCodecs: ${cameraFailureDetail(webCodecsError)}`,
+    )
+  }
+}
+
+async function fallbackMjpegCamera(printerName: string, request: number, reason: string) {
+  cameraTransportDetail.value = reason
+  cameraH264Playback?.stop()
+  cameraH264Playback = undefined
+  cameraCanvasActive.value = false
+  cameraCanvasLive.value = false
   const stream = await invoke<CameraStream>('printer_camera_stream', { name: printerName })
   if (request !== cameraRequest || activePrinter.value?.name !== printerName) return
   cameraUrl.value = stream.url
@@ -1740,6 +1805,10 @@ async function stopCamera() {
   cameraPeer.value = undefined
   cameraMediaStream.value?.getTracks().forEach((track) => track.stop())
   cameraMediaStream.value = undefined
+  cameraH264Playback?.stop()
+  cameraH264Playback = undefined
+  cameraCanvasActive.value = false
+  cameraCanvasLive.value = false
   cameraUrl.value = undefined
   cameraTransport.value = undefined
   cameraLoading.value = false
@@ -1747,11 +1816,10 @@ async function stopCamera() {
 }
 
 async function stopCameraSession() {
-  try {
-    await invoke('printer_camera_webrtc_stop')
-  } catch {
-    // The local peer is already closed; backend teardown is best effort.
-  }
+  await Promise.allSettled([
+    invoke('printer_camera_webrtc_stop'),
+    invoke('printer_camera_stream_stop'),
+  ])
 }
 
 async function saveSnapshot() {
@@ -2300,7 +2368,7 @@ onUnmounted(() => {
                 <template #suffix>
                   <span
                     class="inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-xs font-medium"
-                    :title="cameraTransport === 'mjpeg' ? cameraTransportDetail : undefined"
+                    :title="cameraTransportDetail"
                     :class="cameraStateClasses"
                   >
                     <svg class="size-1.5" viewBox="0 0 6 6" aria-hidden="true"><circle cx="3" cy="3" r="3" /></svg>{{ cameraStateLabel }}
@@ -2316,6 +2384,7 @@ onUnmounted(() => {
                 :class="cameraHasMedia ? 'bg-black' : 'grid place-items-center bg-gray-100 dark:bg-gray-800'"
               >
                 <video v-if="cameraPeer" ref="cameraVideo" :aria-label="t('camera.title')" class="absolute inset-0 size-full object-contain" autoplay muted playsinline />
+                <canvas v-else-if="cameraCanvasActive" ref="cameraCanvas" :aria-label="t('camera.title')" class="absolute inset-0 size-full object-contain" />
                 <img v-else-if="cameraUrl" :src="cameraUrl" :alt="t('camera.title')" width="1280" height="720" class="absolute inset-0 size-full object-contain" @error="cameraUrl = undefined" />
                 <div v-else class="relative z-10 text-center">
                   <PhWarning class="mx-auto size-8 text-yellow-600 dark:text-yellow-400" aria-hidden="true" />

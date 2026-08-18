@@ -632,6 +632,8 @@ mod tests {
         assert!(h264.recv_timeout(Duration::from_millis(1)).is_err());
         owner.publish(CameraFrame::H264(Arc::new(H264AccessUnit {
             rtp_packets: vec![vec![2]],
+            annex_b: Some(vec![0, 0, 0, 1, 5]),
+            keyframe: true,
             jpeg: None,
         })));
         assert!(matches!(
