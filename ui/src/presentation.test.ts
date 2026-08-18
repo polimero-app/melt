@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { awaitsFirstSample, badgeDotClasses, badgeFillClasses, badgeSurfaceClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
+import { awaitsFirstSample, badgeDotClasses, badgeFillClasses, badgeSurfaceClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import type { PrinterBadge } from './monitoring'
 
 const allBadges: PrinterBadge[] = ['idle', 'busy', 'error', 'connecting', 'synchronizing', 'reconnecting', 'offline', 'unknown']
@@ -40,6 +40,15 @@ describe('cameraViewState', () => {
   it('reports loading only while no camera media is available', () => {
     expect(cameraViewState({ loading: true, hasPeer: false, hasMedia: false, hasStreamTransport: false })).toBe('loading')
     expect(cameraViewState({ loading: false, hasPeer: false, hasMedia: false, hasStreamTransport: false })).toBe('offline')
+  })
+})
+
+describe('shouldRunCamera', () => {
+  it('requires a supported camera on the visible control view', () => {
+    expect(shouldRunCamera('control', true, true)).toBe(true)
+    expect(shouldRunCamera('files', true, true)).toBe(false)
+    expect(shouldRunCamera('control', false, true)).toBe(false)
+    expect(shouldRunCamera('control', true, false)).toBe(false)
   })
 })
 

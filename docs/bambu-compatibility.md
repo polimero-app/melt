@@ -29,6 +29,8 @@ subscribe through this manager. Native-video subscriptions receive only H.264
 access units, while preview subscriptions receive only JPEG frames, so one slow
 consumer cannot fill another media type's bounded queue. The WebCodecs bridge
 uses an authenticated loopback binary stream rather than base64 IPC messages.
+The desktop releases its camera subscription whenever the Control view or the
+application window is hidden and reconnects when that view becomes visible.
 
 ## Authorization policy
 

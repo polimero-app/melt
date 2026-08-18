@@ -7,7 +7,7 @@ import { locales, preferredLocale, translate, type Locale, type MessageKey } fro
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration } from './formatting'
 import { printTargetState } from './printing'
-import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay } from './presentation'
+import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { hmsGuideUrl, hmsSeverity, type HmsSeverity } from './hms'
 import { startH264Playback, supportsH264WebCodecs, type H264Playback } from './camera-stream'
@@ -452,6 +452,7 @@ const cameraTransport = ref<CameraTransport>()
 const cameraTransportDetail = ref<string>()
 const cameraLoading = ref(false)
 const cameraError = ref<string>()
+const documentVisible = ref(document.visibilityState === 'visible')
 let monitorUnlisten: UnlistenFn | undefined
 let presenceUnlisten: UnlistenFn | undefined
 let notificationUnlisten: UnlistenFn | undefined
@@ -488,6 +489,9 @@ const systemPrefersDark = ref(true)
 let systemThemeQuery: MediaQueryList | undefined
 function handleSystemThemeChange(event: MediaQueryListEvent) {
   systemPrefersDark.value = event.matches
+}
+function handleDocumentVisibility() {
+  documentVisible.value = document.visibilityState === 'visible'
 }
 const isLightTheme = computed(() => theme.value === 'light' || (theme.value === 'system' && !systemPrefersDark.value))
 watchEffect(() => {
@@ -784,6 +788,15 @@ const cameraStateClasses = computed(() => ({
   offline: 'bg-gray-100 fill-gray-400 text-gray-600 dark:bg-white/10 dark:fill-gray-500 dark:text-gray-400',
 }[cameraState.value]))
 const cameraSupported = computed(() => Boolean(capabilities.value?.cameraStream || capabilities.value?.cameraSnapshot))
+const cameraMayRun = computed(() => shouldRunCamera(activeView.value, documentVisible.value, cameraSupported.value))
+
+watch(cameraMayRun, (shouldRun) => {
+  if (shouldRun) {
+    if (!cameraLoading.value && !cameraHasMedia.value) void refreshCamera()
+  } else if (cameraLoading.value || cameraHasMedia.value || cameraTransport.value) {
+    void stopCamera()
+  }
+})
 
 watchEffect(() => {
   if (cameraVideo.value) cameraVideo.value.srcObject = cameraMediaStream.value ?? null
@@ -1047,7 +1060,6 @@ async function selectPrinter(name: string, refresh = true, focus = refresh) {
     if (request !== selectionRequest || activePrinterId.value !== name) return
     capabilities.value = result.capabilities
     if (result.capabilities.fileList) void loadFiles()
-    if (result.capabilities.cameraStream || result.capabilities.cameraSnapshot) void refreshCamera()
   } catch (reason) {
     showToast(message(reason), 'error')
   }
@@ -1626,9 +1638,10 @@ async function uploadFile() {
 }
 
 async function refreshCamera() {
-  if (!activePrinter.value || !cameraSupported.value) return
+  if (!activePrinter.value || !cameraMayRun.value) return
   const printerName = activePrinter.value.name
   await stopCamera()
+  if (!cameraMayRun.value || activePrinter.value?.name !== printerName) return
   const request = ++cameraRequest
   cameraLoading.value = true
   cameraError.value = undefined
@@ -1715,6 +1728,10 @@ async function fallbackCamera(printerName: string, request: number, reason: stri
   await stopCameraSession()
   try {
     const stream = await invoke<CameraH264Stream>('printer_camera_h264_stream', { name: printerName })
+    if (request !== cameraRequest || activePrinter.value?.name !== printerName) {
+      await stopCameraSession()
+      return
+    }
     if (!await supportsH264WebCodecs(stream.codec)) {
       throw new Error(`WebCodecs does not support ${stream.codec}`)
     }
@@ -1766,7 +1783,10 @@ async function fallbackMjpegCamera(printerName: string, request: number, reason:
   cameraCanvasActive.value = false
   cameraCanvasLive.value = false
   const stream = await invoke<CameraStream>('printer_camera_stream', { name: printerName })
-  if (request !== cameraRequest || activePrinter.value?.name !== printerName) return
+  if (request !== cameraRequest || activePrinter.value?.name !== printerName) {
+    await stopCameraSession()
+    return
+  }
   cameraUrl.value = stream.url
   cameraTransport.value = 'mjpeg'
 }
@@ -2023,6 +2043,7 @@ async function printToPrinter(name: string) {
 
 onMounted(() => {
   window.addEventListener('beforeunload', warnBeforeUnload)
+  document.addEventListener('visibilitychange', handleDocumentVisibility)
   systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
   systemPrefersDark.value = systemThemeQuery.matches
   systemThemeQuery.addEventListener('change', handleSystemThemeChange)
@@ -2070,6 +2091,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('beforeunload', warnBeforeUnload)
+  document.removeEventListener('visibilitychange', handleDocumentVisibility)
   void stopCamera()
   systemThemeQuery?.removeEventListener('change', handleSystemThemeChange)
   monitorUnlisten?.()

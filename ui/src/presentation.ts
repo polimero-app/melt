@@ -52,6 +52,10 @@ export function awaitsFirstSample(badge: PrinterBadge): boolean {
 
 export type CameraViewState = 'live' | 'snapshot' | 'loading' | 'offline'
 
+export function shouldRunCamera(activeView: string, documentVisible: boolean, supported: boolean): boolean {
+  return activeView === 'control' && documentVisible && supported
+}
+
 export function cameraViewState(input: {
   loading: boolean
   hasPeer: boolean
