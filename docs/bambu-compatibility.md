@@ -18,11 +18,11 @@ permits snapshots and multiple viewers to share one upstream without
 transcoding native H.264 viewers.
 
 The shared camera manager is keyed by the normalized printer serial and a
-credential-free connection revision. Subscriber queues hold at most two media
-units and drop new frames under backpressure. The most recent decoded JPEG is
-retained for snapshots. The first subscriber opens the upstream; dropping the
-last subscriber interrupts its socket, and connection changes invalidate the
-previous generation.
+credential-free connection revision. Each subscriber mailbox retains only its
+newest complete media unit under backpressure. The most recent decoded JPEG is
+also retained for snapshots. The first subscriber opens the upstream; dropping
+the last subscriber interrupts its socket, and connection changes invalidate
+the previous generation.
 
 Desktop MJPEG previews, WebRTC offers, WebCodecs streams, and snapshots all
 subscribe through this manager. Native-video subscriptions receive only H.264

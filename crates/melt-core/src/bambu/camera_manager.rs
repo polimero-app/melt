@@ -2,9 +2,9 @@ use std::{
     collections::BTreeMap,
     net::{Shutdown, TcpStream},
     sync::{
-        Arc, Mutex, Weak,
+        Arc, Condvar, Mutex, Weak,
         atomic::{AtomicU32, Ordering},
-        mpsc::{self, Receiver, SyncSender, TrySendError},
+        mpsc,
     },
     thread,
     time::{Duration, Instant},
@@ -18,8 +18,6 @@ use super::{
     H264Stream, MjpegStream, Profile, QuirkEffect, RuntimeCapabilities, applicable_quirks,
     open_classic_mjpeg_stream, open_h264_stream, select_camera_transport,
 };
-
-const SUBSCRIBER_CAPACITY: usize = 2;
 
 #[derive(Clone, Debug)]
 pub enum CameraFrame {
@@ -75,9 +73,60 @@ impl Source {
 
 struct OwnerState {
     next_subscriber: u64,
-    subscribers: BTreeMap<u64, (CameraFrameKind, SyncSender<Arc<CameraFrame>>)>,
+    subscribers: BTreeMap<u64, (CameraFrameKind, Arc<FrameMailbox>)>,
     latest_jpeg: Option<Arc<[u8]>>,
     stopped: bool,
+}
+
+#[derive(Default)]
+struct FrameMailboxState {
+    latest: Option<Arc<CameraFrame>>,
+    closed: bool,
+}
+
+#[derive(Default)]
+struct FrameMailbox {
+    state: Mutex<FrameMailboxState>,
+    available: Condvar,
+}
+
+impl FrameMailbox {
+    fn publish(&self, frame: Arc<CameraFrame>) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if state.closed {
+            return false;
+        }
+        state.latest = Some(frame);
+        self.available.notify_one();
+        true
+    }
+
+    fn recv_timeout(&self, timeout: Duration) -> Result<Arc<CameraFrame>, mpsc::RecvTimeoutError> {
+        let deadline = Instant::now() + timeout;
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        loop {
+            if let Some(frame) = state.latest.take() {
+                return Ok(frame);
+            }
+            if state.closed {
+                return Err(mpsc::RecvTimeoutError::Disconnected);
+            }
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                return Err(mpsc::RecvTimeoutError::Timeout);
+            };
+            let (next, _) = self
+                .available
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(|error| error.into_inner());
+            state = next;
+        }
+    }
+
+    fn close(&self) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.closed = true;
+        self.available.notify_all();
+    }
 }
 
 struct Owner {
@@ -100,14 +149,14 @@ impl Owner {
     }
 
     fn try_subscribe(self: &Arc<Self>, kind: CameraFrameKind) -> Option<CameraSubscription> {
-        let (sender, receiver) = mpsc::sync_channel(SUBSCRIBER_CAPACITY);
+        let receiver = Arc::new(FrameMailbox::default());
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if state.stopped {
             return None;
         }
         let id = state.next_subscriber;
         state.next_subscriber = state.next_subscriber.wrapping_add(1);
-        state.subscribers.insert(id, (kind, sender));
+        state.subscribers.insert(id, (kind, Arc::clone(&receiver)));
         Some(CameraSubscription {
             owner: Arc::clone(self),
             id,
@@ -126,11 +175,7 @@ impl Owner {
             CameraFrame::H264(_) => CameraFrameKind::H264,
         };
         state.subscribers.retain(|_, (interest, subscriber)| {
-            *interest != kind
-                || match subscriber.try_send(Arc::clone(&frame)) {
-                    Ok(()) | Err(TrySendError::Full(_)) => true,
-                    Err(TrySendError::Disconnected(_)) => false,
-                }
+            *interest != kind || subscriber.publish(Arc::clone(&frame))
         });
     }
 
@@ -163,11 +208,16 @@ impl Owner {
 
     fn finish(&self) {
         self.stop();
-        self.state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .subscribers
-            .clear();
+        let subscribers = std::mem::take(
+            &mut self
+                .state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .subscribers,
+        );
+        for (_, (_, subscriber)) in subscribers {
+            subscriber.close();
+        }
     }
 
     fn has_subscribers(&self) -> bool {
@@ -206,7 +256,7 @@ impl Owner {
 pub struct CameraSubscription {
     owner: Arc<Owner>,
     id: u64,
-    receiver: Receiver<Arc<CameraFrame>>,
+    receiver: Arc<FrameMailbox>,
 }
 
 impl CameraSubscription {
@@ -590,7 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn fanout_is_bounded_and_latest_jpeg_is_reused() {
+    fn fanout_keeps_only_the_latest_frame_and_reuses_the_latest_jpeg() {
         let owner = owner();
         let fast = owner.subscribe(CameraFrameKind::Jpeg);
         let slow = owner.subscribe(CameraFrameKind::Jpeg);
@@ -598,8 +648,20 @@ mod tests {
             owner.publish(CameraFrame::Jpeg(Arc::from(vec![value])));
         }
         assert_eq!(fast.latest_jpeg().unwrap().as_ref(), &[9]);
-        assert!(fast.recv_timeout(Duration::from_millis(1)).is_ok());
-        assert!(slow.recv_timeout(Duration::from_millis(1)).is_ok());
+        let fast_frame = fast.recv_timeout(Duration::from_millis(1)).unwrap();
+        let CameraFrame::Jpeg(fast_frame) = fast_frame.as_ref() else {
+            panic!("expected JPEG frame");
+        };
+        let slow_frame = slow.recv_timeout(Duration::from_millis(1)).unwrap();
+        let CameraFrame::Jpeg(slow_frame) = slow_frame.as_ref() else {
+            panic!("expected JPEG frame");
+        };
+        assert_eq!(fast_frame.as_ref(), &[9]);
+        assert_eq!(slow_frame.as_ref(), &[9]);
+        assert!(matches!(
+            fast.recv_timeout(Duration::from_millis(1)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
         assert_eq!(owner.status().subscribers, 2);
     }
 

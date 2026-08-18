@@ -11,7 +11,7 @@ use std::{
 use base64::Engine;
 use melt_core::bambu::{CameraFrame, CameraSubscription};
 use tokio::runtime::Builder;
-use tokio::sync::mpsc as async_mpsc;
+use tokio::sync::watch;
 use webrtc::{
     api::{
         APIBuilder,
@@ -178,7 +178,7 @@ async fn serve(
         .send(Ok(answer.sdp))
         .map_err(|_| "WebRTC signaling request canceled".to_owned())?;
 
-    let (access_unit_tx, mut access_unit_rx) = async_mpsc::channel(2);
+    let (access_unit_tx, mut access_unit_rx) = watch::channel(None);
     let reader_stop = Arc::clone(&stop);
     tokio::task::spawn_blocking(move || {
         while !reader_stop.load(Ordering::Acquire) {
@@ -188,21 +188,24 @@ async fn serve(
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             };
             if let CameraFrame::H264(access_unit) = frame.as_ref() {
-                match access_unit_tx.try_send(access_unit.rtp_packets.clone()) {
-                    Ok(()) | Err(async_mpsc::error::TrySendError::Full(_)) => {}
-                    Err(async_mpsc::error::TrySendError::Closed(_)) => break,
+                if access_unit_tx.send(Some(Arc::clone(access_unit))).is_err() {
+                    break;
                 }
             }
         }
     });
 
     let mut started = false;
-    while let Some(access_unit) = access_unit_rx.recv().await {
+    while access_unit_rx.changed().await.is_ok() {
         if stop.load(Ordering::Acquire) {
             break;
         }
+        let Some(access_unit) = access_unit_rx.borrow_and_update().clone() else {
+            continue;
+        };
         let mut packets = access_unit
-            .into_iter()
+            .rtp_packets
+            .iter()
             .map(|raw| {
                 let mut raw = &raw[..];
                 Packet::unmarshal(&mut raw).map_err(|error| format!("RTP packet: {error}"))
