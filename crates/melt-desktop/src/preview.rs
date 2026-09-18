@@ -16,6 +16,10 @@ pub const GRID_SIZE: (usize, usize) = (640, 360);
 pub const LARGE_SIZE: (usize, usize) = (1920, 1080);
 pub const MAX_PREVIEW_BYTES: usize = 16 << 20;
 pub const MAX_MODEL_BYTES: usize = 32 << 20;
+/// Ceiling on a 3mf's decompressed mesh XML. The XML is verbose and
+/// compresses well, so this sits above MAX_MODEL_BYTES, but it still keeps a
+/// small deflate bomb from inflating into gigabytes.
+const MAX_MODEL_XML_BYTES: u64 = 128 << 20;
 const MAX_PREVIEW_DIMENSION: u32 = 4096;
 const MAX_PREVIEW_PIXELS: u64 = 16_000_000;
 
@@ -99,13 +103,22 @@ pub fn rasterize(
 pub fn rasterize_3mf(bytes: &[u8], size: (usize, usize)) -> Result<Vec<u8>, PreviewError> {
     let mut archive =
         zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_| PreviewError::InvalidModel)?;
-    let mut model = archive
+    let model = archive
         .by_name("3D/3dmodel.model")
         .map_err(|_| PreviewError::InvalidModel)?;
+    if model.size() > MAX_MODEL_XML_BYTES {
+        return Err(PreviewError::TooLarge);
+    }
+    // The declared size comes from the archive and can lie, so bound the
+    // actual read too.
     let mut source = String::new();
     model
+        .take(MAX_MODEL_XML_BYTES + 1)
         .read_to_string(&mut source)
         .map_err(|_| PreviewError::InvalidModel)?;
+    if source.len() as u64 > MAX_MODEL_XML_BYTES {
+        return Err(PreviewError::TooLarge);
+    }
     let mut triangles = Vec::new();
     for mesh in source.split("<mesh").skip(1) {
         let section = mesh.split("</mesh>").next().unwrap_or(mesh);
@@ -533,6 +546,28 @@ mod tests {
         }
         let png = rasterize_3mf(&buffer, GRID_SIZE).unwrap();
         assert!(!png.is_empty());
+    }
+
+    #[test]
+    fn rejects_3mf_xml_that_inflates_past_the_limit() {
+        let mut buffer = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buffer));
+            let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated)
+                .large_file(true);
+            zip.start_file("3D/3dmodel.model", options).unwrap();
+            let chunk = vec![b' '; 1 << 20];
+            for _ in 0..=(MAX_MODEL_XML_BYTES >> 20) {
+                zip.write_all(&chunk).unwrap();
+            }
+            zip.finish().unwrap();
+        }
+        assert!(buffer.len() < MAX_MODEL_BYTES);
+        assert!(matches!(
+            rasterize_3mf(&buffer, GRID_SIZE),
+            Err(PreviewError::TooLarge)
+        ));
     }
 
     #[test]

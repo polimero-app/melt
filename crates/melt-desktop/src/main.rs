@@ -2334,7 +2334,21 @@ fn library_file_preview(
             return Ok(preview);
         }
     }
-    let bytes = std::fs::read(&absolute).map_err(|_| CommandError::new("libraryUnavailable"))?;
+    // Check the size before reading so an oversized model never lands in
+    // memory; `take` also bounds a file that grows after the metadata check.
+    let file =
+        std::fs::File::open(&absolute).map_err(|_| CommandError::new("libraryUnavailable"))?;
+    let length = file
+        .metadata()
+        .map_err(|_| CommandError::new("libraryUnavailable"))?
+        .len();
+    if length > preview::MAX_MODEL_BYTES as u64 {
+        return Err(CommandError::new("thumbnailTooLarge"));
+    }
+    let mut bytes = Vec::with_capacity(length as usize);
+    file.take(preview::MAX_MODEL_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| CommandError::new("libraryUnavailable"))?;
     render_preview(&extension, bytes, cache_key, &state, size)
 }
 
@@ -2514,8 +2528,12 @@ fn render_preview(
         if bytes.len() > preview::MAX_MODEL_BYTES {
             return Err(CommandError::new("thumbnailTooLarge"));
         }
-        let png = preview::rasterize_3mf(&bytes, size)
-            .map_err(|_| CommandError::new("thumbnailInvalid"))?;
+        let png = preview::rasterize_3mf(&bytes, size).map_err(|error| {
+            CommandError::new(match error {
+                preview::PreviewError::TooLarge => "thumbnailTooLarge",
+                _ => "thumbnailInvalid",
+            })
+        })?;
         let preview = FilePreviewResponse {
             kind: "png",
             data: STANDARD.encode(png),
