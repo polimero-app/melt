@@ -458,7 +458,8 @@ let presenceUnlisten: UnlistenFn | undefined
 let notificationUnlisten: UnlistenFn | undefined
 let transferUnlisten: UnlistenFn | undefined
 let printStageUnlisten: UnlistenFn | undefined
-let fileQueryTimer: number | undefined
+let libraryChangeTimer: number | undefined
+let libraryChangeUnlisten: UnlistenFn | undefined
 let selectionRequest = 0
 let cameraRequest = 0
 let cameraH264Playback: H264Playback | undefined
@@ -1103,13 +1104,15 @@ async function loadFiles() {
 // so this never touches printer capabilities or connectivity.
 // `path` is an absolute filesystem path; omitted, the backend resolves the
 // last-browsed folder (persisted in preferences) or a sensible default.
+// This lists the whole folder once; search filters that snapshot locally,
+// and the backend's folder watch triggers a re-list when files change.
 async function loadLibraryFiles(path?: string) {
   const request = ++libraryRequest
   libraryFilesLoading.value = true
   libraryFilesError.value = undefined
   try {
     const result = await invoke<LibraryListResponse>('library_files', {
-      request: { path: path ?? '', search: searchTerm.value },
+      request: { path: path ?? '' },
     })
     if (request !== libraryRequest) return
     libraryFiles.value = result.entries
@@ -1138,12 +1141,15 @@ async function chooseLibraryFolder() {
   await loadLibraryFiles(selected)
 }
 
-watch(searchTerm, () => {
-  if (fileQueryTimer !== undefined) window.clearTimeout(fileQueryTimer)
-  if (activeView.value === 'files') {
-    fileQueryTimer = window.setTimeout(() => void loadLibraryFiles(libraryPath.value), 220)
-  }
-})
+// A file being copied in fires a burst of change events, so they settle
+// into one re-list. Changes while another view is open are picked up by
+// goTo('files') instead.
+function handleLibraryChange(path: string) {
+  if (libraryChangeTimer !== undefined) window.clearTimeout(libraryChangeTimer)
+  libraryChangeTimer = window.setTimeout(() => {
+    if (activeView.value === 'files' && path === libraryPath.value) void loadLibraryFiles(path)
+  }, 300)
+}
 
 function openAddition() {
   draft.value = {
@@ -1937,8 +1943,7 @@ function wifiSignal(dbm: number | undefined) {
 
 const normalizedSearchTerm = computed(() => searchTerm.value.trim().toLocaleLowerCase(locale.value))
 const matchesSearch = (file: FileEntry) => !normalizedSearchTerm.value || file.name.toLocaleLowerCase(locale.value).includes(normalizedSearchTerm.value)
-// The backend already scopes entries to the requested directory, so this
-// only needs to split by type and apply the client-side search echo.
+// The backend lists the whole directory, so search is applied only here.
 const visibleDirectories = computed(() => libraryFiles.value.filter((file) => file.type === 'directory' && matchesSearch(file)))
 const visibleFiles = computed(() => sortedBy(
   libraryFiles.value.filter((file) => file.type === 'file' && matchesSearch(file)),
@@ -2051,6 +2056,9 @@ onMounted(() => {
   // The library normally loads on the way in through goTo, which a restored
   // view skips — without this, reopening on Files shows an empty grid.
   if (activeView.value === 'files') void loadLibraryFiles(libraryPath.value)
+  void listen<string>('library-changed', (event) => handleLibraryChange(event.payload)).then((unlisten) => {
+    libraryChangeUnlisten = unlisten
+  })
   void listen<MonitorEntry[]>('monitoring-updated', (event) => {
     monitoring.value = event.payload
   }).then((unlisten) => {
@@ -2099,7 +2107,8 @@ onUnmounted(() => {
   notificationUnlisten?.()
   transferUnlisten?.()
   printStageUnlisten?.()
-  if (fileQueryTimer !== undefined) window.clearTimeout(fileQueryTimer)
+  libraryChangeUnlisten?.()
+  if (libraryChangeTimer !== undefined) window.clearTimeout(libraryChangeTimer)
   if (toastTimer !== undefined) window.clearTimeout(toastTimer)
   Object.values(temperatureTimers).forEach((timer) => {
     if (timer !== undefined) window.clearTimeout(timer)

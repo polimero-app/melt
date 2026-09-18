@@ -660,8 +660,6 @@ struct LibraryListRequest {
     /// visited folder, or a default under the user's documents.
     #[serde(default)]
     path: String,
-    #[serde(default)]
-    search: String,
 }
 
 #[derive(Serialize)]
@@ -736,6 +734,40 @@ impl Clone for FilePreviewResponse {
 #[derive(Default)]
 struct PreviewState {
     cache: Mutex<PreviewCache>,
+}
+
+/// Watches the folder the file library last listed, so the UI can re-list
+/// it when something outside the app adds, removes or rewrites a file.
+/// Replacing the watcher drops the previous one, which stops that watch.
+#[derive(Default)]
+struct LibraryWatchState {
+    watcher: Mutex<Option<(std::path::PathBuf, notify::RecommendedWatcher)>>,
+}
+
+fn watch_library_dir(app: &tauri::AppHandle, directory: &std::path::Path) {
+    let state = app.state::<LibraryWatchState>();
+    let mut current = state.watcher.lock().unwrap_or_else(|error| error.into_inner());
+    if current.as_ref().is_some_and(|(watched, _)| watched == directory) {
+        return;
+    }
+    let emitter = app.clone();
+    let path = directory.to_string_lossy().into_owned();
+    let handler = move |event: notify::Result<notify::Event>| {
+        // Reads don't change the listing, and a file being copied in emits
+        // plenty of modify events; the UI debounces those into one re-list.
+        if event.is_ok_and(|event| !event.kind.is_access()) {
+            let _ = emitter.emit("library-changed", &path);
+        }
+    };
+    // ponytail: best-effort, a folder that can't be watched still lists and
+    // refreshes on navigation or the refresh button.
+    *current = notify::recommended_watcher(handler)
+        .and_then(|mut watcher| {
+            notify::Watcher::watch(&mut watcher, directory, notify::RecursiveMode::NonRecursive)?;
+            Ok(watcher)
+        })
+        .ok()
+        .map(|watcher| (directory.to_path_buf(), watcher));
 }
 
 #[derive(Clone, Serialize)]
@@ -1584,10 +1616,6 @@ fn library_files(
             metadata: BTreeMap::new(),
         });
     }
-    let search = request.search.trim().to_ascii_lowercase();
-    if !search.is_empty() {
-        entries.retain(|entry| entry.name.to_ascii_lowercase().contains(&search));
-    }
     entries.sort_by(|left, right| {
         let left_rank = (left.entry_type != moonraker::FileEntryType::Directory) as u8;
         let right_rank = (right.entry_type != moonraker::FileEntryType::Directory) as u8;
@@ -1597,6 +1625,7 @@ fn library_files(
                 .cmp(&right.name.to_ascii_lowercase())
         })
     });
+    watch_library_dir(&app, &absolute);
     Ok(LibraryListResponse {
         parent: absolute
             .parent()
@@ -1628,7 +1657,6 @@ fn library_add_file(
     library_files(
         LibraryListRequest {
             path: directory.to_string_lossy().into_owned(),
-            search: String::new(),
         },
         app,
     )
@@ -3359,6 +3387,7 @@ fn main() {
         .manage(CameraStreamState::default())
         .manage(CameraWebRtcState::default())
         .manage(PreviewState::default())
+        .manage(LibraryWatchState::default())
         .manage(TransferState::default())
         .manage(SlicerState::default())
         .setup(|app| {
