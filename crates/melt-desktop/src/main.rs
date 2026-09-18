@@ -746,8 +746,14 @@ struct LibraryWatchState {
 
 fn watch_library_dir(app: &tauri::AppHandle, directory: &std::path::Path) {
     let state = app.state::<LibraryWatchState>();
-    let mut current = state.watcher.lock().unwrap_or_else(|error| error.into_inner());
-    if current.as_ref().is_some_and(|(watched, _)| watched == directory) {
+    let mut current = state
+        .watcher
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if current
+        .as_ref()
+        .is_some_and(|(watched, _)| watched == directory)
+    {
         return;
     }
     let emitter = app.clone();
@@ -1134,15 +1140,57 @@ fn load_status_cache_from(dir: &std::path::Path) -> Option<serde_json::Value> {
     serde_json::from_slice(&bytes).ok()
 }
 
+/// Every successful poll stamps a new `observed_at`, which the UI needs to
+/// show a reading's age but which would otherwise make each 5 s poll look
+/// like a change worth writing to disk. The cache is rewritten only when
+/// something else changed, or at a slow heartbeat so the ages a restart
+/// repaints from it don't drift arbitrarily far behind reality.
+const STATUS_CACHE_HEARTBEAT: Duration = Duration::from_secs(300);
+
+fn without_observed_at(entries: &[MonitorEntry]) -> Vec<MonitorEntry> {
+    entries
+        .iter()
+        .cloned()
+        .map(|entry| MonitorEntry {
+            observed_at: None,
+            ..entry
+        })
+        .collect()
+}
+
+#[derive(Default)]
+struct StatusCacheThrottle {
+    saved: Option<(Vec<MonitorEntry>, Instant)>,
+}
+
+impl StatusCacheThrottle {
+    /// Records `entries` as saved and returns true when they should be
+    /// written; false when only freshness changed since the last write.
+    fn should_save(&mut self, entries: &[MonitorEntry], now: Instant) -> bool {
+        let comparable = without_observed_at(entries);
+        if let Some((saved, saved_at)) = &self.saved
+            && *saved == comparable
+            && now.duration_since(*saved_at) < STATUS_CACHE_HEARTBEAT
+        {
+            return false;
+        }
+        self.saved = Some((comparable, now));
+        true
+    }
+}
+
 fn start_monitor_worker(app: tauri::AppHandle, state: MonitorState) {
     thread::spawn(move || {
         let mut previous_entries: Option<Vec<MonitorEntry>> = None;
+        let mut cache_throttle = StatusCacheThrottle::default();
         loop {
             let cycle_started = Instant::now();
             if let Ok(entries) = collect_monitored_printers(&state) {
                 if previous_entries.as_ref() != Some(&entries) {
                     use tauri::Emitter;
-                    save_status_cache(&entries);
+                    if cache_throttle.should_save(&entries, Instant::now()) {
+                        save_status_cache(&entries);
+                    }
                     let _ = app.emit("monitoring-updated", entries.clone());
                     emit_status_notifications(&app, &state);
                     previous_entries = Some(entries);
@@ -3472,9 +3520,10 @@ mod tests {
 
     use super::{
         CachedMonitor, DesktopPrinter, MonitorConnectionState, MonitorEntry, MonitorState, Profile,
-        cached_monitor_entry_at, cached_ui_monitor_entry, camera_preview_request, ensure_state,
-        extract_3mf_thumbnail, h264_codec, h264_frame_header, load_status_cache_from,
-        monitor_connection_state, operation_error, save_status_cache_to,
+        STATUS_CACHE_HEARTBEAT, StatusCacheThrottle, cached_monitor_entry_at,
+        cached_ui_monitor_entry, camera_preview_request, ensure_state, extract_3mf_thumbnail,
+        h264_codec, h264_frame_header, load_status_cache_from, monitor_connection_state,
+        operation_error, save_status_cache_to,
     };
 
     const TOKEN: &str = "/stream/0123456789abcdef0123456789abcdef";
@@ -3518,6 +3567,30 @@ mod tests {
 
         let cached = load_status_cache_from(dir.path()).unwrap();
         assert_eq!(cached, serde_json::to_value(&entries).unwrap());
+    }
+
+    #[test]
+    fn status_cache_skips_writes_that_only_refresh_observed_at() {
+        let entry = |observed_at: &str, stale: bool| MonitorEntry {
+            name: "attic-p1s".into(),
+            driver: "bambu-lan".into(),
+            status: None,
+            error: None,
+            stale,
+            connection_state: MonitorConnectionState::Live,
+            observed_at: Some(observed_at.into()),
+        };
+        let start = Instant::now();
+        let mut throttle = StatusCacheThrottle::default();
+
+        assert!(throttle.should_save(&[entry("t0", false)], start));
+        assert!(!throttle.should_save(&[entry("t1", false)], start + Duration::from_secs(5)));
+        assert!(throttle.should_save(&[entry("t2", true)], start + Duration::from_secs(10)));
+        assert!(!throttle.should_save(&[entry("t3", true)], start + Duration::from_secs(15)));
+        assert!(throttle.should_save(
+            &[entry("t4", true)],
+            start + Duration::from_secs(10) + STATUS_CACHE_HEARTBEAT,
+        ));
     }
 
     #[test]
