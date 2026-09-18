@@ -41,7 +41,7 @@ async function drawPng(bytes: Uint8Array) {
 }
 
 async function load() {
-  const key = props.path
+  const key = previewIdentity()
   if (loading.value || loadedKey.value === key) return
   failed.value = false
   loading.value = true
@@ -86,7 +86,13 @@ onMounted(() => {
 
 onBeforeUnmount(() => observer?.disconnect())
 
-watch(() => props.path, () => {
+// The same path with a new size or mtime is a different file, so it must
+// redraw rather than keep the pixels already on the canvas.
+function previewIdentity() {
+  return JSON.stringify([props.path, props.sizeBytes, props.modifiedAt])
+}
+
+watch(previewIdentity, () => {
   loadedKey.value = ''
   failed.value = false
   scheduleLoad()
