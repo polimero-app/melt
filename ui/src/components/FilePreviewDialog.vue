@@ -28,7 +28,7 @@ function pngUrl(data: string) {
 // HeadlessUI's Dialog rather than a keydown listener of our own.
 watch(
   () => props.file,
-  async (file) => {
+  async (file, _previous, onCleanup) => {
     source.value = ''
     failed.value = false
     if (!file) return
@@ -37,14 +37,17 @@ watch(
     // showing it costs nothing and the dialog opens with no perceived wait.
     const thumbnail = cachedPreview(request)
     if (thumbnail) source.value = pngUrl(thumbnail.data)
+    // Closing the dialog or moving to another file cancels this render if
+    // it's still queued, and a slower one must not replace what's shown now.
+    const controller = new AbortController()
+    onCleanup(() => controller.abort())
     try {
-      const large = await loadPreview({ ...request, large: true })
-      // A slower render for a file the user has already navigated away from
-      // must not replace whatever the dialog is showing now.
-      if (props.file?.devicePath === file.devicePath) source.value = pngUrl(large.data)
+      // The user is looking at this one, so it goes ahead of grid thumbnails.
+      const large = await loadPreview({ ...request, large: true }, { signal: controller.signal, priority: 'high' })
+      if (!controller.signal.aborted) source.value = pngUrl(large.data)
     } catch {
       // A failed large render still leaves the thumbnail worth looking at.
-      failed.value = !source.value
+      if (!controller.signal.aborted) failed.value = !source.value
     }
   },
   { immediate: true },

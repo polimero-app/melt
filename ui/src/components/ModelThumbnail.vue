@@ -40,9 +40,15 @@ async function drawPng(bytes: Uint8Array) {
   }
 }
 
+// Set while a load is in flight. Aborting it tells the preview queue this
+// card no longer wants the render, so work still queued for it is dropped.
+let controller: AbortController | undefined
+
 async function load() {
   const key = previewIdentity()
-  if (loading.value || loadedKey.value === key) return
+  if (controller || loadedKey.value === key) return
+  const current = new AbortController()
+  controller = current
   failed.value = false
   loading.value = true
   try {
@@ -50,7 +56,7 @@ async function load() {
       path: props.path,
       sizeBytes: props.sizeBytes,
       modifiedAt: props.modifiedAt,
-    })
+    }, { signal: current.signal })
     const bytes = decodeBase64(preview.data)
     if (preview.kind === 'png') {
       if (!await drawPng(bytes)) throw new Error('Invalid thumbnail')
@@ -61,10 +67,19 @@ async function load() {
     // only decodes and displays the returned PNG.
     throw new Error('Raster preview unavailable')
   } catch {
-    failed.value = true
+    if (!current.signal.aborted) failed.value = true
   } finally {
-    loading.value = false
+    if (controller === current) {
+      controller = undefined
+      loading.value = false
+    }
   }
+}
+
+function cancelLoad() {
+  controller?.abort()
+  controller = undefined
+  loading.value = false
 }
 
 function scheduleLoad() {
@@ -84,7 +99,10 @@ onMounted(() => {
   }
 })
 
-onBeforeUnmount(() => observer?.disconnect())
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  cancelLoad()
+})
 
 // The same path with a new size or mtime is a different file, so it must
 // redraw rather than keep the pixels already on the canvas.
@@ -93,6 +111,7 @@ function previewIdentity() {
 }
 
 watch(previewIdentity, () => {
+  cancelLoad()
   loadedKey.value = ''
   failed.value = false
   scheduleLoad()
