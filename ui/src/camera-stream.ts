@@ -10,39 +10,56 @@ export type H264Chunk = {
 
 /** Parses the Rust loopback stream without assuming HTTP chunk boundaries. */
 export class H264StreamParser {
-  private buffered: Uint8Array<ArrayBuffer> = new Uint8Array(0)
+  // Unparsed bytes live in buffer[start, end). Appending writes into spare
+  // capacity instead of rebuilding the buffer, so a large frame arriving in
+  // small chunks costs amortized O(1) copying per byte, not O(frame) per chunk.
+  private buffer: Uint8Array<ArrayBuffer> = new Uint8Array(0)
+  private start = 0
+  private end = 0
 
   push(chunk: Uint8Array): H264Chunk[] {
-    if (chunk.byteLength > 0) {
-      const combined = new Uint8Array(this.buffered.byteLength + chunk.byteLength)
-      combined.set(this.buffered)
-      combined.set(chunk, this.buffered.byteLength)
-      this.buffered = combined
-    }
+    if (chunk.byteLength > 0) this.append(chunk)
 
     const frames: H264Chunk[] = []
-    let offset = 0
-    while (this.buffered.byteLength - offset >= H264_FRAME_HEADER_BYTES) {
-      const header = new DataView(
-        this.buffered.buffer,
-        this.buffered.byteOffset + offset,
-        H264_FRAME_HEADER_BYTES,
-      )
+    while (this.end - this.start >= H264_FRAME_HEADER_BYTES) {
+      const header = new DataView(this.buffer.buffer, this.start, H264_FRAME_HEADER_BYTES)
       const length = header.getUint32(0)
       if (length === 0 || length > MAX_H264_ACCESS_UNIT_BYTES) {
         throw new Error(`Invalid H.264 access-unit length: ${length}`)
       }
-      const frameEnd = offset + H264_FRAME_HEADER_BYTES + length
-      if (frameEnd > this.buffered.byteLength) break
+      const frameEnd = this.start + H264_FRAME_HEADER_BYTES + length
+      if (frameEnd > this.end) break
       frames.push({
-        data: this.buffered.slice(offset + H264_FRAME_HEADER_BYTES, frameEnd),
+        // A copy, since the buffer's bytes are overwritten by later chunks.
+        data: this.buffer.slice(this.start + H264_FRAME_HEADER_BYTES, frameEnd),
         timestamp: Number(header.getBigUint64(4)),
         keyframe: (header.getUint8(12) & 1) !== 0,
       })
-      offset = frameEnd
+      this.start = frameEnd
     }
-    if (offset > 0) this.buffered = this.buffered.slice(offset)
+    if (this.start === this.end) this.start = this.end = 0
     return frames
+  }
+
+  private append(chunk: Uint8Array) {
+    if (this.end + chunk.byteLength > this.buffer.byteLength) {
+      const live = this.end - this.start
+      const needed = live + chunk.byteLength
+      // Compacting only while the result stays at most half full guarantees
+      // the next compaction is at least half a buffer of appends away;
+      // otherwise the buffer doubles, as a growable array would.
+      if (needed <= this.buffer.byteLength / 2) {
+        this.buffer.copyWithin(0, this.start, this.end)
+      } else {
+        const grown = new Uint8Array(Math.max(needed, this.buffer.byteLength * 2))
+        grown.set(this.buffer.subarray(this.start, this.end))
+        this.buffer = grown
+      }
+      this.start = 0
+      this.end = live
+    }
+    this.buffer.set(chunk, this.end)
+    this.end += chunk.byteLength
   }
 }
 
