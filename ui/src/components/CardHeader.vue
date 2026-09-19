@@ -8,7 +8,7 @@ withDefaults(defineProps<{ title: string; icon?: Component; iconClass?: string }
 
 <template>
   <div
-    class="flex items-center gap-2.5 border-b border-gray-200 px-4 py-5 sm:px-6 dark:border-white/10"
+    class="flex items-center gap-2.5 border-b border-gray-200 px-4 py-3 sm:px-6 dark:border-white/10"
     :class="$slots.default ? 'justify-between' : ''"
   >
     <div class="flex items-center gap-3">
