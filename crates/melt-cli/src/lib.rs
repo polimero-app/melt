@@ -47,6 +47,18 @@ struct LeafCommand {
 
 const LEAF_COMMANDS: &[LeafCommand] = &[
     LeafCommand {
+        path: &["ams", "dry", "start"],
+        short: "Start an AMS drying cycle on a printer",
+        args: "<printer> <ams-id> [flags]",
+        flags: "      --filament string         filament type for the drying cycle (default: first loaded tray, then PLA)\n  -h, --help                    help for start\n      --hours int               drying duration in hours (1-24)\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --temperature int         target drying temperature in Celsius\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["ams", "dry", "stop"],
+        short: "Stop an active AMS drying cycle on a printer",
+        args: "<printer> <ams-id> [flags]",
+        flags: "  -h, --help                    help for stop\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
+    },
+    LeafCommand {
         path: &["camera", "snapshot"],
         short: "Capture one still image from a printer camera",
         args: "<name> [flags]",
@@ -215,6 +227,7 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
         path: &[],
         short: "CLI for interacting with 3D printers",
         commands: &[
+            ("ams", "AMS drying operations on a named printer"),
             ("camera", "Camera operations on a named printer"),
             (
                 "completion",
@@ -237,6 +250,19 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
                 "temperature",
                 "Temperature control operations on a named printer",
             ),
+        ],
+    },
+    CommandGroup {
+        path: &["ams"],
+        short: "AMS drying operations on a named printer",
+        commands: &[("dry", "Control AMS filament drying cycles")],
+    },
+    CommandGroup {
+        path: &["ams", "dry"],
+        short: "Control AMS filament drying cycles",
+        commands: &[
+            ("start", "Start an AMS drying cycle on a printer"),
+            ("stop", "Stop an active AMS drying cycle on a printer"),
         ],
     },
     CommandGroup {
@@ -571,6 +597,19 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         }
         [lights, set, rest @ ..] if lights.as_str() == "lights" && set.as_str() == "set" => {
             lights_set(invocation.format, rest, out, err)
+        }
+        [ams, dry, action, rest @ ..]
+            if ams.as_str() == "ams"
+                && dry.as_str() == "dry"
+                && matches!(action.as_str(), "start" | "stop") =>
+        {
+            ams_dry(
+                invocation.format,
+                action.as_str() == "start",
+                rest,
+                out,
+                err,
+            )
         }
         [printer, discover, rest @ ..]
             if printer.as_str() == "printer" && discover.as_str() == "discover" =>
@@ -2230,6 +2269,145 @@ struct LightSetData {
     driver: &'static str,
     light: String,
     state: melt_core::moonraker::LightState,
+    warnings: Vec<String>,
+    capabilities: drivers::Capabilities,
+}
+
+fn ams_dry(
+    format: OutputFormat,
+    start: bool,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let command = if start {
+        "ams dry start"
+    } else {
+        "ams dry stop"
+    };
+    let value_options: &[&str] = if start {
+        &[
+            "timeout",
+            "protocol-trace",
+            "temperature",
+            "hours",
+            "filament",
+        ]
+    } else {
+        &["timeout", "protocol-trace"]
+    };
+    let (positionals, options) = match parse_options(args, &["yes", "insecure"], value_options) {
+        Ok(value) => value,
+        Err(error) => return write_error(command, format, AppError::usage(error), out, err),
+    };
+    let (name, ams_id) = match positionals.as_slice() {
+        [name, ams_id] => (name.as_str(), ams_id.as_str()),
+        _ => {
+            return write_error(
+                command,
+                format,
+                AppError::usage(format!("{command} requires a printer profile and AMS id")),
+                out,
+                err,
+            );
+        }
+    };
+    let Ok(ams_id) = ams_id.parse::<u32>() else {
+        return write_error(
+            command,
+            format,
+            AppError::usage("AMS id must be a number (see `melt status <printer> --detailed`)"),
+            out,
+            err,
+        );
+    };
+    let request = if start {
+        let number = |flag: &str| -> Result<u16, AppError> {
+            options
+                .value(flag)
+                .ok_or_else(|| AppError::usage(format!("{command} requires --{flag}")))?
+                .parse::<u16>()
+                .map_err(|_| AppError::usage(format!("--{flag} must be a whole number")))
+        };
+        let (temperature_c, hours) = match (number("temperature"), number("hours")) {
+            (Ok(temperature), Ok(hours)) => (temperature, hours),
+            (Err(error), _) | (_, Err(error)) => {
+                return write_error(command, format, error, out, err);
+            }
+        };
+        melt_core::moonraker::DryingRequest::Start {
+            temperature_c,
+            hours,
+            filament: options.value("filament").map(str::to_owned),
+        }
+    } else {
+        melt_core::moonraker::DryingRequest::Stop
+    };
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error(command, format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::AmsDrying) {
+        Ok(printer) => printer,
+        Err(error) => return write_error(command, format, error, out, err),
+    };
+    let prompt = match &request {
+        melt_core::moonraker::DryingRequest::Start {
+            temperature_c,
+            hours,
+            ..
+        } => format!(
+            "Start drying AMS {ams_id} at {temperature_c} C for {hours}h on {}? Type 'yes' to continue: ",
+            printer.name
+        ),
+        melt_core::moonraker::DryingRequest::Stop => format!(
+            "Stop drying AMS {ams_id} on {}? Type 'yes' to continue: ",
+            printer.name
+        ),
+    };
+    if let Err(code) =
+        require_confirmation(command, options.enabled("yes"), &prompt, format, out, err)
+    {
+        return code;
+    }
+    match drivers::ams_drying_set(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+        ams_id,
+        &request,
+    ) {
+        Ok(result) => write_success(
+            command,
+            format,
+            AmsDryData {
+                profile: printer.name,
+                driver: printer.driver_kind.name(),
+                ams_id: result.ams_id,
+                active: result.active,
+                warnings: Vec::new(),
+                capabilities: printer.driver_kind.capabilities(),
+            },
+            |out| {
+                if result.active {
+                    writeln!(out, "AMS {} drying started.", result.ams_id)
+                } else {
+                    writeln!(out, "AMS {} drying stopped.", result.ams_id)
+                }
+            },
+            out,
+        ),
+        Err(error) => write_error(command, format, driver_error(error), out, err),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AmsDryData {
+    profile: String,
+    driver: &'static str,
+    ams_id: u32,
+    active: bool,
     warnings: Vec<String>,
     capabilities: drivers::Capabilities,
 }
@@ -4370,12 +4548,18 @@ fn driver_error(error: DriverError) -> AppError {
             | melt_core::bambu::TransportError::FileAlreadyExists
             | melt_core::bambu::TransportError::DirectoryDestination
             | melt_core::bambu::TransportError::InvalidTemperatureTarget
-            | melt_core::bambu::TransportError::InvalidMotion,
+            | melt_core::bambu::TransportError::InvalidMotion
+            | melt_core::bambu::TransportError::InvalidDryingRequest(_),
         ) => AppError::usage(error.to_string()),
         DriverError::Bambu(melt_core::bambu::TransportError::LocalIo) => AppError {
             exit_code: 1,
             code: "internal_error",
             message: "local file operation failed".into(),
+        },
+        DriverError::Bambu(melt_core::bambu::TransportError::DryingBlocked(_)) => AppError {
+            exit_code: 2,
+            code: "invalid_printer_state",
+            message: error.to_string(),
         },
         DriverError::Bambu(_) => AppError {
             exit_code: 1,
@@ -5457,6 +5641,47 @@ mod tests {
                 .unwrap()
                 .contains("unsupported file root")
         );
+    }
+
+    #[test]
+    fn ams_dry_start_requires_temperature_and_hours() {
+        // (args, expected usage fragment)
+        let cases: [(&[&str], &str); 4] = [
+            (&["ams", "dry", "start", "dakota", "0"], "--temperature"),
+            (
+                &["ams", "dry", "start", "dakota", "0", "--temperature", "45"],
+                "--hours",
+            ),
+            (
+                &[
+                    "ams",
+                    "dry",
+                    "start",
+                    "dakota",
+                    "x",
+                    "--temperature",
+                    "45",
+                    "--hours",
+                    "4",
+                ],
+                "AMS id",
+            ),
+            (
+                &["ams", "dry", "stop", "dakota"],
+                "printer profile and AMS id",
+            ),
+        ];
+        for (args, fragment) in cases {
+            let mut full: Vec<String> = args.iter().map(|value| (*value).to_string()).collect();
+            full.push("--output".into());
+            full.push("json".into());
+            let mut out = Vec::new();
+
+            let code = run(&full, &mut out, &mut Vec::new());
+            assert_eq!(code, 2, "{args:?}");
+            let stdout = String::from_utf8(out).unwrap();
+            assert!(stdout.contains(fragment), "{args:?}: {stdout}");
+        }
     }
 
     #[test]
