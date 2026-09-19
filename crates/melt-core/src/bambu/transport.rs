@@ -86,7 +86,7 @@ pub enum Error {
     #[error("Bambu printer rejected an unsigned command")]
     UnsignedCommand,
     #[error(
-        "Bambu printer requires signed commands for {0:?}; enable Developer Mode/LAN-only mode or use a signed client"
+        "Bambu printer requires signed commands for {0:?}; Melt does not support signed mutations, so enable Developer Mode/LAN-only mode"
     )]
     AuthorizationRequired(MutationClass),
     #[error(

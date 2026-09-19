@@ -4289,15 +4289,13 @@ fn driver_error(error: DriverError) -> AppError {
         DriverError::Bambu(melt_core::bambu::TransportError::UnsignedCommand) => AppError {
             exit_code: 5,
             code: "signing_required",
-            message:
-                "printer rejected an unsigned command; enable Developer Mode or use a signed client"
-                    .into(),
+            message: "printer rejected an unsigned command; Melt does not support signed mutations, so enable Developer Mode/LAN-only mode".into(),
         },
         DriverError::Bambu(melt_core::bambu::TransportError::AuthorizationRequired(_)) => {
             AppError {
                 exit_code: 5,
                 code: "signing_required",
-                message: "observed printer security requires signed commands; enable Developer Mode/LAN-only mode or use a signed client".into(),
+                message: "observed printer security requires signed commands; Melt does not support signed mutations, so enable Developer Mode/LAN-only mode".into(),
             }
         }
         DriverError::Bambu(melt_core::bambu::TransportError::AuthorizationConflict(_)) => {
@@ -5193,6 +5191,12 @@ mod tests {
 
         assert_eq!(error.exit_code, 5);
         assert_eq!(error.code, "signing_required");
+        assert!(
+            error
+                .message
+                .contains("Melt does not support signed mutations")
+        );
+        assert!(!error.message.contains("signed client"));
     }
 
     #[test]

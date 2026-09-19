@@ -44,6 +44,14 @@ session lock, and the printer's own rejection remains its backstop. Read-only
 status and diagnostics remain available. Unknown authorization retains
 attempt-and-observe behavior.
 
+Signed mutations are deliberately outside Melt's supported security model.
+Melt does not accept a signing certificate, private key, CRL, or extracted
+vendor application credentials, and it does not fall back to a signing helper.
+When live evidence reports `signingRequired`, Developer Mode/LAN-only mode is
+the supported path for control; otherwise the printer remains read-only in
+Melt. This boundary applies even when another client could sign the same
+command.
+
 The community-reported meaning of `print.fun` bit 29 is retained as an
 inactive, provisional observation. It is visible for qualification but cannot
 block a command until independent physical evidence scopes it to the affected
