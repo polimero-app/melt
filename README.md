@@ -205,13 +205,16 @@ contracts and evidence that these targets enforce.
 ## Running on Linux Wayland
 
 Use `make run` during development. It starts the Vue development server before
-the desktop process. On a Wayland session that also provides XWayland, it
-starts GTK with `GDK_BACKEND=x11` and disables WebKit DMA-BUF rendering before
-the process loads, avoiding compositor protocol failures and GBM buffer
-warnings. To run a built binary directly, use:
+the desktop process. On a Wayland session it disables WebKit DMA-BUF rendering
+before the process loads; with it enabled, GTK aborts with `Error 71 (Protocol
+error) dispatching to Wayland display` on some GPU drivers. GTK otherwise runs
+natively on Wayland. Forcing XWayland with `GDK_BACKEND=x11` is still possible
+but not the default: under XWayland on GNOME the window can stop receiving input
+and repaint events after switching to another window and back, while the app
+itself keeps running. To run a built binary directly, use:
 
 ```sh
-GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 ./target/debug/melt
+WEBKIT_DISABLE_DMABUF_RENDERER=1 ./target/debug/melt
 ```
 
 A development build shows a placeholder icon in the window switcher because

@@ -27,9 +27,9 @@ run: ## Start the desktop app in development mode
 	bun run --cwd ui dev & vite_pid=$$!; \
 	trap 'kill $$vite_pid 2>/dev/null || true' EXIT INT TERM; \
 	until curl --fail --silent http://127.0.0.1:1420 >/dev/null; do sleep 1; done; \
-	if test "$$XDG_SESSION_TYPE" = wayland && test -n "$$DISPLAY" && test -z "$$GDK_BACKEND"; then \
-		echo "Using X11 GTK fallback for this Wayland session"; \
-		GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER="$${WEBKIT_DISABLE_DMABUF_RENDERER:-1}" cargo run -p melt-desktop --bin melt; \
+	if test "$$XDG_SESSION_TYPE" = wayland; then \
+		echo "Disabling WebKit DMA-BUF rendering for this Wayland session"; \
+		WEBKIT_DISABLE_DMABUF_RENDERER="$${WEBKIT_DISABLE_DMABUF_RENDERER:-1}" cargo run -p melt-desktop --bin melt; \
 	else \
 		cargo run -p melt-desktop --bin melt; \
 	fi
