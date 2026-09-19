@@ -371,6 +371,26 @@ impl ConnectionPool {
         })
     }
 
+    pub fn ams_drying_set(
+        &self,
+        name: &str,
+        profile: &drivers::Profile,
+        access_code: Option<&str>,
+        tls_fingerprint: Option<&str>,
+        ams_id: u32,
+        request: &moonraker::DryingRequest,
+    ) -> Result<moonraker::DryingResult, drivers::DriverError> {
+        let drivers::Profile::Bambu(profile) = profile else {
+            return Err(drivers::DriverError::UnsupportedOperation(
+                drivers::Driver::Moonraker,
+                drivers::Operation::AmsDrying,
+            ));
+        };
+        self.with_bambu(name, profile, access_code, tls_fingerprint, |client| {
+            client.ams_drying_set(access_code, tls_fingerprint, ams_id, request)
+        })
+    }
+
     pub fn speed_set(
         &self,
         name: &str,

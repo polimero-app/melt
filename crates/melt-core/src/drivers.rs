@@ -49,6 +49,7 @@ pub struct Capabilities {
     pub fan_control: bool,
     pub light_control: bool,
     pub speed_control: bool,
+    pub ams_drying: bool,
 }
 
 impl Capabilities {
@@ -73,6 +74,7 @@ impl Capabilities {
             Operation::FanSet => self.fan_control,
             Operation::LightSet => self.light_control,
             Operation::SpeedSet => self.speed_control,
+            Operation::AmsDrying => self.ams_drying,
         }
     }
 }
@@ -124,6 +126,7 @@ impl Driver {
                 fan_control: true,
                 light_control: true,
                 speed_control: true,
+                ams_drying: true,
             },
             Self::Moonraker => Capabilities {
                 status: true,
@@ -176,6 +179,7 @@ pub enum Operation {
     FanSet,
     LightSet,
     SpeedSet,
+    AmsDrying,
 }
 
 #[derive(Clone, Debug)]
@@ -652,6 +656,24 @@ pub fn light_set(
     }
 }
 
+pub fn ams_drying_set(
+    profile: &Profile,
+    access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
+    ams_id: u32,
+    request: &moonraker::DryingRequest,
+) -> Result<moonraker::DryingResult, DriverError> {
+    match profile {
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .ams_drying_set(access_code, tls_fingerprint, ams_id, request)
+            .map_err(DriverError::Bambu),
+        Profile::Moonraker(_) => Err(DriverError::UnsupportedOperation(
+            Driver::Moonraker,
+            Operation::AmsDrying,
+        )),
+    }
+}
+
 pub fn speed_set(
     profile: &Profile,
     access_code: Option<&str>,
@@ -835,6 +857,22 @@ mod tests {
             Err(DriverError::UnsupportedOperation(
                 Driver::Moonraker,
                 Operation::LightSet
+            ))
+        ));
+    }
+
+    #[test]
+    fn rejects_ams_drying_for_moonraker_without_connecting() {
+        let profile = Profile::Moonraker(
+            moonraker::Profile::new("printer.local", false, Duration::from_secs(1)).unwrap(),
+        );
+        assert!(!Driver::Moonraker.supports(Operation::AmsDrying));
+        assert!(Driver::BambuLan.supports(Operation::AmsDrying));
+        assert!(matches!(
+            ams_drying_set(&profile, None, None, 0, &moonraker::DryingRequest::Stop),
+            Err(DriverError::UnsupportedOperation(
+                Driver::Moonraker,
+                Operation::AmsDrying
             ))
         ));
     }
