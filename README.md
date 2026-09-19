@@ -23,8 +23,8 @@ Fyne GUI, and Go application implementations.
   the local network, and refresh pinned TLS identities explicitly.
 - **Fleet and dashboard views** — inspect online/idle/busy state, temperatures,
   job progress, layers, time estimates, fans, lights, Wi-Fi signal, and AMS
-  inventory. Background monitors retain the last useful status during bounded
-  reconnect attempts.
+  inventory including drying state. Background monitors retain the last useful
+  status during bounded reconnect attempts.
 - **Camera** — share one authenticated upstream per physical Bambu printer
   across snapshots, native H.264 WebRTC/WebCodecs viewers, and MJPEG fallback,
   with bounded fan-out and reconnect behavior.
@@ -33,7 +33,8 @@ Fyne GUI, and Go application implementations.
   filament/nozzle assignments, select a plate, and start a print only after
   preflight and confirmation.
 - **Printer control** — pause, resume, or cancel jobs; set safe temperature,
-  fan, light, and speed targets; home or jog axes; and issue an immediate
+  fan, light, and speed targets; start or stop AMS filament drying on printers
+  whose firmware allows remote drying; home or jog axes; and issue an immediate
   emergency stop where the driver supports it.
 - **Diagnostics** — export redacted compatibility information covering model
   identity, module firmware, capability provenance, authorization, negotiated
@@ -68,8 +69,8 @@ The command groups cover:
 - `camera snapshot|stream`;
 - `files roots|list|download|upload`;
 - `jobs preflight|start|pause|resume|cancel`;
-- `temperature set`, `motion home|jog`, `fans set`, `lights set`, and
-  `speed set`;
+- `temperature set`, `motion home|jog`, `fans set`, `lights set`,
+  `ams dry start|stop`, and `speed set`;
 - `emergency-stop` and `version`.
 
 Run any command with `--help` for its current arguments and flags. Common
@@ -149,7 +150,9 @@ Bambu LAN supports pinned-TLS MQTT status and controls, authenticated storage
 operations, SSDP/UDP discovery, camera snapshots/streams, and sliced 3MF
 preflight. Live observations and safe protocol probes take precedence over
 model-family assumptions. Unknown models and fields remain operable but are
-not misclassified as supported or unsupported without evidence.
+not misclassified as supported or unsupported without evidence. AMS drying
+status is shown for heater-equipped units, and start/stop is offered only when
+the firmware advertises remote drying.
 
 The print workflow preserves project, plate, display, and storage names
 separately; reconciles available AMS/nozzle data; probes storage protocols

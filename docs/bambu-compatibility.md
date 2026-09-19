@@ -148,6 +148,30 @@ the control inventory only when `support_aux_fan` or `support_chamber_fan`
 confirms them. Heatbreak/Hotend speed remains visible as telemetry because it is
 a real reported fan even though the legacy protocol does not expose a control.
 
+## AMS drying
+
+Heater-equipped AMS units (AMS 2 Pro, AMS HT) report `dry_time` (minutes
+remaining), and only those units expose a `drying` block in detailed status.
+The phase comes from bits 4–7 of the unit's `info` word (Off, Checking,
+Drying, Cooling, Stopping, Error, HeatOutOfControl). A cycle is active while
+time remains or the phase is Checking, Drying, or Cooling, because `dry_time`
+reads 0 during the closing cooling phase. HeatOutOfControl is never treated as
+an active cycle. H2-class firmware also reports the active `dry_setting` and
+`dry_sf_reason` codes, which Melt surfaces as stable identifiers
+(`already_drying`, `insufficient_power`, …).
+
+A unit is `controllable` only when the printer advertises
+`is_support_remote_dry` (`fun2` bit 5). P1-class firmware omits the bit and
+acknowledges `ams_filament_drying` without acting on it, so Melt shows its
+drying state but never sends it the command. Start (`mode` 1) and stop
+(`mode` 0) pass the mutation authorization gate, refuse to start while the unit
+reports a blocking reason, and complete only once the targeted unit's reported
+phase confirms the transition. Start falls back to the first loaded tray's
+filament type, then PLA, because the firmware rejects an empty type.
+Temperature bounds are 45–65 °C for units 0–3 and 45–85 °C for units 128–135;
+duration is 1–24 h. Humidity-target mode, tray rotation, and scheduled drying
+are not implemented.
+
 ## Port 6000 transport
 
 Control replies correlate by typed operation and sequence, and no more than 64
