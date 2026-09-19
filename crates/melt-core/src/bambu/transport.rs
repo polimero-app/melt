@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     fs::{self, File},
     io::{self, Read, Write},
-    net::{SocketAddr, TcpStream, ToSocketAddrs},
+    net::{Ipv4Addr, SocketAddr, TcpStream, ToSocketAddrs},
     path::Path,
     sync::{
         Arc, Mutex, MutexGuard, OnceLock, TryLockError, Weak,
@@ -2751,7 +2751,7 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
             .and_then(|metadata| metadata.get("status_transport"))
             .and_then(Value::as_str)
             .map(str::to_owned),
-        reported_ip: string(print.get("wifi_ip")).filter(|value| !value.is_empty()),
+        reported_ip: reported_ip(print),
         hms,
         airduct_fans,
     };
@@ -2789,6 +2789,33 @@ fn observed_extruder_count(print: &Map<String, Value>) -> Option<u8> {
         .len()
         .try_into()
         .ok()
+}
+
+fn reported_ip(print: &Map<String, Value>) -> Option<String> {
+    if let Some(address) = string(print.get("wifi_ip"))
+        .and_then(|address| address.trim().parse::<Ipv4Addr>().ok())
+        .filter(|address| usable_reported_ip(*address))
+    {
+        return Some(address.to_string());
+    }
+
+    print
+        .get("net")?
+        .get("info")?
+        .as_array()?
+        .iter()
+        .filter_map(|interface| integer(interface.get("ip")))
+        .filter_map(|value| u32::try_from(value).ok())
+        .map(|value| Ipv4Addr::from(value.to_le_bytes()))
+        .find(|address| usable_reported_ip(*address))
+        .map(|address| address.to_string())
+}
+
+fn usable_reported_ip(address: Ipv4Addr) -> bool {
+    !address.is_unspecified()
+        && !address.is_loopback()
+        && !address.is_multicast()
+        && address != Ipv4Addr::BROADCAST
 }
 
 fn primary_nozzle_temperature(print: &Map<String, Value>) -> Option<Temperature> {
@@ -4460,6 +4487,33 @@ mod tests {
             Some(220.0)
         );
         assert_eq!(status.fans["partCooling"], 60);
+    }
+
+    #[test]
+    fn reports_valid_wifi_or_packed_network_addresses() {
+        let wifi = parse_status(
+            br#"{"print":{"gcode_state":"IDLE","wifi_ip":" 192.168.4.20 ","net":{"info":[{"ip":0}]}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            wifi.extensions.bambu_lan.unwrap().reported_ip.as_deref(),
+            Some("192.168.4.20")
+        );
+
+        let packed = u32::from_le_bytes([192, 168, 4, 21]);
+        let report = serde_json::to_vec(&json!({
+            "print": {
+                "gcode_state": "IDLE",
+                "wifi_ip": "127.0.0.1",
+                "net": { "info": [{ "ip": 0 }, { "ip": packed }] }
+            }
+        }))
+        .unwrap();
+        let network = parse_status(&report).unwrap();
+        assert_eq!(
+            network.extensions.bambu_lan.unwrap().reported_ip.as_deref(),
+            Some("192.168.4.21")
+        );
     }
 
     #[test]

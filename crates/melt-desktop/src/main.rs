@@ -1179,13 +1179,16 @@ impl StatusCacheThrottle {
     }
 }
 
-fn start_monitor_worker(app: tauri::AppHandle, state: MonitorState) {
+fn start_monitor_worker(app: tauri::AppHandle, state: MonitorState, presence: PresenceState) {
     thread::spawn(move || {
         let mut previous_entries: Option<Vec<MonitorEntry>> = None;
         let mut cache_throttle = StatusCacheThrottle::default();
         loop {
             let cycle_started = Instant::now();
             if let Ok(entries) = collect_monitored_printers(&state) {
+                if update_presence_from_monitor(&presence, &entries) {
+                    let _ = app.emit("presence-updated", ());
+                }
                 if previous_entries.as_ref() != Some(&entries) {
                     use tauri::Emitter;
                     if cache_throttle.should_save(&entries, Instant::now()) {
@@ -1199,6 +1202,83 @@ fn start_monitor_worker(app: tauri::AppHandle, state: MonitorState) {
             thread::sleep(Duration::from_secs(5).saturating_sub(cycle_started.elapsed()));
         }
     });
+}
+
+fn update_presence_from_monitor(state: &PresenceState, entries: &[MonitorEntry]) -> bool {
+    let configured = Config::load()
+        .ok()
+        .map(|config| {
+            config
+                .sorted_profiles()
+                .into_iter()
+                .filter(|profile| profile.profile.driver == "bambu-lan")
+                .map(|profile| {
+                    (
+                        profile.name.to_ascii_lowercase(),
+                        (
+                            profile.profile.serial,
+                            profile.profile.host,
+                            profile.profile.model,
+                        ),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+    let now_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u64::MAX.into()) as u64;
+    let Ok(mut cache) = state.cache.lock() else {
+        return false;
+    };
+    let mut changed = false;
+    for entry in entries
+        .iter()
+        .filter(|entry| entry.error.is_none() && !entry.stale)
+    {
+        let Some((serial, configured_host, model)) =
+            configured.get(&entry.name.to_ascii_lowercase())
+        else {
+            continue;
+        };
+        let Some(status) = &entry.status else {
+            continue;
+        };
+        let Some(reported_host) = status
+            .extensions
+            .bambu_lan
+            .as_ref()
+            .and_then(|extension| extension.reported_ip.as_deref())
+        else {
+            continue;
+        };
+        let before = cache.get(serial).map(presence_identity);
+        let after = cache
+            .observe_status_address(
+                serial,
+                reported_host,
+                Some(configured_host),
+                model,
+                status.firmware_version.as_deref(),
+                now_unix_ms,
+            )
+            .map(presence_identity);
+        changed |= before != after;
+    }
+    changed
+}
+
+fn presence_identity(
+    presence: &melt_core::bambu::PrinterPresence,
+) -> (String, Option<String>, String, Option<String>) {
+    (
+        presence.host.clone(),
+        presence.suggested_host.clone(),
+        presence.model.clone(),
+        presence.firmware.clone(),
+    )
 }
 
 fn start_presence_worker(app: tauri::AppHandle, state: PresenceState) {
@@ -3440,8 +3520,8 @@ fn main() {
         .manage(SlicerState::default())
         .setup(|app| {
             let state = app.state::<MonitorState>().inner().clone();
-            start_monitor_worker(app.handle().clone(), state);
             let presence = app.state::<PresenceState>().inner().clone();
+            start_monitor_worker(app.handle().clone(), state, presence.clone());
             start_presence_worker(app.handle().clone(), presence);
             Ok(())
         })
