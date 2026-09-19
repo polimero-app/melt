@@ -2912,7 +2912,7 @@ onUnmounted(() => {
                       <span v-if="system.drying?.active" class="flex items-center gap-1 text-orange-600 dark:text-orange-400">
                         <PhSun class="size-4" aria-hidden="true" />
                         <span>{{ system.drying.minutesRemaining ? t('drying.remaining', { time: formatDuration(system.drying.minutesRemaining * 60) }) : t(dryingStatusKey(system.drying.status)) }}</span>
-                        <span v-if="system.drying.setting" class="font-mono">{{ system.drying.setting.temperatureC }} °C</span>
+                        <span v-if="system.drying.setting">· {{ t('drying.target', { temperature: system.drying.setting.temperatureC }) }}</span>
                       </span>
                       <span v-else-if="system.drying && dryingFault(system.drying)" class="flex items-center gap-1 text-red-600 dark:text-red-400">
                         <PhWarning class="size-4" aria-hidden="true" />

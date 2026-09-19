@@ -251,6 +251,7 @@ export type MessageKey =
   | "drying.temperature"
   | "drying.hours"
   | "drying.remaining"
+  | "drying.target"
   | "drying.started"
   | "drying.stopped"
   | "drying.startTitle"
@@ -768,6 +769,7 @@ const messages: Record<Locale, Messages> = {
     "drying.temperature": "Temperature",
     "drying.hours": "Duration",
     "drying.remaining": "Drying · {time} left",
+    "drying.target": "target {temperature}\u00a0°C",
     "drying.started": "{unit}: drying started",
     "drying.stopped": "{unit}: drying stopped",
     "drying.startTitle": "Start drying?",
@@ -1282,6 +1284,7 @@ const messages: Record<Locale, Messages> = {
     "drying.temperature": "Temperatura",
     "drying.hours": "Duração",
     "drying.remaining": "Secando · faltam {time}",
+    "drying.target": "alvo {temperature}\u00a0°C",
     "drying.started": "{unit}: secagem iniciada",
     "drying.stopped": "{unit}: secagem interrompida",
     "drying.startTitle": "Iniciar secagem?",
