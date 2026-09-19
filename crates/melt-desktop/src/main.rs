@@ -3741,6 +3741,16 @@ fn remove_configured_printer(
     Ok(result)
 }
 
+const DMABUF_RENDERER_ENV: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
+
+/// WebKit's DMA-BUF renderer aborts GTK with `Error 71 (Protocol error)
+/// dispatching to Wayland display` on some drivers, which kills the window
+/// before it opens. Disable it on Wayland sessions, where that failure lives,
+/// and never override an explicit setting: a working GPU should keep it.
+fn disables_dmabuf_renderer(already_set: bool, wayland_session: bool) -> bool {
+    cfg!(target_os = "linux") && wayland_session && !already_set
+}
+
 fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if !args.is_empty() {
@@ -3749,6 +3759,16 @@ fn main() {
             &mut std::io::stdout(),
             &mut std::io::stderr(),
         ));
+    }
+
+    // Before any GTK/WebKit initialization: WebKit reads this at startup.
+    if disables_dmabuf_renderer(
+        std::env::var_os(DMABUF_RENDERER_ENV).is_some(),
+        std::env::var_os("WAYLAND_DISPLAY").is_some(),
+    ) {
+        // SAFETY: single-threaded here; no other thread can read the
+        // environment before the runtime spawns its workers below.
+        unsafe { std::env::set_var(DMABUF_RENDERER_ENV, "1") };
     }
 
     let pool = Arc::new(ConnectionPool::default());
@@ -3842,6 +3862,29 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Melt");
+}
+
+#[cfg(test)]
+mod dmabuf_tests {
+    use super::disables_dmabuf_renderer;
+
+    #[test]
+    fn disables_the_renderer_only_on_an_unconfigured_wayland_session() {
+        // (already set, wayland session, expected)
+        let cases = [
+            (false, true, cfg!(target_os = "linux")),
+            (true, true, false),   // an explicit setting wins, including "0"
+            (false, false, false), // X11 session: the protocol error cannot occur
+            (true, false, false),
+        ];
+        for (already_set, wayland, expected) in cases {
+            assert_eq!(
+                disables_dmabuf_renderer(already_set, wayland),
+                expected,
+                "already_set={already_set} wayland={wayland}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

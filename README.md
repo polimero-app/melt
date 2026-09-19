@@ -205,16 +205,23 @@ contracts and evidence that these targets enforce.
 ## Running on Linux Wayland
 
 Use `make run` during development. It starts the Vue development server before
-the desktop process. On a Wayland session it disables WebKit DMA-BUF rendering
-before the process loads; with it enabled, GTK aborts with `Error 71 (Protocol
-error) dispatching to Wayland display` on some GPU drivers. GTK otherwise runs
-natively on Wayland. Forcing XWayland with `GDK_BACKEND=x11` is still possible
-but not the default: under XWayland on GNOME the window can stop receiving input
-and repaint events after switching to another window and back, while the app
-itself keeps running. To run a built binary directly, use:
+the desktop process.
+
+On a Wayland session the desktop process disables WebKit's DMA-BUF renderer
+itself, before GTK loads, because with it enabled GTK aborts with `Error 71
+(Protocol error) dispatching to Wayland display` on some GPU drivers. Setting
+`WEBKIT_DISABLE_DMABUF_RENDERER` explicitly always wins, so a driver that
+handles it keeps hardware rendering with `WEBKIT_DISABLE_DMABUF_RENDERER=0`.
+X11 sessions are left alone; that failure is Wayland-specific.
+
+GTK otherwise uses the session's own backend. Forcing XWayland with
+`GDK_BACKEND=x11` still works but is not the default: under XWayland on GNOME
+the window can stop receiving input and repaint events after switching to
+another window and back, while the application itself keeps running. A built
+binary therefore needs no special environment:
 
 ```sh
-WEBKIT_DISABLE_DMABUF_RENDERER=1 ./target/debug/melt
+./target/debug/melt
 ```
 
 A development build shows a placeholder icon in the window switcher because
