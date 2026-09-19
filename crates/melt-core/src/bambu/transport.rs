@@ -2703,7 +2703,8 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
         id: synthetic_job_id(print, &name),
         name,
     });
-    let errors = status_errors(print, state);
+    let hms = super::hms::events(print);
+    let errors = status_errors(print, state, &hms);
     let fans = status_fans(print);
     let lights = lights(report);
     let (controls, airduct_fans) = control_inventory(print, &temperatures, &fans, &lights);
@@ -2719,6 +2720,7 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
             .and_then(Value::as_str)
             .map(str::to_owned),
         reported_ip: string(print.get("wifi_ip")).filter(|value| !value.is_empty()),
+        hms,
         airduct_fans,
     };
     Ok(Status {
@@ -2809,7 +2811,11 @@ fn heater(print: &Map<String, Value>, current: &str, target: &str) -> Option<Tem
     })
 }
 
-fn status_errors(print: &Map<String, Value>, state: PrinterState) -> Vec<StatusError> {
+fn status_errors(
+    print: &Map<String, Value>,
+    state: PrinterState,
+    hms: &[crate::moonraker::HmsEvent],
+) -> Vec<StatusError> {
     let mut errors = Vec::new();
     if let Some(value) = integer(print.get("mc_print_error_code"))
         .or_else(|| integer(print.get("print_error")))
@@ -2826,53 +2832,14 @@ fn status_errors(print: &Map<String, Value>, state: PrinterState) -> Vec<StatusE
             recoverable: None,
         });
     }
-    for item in print
-        .get("hms")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let attr = integer(item.get("attr")).unwrap_or_default();
-        let code = integer(item.get("code")).unwrap_or_default();
-        if attr != 0 || code != 0 {
-            // Bambu encodes the HMS severity in the high 16 bits; the low 16
-            // bits identify the fault. Match the fault, not its current severity.
-            let message_code = code & 0xffff;
-            let (code_name, message) = match (attr, message_code) {
-                // Bambu HMS 0300-9700-*-0001. Keep the raw code below for
-                // support alongside the printer's own, actionable wording.
-                (0x0300_9700, 0x0001) => ("top_cover_open", "The top cover is open."),
-                // Documented cover and laser-protection alerts from Bambu's
-                // HMS index. These are deliberately separate so a sensor or
-                // missing protection plate is never presented as a simple open cover.
-                (0x0300_9700, 0x0002) => (
-                    "top_cover_front_right_sensor",
-                    "The top cover Hall sensor (front right) is abnormal. Check whether its connection wire is loose.",
-                ),
-                (0x0300_9700, 0x0003) => (
-                    "top_cover_rear_left_sensor",
-                    "The top cover Hall sensor (rear left) is abnormal. Check whether its connection wire is loose.",
-                ),
-                (0x0300_9700, 0x0004) => (
-                    "top_laser_protection_plate_missing",
-                    "The top laser protection plate is not detected. Install it according to the Bambu Lab Wiki, then restart the task.",
-                ),
-                _ => ("hardware_error", "printer reported a hardware error"),
-            };
-            errors.push(StatusError {
-                code: code_name,
-                message: message.into(),
-                raw_code: Some(format!(
-                    "{:04X}-{:04X}-{:04X}-{:04X}",
-                    (attr >> 16) & 0xffff,
-                    attr & 0xffff,
-                    (code >> 16) & 0xffff,
-                    code & 0xffff,
-                )),
-                image_id: None,
-                recoverable: None,
-            });
-        }
+    for event in hms.iter().filter(|event| event.alert) {
+        errors.push(StatusError {
+            code: event.code,
+            message: event.message.clone(),
+            raw_code: Some(event.raw_code.clone()),
+            image_id: None,
+            recoverable: None,
+        });
     }
     if errors.is_empty() && state == PrinterState::Error {
         errors.push(StatusError {
@@ -4477,6 +4444,26 @@ mod tests {
             status.errors[3].raw_code.as_deref(),
             Some("0300-9700-0001-0004")
         );
+    }
+
+    #[test]
+    fn keeps_non_actionable_hms_events_out_of_printer_errors() {
+        let status = parse_status(
+            br#"{"print":{"gcode_state":"IDLE","hms":[
+                {"attr":83887360,"code":65543},
+                {"attr":117448704,"code":196609},
+                {"attr":402662144,"code":196610}
+            ]}}"#,
+        )
+        .unwrap();
+
+        assert!(status.errors.is_empty());
+        let hms = &status.extensions.bambu_lan.unwrap().hms;
+        assert_eq!(hms.len(), 3);
+        assert_eq!(hms[0].code, "command_verification_failed");
+        assert_eq!(hms[1].code, "ams_auto_refill_in_progress");
+        assert_eq!(hms[2].code, "ams_auto_refill_completed");
+        assert!(hms.iter().all(|event| !event.alert));
     }
 
     #[test]

@@ -1150,6 +1150,25 @@ pub struct StatusWarning {
     pub message: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HmsSeverity {
+    Error,
+    Warning,
+    Notification,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HmsEvent {
+    pub code: &'static str,
+    pub message: String,
+    pub raw_code: String,
+    pub severity: HmsSeverity,
+    pub alert: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TimeEstimates {
@@ -1280,6 +1299,8 @@ pub struct BambuExtension {
     pub status_transport: Option<String>,
     #[serde(rename = "reportedIP", skip_serializing_if = "Option::is_none")]
     pub reported_ip: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hms: Vec<HmsEvent>,
     /// True when this firmware reports fans under `device.airduct`, which
     /// selects the `set_fan` command family over legacy `M106` g-code.
     #[serde(skip_serializing_if = "is_false")]
@@ -1299,6 +1320,7 @@ impl BambuExtension {
             && self.mqtt_alive_supported.is_none()
             && self.status_transport.is_none()
             && self.reported_ip.is_none()
+            && self.hms.is_empty()
             && !self.airduct_fans
     }
 }

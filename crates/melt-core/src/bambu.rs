@@ -20,6 +20,7 @@ mod camera_negotiation;
 mod capabilities;
 mod discovery;
 mod firmware;
+mod hms;
 mod identity;
 mod mapping;
 mod names;

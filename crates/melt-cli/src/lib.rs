@@ -4850,6 +4850,7 @@ mod tests {
                     mqtt_alive_supported: None,
                     status_transport: None,
                     reported_ip: None,
+                    hms: Vec::new(),
                     airduct_fans: false,
                 }),
             },
