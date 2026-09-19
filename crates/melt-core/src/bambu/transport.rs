@@ -1,11 +1,11 @@
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     fs::{self, File},
     io::{self, Read, Write},
     net::{SocketAddr, TcpStream, ToSocketAddrs},
     path::Path,
     sync::{
-        Mutex, MutexGuard, TryLockError,
+        Arc, Mutex, MutexGuard, OnceLock, TryLockError, Weak,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -58,6 +58,7 @@ const VERSION_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const VERSION_MAX_ATTEMPTS: u8 = 10;
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static STORAGE_GATES: OnceLock<Mutex<HashMap<String, Weak<Mutex<()>>>>> = OnceLock::new();
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Bambu access code is required")]
@@ -152,15 +153,18 @@ pub struct Client {
     mqtt: Mutex<Option<CachedConnection>>,
     capabilities: Mutex<Option<RuntimeCapabilities>>,
     observed_storage: Mutex<Option<StorageTransport>>,
+    storage_gate: Arc<Mutex<()>>,
 }
 
 impl Client {
     pub fn new(profile: Profile) -> Self {
+        let storage_gate = storage_gate(&profile);
         Self {
             profile,
             mqtt: Mutex::new(None),
             capabilities: Mutex::new(None),
             observed_storage: Mutex::new(None),
+            storage_gate,
         }
     }
 
@@ -1062,6 +1066,7 @@ impl Client {
         if path == "/" {
             return Err(Error::InvalidDevicePath);
         }
+        let _transfer = self.lock_storage_until(deadline_after(self.profile.timeout())?)?;
         if transport == super::StorageTransport::Tunnel6000 {
             return tunnel::Connection::open(&self.profile, access_code, fingerprint)?
                 .download(&path, destination);
@@ -1087,6 +1092,7 @@ impl Client {
             return Err(Error::Unsupported(":6000 SUB_FILE thumbnail"));
         }
         let (storage, path) = storage_location(transport, device_path)?;
+        let _transfer = self.lock_storage_until(deadline_after(self.profile.timeout())?)?;
         let plate = plate.max(1);
         let paths = [
             format!("{path}#Metadata/plate_{plate}.png"),
@@ -1118,6 +1124,7 @@ impl Client {
         if path == "/" {
             return Err(Error::DirectoryDestination);
         }
+        let _transfer = self.lock_storage_until(deadline_after(self.profile.timeout())?)?;
         if transport == super::StorageTransport::Tunnel6000 {
             let mut connection = tunnel::Connection::open(&self.profile, access_code, fingerprint)?;
             if !overwrite {
@@ -1346,6 +1353,31 @@ impl Client {
             }
         }
     }
+
+    fn lock_storage_until(&self, deadline: Instant) -> Result<MutexGuard<'_, ()>, Error> {
+        loop {
+            match self.storage_gate.try_lock() {
+                Ok(storage) => return Ok(storage),
+                Err(TryLockError::Poisoned(error)) => return Ok(error.into_inner()),
+                Err(TryLockError::WouldBlock) => {
+                    std::thread::sleep(remaining(deadline)?.min(Duration::from_millis(1)));
+                }
+            }
+        }
+    }
+}
+
+fn storage_gate(profile: &Profile) -> Arc<Mutex<()>> {
+    let registry = STORAGE_GATES.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut registry = registry.lock().unwrap_or_else(|error| error.into_inner());
+    registry.retain(|_, gate| gate.strong_count() > 0);
+    let key = profile.serial().trim().to_ascii_uppercase();
+    if let Some(gate) = registry.get(&key).and_then(Weak::upgrade) {
+        return gate;
+    }
+    let gate = Arc::new(Mutex::new(()));
+    registry.insert(key, Arc::downgrade(&gate));
+    gate
 }
 
 fn validate_pin(profile: &Profile, fingerprint: Option<&str>) -> Result<(), Error> {
@@ -3971,7 +4003,9 @@ impl FtpsConnection {
         let mut data = self.start_data_tls(socket)?;
         let result = copy_data(source, &mut data);
         let _ = data.flush();
-        let _ = data.shutdown();
+        // Several printer FTPS stacks wait indefinitely for TLS close_notify.
+        // Closing the data socket and confirming the 226 control reply is the
+        // interoperable transfer boundary for affected firmware.
         drop(data);
         self.expect(&[226, 250])?;
         result
@@ -5932,6 +5966,40 @@ mod tests {
         assert!(matches!(result, Err(Error::Timeout)));
         assert!(started.elapsed() < Duration::from_millis(80));
         thread.join().unwrap();
+    }
+
+    #[test]
+    fn storage_transfers_are_serialized_per_printer_across_clients() {
+        let timeout = Duration::from_millis(20);
+        let first =
+            Client::new(Profile::with_timeout("127.0.0.1", "ARB001", true, timeout).unwrap());
+        let second =
+            Client::new(Profile::with_timeout("printer.local", "arb001", true, timeout).unwrap());
+        let other =
+            Client::new(Profile::with_timeout("127.0.0.1", "ARB002", true, timeout).unwrap());
+        assert!(Arc::ptr_eq(&first.storage_gate, &second.storage_gate));
+        assert!(!Arc::ptr_eq(&first.storage_gate, &other.storage_gate));
+
+        let first_transfer = first
+            .lock_storage_until(deadline_after(timeout).unwrap())
+            .unwrap();
+        let started = Instant::now();
+        assert!(matches!(
+            second.lock_storage_until(deadline_after(timeout).unwrap()),
+            Err(Error::Timeout)
+        ));
+        assert!(started.elapsed() < Duration::from_millis(80));
+        let other_transfer = other
+            .lock_storage_until(deadline_after(timeout).unwrap())
+            .unwrap();
+
+        drop(other_transfer);
+        drop(first_transfer);
+        assert!(
+            second
+                .lock_storage_until(deadline_after(timeout).unwrap())
+                .is_ok()
+        );
     }
 
     #[test]
