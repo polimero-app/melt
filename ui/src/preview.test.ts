@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
-const invoke = vi.hoisted(() => vi.fn())
-vi.mock('@tauri-apps/api/core', () => ({ invoke }))
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
+const invoke = (await import('@tauri-apps/api/core')).invoke as unknown as ReturnType<typeof vi.fn>
 
 const { MAX_PREVIEW_CACHE_CHARS, cachedPreview, loadPreview } = await import('./preview')
 
