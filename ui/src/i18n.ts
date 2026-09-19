@@ -464,6 +464,7 @@ export type MessageKey =
   | "operations.motionJog"
   | "operations.lightSet"
   | "operations.speedSet"
+  | "operations.amsDrying"
   | "operations.fileDownload"
   | "operations.fileUpload"
   | "operations.verification"
@@ -975,6 +976,7 @@ const messages: Record<Locale, Messages> = {
     "operations.motionJog": "jogging the printer",
     "operations.lightSet": "setting the light",
     "operations.speedSet": "setting the speed profile",
+    "operations.amsDrying": "changing AMS drying",
     "operations.fileDownload": "downloading the file",
     "operations.fileUpload": "uploading the file",
     "operations.verification": "verifying the profile",
@@ -1466,6 +1468,7 @@ const messages: Record<Locale, Messages> = {
     "operations.motionJog": "o movimento manual",
     "operations.lightSet": "o controle de iluminação",
     "operations.speedSet": "o controle de velocidade",
+    "operations.amsDrying": "a secagem do AMS",
     "operations.fileDownload": "o download do arquivo",
     "operations.fileUpload": "o envio do arquivo",
     "operations.verification": "a verificação do perfil",

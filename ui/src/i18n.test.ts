@@ -18,4 +18,9 @@ describe("localization", () => {
     // Codes the UI does not know yet must not blow up a render.
     expect(translate("en", "errors.notAThing" as never)).toBe("errors.notAThing");
   });
+
+  it("has a translation for every desktop operation slug used in errors, including AMS drying", () => {
+    expect(translate("en", "operations.amsDrying")).toBe("changing AMS drying");
+    expect(translate("pt-BR", "operations.amsDrying")).toBe("a secagem do AMS");
+  });
 });
