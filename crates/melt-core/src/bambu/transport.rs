@@ -11,6 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::firmware_updates::FirmwareUpdateReport;
 use crate::moonraker::{
     AmsData, AmsTray, AmsUnit, BambuExtension, ControlInventory, Extensions, FanControl, FanKind,
     FanMode, FanResult, FileEntry, FileEntryType, FileList, FileRoot, GcodePosition, Job,
@@ -31,9 +32,9 @@ use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rf
 use super::{
     AuthorizationMode, BedLevelingSupport, FirmwareInventory, MQTT_USERNAME, MappingStatus,
     MqttTopics, PrintStage, PrintStageEvent, Profile, RuntimeCapabilities, StorageTransport,
-    StorageVolume, TlsPinError, is_pushall_payload, is_valid_tls_fingerprint,
-    preflight_print_package, pushall_payload, resolve_authorization, tls_fingerprint, tunnel,
-    verify_tls_fingerprint,
+    StorageVolume, TlsPinError, firmware::update_report, is_pushall_payload,
+    is_valid_tls_fingerprint, preflight_print_package, pushall_payload, resolve_authorization,
+    tls_fingerprint, tunnel, verify_tls_fingerprint,
 };
 
 #[cfg(test)]
@@ -240,6 +241,30 @@ impl Client {
         })?;
         *self.capabilities.lock().map_err(|_| Error::Connection)? = Some(capabilities.clone());
         Ok(capabilities)
+    }
+
+    /// Reads firmware-update availability without starting or confirming an
+    /// update. Bambu supplies targets in the normal status snapshot; installed
+    /// module versions come from the existing read-only `info.get_version`
+    /// query on the same authenticated MQTT session.
+    pub fn firmware_update_status(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        refresh: bool,
+    ) -> Result<FirmwareUpdateReport, Error> {
+        self.with_mqtt(access_code, fingerprint, |mqtt| {
+            if refresh || mqtt.status_document.is_none() {
+                mqtt.exchange(pushall_payload(next_sequence()), is_full_report)?;
+            }
+            let version = mqtt.query_version()?;
+            let inventory = FirmwareInventory::from_version_info(&version);
+            let status = mqtt
+                .status_document
+                .as_ref()
+                .ok_or(Error::InvalidResponse)?;
+            Ok(update_report(status, &inventory))
+        })
     }
 
     fn effective_capabilities(&self) -> RuntimeCapabilities {
@@ -4404,7 +4429,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::trace::{Direction, ProtocolTracer};
+    use crate::{
+        firmware_updates::FirmwareUpdateAvailability,
+        trace::{Direction, ProtocolTracer},
+    };
 
     #[test]
     fn fan_commands_follow_the_reported_protocol_generation_not_the_key_name() {
@@ -5743,6 +5771,66 @@ mod tests {
         );
         assert_eq!(capabilities.storage_transport, StorageTransport::Tunnel6000);
         assert!(capabilities.storage_volumes.contains(&StorageVolume::Emmc));
+    }
+
+    #[test]
+    fn passive_firmware_check_reuses_the_accumulated_status_and_version() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let acceptor = test_acceptor();
+        let (release_tx, release_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            assert_eq!(read_test_packet(&mut stream).kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            stream.flush().unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+            release_rx.recv().unwrap();
+        });
+
+        let profile = Profile::with_timeout(
+            address.ip().to_string(),
+            "SN001",
+            true,
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) =
+            open_tls(&connector, &profile, address.port(), None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+        mqtt.subscribe().unwrap();
+        assert!(mqtt.accumulate_status(&json!({"print": {
+            "command": "push_status",
+            "msg": 0,
+            "gcode_state": "IDLE",
+            "upgrade_state": {"ota_new_version_number": "01.09.00.00"}
+        }})));
+        mqtt.device_info = Some(json!({
+            "command": "get_version",
+            "module": [{"name": "ota", "sw_ver": "01.08.00.00"}]
+        }));
+        let identity = profile.connection_identity(Some("access-code"), None);
+        let client = Client::new(profile);
+        *client.mqtt.lock().unwrap() = Some(CachedConnection { identity, mqtt });
+
+        let report = client
+            .firmware_update_status(Some("access-code"), None, false)
+            .unwrap();
+
+        release_tx.send(()).unwrap();
+        server.join().unwrap();
+        assert_eq!(report.availability, FirmwareUpdateAvailability::Available);
+        assert_eq!(
+            report.components[0].available_version.as_deref(),
+            Some("01.09.00.00")
+        );
     }
 
     #[test]
