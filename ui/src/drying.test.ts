@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dryingBounds, dryingDefaults, dryingFault, dryingStoppable } from './drying'
+import { dryingBounds, dryingDefaults, dryingFault, dryingStoppable, dryingTargetShown } from './drying'
 
 describe('drying presets', () => {
   it('uses AMS 2 Pro limits for units 0-3 and AMS HT limits for 128-135', () => {
@@ -39,5 +39,15 @@ describe('dryingStoppable', () => {
     expect(dryingStoppable({ active: false, status: 'heatOutOfControl' })).toBe(true)
     expect(dryingStoppable({ active: false, status: 'off' })).toBe(false)
     expect(dryingStoppable({ active: false, status: 'stopping' })).toBe(false)
+  })
+})
+
+describe('dryingTargetShown', () => {
+  it('hides the target once the displayed reading has reached it', () => {
+    expect(dryingTargetShown(44.7, 45)).toBe(false) // shown as 45 °C
+    expect(dryingTargetShown(45, 45)).toBe(false)
+    expect(dryingTargetShown(38.2, 45)).toBe(true)
+    expect(dryingTargetShown(undefined, 45)).toBe(true)
+    expect(dryingTargetShown(45, undefined)).toBe(false)
   })
 })

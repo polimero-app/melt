@@ -6,7 +6,7 @@ import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plug
 import { locales, preferredLocale, translate, type Locale, type MessageKey } from './i18n'
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration, remainingTimePresentation } from './formatting'
-import { dryingBounds, dryingDefaults, dryingFault, dryingStoppable, type AmsDrying, type DryingStatus } from './drying'
+import { dryingBounds, dryingDefaults, dryingFault, dryingStoppable, dryingTargetShown, type AmsDrying, type DryingStatus } from './drying'
 import { printTargetState } from './printing'
 import { printStageLabel } from './stages'
 import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
@@ -2912,7 +2912,7 @@ onUnmounted(() => {
                       <span v-if="system.drying?.active" class="flex items-center gap-1 text-orange-600 dark:text-orange-400">
                         <PhSun class="size-4" aria-hidden="true" />
                         <span>{{ system.drying.minutesRemaining ? t('drying.remaining', { time: formatDuration(system.drying.minutesRemaining * 60) }) : t(dryingStatusKey(system.drying.status)) }}</span>
-                        <span v-if="system.drying.setting">· {{ t('drying.target', { temperature: system.drying.setting.temperatureC }) }}</span>
+                        <span v-if="system.drying.setting && dryingTargetShown(system.temperature, system.drying.setting.temperatureC)">· {{ t('drying.target', { temperature: system.drying.setting.temperatureC }) }}</span>
                       </span>
                       <span v-else-if="system.drying && dryingFault(system.drying)" class="flex items-center gap-1 text-red-600 dark:text-red-400">
                         <PhWarning class="size-4" aria-hidden="true" />

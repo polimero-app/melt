@@ -47,3 +47,9 @@ export function dryingDefaults(unitId: number, filament?: string) {
   const [temperatureC, hours] = PRESETS[key][unitId >= 128 ? 'ht' : 'pro']
   return { temperatureC, hours, filament: key }
 }
+
+/** The badge repeats the target only while the displayed (rounded) reading differs from it. */
+export function dryingTargetShown(temperature: number | undefined, target: number | undefined): boolean {
+  if (target === undefined) return false
+  return temperature === undefined || Math.round(temperature) !== target
+}
