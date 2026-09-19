@@ -13,6 +13,14 @@ import { commandDetail, commandMessage, type CommandError } from './errors'
 import { hmsGuideUrl, hmsSeverity, type HmsSeverity } from './hms'
 import { startH264Playback, supportsH264WebCodecs, type H264Playback } from './camera-stream'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
+import {
+  hasAvailableUpdate,
+  hasRequiredUpdate,
+  updateEntryFor,
+  versionRail,
+  type FirmwareUpdateComponentKind,
+  type FirmwareUpdateEntry,
+} from './firmware-updates'
 import { naturallyDescending, nextSort, shouldDeferLibraryCards, sortedBy, type FileSort, type SortKey } from './library'
 import {
   PRESET_NAME_MAX_LENGTH,
@@ -140,6 +148,7 @@ type Capabilities = {
   motionControl: boolean
   fanControl: boolean
   tlsRefresh: boolean
+  firmwareUpdateCheck: boolean
 }
 
 type DiscoveredPrinter = {
@@ -405,6 +414,9 @@ const info = ref<AppInfo>()
 const printers = ref<Printer[]>([])
 const drivers = ref<Driver[]>([])
 const monitoring = ref<MonitorEntry[]>([])
+const firmwareUpdates = ref<FirmwareUpdateEntry[]>([])
+const firmwareRefreshing = ref(false)
+const firmwareError = ref<string>()
 const capabilities = ref<Capabilities>()
 const files = ref<FileEntry[]>([])
 const loading = ref(true)
@@ -457,6 +469,7 @@ const cameraLoading = ref(false)
 const cameraError = ref<string>()
 const documentVisible = ref(document.visibilityState === 'visible')
 let monitorUnlisten: UnlistenFn | undefined
+let firmwareUpdatesUnlisten: UnlistenFn | undefined
 let presenceUnlisten: UnlistenFn | undefined
 let notificationUnlisten: UnlistenFn | undefined
 let transferUnlisten: UnlistenFn | undefined
@@ -609,6 +622,25 @@ const compactNavValue = computed({
 const hasPrinters = computed(() => printers.value.length > 0)
 const selectedMonitor = computed(() => monitoring.value.find((entry) => entry.name === activePrinter.value?.name))
 const selectedStatus = computed(() => selectedMonitor.value?.status)
+const activeFirmwareUpdate = computed(() => updateEntryFor(firmwareUpdates.value, activePrinter.value?.name))
+
+const firmwareFor = (name: string) => updateEntryFor(firmwareUpdates.value, name)
+const firmwareComponentLabel = (kind: FirmwareUpdateComponentKind) => t(
+  kind === 'printerFirmware'
+    ? 'firmware.printerFirmware'
+    : kind === 'accessoryFirmware'
+      ? 'firmware.accessoryFirmware'
+      : 'firmware.printerSoftware',
+)
+const firmwareAvailabilityLabel = (entry: FirmwareUpdateEntry) => t(
+  entry.report.availability === 'available'
+    ? 'firmware.available'
+    : entry.report.availability === 'current'
+      ? 'firmware.current'
+      : entry.report.availability === 'unsupported'
+        ? 'firmware.unsupported'
+        : 'firmware.unknown',
+)
 
 function badgeFor(name: string): PrinterBadge {
   const entry = monitoring.value.find((candidate) => candidate.name === name)
@@ -1017,6 +1049,24 @@ function clearSelection() {
   files.value = []
   cameraUrl.value = undefined
   cameraError.value = undefined
+  firmwareError.value = undefined
+}
+
+async function loadFirmwareUpdates(name: string, refresh = false) {
+  if (firmwareRefreshing.value && refresh) return
+  if (refresh) firmwareRefreshing.value = true
+  firmwareError.value = undefined
+  try {
+    const entry = await invoke<FirmwareUpdateEntry>('printer_firmware_updates', { name, refresh })
+    const index = firmwareUpdates.value.findIndex((candidate) => candidate.profile === entry.profile)
+    if (index === -1) firmwareUpdates.value.push(entry)
+    else firmwareUpdates.value.splice(index, 1, entry)
+  } catch (reason) {
+    firmwareError.value = message(reason)
+    if (refresh) showToast(firmwareError.value ?? t('firmware.checkFailed'), 'error')
+  } finally {
+    if (refresh) firmwareRefreshing.value = false
+  }
 }
 
 // Refreshes only the active printer (every caller acts on it specifically),
@@ -1073,6 +1123,7 @@ async function selectPrinter(name: string, refresh = true, focus = refresh) {
     if (request !== selectionRequest || activePrinterId.value !== name) return
     capabilities.value = result.capabilities
     if (result.capabilities.fileList) void loadFiles()
+    if (result.capabilities.firmwareUpdateCheck) void loadFirmwareUpdates(name)
   } catch (reason) {
     showToast(message(reason), 'error')
   }
@@ -2079,6 +2130,16 @@ onMounted(() => {
       if (cached && monitoring.value.length === 0) monitoring.value = cached
     })
   })
+  void listen<FirmwareUpdateEntry>('firmware-updates-updated', (event) => {
+    const index = firmwareUpdates.value.findIndex((candidate) => candidate.profile === event.payload.profile)
+    if (index === -1) firmwareUpdates.value.push(event.payload)
+    else firmwareUpdates.value.splice(index, 1, event.payload)
+  }).then((unlisten) => {
+    firmwareUpdatesUnlisten = unlisten
+    void invoke<FirmwareUpdateEntry[]>('cached_firmware_updates').then((cached) => {
+      if (firmwareUpdates.value.length === 0) firmwareUpdates.value = cached
+    })
+  })
   void listen('presence-updated', () => {
     void invoke<Printer[]>('configured_printers').then((profiles) => {
       printers.value = profiles
@@ -2115,6 +2176,7 @@ onUnmounted(() => {
   void stopCamera()
   systemThemeQuery?.removeEventListener('change', handleSystemThemeChange)
   monitorUnlisten?.()
+  firmwareUpdatesUnlisten?.()
   presenceUnlisten?.()
   notificationUnlisten?.()
   transferUnlisten?.()
@@ -2405,6 +2467,72 @@ onUnmounted(() => {
               </div>
             </div>
           </section>
+          <Card class="mb-5">
+            <CardHeader :title="t('firmware.title')" :icon="PhInfo">
+              <template #suffix>
+                <span
+                  v-if="activeFirmwareUpdate"
+                  class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium"
+                  :class="activeFirmwareUpdate.report.availability === 'available'
+                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-400/10 dark:text-amber-300'
+                    : activeFirmwareUpdate.report.availability === 'current'
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300'
+                      : 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300'"
+                >{{ firmwareAvailabilityLabel(activeFirmwareUpdate) }}</span>
+              </template>
+              <Button
+                variant="secondary"
+                :disabled="firmwareRefreshing || !capabilities?.firmwareUpdateCheck"
+                @click="loadFirmwareUpdates(activePrinter.name, true)"
+              ><PhArrowsClockwise class="size-4" :class="firmwareRefreshing && 'animate-spin'" aria-hidden="true" /> {{ t('firmware.checkAgain') }}</Button>
+            </CardHeader>
+            <div class="px-4 py-5 sm:p-6">
+              <div v-if="!activeFirmwareUpdate" class="flex items-start gap-3 text-sm text-gray-500 dark:text-gray-400" role="status">
+                <PhArrowsClockwise v-if="!firmwareError" class="mt-0.5 size-4 shrink-0 animate-spin" aria-hidden="true" />
+                <PhWarning v-else class="mt-0.5 size-4 shrink-0 text-amber-500" aria-hidden="true" />
+                <p>{{ firmwareError ?? t('firmware.checking') }}</p>
+              </div>
+              <template v-else>
+                <p v-if="activeFirmwareUpdate.report.source === 'moonrakerUpdateManager'" class="mb-4 text-sm text-gray-500 dark:text-gray-400">
+                  {{ t('firmware.klipperScope') }}
+                </p>
+                <div class="divide-y divide-gray-200 dark:divide-white/10">
+                  <div
+                    v-for="component in activeFirmwareUpdate.report.components"
+                    :key="component.id"
+                    class="grid gap-3 py-4 first:pt-0 last:pb-0 sm:grid-cols-[minmax(10rem,1fr)_minmax(0,2fr)] sm:items-center"
+                  >
+                    <div class="min-w-0">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <p class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ component.label }}</p>
+                        <span v-if="component.required" class="rounded-full bg-amber-100 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-400/10 dark:text-amber-300">{{ t('firmware.required') }}</span>
+                      </div>
+                      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ firmwareComponentLabel(component.kind) }}</p>
+                    </div>
+                    <div class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 rounded-md bg-gray-50 px-3 py-2 dark:bg-white/5">
+                      <div class="min-w-0">
+                        <p class="text-[0.65rem] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ t('firmware.installed') }}</p>
+                        <p class="truncate font-mono text-sm text-gray-800 dark:text-gray-200" :title="component.currentVersion">{{ versionRail(component).installed }}</p>
+                      </div>
+                      <PhCaretRight class="size-4 text-gray-400" aria-hidden="true" />
+                      <div class="min-w-0 text-right">
+                        <p class="text-[0.65rem] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ t('firmware.advertised') }}</p>
+                        <p class="truncate font-mono text-sm" :class="component.availability === 'available' ? 'font-semibold text-amber-700 dark:text-amber-300' : 'text-gray-800 dark:text-gray-200'" :title="component.availableVersion">{{ versionRail(component).advertised }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 pt-4 text-xs text-gray-500 dark:border-white/10 dark:text-gray-400">
+                  <span>{{ t('firmware.lastChecked', { date: formatDate(activeFirmwareUpdate.checkedAt) }) }}</span>
+                  <span v-if="activeFirmwareUpdate.stale" class="font-medium text-amber-700 dark:text-amber-300">{{ t('firmware.stale') }}</span>
+                </div>
+                <p v-if="activeFirmwareUpdate.error" class="mt-3 text-xs text-amber-700 dark:text-amber-300">{{ message(activeFirmwareUpdate.error) }}</p>
+                <ul v-if="activeFirmwareUpdate.report.issues.length" class="mt-3 space-y-1 text-xs text-gray-500 dark:text-gray-400">
+                  <li v-for="issue in activeFirmwareUpdate.report.issues" :key="issue.code">{{ issue.message }}</li>
+                </ul>
+              </template>
+            </div>
+          </Card>
           <section class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,3fr)_minmax(18rem,1fr)]">
             <Card class="overflow-hidden">
               <CardHeader :title="t('camera.title')" :icon="PhVideoCamera">
@@ -2853,7 +2981,13 @@ onUnmounted(() => {
             </div>
             <div class="mt-6 flex items-center justify-between border-y border-gray-200 py-3 dark:border-white/10">
               <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('printersView.status') }}</span>
-              <StatusBadge :status="badgeFor(printer.name)" :label="statusLabel(badgeFor(printer.name))" />
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                <span
+                  v-if="hasAvailableUpdate(firmwareFor(printer.name))"
+                  class="inline-flex items-center rounded-md bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800 dark:bg-amber-400/10 dark:text-amber-300"
+                >{{ hasRequiredUpdate(firmwareFor(printer.name)) ? t('firmware.requiredUpdate') : t('firmware.updateAvailable') }}</span>
+                <StatusBadge :status="badgeFor(printer.name)" :label="statusLabel(badgeFor(printer.name))" />
+              </div>
             </div>
             <!-- Description list -->
             <dl class="mt-2 divide-y divide-gray-200 text-xs dark:divide-white/10">

@@ -205,6 +205,25 @@ export type MessageKey =
   | "control.emergencyStopSent"
   | "control.observedAt"
   | "control.observedAtTitle"
+  | "firmware.title"
+  | "firmware.available"
+  | "firmware.current"
+  | "firmware.unknown"
+  | "firmware.unsupported"
+  | "firmware.checkAgain"
+  | "firmware.checking"
+  | "firmware.checkFailed"
+  | "firmware.klipperScope"
+  | "firmware.printerFirmware"
+  | "firmware.accessoryFirmware"
+  | "firmware.printerSoftware"
+  | "firmware.installed"
+  | "firmware.advertised"
+  | "firmware.required"
+  | "firmware.lastChecked"
+  | "firmware.stale"
+  | "firmware.updateAvailable"
+  | "firmware.requiredUpdate"
   | "camera.title"
   | "camera.live"
   | "camera.snapshotLabel"
@@ -666,6 +685,25 @@ const messages: Record<Locale, Messages> = {
     "control.emergencyStopSent": "Emergency stop sent",
     "control.observedAt": "{seconds}s ago",
     "control.observedAtTitle": "Age of the last reading received from the printer",
+    "firmware.title": "Firmware & software",
+    "firmware.available": "Update available",
+    "firmware.current": "Current",
+    "firmware.unknown": "Availability unknown",
+    "firmware.unsupported": "Not available",
+    "firmware.checkAgain": "Check again",
+    "firmware.checking": "Checking update availability…",
+    "firmware.checkFailed": "The update check failed.",
+    "firmware.klipperScope": "This checks Klipper software through Moonraker. Controller-board firmware is not checked.",
+    "firmware.printerFirmware": "Printer firmware",
+    "firmware.accessoryFirmware": "Accessory firmware",
+    "firmware.printerSoftware": "Printer software",
+    "firmware.installed": "Installed",
+    "firmware.advertised": "Advertised",
+    "firmware.required": "Required",
+    "firmware.lastChecked": "Last checked {date}",
+    "firmware.stale": "Stored result — confirmation is more than 24 hours old",
+    "firmware.updateAvailable": "Update available",
+    "firmware.requiredUpdate": "Required update",
     "camera.title": "Camera",
     "camera.live": "LIVE",
     "camera.snapshotLabel": "SNAPSHOT",
@@ -1124,6 +1162,25 @@ const messages: Record<Locale, Messages> = {
     "control.emergencyStopSent": "Parada de emergência enviada",
     "control.observedAt": "há {seconds}s",
     "control.observedAtTitle": "Idade da última leitura recebida da impressora",
+    "firmware.title": "Firmware e software",
+    "firmware.available": "Atualização disponível",
+    "firmware.current": "Atual",
+    "firmware.unknown": "Disponibilidade desconhecida",
+    "firmware.unsupported": "Indisponível",
+    "firmware.checkAgain": "Verificar novamente",
+    "firmware.checking": "Verificando atualizações disponíveis…",
+    "firmware.checkFailed": "A verificação de atualizações falhou.",
+    "firmware.klipperScope": "Esta verificação cobre o software Klipper via Moonraker. O firmware da placa controladora não é verificado.",
+    "firmware.printerFirmware": "Firmware da impressora",
+    "firmware.accessoryFirmware": "Firmware de acessório",
+    "firmware.printerSoftware": "Software da impressora",
+    "firmware.installed": "Instalado",
+    "firmware.advertised": "Anunciado",
+    "firmware.required": "Obrigatória",
+    "firmware.lastChecked": "Última verificação em {date}",
+    "firmware.stale": "Resultado armazenado — confirmação há mais de 24 horas",
+    "firmware.updateAvailable": "Atualização disponível",
+    "firmware.requiredUpdate": "Atualização obrigatória",
     "camera.title": "Câmera",
     "camera.live": "AO VIVO",
     "camera.snapshotLabel": "CAPTURA",
