@@ -245,6 +245,39 @@ export type MessageKey =
   | "materials.ready"
   | "materials.humidity"
   | "materials.temperature"
+  | "drying.dry"
+  | "drying.start"
+  | "drying.stop"
+  | "drying.temperature"
+  | "drying.hours"
+  | "drying.remaining"
+  | "drying.started"
+  | "drying.stopped"
+  | "drying.startTitle"
+  | "drying.startDescription"
+  | "drying.startConfirm"
+  | "drying.stopTitle"
+  | "drying.stopDescription"
+  | "drying.stopConfirm"
+  | "drying.screenOnly"
+  | "drying.status.off"
+  | "drying.status.checking"
+  | "drying.status.drying"
+  | "drying.status.cooling"
+  | "drying.status.stopping"
+  | "drying.status.error"
+  | "drying.status.heatOutOfControl"
+  | "drying.status.unknown"
+  | "drying.blocked.printer_busy"
+  | "drying.blocked.insufficient_power"
+  | "drying.blocked.ams_busy"
+  | "drying.blocked.filament_at_outlet"
+  | "drying.blocked.already_starting"
+  | "drying.blocked.unsupported_in_2d_mode"
+  | "drying.blocked.already_drying"
+  | "drying.blocked.firmware_upgrading"
+  | "drying.blocked.external_power_required"
+  | "drying.blocked.unknown"
   | "printersView.title"
   | "printersView.description"
   | "printersView.discover"
@@ -453,6 +486,7 @@ export type MessageKey =
   | "operations.motionJog"
   | "operations.lightSet"
   | "operations.speedSet"
+  | "operations.amsDrying"
   | "operations.fileDownload"
   | "operations.fileUpload"
   | "operations.verification"
@@ -728,6 +762,39 @@ const messages: Record<Locale, Messages> = {
     "materials.ready": "Ready",
     "materials.humidity": "Humidity",
     "materials.temperature": "Temperature",
+    "drying.dry": "Dry…",
+    "drying.start": "Start drying",
+    "drying.stop": "Stop drying",
+    "drying.temperature": "Temperature",
+    "drying.hours": "Duration",
+    "drying.remaining": "Drying · {time} left",
+    "drying.started": "{unit}: drying started",
+    "drying.stopped": "{unit}: drying stopped",
+    "drying.startTitle": "Start drying?",
+    "drying.startDescription": "{unit} will heat to {temperature} °C for {hours} h.",
+    "drying.startConfirm": "Start",
+    "drying.stopTitle": "Stop drying?",
+    "drying.stopDescription": "{unit} will stop its drying cycle.",
+    "drying.stopConfirm": "Stop",
+    "drying.screenOnly": "Drying can only be started from the printer screen.",
+    "drying.status.off": "Off",
+    "drying.status.checking": "Checking",
+    "drying.status.drying": "Drying",
+    "drying.status.cooling": "Cooling",
+    "drying.status.stopping": "Stopping",
+    "drying.status.error": "Error",
+    "drying.status.heatOutOfControl": "Heat out of control",
+    "drying.status.unknown": "Unknown",
+    "drying.blocked.printer_busy": "Printer is busy",
+    "drying.blocked.insufficient_power": "Insufficient power",
+    "drying.blocked.ams_busy": "AMS is busy",
+    "drying.blocked.filament_at_outlet": "Retract filament from the AMS outlet first",
+    "drying.blocked.already_starting": "Already starting",
+    "drying.blocked.unsupported_in_2d_mode": "Not available in 2D mode",
+    "drying.blocked.already_drying": "Already drying",
+    "drying.blocked.firmware_upgrading": "AMS firmware is upgrading",
+    "drying.blocked.external_power_required": "Plug in the external AMS power adapter",
+    "drying.blocked.unknown": "Printer refused to start drying",
     "printersView.title": "Printer management",
     "printersView.description": "Discover and maintain the printers available on your local network.",
     "printersView.discover": "Discover printers",
@@ -953,6 +1020,7 @@ const messages: Record<Locale, Messages> = {
     "operations.motionJog": "jogging the printer",
     "operations.lightSet": "setting the light",
     "operations.speedSet": "setting the speed profile",
+    "operations.amsDrying": "changing AMS drying",
     "operations.fileDownload": "downloading the file",
     "operations.fileUpload": "uploading the file",
     "operations.verification": "verifying the profile",
@@ -1208,6 +1276,39 @@ const messages: Record<Locale, Messages> = {
     "materials.ready": "Pronto",
     "materials.humidity": "Umidade",
     "materials.temperature": "Temperatura",
+    "drying.dry": "Secar…",
+    "drying.start": "Iniciar secagem",
+    "drying.stop": "Parar secagem",
+    "drying.temperature": "Temperatura",
+    "drying.hours": "Duração",
+    "drying.remaining": "Secando · faltam {time}",
+    "drying.started": "{unit}: secagem iniciada",
+    "drying.stopped": "{unit}: secagem interrompida",
+    "drying.startTitle": "Iniciar secagem?",
+    "drying.startDescription": "{unit} aquecerá a {temperature} °C por {hours} h.",
+    "drying.startConfirm": "Iniciar",
+    "drying.stopTitle": "Parar secagem?",
+    "drying.stopDescription": "{unit} interromperá o ciclo de secagem.",
+    "drying.stopConfirm": "Parar",
+    "drying.screenOnly": "A secagem só pode ser iniciada pela tela da impressora.",
+    "drying.status.off": "Desligado",
+    "drying.status.checking": "Verificando",
+    "drying.status.drying": "Secando",
+    "drying.status.cooling": "Resfriando",
+    "drying.status.stopping": "Parando",
+    "drying.status.error": "Erro",
+    "drying.status.heatOutOfControl": "Aquecimento fora de controle",
+    "drying.status.unknown": "Desconhecido",
+    "drying.blocked.printer_busy": "Impressora ocupada",
+    "drying.blocked.insufficient_power": "Energia insuficiente",
+    "drying.blocked.ams_busy": "AMS ocupado",
+    "drying.blocked.filament_at_outlet": "Retraia o filamento da saída do AMS",
+    "drying.blocked.already_starting": "Já iniciando",
+    "drying.blocked.unsupported_in_2d_mode": "Indisponível no modo 2D",
+    "drying.blocked.already_drying": "Já secando",
+    "drying.blocked.firmware_upgrading": "Atualizando firmware do AMS",
+    "drying.blocked.external_power_required": "Conecte o adaptador de energia externo do AMS",
+    "drying.blocked.unknown": "A impressora recusou iniciar a secagem",
     "printersView.title": "Gerenciamento de impressoras",
     "printersView.description": "Descubra e mantenha as impressoras disponíveis na sua rede local.",
     "printersView.discover": "Descobrir impressoras",
@@ -1433,6 +1534,7 @@ const messages: Record<Locale, Messages> = {
     "operations.motionJog": "o movimento manual",
     "operations.lightSet": "o controle de iluminação",
     "operations.speedSet": "o controle de velocidade",
+    "operations.amsDrying": "a secagem do AMS",
     "operations.fileDownload": "o download do arquivo",
     "operations.fileUpload": "o envio do arquivo",
     "operations.verification": "a verificação do perfil",

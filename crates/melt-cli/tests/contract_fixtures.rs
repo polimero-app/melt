@@ -33,7 +33,7 @@ fn contract_fixtures_match_the_cli_envelope_and_exit_contract() {
     let inventory: Value = read_json("inventory.json");
     assert_eq!(inventory["schemaVersion"], 2);
     let commands = inventory["commands"].as_array().expect("commands array");
-    assert_eq!(commands.len(), 37);
+    assert_eq!(commands.len(), 41);
     assert!(
         commands
             .iter()

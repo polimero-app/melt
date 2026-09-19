@@ -12,6 +12,10 @@
   ],
   "commands": [
     {"path": "melt", "arguments": "", "flags": [], "implementation": "implemented"},
+    {"path": "ams", "arguments": "", "flags": [], "implementation": "implemented"},
+    {"path": "ams dry", "arguments": "", "flags": [], "implementation": "implemented"},
+    {"path": "ams dry start", "arguments": "<printer> <ams-id>", "flags": ["--temperature <celsius>", "--hours <hours>", "--filament <type>", "--yes", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
+    {"path": "ams dry stop", "arguments": "<printer> <ams-id>", "flags": ["--yes", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
     {"path": "camera", "arguments": "", "flags": [], "implementation": "implemented"},
     {"path": "camera snapshot", "arguments": "<printer>", "flags": ["--to <path>", "--overwrite", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
     {"path": "camera stream", "arguments": "<printer>", "flags": ["--format <format>", "--port <port>", "--insecure", "--protocol-trace <path>", "--timeout <duration>", "--duration <duration>"], "implementation": "implemented"},

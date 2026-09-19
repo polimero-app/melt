@@ -1492,7 +1492,47 @@ pub struct AmsUnit {
     pub humidity_level: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drying: Option<AmsDrying>,
     pub trays: Vec<AmsTray>,
+}
+
+/// Drying phase from bits 4-7 of the AMS `info` word (Bambu Studio
+/// `DevFilaSystem`). `PrdTesting` (7) and future values read as `Unknown`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DryingStatus {
+    Off,
+    Checking,
+    Drying,
+    Cooling,
+    Stopping,
+    Error,
+    HeatOutOfControl,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DryingSetting {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filament: Option<String>,
+    pub temperature_c: u16,
+    pub hours: u16,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AmsDrying {
+    pub status: DryingStatus,
+    pub active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minutes_remaining: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub setting: Option<DryingSetting>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub blocked_reasons: Vec<&'static str>,
+    pub controllable: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -1750,6 +1790,25 @@ impl LightState {
 pub struct LightResult {
     pub light: String,
     pub state: LightState,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(tag = "action", rename_all = "camelCase")]
+pub enum DryingRequest {
+    #[serde(rename_all = "camelCase")]
+    Start {
+        temperature_c: u16,
+        hours: u16,
+        filament: Option<String>,
+    },
+    Stop,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DryingResult {
+    pub ams_id: u32,
+    pub active: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]

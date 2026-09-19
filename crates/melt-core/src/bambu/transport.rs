@@ -13,12 +13,13 @@ use std::{
 
 use crate::firmware_updates::FirmwareUpdateReport;
 use crate::moonraker::{
-    AmsData, AmsTray, AmsUnit, BambuExtension, ControlInventory, Extensions, FanControl, FanKind,
-    FanMode, FanResult, FileEntry, FileEntryType, FileList, FileRoot, GcodePosition, Job,
-    JobResult, LightControl, LightKind, LightMode, LightResult, LightState, MotionResult,
-    MotionState, PrintMeta, PrinterState, Progress, SpeedResult, Status, StatusError,
-    StatusWarning, Temperature, TemperatureControl, TemperatureKind, TemperatureResult,
-    TemperatureTargets, Temperatures, TimeEstimates, Timelapse, ToolPosition, Wifi,
+    AmsData, AmsDrying, AmsTray, AmsUnit, BambuExtension, ControlInventory, DryingRequest,
+    DryingResult, DryingSetting, DryingStatus, Extensions, FanControl, FanKind, FanMode, FanResult,
+    FileEntry, FileEntryType, FileList, FileRoot, GcodePosition, Job, JobResult, LightControl,
+    LightKind, LightMode, LightResult, LightState, MotionResult, MotionState, PrintMeta,
+    PrinterState, Progress, SpeedResult, Status, StatusError, StatusWarning, Temperature,
+    TemperatureControl, TemperatureKind, TemperatureResult, TemperatureTargets, Temperatures,
+    TimeEstimates, Timelapse, ToolPosition, Wifi,
 };
 use crate::trace::TraceEvent;
 use openssl::ssl::{
@@ -114,6 +115,10 @@ pub enum Error {
     LocalIo,
     #[error("print package preflight failed")]
     PreflightRejected,
+    #[error("invalid AMS drying request: {0}")]
+    InvalidDryingRequest(&'static str),
+    #[error("AMS drying is blocked: {0}")]
+    DryingBlocked(&'static str),
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -128,6 +133,7 @@ pub enum MutationClass {
     Fan,
     Light,
     Speed,
+    Drying,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -985,6 +991,71 @@ impl Client {
         })?;
         Ok(SpeedResult {
             speed_profile: speed_profile.to_owned(),
+        })
+    }
+
+    pub fn ams_drying_set(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        ams_id: u32,
+        request: &DryingRequest,
+    ) -> Result<DryingResult, Error> {
+        self.authorize_mutation(access_code, fingerprint, MutationClass::Drying)?;
+        validate_drying_request(ams_id, request)?;
+        let status = self.status(access_code, fingerprint)?;
+        let unit = status
+            .extensions
+            .bambu_lan
+            .as_ref()
+            .and_then(|extension| extension.ams.as_ref())
+            .and_then(|ams| ams.units.iter().find(|unit| unit.id == ams_id))
+            .ok_or(Error::Unsupported("requested AMS unit on this printer"))?;
+        let drying = unit
+            .drying
+            .as_ref()
+            .ok_or(Error::Unsupported("drying on this AMS unit"))?;
+        if !drying.controllable {
+            return Err(Error::Unsupported(
+                "remote AMS drying on this printer; start it from the printer screen",
+            ));
+        }
+        let start = match request {
+            DryingRequest::Stop if stop_is_noop(drying) => {
+                return Ok(DryingResult {
+                    ams_id,
+                    active: false,
+                });
+            }
+            DryingRequest::Stop => None,
+            DryingRequest::Start {
+                temperature_c,
+                hours,
+                filament,
+            } => {
+                if let Some(message) = start_block_reason(drying) {
+                    return Err(Error::DryingBlocked(message));
+                }
+                Some((
+                    *temperature_c,
+                    *hours,
+                    drying_filament(filament.as_deref(), unit)?,
+                ))
+            }
+        };
+        let payload = drying_payload(
+            ams_id,
+            start
+                .as_ref()
+                .map(|(temp, hours, filament)| (*temp, *hours, filament.as_str())),
+        );
+        let is_start = start.is_some();
+        self.exchange(access_code, fingerprint, payload, |report| {
+            drying_reached(report, ams_id, is_start)
+        })?;
+        Ok(DryingResult {
+            ams_id,
+            active: is_start,
         })
     }
 
@@ -3496,18 +3567,260 @@ fn ams_humidity(index: i64) -> Option<(&'static str, &'static str)> {
     }
 }
 
+/// `dry_sf_reason` codes: (stable identifier, message). Index = firmware code.
+const DRY_BLOCK_REASONS: [(&str, &str); 9] = [
+    ("printer_busy", "the printer is busy"),
+    (
+        "insufficient_power",
+        "insufficient power: too many AMS units drying or an external PSU is required",
+    ),
+    ("ams_busy", "the AMS is busy"),
+    (
+        "filament_at_outlet",
+        "filament is at the AMS outlet; retract it first",
+    ),
+    (
+        "already_starting",
+        "the AMS is already starting a drying cycle",
+    ),
+    (
+        "unsupported_in_2d_mode",
+        "drying is not available in 2D mode",
+    ),
+    ("already_drying", "the AMS is already drying"),
+    ("firmware_upgrading", "the AMS firmware is upgrading"),
+    (
+        "external_power_required",
+        "plug in the external AMS power adapter",
+    ),
+];
+
+fn drying_status(code: u64) -> DryingStatus {
+    match code {
+        0 => DryingStatus::Off,
+        1 => DryingStatus::Checking,
+        2 => DryingStatus::Drying,
+        3 => DryingStatus::Cooling,
+        4 => DryingStatus::Stopping,
+        5 => DryingStatus::Error,
+        6 => DryingStatus::HeatOutOfControl,
+        _ => DryingStatus::Unknown,
+    }
+}
+
+/// Bambuddy's rule: `dry_time` reads 0 through the closing cooling phase, so
+/// the phase also counts. HeatOutOfControl is never "expected heat".
+fn unit_drying_active(minutes: Option<u32>, status: DryingStatus) -> bool {
+    minutes.is_some()
+        || matches!(
+            status,
+            DryingStatus::Checking | DryingStatus::Drying | DryingStatus::Cooling
+        )
+}
+
+/// Decides whether a start request should be refused, and why.
+///
+/// An active unit is refused outright: a stale `blocked_reasons` snapshot
+/// from before the cycle started (e.g. real dakota capture: active with
+/// `dry_sf_reason: [6]`, code 6 == already_drying) must never let the
+/// "already drying" reason fall through and read as a real block on an idle
+/// unit, so `already_drying` is dropped before picking the first reason for
+/// an inactive unit.
+fn start_block_reason(drying: &AmsDrying) -> Option<&'static str> {
+    if drying.active {
+        return Some("the AMS is already drying");
+    }
+    let code = drying
+        .blocked_reasons
+        .iter()
+        .find(|reason| **reason != "already_drying")?;
+    Some(
+        DRY_BLOCK_REASONS
+            .iter()
+            .find(|(identifier, _)| identifier == code)
+            .map_or("the printer refused to start drying", |(_, message)| {
+                *message
+            }),
+    )
+}
+
+/// Decides whether a stop request is a no-op: only when the unit is fully
+/// idle (`Off`, no time left). Every fault or in-progress state (including
+/// `HeatOutOfControl`, `Error`, `Stopping`, and `Unknown`) still sends the
+/// stop command, since `drying.active` deliberately excludes those states.
+fn stop_is_noop(drying: &AmsDrying) -> bool {
+    drying.status == DryingStatus::Off && drying.minutes_remaining.is_none()
+}
+
+/// Only heater-equipped units (AMS 2 Pro, AMS HT) report `dry_time`.
+fn ams_drying(unit: &Value, remote_dry: bool) -> Option<AmsDrying> {
+    let minutes = integer(unit.get("dry_time"))?;
+    let minutes_remaining = u32::try_from(minutes).ok().filter(|value| *value > 0);
+    let status = string(unit.get("info"))
+        .and_then(|info| u64::from_str_radix(info.trim(), 16).ok())
+        .map_or(DryingStatus::Unknown, |info| {
+            drying_status((info >> 4) & 0xF)
+        });
+    let setting = unit.get("dry_setting").and_then(|setting| {
+        Some(DryingSetting {
+            filament: string(setting.get("dry_filament")).filter(|value| !value.is_empty()),
+            temperature_c: integer(setting.get("dry_temperature"))
+                .and_then(|value| u16::try_from(value).ok())
+                .filter(|value| *value > 0)?,
+            hours: integer(setting.get("dry_duration"))
+                .and_then(|value| u16::try_from(value).ok())
+                .filter(|value| *value > 0)?,
+        })
+    });
+    let blocked_reasons = unit
+        .get("dry_sf_reason")
+        .and_then(Value::as_array)
+        .map(|codes| {
+            codes
+                .iter()
+                .map(|code| {
+                    integer(Some(code))
+                        .and_then(|code| usize::try_from(code).ok())
+                        .and_then(|code| DRY_BLOCK_REASONS.get(code))
+                        .map_or("unknown", |(identifier, _)| *identifier)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(AmsDrying {
+        status,
+        active: unit_drying_active(minutes_remaining, status),
+        minutes_remaining,
+        setting,
+        blocked_reasons,
+        controllable: remote_dry,
+    })
+}
+
+// ponytail: bounds by unit id range (0-3 AMS 2 Pro, 128-135 AMS HT, per
+// Bambuddy). The firmware still rejects out-of-range targets; read module
+// names (n3f/n3s) from the firmware inventory if a new unit type breaks this.
+fn drying_temperature_bounds(ams_id: u32) -> Option<std::ops::RangeInclusive<u16>> {
+    match ams_id {
+        0..=3 => Some(45..=65),
+        128..=135 => Some(45..=85),
+        _ => None,
+    }
+}
+
+fn validate_drying_request(ams_id: u32, request: &DryingRequest) -> Result<(), Error> {
+    let bounds =
+        drying_temperature_bounds(ams_id).ok_or(Error::Unsupported("drying on this AMS unit"))?;
+    let DryingRequest::Start {
+        temperature_c,
+        hours,
+        ..
+    } = request
+    else {
+        return Ok(());
+    };
+    if !bounds.contains(temperature_c) {
+        return Err(Error::InvalidDryingRequest(
+            "temperature outside this AMS unit's range",
+        ));
+    }
+    if !(1..=24).contains(hours) {
+        return Err(Error::InvalidDryingRequest("duration must be 1-24 hours"));
+    }
+    Ok(())
+}
+
+/// The printer rejects a start with no filament type.
+fn drying_filament(requested: Option<&str>, unit: &AmsUnit) -> Result<String, Error> {
+    let filament = requested
+        .map(str::to_owned)
+        .or_else(|| {
+            unit.trays
+                .iter()
+                .find_map(|tray| tray.filament_type.clone())
+        })
+        .unwrap_or_else(|| "PLA".into())
+        .to_ascii_uppercase();
+    if filament.is_empty()
+        || filament.len() > 16
+        || !filament
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'+' | b' '))
+    {
+        return Err(Error::InvalidDryingRequest("invalid filament type"));
+    }
+    Ok(filament)
+}
+
+/// `start` = `(temperature °C, hours, filament)`; `None` stops the cycle.
+fn drying_payload(ams_id: u32, start: Option<(u16, u16, &str)>) -> String {
+    let (mode, temp, duration, cooling_temp, filament) = match start {
+        Some((temp, hours, filament)) => (1, temp, hours, 20, filament),
+        None => (0, 0, 0, 0, ""),
+    };
+    json!({
+        "print": {
+            "sequence_id": next_sequence_id(),
+            "command": "ams_filament_drying",
+            "ams_id": ams_id,
+            "mode": mode,
+            "filament": filament,
+            "temp": temp,
+            "duration": duration,
+            "humidity": 0,
+            "rotate_tray": false,
+            "cooling_temp": cooling_temp,
+            "close_power_conflict": false,
+        }
+    })
+    .to_string()
+}
+
+/// Start is proven once the unit leaves Off (Checking counts); stop once it is
+/// neither checking nor drying and has no time left.
+fn drying_reached(report: &Value, ams_id: u32, start: bool) -> bool {
+    let Some(unit) = report
+        .pointer("/print/ams/ams")
+        .and_then(Value::as_array)
+        .and_then(|units| {
+            units
+                .iter()
+                .find(|unit| integer(unit.get("id")) == Some(i64::from(ams_id)))
+        })
+    else {
+        return false;
+    };
+    let Some(drying) = ams_drying(unit, false) else {
+        return false;
+    };
+    let running = matches!(drying.status, DryingStatus::Checking | DryingStatus::Drying);
+    if start {
+        running || drying.minutes_remaining.is_some()
+    } else {
+        !running && drying.minutes_remaining.is_none()
+    }
+}
+
 fn ams_data(print: &Map<String, Value>) -> Option<AmsData> {
+    // Bit 5 is Bambu Studio's `is_support_remote_dry`. P1-class firmware omits
+    // `fun2` and silently ignores the command, so absence means screen-only.
+    let remote_dry = fun2_bit(print, 5).unwrap_or(false);
     let mut units: Vec<AmsUnit> = print
         .get("ams")
         .and_then(|ams| ams.get("ams"))
         .and_then(Value::as_array)
-        .map(|entries| entries.iter().map(ams_unit).collect())
+        .map(|entries| {
+            entries
+                .iter()
+                .map(|unit| ams_unit(unit, remote_dry))
+                .collect()
+        })
         .unwrap_or_default();
     units.extend(virtual_tray_units(print));
     (!units.is_empty()).then_some(AmsData { units })
 }
 
-fn ams_unit(unit: &Value) -> AmsUnit {
+fn ams_unit(unit: &Value, remote_dry: bool) -> AmsUnit {
     let humidity = integer(unit.get("humidity")).and_then(ams_humidity);
     AmsUnit {
         id: integer(unit.get("id"))
@@ -3517,6 +3830,7 @@ fn ams_unit(unit: &Value) -> AmsUnit {
         humidity_range: humidity.map(|(range, _)| range),
         humidity_level: humidity.map(|(_, level)| level),
         temperature: number(unit.get("temp")).filter(|value| *value > 0.0),
+        drying: ams_drying(unit, remote_dry),
         trays: unit
             .get("tray")
             .and_then(Value::as_array)
@@ -3588,6 +3902,7 @@ fn virtual_tray_units(print: &Map<String, Value>) -> Vec<AmsUnit> {
             humidity_range: None,
             humidity_level: None,
             temperature: None,
+            drying: None,
             trays: vec![AmsTray {
                 slot: 0,
                 tray_index: integer(tray.get("id"))
@@ -3653,11 +3968,16 @@ fn sd_card_state(print: &Map<String, Value>) -> Option<&'static str> {
     }
 }
 
+/// `fun2` is a hex capability mask of arbitrary length.
+fn fun2_bit(print: &Map<String, Value>, bit: u32) -> Option<bool> {
+    let raw = string(print.get("fun2")).filter(|value| !value.is_empty())?;
+    let bits = u128::from_str_radix(raw.trim(), 16).ok()?;
+    Some(bits & (1 << bit) != 0)
+}
+
 /// eMMC support is advertised by bit 17 of the hex `fun2` capability mask.
 fn has_emmc(print: &Map<String, Value>) -> Option<bool> {
-    let raw = string(print.get("fun2")).filter(|value| !value.is_empty())?;
-    let bits = u64::from_str_radix(raw.trim(), 16).ok()?;
-    (bits & (1 << 17) != 0).then_some(true)
+    fun2_bit(print, 17).filter(|supported| *supported)
 }
 
 fn string(value: Option<&Value>) -> Option<String> {
@@ -4792,6 +5112,123 @@ mod tests {
             Some("2024-06-19T00:00:00Z")
         );
         assert_eq!(ftp_modified_at("Foo", "19", "2024"), None);
+    }
+
+    // Sanitized from a 2026-09-19 dakota capture (H2-class, fw 01.02.00.00).
+    fn h2_drying_print() -> Value {
+        json!({
+            "fun2": "2011FF",
+            "ams": {"ams": [
+                {"id": "0", "info": "10942023", "dry_time": 661, "humidity": "1", "temp": "44.7",
+                 "dry_setting": {"dry_duration": 12, "dry_filament": "PLA", "dry_temperature": 45},
+                 "dry_sf_reason": [6], "tray": []},
+                {"id": "128", "info": "11942124", "dry_time": 661, "temp": "45.0",
+                 "dry_setting": {"dry_duration": -1, "dry_filament": "", "dry_temperature": -1},
+                 "dry_sf_reason": [], "tray": []}
+            ]}
+        })
+    }
+
+    #[test]
+    fn decodes_an_active_remote_capable_drying_cycle() {
+        let print = h2_drying_print();
+        let units = ams_data(print.as_object().unwrap()).unwrap().units;
+
+        let drying = units[0].drying.as_ref().unwrap();
+        assert_eq!(drying.status, DryingStatus::Drying);
+        assert!(drying.active);
+        assert_eq!(drying.minutes_remaining, Some(661));
+        assert_eq!(
+            drying.setting,
+            Some(DryingSetting {
+                filament: Some("PLA".into()),
+                temperature_c: 45,
+                hours: 12
+            })
+        );
+        assert_eq!(drying.blocked_reasons, vec!["already_drying"]);
+        assert!(drying.controllable);
+        // `-1` sentinels mean "no setting reported", not a 65535 °C target.
+        assert_eq!(units[1].drying.as_ref().unwrap().setting, None);
+    }
+
+    #[test]
+    fn drying_state_table() {
+        // (unit json, fun2, expected status, active, controllable)
+        let cases = [
+            // georgia: P1-class firmware, drying started on screen, no fun2.
+            (
+                json!({"id": "128", "info": "142024", "dry_time": 661}),
+                None,
+                DryingStatus::Drying,
+                true,
+                false,
+            ),
+            // alaska: heater-equipped HT unit, idle.
+            (
+                json!({"id": "128", "info": "2004", "dry_time": 0}),
+                None,
+                DryingStatus::Off,
+                false,
+                false,
+            ),
+            // Cooling phase: dry_time already 0 but the cycle is still live.
+            (
+                json!({"id": "0", "info": "30", "dry_time": 0}),
+                Some("20"),
+                DryingStatus::Cooling,
+                true,
+                true,
+            ),
+            // Unparseable info with time left: still active, phase unknown.
+            (
+                json!({"id": "0", "info": "zz", "dry_time": 5}),
+                Some("20"),
+                DryingStatus::Unknown,
+                true,
+                true,
+            ),
+            // HeatOutOfControl is a fault, never an "expected heat" live cycle.
+            (
+                json!({"id": "0", "info": "60", "dry_time": 0}),
+                Some("20"),
+                DryingStatus::HeatOutOfControl,
+                false,
+                true,
+            ),
+        ];
+        for (unit, fun2, status, active, controllable) in cases {
+            let mut print = json!({"ams": {"ams": [unit.clone()]}});
+            if let Some(fun2) = fun2 {
+                print["fun2"] = json!(fun2);
+            }
+            let units = ams_data(print.as_object().unwrap()).unwrap().units;
+            let drying = units[0].drying.as_ref().unwrap_or_else(|| panic!("{unit}"));
+            assert_eq!(drying.status, status, "{unit}");
+            assert_eq!(drying.active, active, "{unit}");
+            assert_eq!(drying.controllable, controllable, "{unit}");
+        }
+    }
+
+    #[test]
+    fn units_without_a_heater_report_no_drying_block() {
+        // Classic AMS and AMS Lite never send dry_time.
+        let print =
+            json!({"fun2": "20", "ams": {"ams": [{"id": "0", "info": "1001", "tray": []}]}});
+        let units = ams_data(print.as_object().unwrap()).unwrap().units;
+        assert_eq!(units[0].drying, None);
+    }
+
+    #[test]
+    fn unknown_block_reason_codes_are_kept_as_unknown() {
+        let print = json!({"fun2": "20", "ams": {"ams": [
+            {"id": "0", "info": "0", "dry_time": 0, "dry_sf_reason": [3, 99]}
+        ]}});
+        let units = ams_data(print.as_object().unwrap()).unwrap().units;
+        assert_eq!(
+            units[0].drying.as_ref().unwrap().blocked_reasons,
+            vec!["filament_at_outlet", "unknown"]
+        );
     }
 
     #[test]
@@ -6142,6 +6579,274 @@ mod tests {
                 .lock_storage_until(deadline_after(timeout).unwrap())
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn drying_start_validation_table() {
+        let start = |temperature_c, hours| DryingRequest::Start {
+            temperature_c,
+            hours,
+            filament: None,
+        };
+        // (ams_id, request, ok)
+        let cases = [
+            (0, start(45, 12), true),
+            (0, start(65, 1), true),
+            (0, start(66, 12), false),  // AMS 2 Pro max 65 °C
+            (128, start(85, 24), true), // AMS HT max 85 °C
+            (128, start(44, 12), false),
+            (128, start(60, 0), false),
+            (128, start(60, 25), false),
+            (254, start(45, 1), false), // external spool has no heater
+            (0, DryingRequest::Stop, true),
+        ];
+        for (ams_id, request, ok) in cases {
+            assert_eq!(
+                validate_drying_request(ams_id, &request).is_ok(),
+                ok,
+                "{ams_id} {request:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn drying_filament_falls_back_to_the_loaded_tray_then_pla() {
+        let loaded = AmsUnit {
+            trays: vec![AmsTray {
+                filament_type: Some("PETG".into()),
+                ..AmsTray::default()
+            }],
+            ..AmsUnit::default()
+        };
+        assert_eq!(drying_filament(None, &loaded).unwrap(), "PETG");
+        assert_eq!(drying_filament(Some("abs"), &loaded).unwrap(), "ABS");
+        assert_eq!(drying_filament(None, &AmsUnit::default()).unwrap(), "PLA");
+        assert!(drying_filament(Some("PLA\"}"), &loaded).is_err());
+        assert!(drying_filament(Some(&"X".repeat(17)), &loaded).is_err());
+    }
+
+    #[test]
+    fn drying_payloads_match_the_reference_wire_shape() {
+        let start: Value =
+            serde_json::from_str(&drying_payload(128, Some((60, 8, "PETG")))).unwrap();
+        let print = &start["print"];
+        assert_eq!(print["command"], "ams_filament_drying");
+        assert_eq!(print["ams_id"], 128);
+        assert_eq!(print["mode"], 1);
+        assert_eq!(print["temp"], 60);
+        assert_eq!(print["duration"], 8);
+        assert_eq!(print["filament"], "PETG");
+        assert_eq!(print["cooling_temp"], 20);
+        assert_eq!(print["humidity"], 0);
+        assert_eq!(print["rotate_tray"], false);
+        assert_eq!(print["close_power_conflict"], false);
+        assert!(print["sequence_id"].is_string());
+
+        let stop: Value = serde_json::from_str(&drying_payload(0, None)).unwrap();
+        assert_eq!(stop["print"]["mode"], 0);
+        assert_eq!(stop["print"]["temp"], 0);
+        assert_eq!(stop["print"]["duration"], 0);
+        assert_eq!(stop["print"]["cooling_temp"], 0);
+        assert_eq!(stop["print"]["filament"], "");
+    }
+
+    #[test]
+    fn drying_predicate_reads_the_targeted_unit() {
+        let report = |id: &str, info: &str, minutes: i64| {
+            json!({"print": {"gcode_state": "IDLE", "ams": {"ams": [
+                {"id": "1", "info": "20", "dry_time": 300},
+                {"id": id, "info": info, "dry_time": minutes}
+            ]}}})
+        };
+        assert!(drying_reached(&report("0", "10", 0), 0, true)); // Checking counts as started
+        assert!(drying_reached(&report("0", "0", 720), 0, true));
+        assert!(!drying_reached(&report("0", "0", 0), 0, true));
+        assert!(drying_reached(&report("0", "40", 0), 0, false)); // Stopping
+        assert!(drying_reached(&report("0", "0", 0), 0, false));
+        assert!(!drying_reached(&report("0", "20", 100), 0, false));
+        // Unit 1 is drying, but unit 0 is the target.
+        assert!(!drying_reached(&report("0", "0", 0), 0, true));
+        assert!(!drying_reached(&json!({"print": {}}), 0, true));
+    }
+
+    fn drying_test_client(port: u16, host: String) -> Client {
+        let profile = Profile::with_timeout(host, "SN001", true, Duration::from_secs(5)).unwrap();
+        let connector = tls_connector().unwrap();
+        let deadline = deadline_after(profile.timeout()).unwrap();
+        let (stream, _) = open_tls(&connector, &profile, port, None, false, deadline).unwrap();
+        let mut mqtt = MqttConnection::new(stream, profile.mqtt_topics(), deadline);
+        mqtt.connect("access-code").unwrap();
+        mqtt.subscribe().unwrap();
+        let identity = profile.connection_identity(Some("access-code"), None);
+        let client = Client::new(profile);
+        *client.mqtt.lock().unwrap() = Some(CachedConnection { identity, mqtt });
+        client
+    }
+
+    /// Answers every pushall with `idle` until the drying command arrives,
+    /// acks it, then answers the next pushall with `after`. Returns the command.
+    fn drying_broker(fun2: &'static str, after: Value) -> (String, u16, thread::JoinHandle<Value>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let acceptor = test_acceptor();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            let connect = read_test_packet(&mut stream);
+            assert_eq!(connect.kind, 0x10);
+            stream.write_all(&[0x20, 0x02, 0, 0]).unwrap();
+            let subscribe = read_test_packet(&mut stream);
+            let id = &subscribe.payload[..2];
+            stream.write_all(&[0x90, 0x03, id[0], id[1], 0]).unwrap();
+            stream.flush().unwrap();
+            let idle = json!({"print": {"gcode_state": "IDLE", "mc_percent": 0, "fun2": fun2,
+                "ams": {"ams": [{"id": "0", "info": "3", "dry_time": 0, "dry_sf_reason": [],
+                    "tray": [{"id": "0", "tray_type": "PETG"}]}]}}});
+            let mut command: Option<Value> = None;
+            loop {
+                let packet = read_test_packet(&mut stream);
+                if packet.kind >> 4 != 3 {
+                    continue;
+                }
+                let payload = mqtt_publish_payload(packet.kind, &packet.payload).unwrap();
+                if is_pushall_payload(&payload) {
+                    let done = command.is_some();
+                    write_test_report(&mut stream, if done { &after } else { &idle });
+                    if done {
+                        return command.unwrap();
+                    }
+                    continue;
+                }
+                let value: Value = serde_json::from_slice(&payload).unwrap();
+                write_test_report(
+                    &mut stream,
+                    &json!({"print": {
+                        "sequence_id": value["print"]["sequence_id"],
+                        "command": "ams_filament_drying", "result": "success"}}),
+                );
+                command = Some(value);
+            }
+        });
+        (address.ip().to_string(), address.port(), server)
+    }
+
+    #[test]
+    fn starting_a_drying_cycle_publishes_the_command_and_waits_for_the_phase() {
+        let drying = json!({"print": {"gcode_state": "IDLE", "mc_percent": 0, "fun2": "20",
+            "ams": {"ams": [{"id": "0", "info": "23", "dry_time": 480, "tray": []}]}}});
+        let (host, port, server) = drying_broker("20", drying);
+        let client = drying_test_client(port, host);
+
+        let result = client
+            .ams_drying_set(
+                Some("access-code"),
+                None,
+                0,
+                &DryingRequest::Start {
+                    temperature_c: 60,
+                    hours: 8,
+                    filament: None,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            result,
+            DryingResult {
+                ams_id: 0,
+                active: true
+            }
+        );
+        let command = server.join().unwrap();
+        assert_eq!(command["print"]["filament"], "PETG"); // loaded tray fallback
+        assert_eq!(command["print"]["temp"], 60);
+        assert_eq!(command["print"]["duration"], 8);
+    }
+
+    #[test]
+    fn screen_only_printers_are_never_sent_a_drying_command() {
+        // No fun2 bit 5: P1-class firmware acks and ignores the command.
+        let (host, port, _server) = drying_broker("0", json!({}));
+        let client = drying_test_client(port, host);
+        let result = client.ams_drying_set(
+            Some("access-code"),
+            None,
+            0,
+            &DryingRequest::Start {
+                temperature_c: 45,
+                hours: 4,
+                filament: None,
+            },
+        );
+        assert!(matches!(result, Err(Error::Unsupported(_))));
+        // The broker thread is blocked on read until `client` drops at the
+        // end of this test, which closes the socket and ends the thread on
+        // EOF; it is not left running until process exit.
+    }
+
+    #[test]
+    fn start_block_reason_table() {
+        let drying = |active, blocked_reasons: &[&'static str]| AmsDrying {
+            status: DryingStatus::Off,
+            active,
+            minutes_remaining: None,
+            setting: None,
+            blocked_reasons: blocked_reasons.to_vec(),
+            controllable: true,
+        };
+        // (active, blocked_reasons, expected)
+        let cases = [
+            (drying(true, &[]), Some("the AMS is already drying")),
+            (drying(false, &["already_drying"]), None),
+            (
+                drying(false, &["already_drying", "insufficient_power"]),
+                Some(
+                    "insufficient power: too many AMS units drying or an external PSU is required",
+                ),
+            ),
+            (drying(false, &[]), None),
+        ];
+        for (drying, expected) in cases {
+            assert_eq!(start_block_reason(&drying), expected, "{drying:?}");
+        }
+    }
+
+    #[test]
+    fn stop_is_noop_table() {
+        let drying = |status, minutes_remaining| AmsDrying {
+            status,
+            active: unit_drying_active(minutes_remaining, status),
+            minutes_remaining,
+            setting: None,
+            blocked_reasons: Vec::new(),
+            controllable: true,
+        };
+        // (status, minutes_remaining, expected no-op)
+        let cases = [
+            (drying(DryingStatus::Off, None), true),
+            (drying(DryingStatus::HeatOutOfControl, None), false),
+            (drying(DryingStatus::Error, None), false),
+            (drying(DryingStatus::Unknown, None), false),
+            (drying(DryingStatus::Drying, Some(10)), false),
+        ];
+        for (drying, expected) in cases {
+            assert_eq!(stop_is_noop(&drying), expected, "{drying:?}");
+        }
+    }
+
+    #[test]
+    fn drying_respects_the_signing_gate() {
+        let profile =
+            Profile::with_timeout("203.0.113.1", "SN001", true, Duration::from_millis(50)).unwrap();
+        let client = Client::new(profile);
+        let mut capabilities = RuntimeCapabilities::for_model("H2D");
+        capabilities.authorization = AuthorizationMode::SigningRequired;
+        *client.capabilities.lock().unwrap() = Some(capabilities);
+
+        assert!(matches!(
+            client.ams_drying_set(Some("code"), None, 0, &DryingRequest::Stop),
+            Err(Error::AuthorizationRequired(MutationClass::Drying))
+        ));
     }
 
     #[test]
