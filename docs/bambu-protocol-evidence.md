@@ -50,3 +50,19 @@ qualification status, owner, and removal condition. Expired or contradicted
 entries are diagnostic-only. Release evidence identifies the exact Melt
 commit and requires informed consent for captures from printers Melt's
 maintainers do not own.
+
+## Firmware-update evidence boundary
+
+Melt reads installed module versions from the LAN `info.get_version` response
+and treats only qualified fields under `print.upgrade_state` as update
+advertisements. Structured `new_ver_list` targets and the legacy named
+`*_new_version_number` fields can establish that a target is advertised;
+opaque numeric state values cannot.
+
+No sanitized physical no-update capture is checked in yet. Consequently, an
+empty or missing advertisement is reported as `unknown` (“No update
+advertised”), never `current`. A future claim that Bambu firmware is current
+requires a manifest-governed physical fixture that identifies the exact model,
+module versions, full-versus-delta report shape, and clearing behavior. Tests
+with synthetic documents exercise parser safety but do not raise this physical
+qualification level.

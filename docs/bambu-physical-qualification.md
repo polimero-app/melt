@@ -72,6 +72,13 @@ firmware contradiction can invalidate one fact without discarding the session.
    thermal, fan, light, speed, home/jog, and emergency paths. Record
    authentication rejection, TLS mismatch, timeout/network loss, storage full,
    destination collision, printer rejection, and unsupported-capability errors.
+8. **Firmware availability:** capture `info.get_version` and the matching full
+   `print.upgrade_state`, then capture a delta that advertises, changes, or
+   clears a target. Cover printer and accessory modules plus forced updates.
+   Confirm passive and explicit-refresh checks send no upgrade command and do
+   not contact a cloud endpoint. A “current” qualification additionally needs
+   an exact no-update capture and repeatable proof that silence has that meaning
+   for the scoped model and module versions.
 
 ## Evidence layout and sanitization
 

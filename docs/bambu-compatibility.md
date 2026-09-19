@@ -244,6 +244,20 @@ reject malformed/reversed ranges, duplicate IDs, missing evidence ownership or
 removal criteria, and overlapping active MJPEG/RTSPS routes. Provisional,
 contradicted, and expired entries remain visible but never alter runtime behavior.
 
+## Read-only firmware availability
+
+Firmware checks reuse the authenticated LAN MQTT session. They combine the
+installed module inventory with explicit printer-advertised targets and never
+send an `upgrade` command, download a package, or contact the Bambu cloud.
+Unknown modules with a qualified advertised target remain visible as accessory
+firmware rather than being discarded.
+
+An advertised target can be reported as available. Silence cannot prove that a
+printer is current, so missing or empty target data remains unknown until the
+physical-evidence workflow qualifies a no-update state for an exact firmware
+line. Forced-update flags are retained as a required-update signal, while
+malformed or lower targets remain unknown and produce a bounded issue.
+
 ## Automated qualification
 
 The Rust tests cover legacy and structured status shapes, unknown fields,
