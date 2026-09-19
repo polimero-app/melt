@@ -245,6 +245,7 @@ export type MessageKey =
   | "materials.ready"
   | "materials.humidity"
   | "materials.temperature"
+  | "drying.actions"
   | "drying.dry"
   | "drying.start"
   | "drying.stop"
@@ -260,7 +261,6 @@ export type MessageKey =
   | "drying.stopTitle"
   | "drying.stopDescription"
   | "drying.stopConfirm"
-  | "drying.screenOnly"
   | "drying.status.off"
   | "drying.status.checking"
   | "drying.status.drying"
@@ -763,6 +763,7 @@ const messages: Record<Locale, Messages> = {
     "materials.ready": "Ready",
     "materials.humidity": "Humidity",
     "materials.temperature": "Temperature",
+    "drying.actions": "Drying actions",
     "drying.dry": "Dry…",
     "drying.start": "Start drying",
     "drying.stop": "Stop drying",
@@ -778,7 +779,6 @@ const messages: Record<Locale, Messages> = {
     "drying.stopTitle": "Stop drying?",
     "drying.stopDescription": "{unit} will stop its drying cycle.",
     "drying.stopConfirm": "Stop",
-    "drying.screenOnly": "Drying can only be started from the printer screen.",
     "drying.status.off": "Off",
     "drying.status.checking": "Checking",
     "drying.status.drying": "Drying",
@@ -1278,6 +1278,7 @@ const messages: Record<Locale, Messages> = {
     "materials.ready": "Pronto",
     "materials.humidity": "Umidade",
     "materials.temperature": "Temperatura",
+    "drying.actions": "Ações de secagem",
     "drying.dry": "Secar…",
     "drying.start": "Iniciar secagem",
     "drying.stop": "Parar secagem",
@@ -1293,7 +1294,6 @@ const messages: Record<Locale, Messages> = {
     "drying.stopTitle": "Parar secagem?",
     "drying.stopDescription": "{unit} interromperá o ciclo de secagem.",
     "drying.stopConfirm": "Parar",
-    "drying.screenOnly": "A secagem só pode ser iniciada pela tela da impressora.",
     "drying.status.off": "Desligado",
     "drying.status.checking": "Verificando",
     "drying.status.drying": "Secando",

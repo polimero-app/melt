@@ -1651,6 +1651,7 @@ async function toggleLight(light: string, on: boolean) {
 
 const dryingForm = ref<{ unitId: number; temperatureC: number; hours: number; filament: string } | undefined>()
 const dryingBusy = ref(false)
+const dryingFormSystem = computed(() => materialSystems.value.find((system) => system.unitId === dryingForm.value?.unitId))
 
 function openDryingForm(system: MaterialSystemView) {
   const defaults = dryingDefaults(system.unitId, system.firstFilament)
@@ -1684,6 +1685,25 @@ function setDrying(system: MaterialSystemView, start: boolean) {
     },
   )
 }
+
+function dryingActionItems(system: MaterialSystemView): ActionMenuItem[] {
+  if (!system.drying?.controllable) return []
+  if (dryingStoppable(system.drying)) {
+    return [{ label: `${system.name}: ${t('drying.stop')}`, icon: PhStop, disabled: dryingBusy.value, onSelect: () => setDrying(system, false) }]
+  }
+  return [
+    {
+      label: `${system.name}: ${t('drying.dry')}`,
+      icon: PhSun,
+      disabled: dryingBusy.value || Boolean(system.drying.blockedReasons?.length),
+      onSelect: () => openDryingForm(system),
+    },
+  ]
+}
+
+const dryingMenuItems = computed<ActionMenuItem[]>(() =>
+  capabilities.value?.amsDrying ? materialSystems.value.flatMap(dryingActionItems) : [],
+)
 
 function emergencyStop() {
   if (!activePrinter.value) return
@@ -2901,7 +2921,9 @@ onUnmounted(() => {
             </Card>
 
             <Card v-if="materialSystems.length">
-              <CardHeader :title="t('materials.title')" :icon="PhStack" />
+              <CardHeader :title="t('materials.title')" :icon="PhStack">
+                <ActionMenu v-if="dryingMenuItems.length" :label="t('drying.actions')" :items="dryingMenuItems" />
+              </CardHeader>
               <div class="divide-y divide-gray-200 dark:divide-white/10">
                 <div v-for="system in materialSystems" :key="system.name" class="px-4 py-5 sm:px-6">
                   <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -2938,36 +2960,10 @@ onUnmounted(() => {
                       </span>
                     </div>
                   </div>
-                  <div v-if="capabilities?.amsDrying && system.drying" class="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                    <template v-if="system.drying.controllable">
-                      <Button v-if="dryingStoppable(system.drying)" :disabled="dryingBusy" @click="setDrying(system, false)">{{ t('drying.stop') }}</Button>
-                      <template v-else-if="dryingForm?.unitId === system.unitId">
-                        <label class="flex items-center gap-1">{{ t('drying.temperature') }}
-                          <input
-                            v-model.number="dryingForm.temperatureC"
-                            type="number"
-                            inputmode="numeric"
-                            :min="dryingBounds(system.unitId)?.min"
-                            :max="dryingBounds(system.unitId)?.max"
-                            class="w-16 rounded-md bg-white py-1.5 text-center font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
-                          /> °C</label>
-                        <label class="flex items-center gap-1">{{ t('drying.hours') }}
-                          <input
-                            v-model.number="dryingForm.hours"
-                            type="number"
-                            inputmode="numeric"
-                            min="1"
-                            max="24"
-                            class="w-14 rounded-md bg-white py-1.5 text-center font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
-                          /> h</label>
-                        <Button variant="primary" :disabled="dryingBusy" @click="setDrying(system, true)">{{ t('drying.start') }}</Button>
-                        <Button @click="dryingForm = undefined">{{ t('common.cancel') }}</Button>
-                      </template>
-                      <Button v-else :disabled="dryingBusy || Boolean(system.drying.blockedReasons?.length)" @click="openDryingForm(system)">{{ t('drying.dry') }}</Button>
-                      <span v-if="!system.drying.active && system.drying.blockedReasons?.length" class="text-gray-500 dark:text-gray-400">{{ t(dryingBlockedKey(system.drying.blockedReasons[0])) }}</span>
-                    </template>
-                    <span v-else class="text-gray-500 dark:text-gray-400">{{ t('drying.screenOnly') }}</span>
-                  </div>
+                  <div
+                    v-if="capabilities?.amsDrying && system.drying?.controllable && !system.drying.active && system.drying.blockedReasons?.length"
+                    class="mt-3 text-xs text-gray-500 dark:text-gray-400"
+                  >{{ t(dryingBlockedKey(system.drying.blockedReasons[0])) }}</div>
                 </div>
               </div>
             </Card>
@@ -3727,6 +3723,49 @@ onUnmounted(() => {
       :unavailable-label="t('filesView.previewUnavailable')"
       @close="previewFile = undefined"
     />
+
+    <SlideOver
+      :open="dryingForm !== undefined"
+      :title="t('drying.dry')"
+      :description="dryingFormSystem?.name"
+      :close-label="t('common.closePanel')"
+      @close="!dryingBusy && (dryingForm = undefined)"
+    >
+      <div v-if="dryingForm" class="space-y-4">
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-200">
+          {{ t('drying.temperature') }}
+          <div class="mt-1 flex items-center gap-2">
+            <input
+              v-model.number="dryingForm.temperatureC"
+              type="number"
+              inputmode="numeric"
+              :min="dryingBounds(dryingForm.unitId)?.min"
+              :max="dryingBounds(dryingForm.unitId)?.max"
+              class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-white/15 dark:bg-white/5 dark:text-white"
+            />
+            <span class="shrink-0 text-gray-500 dark:text-gray-400">°C</span>
+          </div>
+        </label>
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-200">
+          {{ t('drying.hours') }}
+          <div class="mt-1 flex items-center gap-2">
+            <input
+              v-model.number="dryingForm.hours"
+              type="number"
+              inputmode="numeric"
+              min="1"
+              max="24"
+              class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-white/15 dark:bg-white/5 dark:text-white"
+            />
+            <span class="shrink-0 text-gray-500 dark:text-gray-400">h</span>
+          </div>
+        </label>
+      </div>
+      <template #footer>
+        <Button :disabled="dryingBusy" @click="dryingForm = undefined">{{ t('common.cancel') }}</Button>
+        <Button v-if="dryingFormSystem" variant="primary" :disabled="dryingBusy" @click="setDrying(dryingFormSystem, true)">{{ t('drying.start') }}</Button>
+      </template>
+    </SlideOver>
 
     <ConfirmDialog
       :open="pendingConfirm !== undefined"
