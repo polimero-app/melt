@@ -16,12 +16,19 @@ use reqwest::{
     redirect::Policy,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use thiserror::Error;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use url::Url;
 
-use crate::trace::{SharedTracer, TraceEvent, next_tracer_generation};
+use crate::{
+    firmware_updates::{
+        FirmwareUpdateAvailability, FirmwareUpdateComponent, FirmwareUpdateComponentKind,
+        FirmwareUpdateIssue, FirmwareUpdateReport, FirmwareUpdateSource, MAX_VERSION_BYTES,
+        bounded_provider_text, provider_data_truncated,
+    },
+    trace::{SharedTracer, TraceEvent, next_tracer_generation},
+};
 
 pub const DEFAULT_PORT: u16 = 7125;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -184,6 +191,36 @@ impl Client {
 
     pub fn status(&self, access_code: Option<&str>) -> Result<Status, Error> {
         self.status_with_timeout(access_code, self.profile.timeout)
+    }
+
+    /// Checks the Moonraker update manager without installing or restarting anything.
+    pub fn firmware_update_status(
+        &self,
+        access_code: Option<&str>,
+        refresh: bool,
+    ) -> Result<FirmwareUpdateReport, Error> {
+        let result = if refresh {
+            self.json_body_request(
+                Method::POST,
+                "machine/update/refresh",
+                &json!({ "name": "klipper" }),
+                access_code,
+            )
+        } else {
+            self.json_request(Method::GET, "machine/update/status", &[], access_code)
+        };
+
+        match result {
+            Ok(value) => Ok(moonraker_update_report(&value)),
+            Err(Error::HttpStatus(StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND)) => {
+                Ok(FirmwareUpdateReport::unsupported(
+                    FirmwareUpdateSource::MoonrakerUpdateManager,
+                    "updateManagerUnavailable",
+                    "Moonraker's update manager is not available on this printer.",
+                ))
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub fn status_with_timeout(
@@ -781,6 +818,65 @@ impl Client {
             .map_err(|_| Error::InvalidResponse)
     }
 
+    fn json_body_request<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        endpoint: &str,
+        body: &Value,
+        access_code: Option<&str>,
+    ) -> Result<T, Error> {
+        let label = format!("{method} {endpoint}");
+        let url = self.endpoint(endpoint);
+        let mut request = self
+            .http
+            .request(method, url)
+            .header(ACCEPT, "application/json")
+            .json(body);
+        if let Some(access_code) = access_code.filter(|value| !value.is_empty()) {
+            let value = HeaderValue::from_str(access_code).map_err(|_| Error::InvalidAccessCode)?;
+            request = request.header("X-Api-Key", value);
+        }
+        self.trace(TraceEvent::request("http", label.as_str()));
+        let response = match request.send() {
+            Ok(response) => response,
+            Err(error) => {
+                let outcome = if error.is_timeout() {
+                    "timeout"
+                } else {
+                    "transport_error"
+                };
+                self.trace(TraceEvent::response("http", label.as_str()).with_outcome(outcome));
+                return Err(map_request_error(error));
+            }
+        };
+        let status = response.status();
+        match status {
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                self.trace(TraceEvent::response("http", label).with_outcome(status.as_str()));
+                return Err(Error::Authentication);
+            }
+            status if !status.is_success() => {
+                self.trace(TraceEvent::response("http", label).with_outcome(status.as_str()));
+                return Err(Error::HttpStatus(status));
+            }
+            _ => {}
+        }
+        let bytes = self.read_response(response, &label)?;
+        let envelope: Envelope =
+            serde_json::from_slice(&bytes).map_err(|_| Error::InvalidResponse)?;
+        if envelope.error.as_ref().is_some_and(|error| {
+            error.message.to_ascii_lowercase().contains("unauthorized")
+                || error.message.to_ascii_lowercase().contains("forbidden")
+        }) {
+            return Err(Error::Authentication);
+        }
+        if envelope.error.is_some() {
+            return Err(Error::Api);
+        }
+        serde_json::from_value(envelope.result.ok_or(Error::MissingResult)?)
+            .map_err(|_| Error::InvalidResponse)
+    }
+
     fn response(
         &self,
         http: &HttpClient,
@@ -902,6 +998,110 @@ impl Client {
         url.set_path(&path);
         url
     }
+}
+
+fn moonraker_update_report(result: &Value) -> FirmwareUpdateReport {
+    let Some(klipper) = result
+        .get("version_info")
+        .and_then(Value::as_object)
+        .and_then(|versions| versions.get("klipper"))
+        .and_then(Value::as_object)
+    else {
+        return FirmwareUpdateReport::unsupported(
+            FirmwareUpdateSource::MoonrakerUpdateManager,
+            "klipperUpdateUnavailable",
+            "Moonraker does not expose a Klipper update-manager entry.",
+        );
+    };
+
+    let mut issues = Vec::new();
+    let current_version =
+        bounded_update_value(klipper, &["version", "full_version_string"], &mut issues);
+    let available_version = bounded_update_value(klipper, &["remote_version"], &mut issues);
+    let current_hash = update_text(klipper, "current_hash");
+    let remote_hash = update_text(klipper, "remote_hash");
+    let commits_behind = klipper
+        .get("commits_behind_count")
+        .and_then(Value::as_u64)
+        .is_some_and(|count| count > 0)
+        || klipper
+            .get("commits_behind")
+            .and_then(Value::as_array)
+            .is_some_and(|commits| !commits.is_empty());
+    let invalid = klipper.get("is_valid").and_then(Value::as_bool) == Some(false)
+        || klipper.get("corrupt").and_then(Value::as_bool) == Some(true);
+
+    let availability = if invalid {
+        issues.push(FirmwareUpdateIssue {
+            code: "invalidRepositoryState",
+            message: "Moonraker reports that the local Klipper repository is not valid.",
+        });
+        FirmwareUpdateAvailability::Unknown
+    } else if commits_behind
+        || current_hash
+            .zip(remote_hash)
+            .is_some_and(|(current, remote)| current != remote)
+        || current_version
+            .as_deref()
+            .zip(available_version.as_deref())
+            .is_some_and(|(current, available)| current != available)
+    {
+        FirmwareUpdateAvailability::Available
+    } else if current_hash
+        .zip(remote_hash)
+        .is_some_and(|(current, remote)| current == remote)
+        || current_version
+            .as_deref()
+            .zip(available_version.as_deref())
+            .is_some_and(|(current, available)| current == available)
+    {
+        FirmwareUpdateAvailability::Current
+    } else {
+        issues.push(FirmwareUpdateIssue {
+            code: "incompleteUpdateData",
+            message: "Moonraker did not provide enough version data to determine update availability.",
+        });
+        FirmwareUpdateAvailability::Unknown
+    };
+
+    FirmwareUpdateReport::from_components(
+        FirmwareUpdateSource::MoonrakerUpdateManager,
+        vec![FirmwareUpdateComponent {
+            id: "klipper".into(),
+            label: "Klipper software".into(),
+            kind: FirmwareUpdateComponentKind::PrinterSoftware,
+            current_version,
+            available_version,
+            availability,
+            required: false,
+        }],
+        issues,
+    )
+}
+
+fn update_text<'a>(object: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn bounded_update_value(
+    object: &Map<String, Value>,
+    keys: &[&str],
+    issues: &mut Vec<FirmwareUpdateIssue>,
+) -> Option<String> {
+    let value = keys.iter().find_map(|key| update_text(object, key))?;
+    let (value, truncated) = bounded_provider_text(value, MAX_VERSION_BYTES);
+    if truncated
+        && !issues
+            .iter()
+            .any(|issue| issue.code == "providerDataTruncated")
+    {
+        issues.push(provider_data_truncated());
+    }
+    Some(value)
 }
 
 fn map_request_error(error: reqwest::Error) -> Error {
@@ -2035,6 +2235,75 @@ mod tests {
                 "{host}"
             );
         }
+    }
+
+    #[test]
+    fn firmware_update_status_reports_current_and_available_klipper_software() {
+        let (current_host, request, current_server) = server(
+            r#"{"result":{"version_info":{"klipper":{"version":"v0.13.0","remote_version":"v0.13.0","current_hash":"abc","remote_hash":"abc","is_valid":true,"commits_behind":[]}}}}"#,
+        );
+        let current = Client::new(Profile::new(&current_host, false, DEFAULT_TIMEOUT).unwrap())
+            .unwrap()
+            .firmware_update_status(None, false)
+            .unwrap();
+        assert_eq!(current.availability, FirmwareUpdateAvailability::Current);
+        assert_eq!(
+            current.components[0].kind,
+            FirmwareUpdateComponentKind::PrinterSoftware
+        );
+        let request = request.recv().unwrap();
+        assert!(request.starts_with("GET "));
+        assert!(request.contains("/machine/update/status"));
+        current_server.join().unwrap();
+
+        let (available_host, _request, available_server) = server(
+            r#"{"result":{"version_info":{"klipper":{"version":"v0.12.0","remote_version":"v0.13.0","current_hash":"abc","remote_hash":"def","is_valid":true,"commits_behind":[{"sha":"def"}]}}}}"#,
+        );
+        let available = Client::new(Profile::new(&available_host, false, DEFAULT_TIMEOUT).unwrap())
+            .unwrap()
+            .firmware_update_status(None, false)
+            .unwrap();
+        assert_eq!(
+            available.availability,
+            FirmwareUpdateAvailability::Available
+        );
+        assert_eq!(
+            available.components[0].available_version.as_deref(),
+            Some("v0.13.0")
+        );
+        available_server.join().unwrap();
+    }
+
+    #[test]
+    fn firmware_update_status_is_unsupported_without_a_klipper_entry() {
+        let (host, _request, server) = server(r#"{"result":{"version_info":{"moonraker":{}}}}"#);
+        let report = Client::new(Profile::new(&host, false, DEFAULT_TIMEOUT).unwrap())
+            .unwrap()
+            .firmware_update_status(None, false)
+            .unwrap();
+
+        assert_eq!(report.availability, FirmwareUpdateAvailability::Unsupported);
+        assert_eq!(report.issues[0].code, "klipperUpdateUnavailable");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn firmware_update_refresh_targets_only_klipper() {
+        let (host, requests, server) = scripted_server(vec![
+            r#"{"result":{"version_info":{"klipper":{"version":"v1","remote_version":"v2","is_valid":true}}}}"#,
+        ]);
+        let report = Client::new(Profile::new(&host, false, DEFAULT_TIMEOUT).unwrap())
+            .unwrap()
+            .firmware_update_status(Some("secret"), true)
+            .unwrap();
+
+        assert_eq!(report.availability, FirmwareUpdateAvailability::Available);
+        let request = requests.recv().unwrap();
+        assert!(request.starts_with("POST "));
+        assert!(request.contains("/machine/update/refresh "));
+        assert!(request.to_ascii_lowercase().contains("x-api-key: secret"));
+        assert!(request.ends_with(r#"{"name":"klipper"}"#));
+        server.join().unwrap();
     }
 
     #[derive(Debug, Default)]
