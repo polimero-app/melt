@@ -40,6 +40,7 @@ Rules:
 
 ## Reusable implementation
 
+- Use a 68 px minimum rail (`min-h-17`) for shared card headers, whether they contain actions or text only. Keep 44 px `IconButton` hit targets intact and normalize height in `CardHeader.vue` instead of overriding individual cards.
 - Centralize state derivation in `ui/src/monitoring.ts`; presentation surfaces consume its `PrinterBadge` result instead of reimplementing precedence rules.
 - Keep badge colors and labels synchronized between `ui/src/App.vue`, `ui/src/components/StatusBadge.vue`, and localized messages.
 - Add a table-driven or focused unit test whenever the monitoring state contract changes, especially around stale status plus error precedence.
