@@ -37,6 +37,7 @@ pub struct Observed<T> {
 pub struct CapabilityObservations {
     pub values: BTreeMap<String, Observed<Value>>,
     pub unknown_support_fields: BTreeMap<String, Observed<Value>>,
+    pub upgrade_fields: BTreeMap<String, Observed<Value>>,
 }
 
 impl CapabilityObservations {
@@ -54,6 +55,21 @@ impl CapabilityObservations {
             ReportKind::Delta
         };
         for (key, value) in print {
+            if key == "upgrade_state"
+                && let Some(upgrade) = value.as_object()
+            {
+                for (field, value) in upgrade {
+                    self.upgrade_fields.insert(
+                        field.clone(),
+                        Observed {
+                            value: value.clone(),
+                            source: ObservationSource::MqttStatus,
+                            report_kind: kind,
+                            observed_at_unix_ms: timestamp,
+                        },
+                    );
+                }
+            }
             if key.starts_with("support_") || key == "ipcam" {
                 let observation = Observed {
                     value: value.clone(),
@@ -104,6 +120,21 @@ mod tests {
         assert_eq!(
             observations.values["support_timelapse"].report_kind,
             ReportKind::Full
+        );
+    }
+
+    #[test]
+    fn preserves_upgrade_field_shapes_without_interpreting_values() {
+        let mut observations = CapabilityObservations::default();
+        observations.merge_status(
+            &json!({"print":{"upgrade_state":{"new_ver_list":[],"future_state":7}}}),
+            false,
+        );
+
+        assert_eq!(observations.upgrade_fields["new_ver_list"].value, json!([]));
+        assert_eq!(
+            observations.upgrade_fields["future_state"].report_kind,
+            ReportKind::Delta
         );
     }
 }

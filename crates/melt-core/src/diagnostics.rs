@@ -9,6 +9,7 @@ use crate::{
     VERSION,
     bambu::{self, CameraOwnerStatus, CameraSelection, RuntimeCapabilities},
     config::Profile,
+    firmware_updates::FirmwareUpdateReport,
     monitor,
 };
 
@@ -34,7 +35,10 @@ pub struct BambuCompatibilityReport {
     pub canonical_model: bambu::CanonicalModel,
     pub model_family: bambu::ModelFamily,
     pub firmware_modules: Vec<FirmwareModuleReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub firmware_updates: Option<FirmwareUpdateReport>,
     pub capability_observations: Vec<CapabilityObservationReport>,
+    pub upgrade_observations: Vec<CapabilityObservationReport>,
     pub authorization: bambu::AuthorizationResolution,
     pub camera: CameraReport,
     pub storage_transport: bambu::StorageTransport,
@@ -121,6 +125,24 @@ pub fn bambu_compatibility_report(
     tls_pinned: bool,
     owner: Option<&CameraOwnerStatus>,
 ) -> BambuCompatibilityReport {
+    bambu_compatibility_report_with_updates(
+        printer_index,
+        capabilities,
+        selection,
+        tls_pinned,
+        owner,
+        None,
+    )
+}
+
+pub fn bambu_compatibility_report_with_updates(
+    printer_index: usize,
+    capabilities: &RuntimeCapabilities,
+    selection: &CameraSelection,
+    tls_pinned: bool,
+    owner: Option<&CameraOwnerStatus>,
+    firmware_updates: Option<&FirmwareUpdateReport>,
+) -> BambuCompatibilityReport {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -144,6 +166,20 @@ pub fn bambu_compatibility_report(
         );
     }
     observations.sort_by(|left, right| left.field.cmp(&right.field));
+    let mut upgrade_observations = capabilities
+        .observations
+        .upgrade_fields
+        .iter()
+        .map(|(field, observed)| CapabilityObservationReport {
+            field: field.clone(),
+            source: observed.source,
+            report_kind: observed.report_kind,
+            age_seconds: now.saturating_sub(observed.observed_at_unix_ms) / 1000,
+            value_summary: value_summary(&observed.value),
+            unknown: !known_upgrade_field(field),
+        })
+        .collect::<Vec<_>>();
+    upgrade_observations.sort_by(|left, right| left.field.cmp(&right.field));
     let active = bambu::applicable_quirks(&capabilities.identity, &capabilities.firmware);
     let quirks = bambu::matching_quirks(&capabilities.identity)
         .into_iter()
@@ -169,7 +205,9 @@ pub fn bambu_compatibility_report(
                 hardware: module.hardware.clone(),
             })
             .collect(),
+        firmware_updates: firmware_updates.cloned(),
         capability_observations: observations,
+        upgrade_observations,
         authorization: capabilities.authorization_resolution.clone(),
         camera: CameraReport {
             preferred: selection.preferred,
@@ -187,6 +225,19 @@ pub fn bambu_compatibility_report(
         quirks,
         tls_pinned,
     }
+}
+
+fn known_upgrade_field(field: &str) -> bool {
+    matches!(
+        field,
+        "new_ver_list"
+            | "ota_new_version_number"
+            | "ams_new_version_number"
+            | "ahb_new_version_number"
+            | "ext_new_version_number"
+            | "force_upgrade"
+            | "new_version_state"
+    )
 }
 
 fn value_summary(value: &serde_json::Value) -> &'static str {
@@ -265,6 +316,13 @@ mod tests {
                 observed_at_unix_ms: 0,
             },
         );
+        capabilities.observations.merge_status(
+            &serde_json::json!({"print":{"upgrade_state":{
+                "new_ver_list":[{"sw_new_ver":"2.0","url":"https://private.invalid/package"}],
+                "future_provider_field":{"device":"SECRET-SERIAL"}
+            }}}),
+            true,
+        );
         let selection = CameraSelection {
             preferred: bambu::CameraTransport::Unknown,
             source: bambu::CameraSelectionSource::Unknown,
@@ -278,6 +336,17 @@ mod tests {
         assert!(!json.contains("SECRET-MODULE-SERIAL"));
         assert!(!json.contains("192.0.2.99"));
         assert!(!json.contains("/private"));
+        assert!(!json.contains("private.invalid"));
+        assert!(!json.contains("SECRET-SERIAL"));
+        assert_eq!(report.upgrade_observations.len(), 2);
+        assert!(
+            report
+                .upgrade_observations
+                .iter()
+                .any(|observation| observation.field == "future_provider_field"
+                    && observation.unknown
+                    && observation.value_summary == "object-redacted")
+        );
         assert!(json.contains("string-redacted") || json.contains("object-redacted"));
     }
 }

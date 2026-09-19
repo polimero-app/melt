@@ -1109,12 +1109,20 @@ fn printer_capabilities(
         }
     };
     let selection = bambu::select_camera_transport(profile.host(), &capabilities);
-    let compatibility = diagnostics::bambu_compatibility_report(
+    let firmware_updates = client
+        .firmware_update_status(
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+            false,
+        )
+        .ok();
+    let compatibility = diagnostics::bambu_compatibility_report_with_updates(
         1,
         &capabilities,
         &selection,
         printer.tls_fingerprint.is_some(),
         None,
+        firmware_updates.as_ref(),
     );
     let report = human_capabilities(&printer.name, &compatibility);
     write_success(
@@ -1138,8 +1146,18 @@ fn human_capabilities(profile: &str, report: &diagnostics::BambuCompatibilityRep
         .join(", ");
     let active_quirks = report.quirks.iter().filter(|quirk| quirk.active).count();
     let inactive_quirks = report.quirks.len().saturating_sub(active_quirks);
+    let update_summary = report.firmware_updates.as_ref().map_or_else(
+        || "unobserved".into(),
+        |updates| {
+            format!(
+                "{:?} ({} components)",
+                updates.availability,
+                updates.components.len()
+            )
+        },
+    );
     format!(
-        "Profile: {}\nModel: {} ({:?}, {:?})\nFirmware: {}\nAuthorization: {:?}{}\nCamera: {:?} ({:?})\nStorage: {:?}\nQuirks: {} active, {} matching but inactive\nObservations: {} (values redacted)",
+        "Profile: {}\nModel: {} ({:?}, {:?})\nFirmware: {}\nUpdates: {}\nAuthorization: {:?}{}\nCamera: {:?} ({:?})\nStorage: {:?}\nQuirks: {} active, {} matching but inactive\nObservations: {} (values redacted)",
         sanitize(profile),
         sanitize(&report.model_raw),
         report.canonical_model,
@@ -1149,6 +1167,7 @@ fn human_capabilities(profile: &str, report: &diagnostics::BambuCompatibilityRep
         } else {
             &firmware
         },
+        update_summary,
         report.authorization.effective,
         if report.authorization.conflict {
             " (conflicting evidence)"

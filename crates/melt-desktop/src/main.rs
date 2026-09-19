@@ -3437,6 +3437,7 @@ impl ConstantTimeEq for [u8] {
 #[tauri::command(async)]
 fn diagnostics_report(
     monitor: tauri::State<'_, MonitorState>,
+    firmware: tauri::State<'_, FirmwareUpdateState>,
     camera: tauri::State<'_, CameraManager>,
 ) -> Result<diagnostics::Report, CommandError> {
     let config = Config::load().map_err(|_| unreadable_config())?;
@@ -3477,12 +3478,18 @@ fn diagnostics_report(
         let selection = melt_core::bambu::select_camera_transport(profile.host(), &capabilities);
         let key = driver.physical_printer_key(&named.name);
         let owner = owners.iter().find(|owner| owner.printer_key == key);
-        bambu_reports.push(diagnostics::bambu_compatibility_report(
+        let update_report = firmware.entries.lock().ok().and_then(|entries| {
+            entries
+                .get(&named.name)
+                .map(|cached| cached.entry.report.clone())
+        });
+        bambu_reports.push(diagnostics::bambu_compatibility_report_with_updates(
             index + 1,
             &capabilities,
             &selection,
             fingerprint.is_some(),
             owner,
+            update_report.as_ref(),
         ));
     }
     Ok(diagnostics::with_bambu(base, bambu_reports))
