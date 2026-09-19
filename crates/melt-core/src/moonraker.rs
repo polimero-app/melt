@@ -1571,6 +1571,25 @@ pub struct LightResult {
     pub state: LightState,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(tag = "action", rename_all = "camelCase")]
+pub enum DryingRequest {
+    #[serde(rename_all = "camelCase")]
+    Start {
+        temperature_c: u16,
+        hours: u16,
+        filament: Option<String>,
+    },
+    Stop,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DryingResult {
+    pub ams_id: u32,
+    pub active: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeedResult {
