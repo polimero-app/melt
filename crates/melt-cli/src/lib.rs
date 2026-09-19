@@ -4802,6 +4802,7 @@ mod tests {
                 queue_total: None,
             }),
             stage: Some("printing"),
+            stage_code: Some(0),
             timelapse: Some(moonraker::Timelapse {
                 recording: false,
                 progress: None,

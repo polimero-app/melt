@@ -1363,6 +1363,8 @@ pub struct Status {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stage: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_code: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub timelapse: Option<Timelapse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gcode_position: Option<GcodePosition>,
@@ -1384,6 +1386,7 @@ impl Status {
         self.wifi = None;
         self.print_meta = None;
         self.stage = None;
+        self.stage_code = None;
         self.timelapse = None;
         self.gcode_position = None;
         self.firmware_version = None;
@@ -1602,6 +1605,7 @@ impl Status {
             controls,
             print_meta: None,
             stage: None,
+            stage_code: None,
             timelapse: None,
             gcode_position: None,
             firmware_version: None,

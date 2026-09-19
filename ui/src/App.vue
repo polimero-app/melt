@@ -7,6 +7,7 @@ import { locales, preferredLocale, translate, type Locale, type MessageKey } fro
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration } from './formatting'
 import { printTargetState } from './printing'
+import { printStageLabel } from './stages'
 import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { hmsGuideUrl, hmsSeverity, type HmsSeverity } from './hms'
@@ -209,6 +210,8 @@ type PrinterStatus = {
   printMeta?: { fileName: string; fileSize?: number; plateIndex?: number; plateCount?: number; bedType?: string }
   progress?: { percent: number; preparationPercent?: number; currentLayer?: number; totalLayers?: number }
   timeEstimates?: { elapsedSeconds: number; remainingSeconds?: number; totalSeconds?: number }
+  stage?: string
+  stageCode?: number
   errors: { code: string; message: string; rawCode?: string; recoverable?: boolean }[]
   warnings: { code: string; message: string }[]
   fans?: Record<string, number>
@@ -628,6 +631,10 @@ const badgeMessageKeys: Record<PrinterBadge, MessageKey> = {
 }
 const statusLabel = (badge: PrinterBadge) => t(badgeMessageKeys[badge])
 const hasActiveJob = computed(() => isActiveJobState(selectedStatus.value?.state))
+const currentStageLabel = computed(() => {
+  if (!hasActiveJob.value) return undefined
+  return printStageLabel(locale.value, selectedStatus.value?.stage, selectedStatus.value?.stageCode)
+})
 const progressPercent = computed(() => selectedStatus.value?.progress?.percent ?? 0)
 const preparingPercent = computed(() => {
   if (!hasActiveJob.value) return undefined
@@ -2453,6 +2460,7 @@ onUnmounted(() => {
                     >{{ selectedStatus?.job?.name ?? t('dashboard.noJob') }}</p>
                     <p class="mt-1 font-mono text-xs text-gray-500 dark:text-gray-400">
                       {{ t(printerStateMessageKey(selectedStatus?.state)) }}
+                      <span v-if="currentStageLabel"> · {{ currentStageLabel }}</span>
                       <span v-if="selectedStatus?.printMeta?.plateIndex !== undefined">
                         · {{ t('control.plateOf', { index: selectedStatus.printMeta.plateIndex, total: selectedStatus.printMeta.plateCount ?? '—' }) }}
                       </span>

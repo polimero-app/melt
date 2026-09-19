@@ -2737,7 +2737,8 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
         lights,
         controls,
         print_meta: print_meta(print),
-        stage: stage(print),
+        stage: stage(print, state),
+        stage_code: stage_code(print),
         timelapse: timelapse(print),
         gcode_position: gcode_position(print),
         firmware_version: firmware_version(print),
@@ -3257,29 +3258,86 @@ fn lights(report: &Value) -> BTreeMap<String, String> {
         .unwrap_or_default()
 }
 
-fn stage(print: &Map<String, Value>) -> Option<&'static str> {
-    let stage = integer(print.get("stg_cur"))?;
-    match stage {
+fn stage_code(print: &Map<String, Value>) -> Option<u8> {
+    integer(print.get("stg_cur"))
+        .filter(|stage| (0..=254).contains(stage))
+        .and_then(|stage| stage.try_into().ok())
+}
+
+fn stage(print: &Map<String, Value>, state: PrinterState) -> Option<&'static str> {
+    if !matches!(state, PrinterState::Printing | PrinterState::Paused) {
+        return None;
+    }
+    match stage_code(print)? {
         0 => Some("printing"),
         1 => Some("auto_bed_leveling"),
         2 => Some("heatbed_preheating"),
-        3 => Some("sweeping_xy_mech_mode"),
+        3 => Some("vibration_compensation"),
         4 => Some("changing_filament"),
         5 => Some("m400_pause"),
-        6 => Some("filament_runout_pause"),
-        7 => Some("heating_hotend"),
-        8 => Some("calibrating_extrusion"),
+        6 => Some("paused_filament_runout"),
+        7 => Some("heating_nozzle"),
+        8 => Some("calibrating_dynamic_flow"),
         9 => Some("scanning_bed_surface"),
         10 => Some("inspecting_first_layer"),
         11 => Some("identifying_build_plate_type"),
+        12 => Some("calibrating_micro_lidar"),
+        13 => Some("homing_toolhead"),
         14 => Some("cleaning_nozzle_tip"),
         15 => Some("checking_extruder_temperature"),
-        16 => Some("paused_user_input"),
-        17 => Some("paused_front_cover_falling"),
+        16 => Some("paused_by_user"),
+        17 => Some("paused_front_cover_fell_off"),
         18 => Some("calibrating_micro_lidar"),
-        19 => Some("calibrating_extrusion_flow"),
+        19 => Some("calibrating_flow_ratio"),
         20 => Some("paused_nozzle_temperature_malfunction"),
-        21 => Some("paused_heat_bed_temperature_malfunction"),
+        21 => Some("paused_heatbed_temperature_malfunction"),
+        22 => Some("unloading_filament"),
+        23 => Some("paused_step_loss"),
+        24 => Some("loading_filament"),
+        25 => Some("motor_noise_cancellation"),
+        26 => Some("paused_ams_offline"),
+        27 => Some("paused_low_heatbreak_fan"),
+        28 => Some("paused_chamber_temperature_control"),
+        29 => Some("cooling_chamber"),
+        30 => Some("paused_by_gcode"),
+        31 => Some("motor_noise_showcase"),
+        32 => Some("paused_nozzle_clumping"),
+        33 => Some("paused_cutter_error"),
+        34 => Some("paused_first_layer_error"),
+        35 => Some("paused_nozzle_clog"),
+        36 => Some("measuring_motion_precision"),
+        37 => Some("enhancing_motion_precision"),
+        38 => Some("measuring_motion_accuracy"),
+        39 => Some("calibrating_nozzle_offset"),
+        40 => Some("high_temperature_bed_leveling"),
+        41 => Some("checking_quick_release_lever"),
+        42 => Some("checking_door_and_top_cover"),
+        43 => Some("laser_calibration"),
+        44 => Some("checking_build_platform"),
+        45 => Some("confirming_birdseye_camera_location"),
+        46 => Some("calibrating_birdseye_camera"),
+        47 => Some("bed_leveling_phase_1"),
+        48 => Some("bed_leveling_phase_2"),
+        49 => Some("heating_chamber"),
+        50 => Some("cooling_heatbed"),
+        51 => Some("printing_calibration_lines"),
+        52 => Some("checking_material"),
+        53 => Some("calibrating_live_view_camera"),
+        54 => Some("waiting_for_heatbed_temperature"),
+        55 => Some("checking_material_position"),
+        56 => Some("calibrating_cutting_module_offset"),
+        57 => Some("measuring_surface"),
+        58 => Some("thermal_preconditioning"),
+        59 => Some("homing_blade_holder"),
+        60 => Some("calibrating_camera_offset"),
+        61 => Some("calibrating_blade_holder_position"),
+        62 => Some("hotend_pick_and_place_test"),
+        63 => Some("waiting_for_chamber_temperature"),
+        64 => Some("preparing_hotend"),
+        65 => Some("calibrating_nozzle_clumping_detection"),
+        66 => Some("purifying_chamber_air"),
+        74 => Some("preparing"),
+        77 => Some("preparing_ams"),
         _ => None,
     }
 }
@@ -4393,6 +4451,115 @@ mod tests {
             status.errors[1].raw_code.as_deref(),
             Some("0000-0001-0000-0002")
         );
+    }
+
+    #[test]
+    fn maps_current_bambu_print_stages() {
+        let expected = [
+            "printing",
+            "auto_bed_leveling",
+            "heatbed_preheating",
+            "vibration_compensation",
+            "changing_filament",
+            "m400_pause",
+            "paused_filament_runout",
+            "heating_nozzle",
+            "calibrating_dynamic_flow",
+            "scanning_bed_surface",
+            "inspecting_first_layer",
+            "identifying_build_plate_type",
+            "calibrating_micro_lidar",
+            "homing_toolhead",
+            "cleaning_nozzle_tip",
+            "checking_extruder_temperature",
+            "paused_by_user",
+            "paused_front_cover_fell_off",
+            "calibrating_micro_lidar",
+            "calibrating_flow_ratio",
+            "paused_nozzle_temperature_malfunction",
+            "paused_heatbed_temperature_malfunction",
+            "unloading_filament",
+            "paused_step_loss",
+            "loading_filament",
+            "motor_noise_cancellation",
+            "paused_ams_offline",
+            "paused_low_heatbreak_fan",
+            "paused_chamber_temperature_control",
+            "cooling_chamber",
+            "paused_by_gcode",
+            "motor_noise_showcase",
+            "paused_nozzle_clumping",
+            "paused_cutter_error",
+            "paused_first_layer_error",
+            "paused_nozzle_clog",
+            "measuring_motion_precision",
+            "enhancing_motion_precision",
+            "measuring_motion_accuracy",
+            "calibrating_nozzle_offset",
+            "high_temperature_bed_leveling",
+            "checking_quick_release_lever",
+            "checking_door_and_top_cover",
+            "laser_calibration",
+            "checking_build_platform",
+            "confirming_birdseye_camera_location",
+            "calibrating_birdseye_camera",
+            "bed_leveling_phase_1",
+            "bed_leveling_phase_2",
+            "heating_chamber",
+            "cooling_heatbed",
+            "printing_calibration_lines",
+            "checking_material",
+            "calibrating_live_view_camera",
+            "waiting_for_heatbed_temperature",
+            "checking_material_position",
+            "calibrating_cutting_module_offset",
+            "measuring_surface",
+            "thermal_preconditioning",
+            "homing_blade_holder",
+            "calibrating_camera_offset",
+            "calibrating_blade_holder_position",
+            "hotend_pick_and_place_test",
+            "waiting_for_chamber_temperature",
+            "preparing_hotend",
+            "calibrating_nozzle_clumping_detection",
+            "purifying_chamber_air",
+        ];
+
+        for (code, expected) in expected.into_iter().enumerate() {
+            let value = serde_json::json!({ "stg_cur": code });
+            assert_eq!(
+                stage(value.as_object().unwrap(), PrinterState::Printing),
+                Some(expected),
+                "stage {code}",
+            );
+        }
+        for (code, expected) in [(74, "preparing"), (77, "preparing_ams")] {
+            let value = serde_json::json!({ "stg_cur": code });
+            assert_eq!(
+                stage(value.as_object().unwrap(), PrinterState::Printing),
+                Some(expected),
+            );
+        }
+    }
+
+    #[test]
+    fn preserves_unknown_active_stage_codes_but_hides_idle_sentinels() {
+        let unknown =
+            parse_status(br#"{"print":{"gcode_state":"PRINTING","stg_cur":73}}"#).unwrap();
+        assert_eq!(unknown.stage, None);
+        assert_eq!(unknown.stage_code, Some(73));
+
+        let stale_printing =
+            parse_status(br#"{"print":{"gcode_state":"IDLE","stg_cur":0}}"#).unwrap();
+        assert_eq!(stale_printing.stage, None);
+        assert_eq!(stale_printing.stage_code, Some(0));
+
+        for sentinel in [-1, 255] {
+            let report = format!(r#"{{"print":{{"gcode_state":"IDLE","stg_cur":{sentinel}}}}}"#);
+            let status = parse_status(report.as_bytes()).unwrap();
+            assert_eq!(status.stage, None);
+            assert_eq!(status.stage_code, None);
+        }
     }
 
     #[test]
