@@ -1048,6 +1048,20 @@ fn fan_display_name(key: &str) -> &str {
     }
 }
 
+fn drying_status_label(status: melt_core::moonraker::DryingStatus) -> &'static str {
+    use melt_core::moonraker::DryingStatus;
+    match status {
+        DryingStatus::Off => "off",
+        DryingStatus::Checking => "checking",
+        DryingStatus::Drying => "drying",
+        DryingStatus::Cooling => "cooling",
+        DryingStatus::Stopping => "stopping",
+        DryingStatus::Error => "error",
+        DryingStatus::HeatOutOfControl => "heat out of control",
+        DryingStatus::Unknown => "unknown",
+    }
+}
+
 fn human_status(name: &str, status: &moonraker::Status, detailed: bool) -> String {
     let mut lines = vec![
         format!("Printer: {}", sanitize(name)),
@@ -1177,6 +1191,27 @@ fn human_status(name: &str, status: &moonraker::Status, detailed: bool) -> Strin
             }
             if let Some(temperature) = unit.temperature {
                 parts.push(format!("temp: {temperature:.1} C"));
+            }
+            if let Some(drying) = &unit.drying {
+                let mut text = match drying.minutes_remaining {
+                    Some(minutes) => format!("drying: {}h {}m left", minutes / 60, minutes % 60),
+                    None if drying.active => "drying: cooling".into(),
+                    None => format!("drying: {}", drying_status_label(drying.status)),
+                };
+                if let Some(setting) = &drying.setting {
+                    text.push_str(", ");
+                    if let Some(filament) = &setting.filament {
+                        text.push_str(&format!("{} ", sanitize(filament)));
+                    }
+                    text.push_str(&format!("{} C / {}h", setting.temperature_c, setting.hours));
+                }
+                parts.push(text);
+                if !drying.active && !drying.blocked_reasons.is_empty() {
+                    parts.push(format!(
+                        "drying blocked: {}",
+                        drying.blocked_reasons.join(", ")
+                    ));
+                }
             }
             let suffix = if parts.is_empty() {
                 String::new()
@@ -4881,6 +4916,71 @@ mod tests {
         let detailed = human_status("dakota", &status, true);
         assert!(
             detailed.contains("Fans:\n  Part cooling: 75%\n  Exhaust: 40%"),
+            "{detailed}"
+        );
+    }
+
+    #[test]
+    fn detailed_status_shows_ams_drying_state() {
+        let mut status = sample_status();
+        let ams = status
+            .extensions
+            .bambu_lan
+            .as_mut()
+            .unwrap()
+            .ams
+            .as_mut()
+            .unwrap();
+        ams.units[0].humidity_range = None;
+        ams.units[0].humidity_level = None;
+        ams.units[0].temperature = None;
+        ams.units[0].drying = Some(moonraker::AmsDrying {
+            status: moonraker::DryingStatus::Drying,
+            active: true,
+            minutes_remaining: Some(661),
+            setting: Some(moonraker::DryingSetting {
+                filament: Some("PLA".into()),
+                temperature_c: 45,
+                hours: 12,
+            }),
+            blocked_reasons: vec!["already_drying"],
+            controllable: false,
+        });
+
+        let detailed = human_status("dakota", &status, true);
+        assert!(
+            detailed.contains("  Unit 0 (drying: 11h 1m left, PLA 45 C / 12h):"),
+            "{detailed}"
+        );
+        assert!(
+            !detailed.contains("drying blocked"),
+            "an active cycle hides its own already_drying reason"
+        );
+
+        let ams = status
+            .extensions
+            .bambu_lan
+            .as_mut()
+            .unwrap()
+            .ams
+            .as_mut()
+            .unwrap();
+        ams.units.push(moonraker::AmsUnit {
+            id: 1,
+            drying: Some(moonraker::AmsDrying {
+                status: moonraker::DryingStatus::Off,
+                active: false,
+                minutes_remaining: None,
+                setting: None,
+                blocked_reasons: vec!["insufficient_power"],
+                controllable: true,
+            }),
+            ..Default::default()
+        });
+
+        let detailed = human_status("dakota", &status, true);
+        assert!(
+            detailed.contains("(drying: off, drying blocked: insufficient_power)"),
             "{detailed}"
         );
     }
