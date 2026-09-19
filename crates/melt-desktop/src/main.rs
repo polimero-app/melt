@@ -459,6 +459,14 @@ struct LightRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct AmsDryingRequest {
+    name: String,
+    ams_id: u32,
+    drying: moonraker::DryingRequest,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SpeedRequest {
     name: String,
     speed_profile: String,
@@ -2203,6 +2211,27 @@ fn printer_light_set(
 }
 
 #[tauri::command(async)]
+fn printer_ams_drying_set(
+    request: AmsDryingRequest,
+    state: tauri::State<'_, MonitorState>,
+) -> Result<moonraker::DryingResult, CommandError> {
+    let (generation, printer) =
+        pooled_desktop_printer(&state, &request.name, Operation::AmsDrying)?;
+    let result = current_pool_operation(&state, generation, Operation::AmsDrying, |pool| {
+        pool.ams_drying_set(
+            &request.name,
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+            request.ams_id,
+            &request.drying,
+        )
+    });
+    invalidate(&state, &request.name);
+    result
+}
+
+#[tauri::command(async)]
 fn printer_speed_set(
     request: SpeedRequest,
     state: tauri::State<'_, MonitorState>,
@@ -3432,6 +3461,7 @@ fn operation_slug(operation: Operation) -> &'static str {
         Operation::MotionJog => "motionJog",
         Operation::LightSet => "lightSet",
         Operation::SpeedSet => "speedSet",
+        Operation::AmsDrying => "amsDrying",
         Operation::FileDownload => "fileDownload",
         Operation::FileUpload => "fileUpload",
         Operation::FileDelete => "fileDelete",
@@ -3556,6 +3586,7 @@ fn main() {
             printer_motion_home,
             printer_motion_jog,
             printer_light_set,
+            printer_ams_drying_set,
             printer_speed_set,
             printer_file_download,
             cancel_file_transfer,
