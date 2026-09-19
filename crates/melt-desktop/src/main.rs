@@ -367,19 +367,10 @@ struct CachedFirmwareUpdate {
     entry: FirmwareUpdateEntry,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct FirmwareUpdateState {
     entries: Arc<Mutex<BTreeMap<String, CachedFirmwareUpdate>>>,
     pool: Arc<ConnectionPool>,
-}
-
-impl Default for FirmwareUpdateState {
-    fn default() -> Self {
-        Self {
-            entries: Arc::default(),
-            pool: Arc::default(),
-        }
-    }
 }
 
 #[derive(Default)]
