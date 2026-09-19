@@ -5,7 +5,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog'
 import { locales, preferredLocale, translate, type Locale, type MessageKey } from './i18n'
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
-import { clampTarget, formatDuration } from './formatting'
+import { clampTarget, remainingTimePresentation } from './formatting'
 import { printTargetState } from './printing'
 import { printStageLabel } from './stages'
 import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
@@ -649,6 +649,14 @@ const jobThumbnail = computed(() => {
   if (!name) return undefined
   return libraryFiles.value.find((file) => file.type === 'file' && file.name === name)
 })
+const remainingTimeLabel = computed(() => {
+  const remaining = selectedStatus.value?.timeEstimates?.remainingSeconds
+  if (!hasActiveJob.value || remaining === undefined) return undefined
+  const presentation = remainingTimePresentation(remaining)
+  return presentation.kind === 'almostComplete'
+    ? t('control.almostComplete')
+    : t('control.remaining', { duration: presentation.duration })
+})
 // aria-valuenow alone announces a bare "45". Spell out what the number means,
 // and fold in the layer and remaining time a sighted user reads beside the bar.
 const progressValueText = computed(() => {
@@ -658,10 +666,7 @@ const progressValueText = computed(() => {
   if (progress?.currentLayer !== undefined && progress.totalLayers !== undefined) {
     parts.push(t('control.layer', { current: progress.currentLayer, total: progress.totalLayers }))
   }
-  const remaining = selectedStatus.value?.timeEstimates?.remainingSeconds
-  if (hasActiveJob.value && remaining !== undefined) {
-    parts.push(t('control.remaining', { duration: formatDuration(remaining) }))
-  }
+  if (remainingTimeLabel.value) parts.push(remainingTimeLabel.value)
   return parts.join(' · ')
 })
 
@@ -2470,8 +2475,8 @@ onUnmounted(() => {
                 <div class="mt-6">
                   <div class="mb-2 flex justify-between text-xs text-gray-500 dark:text-gray-400">
                     <span>{{ t('control.layer', { current: selectedStatus?.progress?.currentLayer ?? '—', total: selectedStatus?.progress?.totalLayers ?? '—' }) }}</span>
-                    <span v-if="hasActiveJob && selectedStatus?.timeEstimates?.remainingSeconds !== undefined" class="font-mono">
-                      {{ t('control.remaining', { duration: formatDuration(selectedStatus.timeEstimates.remainingSeconds) }) }}
+                    <span v-if="remainingTimeLabel" class="font-mono">
+                      {{ remainingTimeLabel }}
                     </span>
                   </div>
                   <div

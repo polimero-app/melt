@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampTarget, formatDuration, relativeAge } from './formatting'
+import { clampTarget, formatDuration, relativeAge, remainingTimePresentation } from './formatting'
 
 describe('relative age', () => {
   const now = Date.parse('2026-08-04T12:00:30.000Z')
@@ -40,6 +40,16 @@ describe('duration formatting', () => {
 
   it('drops a zero minute component', () => {
     expect(formatDuration(7200)).toBe('2h')
+  })
+})
+
+describe('remaining time presentation', () => {
+  it('treats zero as an active job that is almost complete', () => {
+    expect(remainingTimePresentation(0)).toEqual({ kind: 'almostComplete' })
+  })
+
+  it('keeps positive estimates as formatted durations', () => {
+    expect(remainingTimePresentation(45)).toEqual({ kind: 'duration', duration: '< 1m' })
   })
 })
 

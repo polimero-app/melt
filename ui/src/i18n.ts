@@ -157,6 +157,7 @@ export type MessageKey =
   | "control.complete"
   | "control.preparing"
   | "control.remaining"
+  | "control.almostComplete"
   | "control.timeUnavailable"
   | "control.layer"
   | "control.plateOf"
@@ -617,6 +618,7 @@ const messages: Record<Locale, Messages> = {
     "control.complete": "{percent}% complete",
     "control.preparing": "Preparing — heating and levelling",
     "control.remaining": "{duration} left",
+    "control.almostComplete": "Almost complete",
     "control.timeUnavailable": "Time estimate unavailable",
     "control.layer": "Layer {current} / {total}",
     "control.plateOf": "plate {index} of {total}",
@@ -1074,6 +1076,7 @@ const messages: Record<Locale, Messages> = {
     "control.complete": "{percent}% concluído",
     "control.preparing": "Preparando — aquecendo e nivelando",
     "control.remaining": "faltam {duration}",
+    "control.almostComplete": "Quase concluído",
     "control.timeUnavailable": "Estimativa de tempo indisponível",
     "control.layer": "Camada {current} / {total}",
     "control.plateOf": "placa {index} de {total}",

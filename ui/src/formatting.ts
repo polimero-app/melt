@@ -23,6 +23,15 @@ export function formatDuration(seconds: number): string {
   return minutes ? `${hours}h ${minutes}m` : `${hours}h`
 }
 
+export type RemainingTimePresentation =
+  | { kind: 'almostComplete' }
+  | { kind: 'duration'; duration: string }
+
+export function remainingTimePresentation(seconds: number): RemainingTimePresentation {
+  if (seconds <= 0) return { kind: 'almostComplete' }
+  return { kind: 'duration', duration: formatDuration(seconds) }
+}
+
 export function clampTarget(maximum: number, next: number): number {
   return Math.max(0, Math.min(maximum, Math.round(next / 5) * 5))
 }
