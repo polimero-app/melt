@@ -43,3 +43,4 @@ Rules:
 - Centralize state derivation in `ui/src/monitoring.ts`; presentation surfaces consume its `PrinterBadge` result instead of reimplementing precedence rules.
 - Keep badge colors and labels synchronized between `ui/src/App.vue`, `ui/src/components/StatusBadge.vue`, and localized messages.
 - Add a table-driven or focused unit test whenever the monitoring state contract changes, especially around stale status plus error precedence.
+- When `content-visibility` defers cards in large collections, restore normal painting on the active card with `:focus-within` and the component's explicit open state. This lets menus and popovers escape the card boundary without giving up off-screen rendering savings for the rest of the collection.

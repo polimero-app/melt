@@ -114,3 +114,10 @@ select {
   content-visibility: auto;
   contain-intrinsic-size: auto 280px;
 }
+
+/* content-visibility adds paint containment, which would clip a card's action
+   menu at the card edge. Restore normal painting only for the active card. */
+.library-card-deferred:focus-within,
+.library-card-deferred:has([data-headlessui-state~="open"]) {
+  content-visibility: visible;
+}
