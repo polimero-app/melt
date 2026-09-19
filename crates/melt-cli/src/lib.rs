@@ -1234,7 +1234,6 @@ fn human_status(name: &str, status: &moonraker::Status, detailed: bool) -> Strin
             if let Some(drying) = &unit.drying {
                 let mut text = match drying.minutes_remaining {
                     Some(minutes) => format!("drying: {}h {}m left", minutes / 60, minutes % 60),
-                    None if drying.active => "drying: cooling".into(),
                     None => format!("drying: {}", drying_status_label(drying.status)),
                 };
                 if let Some(setting) = &drying.setting {
@@ -5167,6 +5166,36 @@ mod tests {
             detailed.contains("(drying: off, drying blocked: insufficient_power)"),
             "{detailed}"
         );
+    }
+
+    #[test]
+    fn detailed_status_labels_non_cooling_phases_with_no_time_left() {
+        // Checking (and Drying at cycle start) report dry_time 0 too; only
+        // Cooling should ever read "cooling".
+        let mut status = sample_status();
+        let ams = status
+            .extensions
+            .bambu_lan
+            .as_mut()
+            .unwrap()
+            .ams
+            .as_mut()
+            .unwrap();
+        ams.units[0].humidity_range = None;
+        ams.units[0].humidity_level = None;
+        ams.units[0].temperature = None;
+        ams.units[0].drying = Some(moonraker::AmsDrying {
+            status: moonraker::DryingStatus::Checking,
+            active: true,
+            minutes_remaining: None,
+            setting: None,
+            blocked_reasons: Vec::new(),
+            controllable: false,
+        });
+
+        let detailed = human_status("dakota", &status, true);
+        assert!(detailed.contains("drying: checking"), "{detailed}");
+        assert!(!detailed.contains("drying: cooling"), "{detailed}");
     }
 
     #[test]
