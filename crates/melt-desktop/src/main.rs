@@ -1010,18 +1010,14 @@ fn probe_keychain(name: String) -> Result<KeychainProbe, CommandError> {
             available: true,
             reason: None,
         }),
-        Err(error) if error.code == "accessCodeUnavailable" => {
-            return Ok(KeychainProbe {
-                available: true,
-                reason: Some("accessCodeMissing"),
-            });
-        }
-        Err(error) if error.code == "keychainFailed" => {
-            return Ok(KeychainProbe {
-                available: false,
-                reason: Some("keychainUnavailable"),
-            });
-        }
+        Err(error) if error.code == "accessCodeUnavailable" => Ok(KeychainProbe {
+            available: true,
+            reason: Some("accessCodeMissing"),
+        }),
+        Err(error) if error.code == "keychainFailed" => Ok(KeychainProbe {
+            available: false,
+            reason: Some("keychainUnavailable"),
+        }),
         Err(error) => Err(error),
     }
 }
