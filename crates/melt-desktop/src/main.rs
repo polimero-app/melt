@@ -17,6 +17,7 @@ use melt_core::{
     config::{Config, ConfigError, Profile, config_dir},
     diagnostics,
     drivers::{self, Capabilities, DriverError, Operation},
+    firmware_updates::FirmwareUpdateReport,
     keychain::{SERVICE, SecretError, SecretStore, SystemKeychain, account},
     monitor, moonraker,
     pool::ConnectionPool,
@@ -343,6 +344,42 @@ struct MonitorState {
     entries: Arc<Mutex<BTreeMap<String, CachedMonitor>>>,
     previous: Arc<Mutex<HashMap<String, MonitorEntry>>>,
     pool: Arc<ConnectionPool>,
+}
+
+const FIRMWARE_UPDATE_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
+const FIRMWARE_UPDATE_STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FirmwareUpdateEntry {
+    profile: String,
+    driver: String,
+    report: FirmwareUpdateReport,
+    checked_at: String,
+    stale: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<CommandError>,
+}
+
+struct CachedFirmwareUpdate {
+    checked_at: Instant,
+    generation: u64,
+    entry: FirmwareUpdateEntry,
+}
+
+#[derive(Clone)]
+struct FirmwareUpdateState {
+    entries: Arc<Mutex<BTreeMap<String, CachedFirmwareUpdate>>>,
+    pool: Arc<ConnectionPool>,
+}
+
+impl Default for FirmwareUpdateState {
+    fn default() -> Self {
+        Self {
+            entries: Arc::default(),
+            pool: Arc::default(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -992,6 +1029,147 @@ fn cached_monitoring() -> Option<serde_json::Value> {
     load_status_cache()
 }
 
+#[tauri::command(async)]
+fn cached_firmware_updates(
+    state: tauri::State<'_, FirmwareUpdateState>,
+) -> Result<Vec<FirmwareUpdateEntry>, CommandError> {
+    let generation = state.pool.lifecycle_generation();
+    let entries = state
+        .entries
+        .lock()
+        .map_err(|_| CommandError::new("firmwareUpdatesUnavailable"))?;
+    Ok(entries
+        .values()
+        .filter(|cached| cached.generation == generation)
+        .map(current_firmware_entry)
+        .collect())
+}
+
+#[tauri::command(async)]
+fn printer_firmware_updates(
+    name: String,
+    refresh: bool,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, FirmwareUpdateState>,
+) -> Result<FirmwareUpdateEntry, CommandError> {
+    let config = Config::load().map_err(|_| unreadable_config())?;
+    let normalized = name.to_ascii_lowercase();
+    let profile = config
+        .get_profile(&normalized)
+        .ok_or_else(|| CommandError::new("profileNotFound"))?
+        .clone();
+    if !refresh && let Some(entry) = fresh_firmware_entry(&state, &normalized) {
+        return Ok(entry);
+    }
+    check_firmware_updates(&state, &app, normalized, profile, refresh)
+}
+
+fn fresh_firmware_entry(state: &FirmwareUpdateState, name: &str) -> Option<FirmwareUpdateEntry> {
+    let generation = state.pool.lifecycle_generation();
+    let entries = state.entries.lock().ok()?;
+    let cached = entries.get(&name.to_ascii_lowercase())?;
+    (cached.generation == generation && cached.checked_at.elapsed() <= FIRMWARE_UPDATE_CACHE_TTL)
+        .then(|| current_firmware_entry(cached))
+}
+
+fn current_firmware_entry(cached: &CachedFirmwareUpdate) -> FirmwareUpdateEntry {
+    let mut entry = cached.entry.clone();
+    entry.stale |= cached.checked_at.elapsed() > FIRMWARE_UPDATE_STALE_AFTER;
+    entry
+}
+
+fn check_firmware_updates(
+    state: &FirmwareUpdateState,
+    app: &tauri::AppHandle,
+    name: String,
+    profile: Profile,
+    refresh: bool,
+) -> Result<FirmwareUpdateEntry, CommandError> {
+    let generation = state.pool.lifecycle_generation();
+    let driver = drivers::profile(&profile).map_err(|_| CommandError::new("profileInvalid"))?;
+    let kind = driver.driver();
+    let access_code = access_code(&profile.driver, &name, kind)?;
+    let fingerprint = tls_fingerprint(&profile.driver, &name, kind, profile.insecure)?;
+    let result = state.pool.firmware_update_status(
+        &name,
+        &driver,
+        access_code.as_deref(),
+        fingerprint.as_deref(),
+        refresh,
+    );
+    if !state.pool.is_current_generation(generation) {
+        return Err(CommandError::new("profileNotFound"));
+    }
+    match result {
+        Ok(report) => {
+            let entry = FirmwareUpdateEntry {
+                profile: name.clone(),
+                driver: kind.name().into(),
+                report,
+                checked_at: format_modified(SystemTime::now()).unwrap_or_default(),
+                stale: false,
+                error: None,
+            };
+            let changed = store_firmware_update(state, &name, generation, entry.clone());
+            if changed {
+                let _ = app.emit("firmware-updates-updated", &entry);
+            }
+            Ok(entry)
+        }
+        Err(error) => {
+            let error = operation_error(error, Operation::FirmwareUpdateCheck);
+            if let Some((entry, changed)) = retain_firmware_update_failure(state, &name, &error)
+                && changed
+            {
+                let _ = app.emit("firmware-updates-updated", entry);
+            }
+            Err(error)
+        }
+    }
+}
+
+fn store_firmware_update(
+    state: &FirmwareUpdateState,
+    name: &str,
+    generation: u64,
+    entry: FirmwareUpdateEntry,
+) -> bool {
+    let Ok(mut entries) = state.entries.lock() else {
+        return false;
+    };
+    let changed = entries
+        .get(name)
+        .is_none_or(|cached| cached.entry != entry || cached.generation != generation);
+    entries.insert(
+        name.to_owned(),
+        CachedFirmwareUpdate {
+            checked_at: Instant::now(),
+            generation,
+            entry,
+        },
+    );
+    changed
+}
+
+fn retain_firmware_update_failure(
+    state: &FirmwareUpdateState,
+    name: &str,
+    error: &CommandError,
+) -> Option<(FirmwareUpdateEntry, bool)> {
+    let mut entries = state.entries.lock().ok()?;
+    let cached = entries.get_mut(name)?;
+    let previous = cached.entry.clone();
+    cached.entry.stale = true;
+    cached.entry.error = Some(error.clone());
+    Some((cached.entry.clone(), cached.entry != previous))
+}
+
+fn invalidate_firmware_updates(state: &FirmwareUpdateState, name: &str) {
+    if let Ok(mut entries) = state.entries.lock() {
+        entries.remove(&name.to_ascii_lowercase());
+    }
+}
+
 /// Tries to read the configured authentication credential without exposing it.
 /// On Secret Service based desktops this access can also cause the OS to
 /// present its normal unlock prompt; Melt never attempts to unlock it
@@ -1196,6 +1374,38 @@ fn start_monitor_worker(app: tauri::AppHandle, state: MonitorState, presence: Pr
                 }
             }
             thread::sleep(Duration::from_secs(5).saturating_sub(cycle_started.elapsed()));
+        }
+    });
+}
+
+fn start_firmware_update_worker(app: tauri::AppHandle, state: FirmwareUpdateState) {
+    thread::spawn(move || {
+        // Let the status monitor establish the shared sessions before doing
+        // slower, non-essential update checks.
+        thread::sleep(Duration::from_secs(10));
+        loop {
+            let cycle_started = Instant::now();
+            if let Ok(config) = Config::load() {
+                let profiles = config.sorted_profiles();
+                for batch in profiles.chunks(usize::from(monitor::DEFAULT_WORKERS)) {
+                    thread::scope(|scope| {
+                        for named in batch.iter().cloned() {
+                            let app = &app;
+                            let state = &state;
+                            scope.spawn(move || {
+                                let _ = check_firmware_updates(
+                                    state,
+                                    app,
+                                    named.name,
+                                    named.profile,
+                                    false,
+                                );
+                            });
+                        }
+                    });
+                }
+            }
+            thread::sleep(FIRMWARE_UPDATE_CACHE_TTL.saturating_sub(cycle_started.elapsed()));
         }
     });
 }
@@ -1612,14 +1822,17 @@ fn update_configured_printer(
     name: String,
     request: profiles::CreateRequest,
     state: tauri::State<'_, MonitorState>,
+    firmware_state: tauri::State<'_, FirmwareUpdateState>,
 ) -> Result<profiles::UpdateResult, CommandError> {
     let dir = config_dir().map_err(|_| unreadable_config())?;
     let result = profiles::update(dir, &SystemKeychain, &name, request).map_err(create_error)?;
     state.pool.remove(&name);
     invalidate(&state, &name);
+    invalidate_firmware_updates(&firmware_state, &name);
     if result.name != name {
         state.pool.remove(&result.name);
         invalidate(&state, &result.name);
+        invalidate_firmware_updates(&firmware_state, &result.name);
     }
     Ok(result)
 }
@@ -1648,6 +1861,7 @@ fn create_error(error: profiles::ProfileError) -> CommandError {
 fn refresh_printer_tls(
     request: TlsRefreshRequest,
     state: tauri::State<'_, MonitorState>,
+    firmware_state: tauri::State<'_, FirmwareUpdateState>,
 ) -> Result<profiles::TlsRefreshResult, CommandError> {
     if !request.confirmed {
         return Err(CommandError::new("tlsUnconfirmed"));
@@ -1658,6 +1872,7 @@ fn refresh_printer_tls(
             .map_err(create_error)?;
     state.pool.remove(&request.name);
     invalidate(&state, &request.name);
+    invalidate_firmware_updates(&firmware_state, &request.name);
     Ok(result)
 }
 
@@ -3436,6 +3651,7 @@ fn operation_slug(operation: Operation) -> &'static str {
         Operation::FileUpload => "fileUpload",
         Operation::FileDelete => "fileDelete",
         Operation::Verify => "verification",
+        Operation::FirmwareUpdateCheck => "firmwareUpdateCheck",
         _ => "operation",
     }
 }
@@ -3484,11 +3700,13 @@ fn operation_error(error: DriverError, operation: Operation) -> CommandError {
 fn remove_configured_printer(
     name: String,
     state: tauri::State<'_, MonitorState>,
+    firmware_state: tauri::State<'_, FirmwareUpdateState>,
 ) -> Result<profiles::RemoveResult, CommandError> {
     let dir = config_dir().map_err(|_| unreadable_config())?;
     let result = profiles::remove(dir, &SystemKeychain, &name).map_err(create_error)?;
     state.pool.remove(&name);
     invalidate(&state, &name);
+    invalidate_firmware_updates(&firmware_state, &name);
     Ok(result)
 }
 
@@ -3502,10 +3720,21 @@ fn main() {
         ));
     }
 
+    let pool = Arc::new(ConnectionPool::default());
+    let monitor_state = MonitorState {
+        pool: pool.clone(),
+        ..MonitorState::default()
+    };
+    let firmware_update_state = FirmwareUpdateState {
+        entries: Arc::default(),
+        pool,
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .manage(MonitorState::default())
+        .manage(monitor_state)
+        .manage(firmware_update_state)
         .manage(PresenceState::default())
         .manage(CameraManager::default())
         .manage(CameraStreamState::default())
@@ -3516,8 +3745,10 @@ fn main() {
         .manage(SlicerState::default())
         .setup(|app| {
             let state = app.state::<MonitorState>().inner().clone();
+            let firmware_state = app.state::<FirmwareUpdateState>().inner().clone();
             let presence = app.state::<PresenceState>().inner().clone();
             start_monitor_worker(app.handle().clone(), state, presence.clone());
+            start_firmware_update_worker(app.handle().clone(), firmware_state);
             start_presence_worker(app.handle().clone(), presence);
             Ok(())
         })
@@ -3536,6 +3767,8 @@ fn main() {
             printer_capabilities,
             monitored_printers,
             cached_monitoring,
+            cached_firmware_updates,
+            printer_firmware_updates,
             probe_keychain,
             printer_status,
             create_configured_printer,
@@ -3591,18 +3824,79 @@ mod tests {
 
     use melt_core::{
         drivers::{self, Operation},
+        firmware_updates::{FirmwareUpdateReport, FirmwareUpdateSource},
         moonraker,
     };
 
     use super::{
-        CachedMonitor, DesktopPrinter, MonitorConnectionState, MonitorEntry, MonitorState, Profile,
-        STATUS_CACHE_HEARTBEAT, StatusCacheThrottle, cached_monitor_entry_at,
-        cached_ui_monitor_entry, camera_preview_request, ensure_state, extract_3mf_thumbnail,
-        h264_codec, h264_frame_header, load_status_cache_from, monitor_connection_state,
-        operation_error, save_status_cache_to,
+        CachedFirmwareUpdate, CachedMonitor, DesktopPrinter, FIRMWARE_UPDATE_STALE_AFTER,
+        FirmwareUpdateEntry, FirmwareUpdateState, MonitorConnectionState, MonitorEntry,
+        MonitorState, Profile, STATUS_CACHE_HEARTBEAT, StatusCacheThrottle,
+        cached_monitor_entry_at, cached_ui_monitor_entry, camera_preview_request,
+        current_firmware_entry, ensure_state, extract_3mf_thumbnail, h264_codec, h264_frame_header,
+        invalidate_firmware_updates, load_status_cache_from, monitor_connection_state,
+        operation_error, retain_firmware_update_failure, save_status_cache_to,
+        store_firmware_update,
     };
 
     const TOKEN: &str = "/stream/0123456789abcdef0123456789abcdef";
+
+    fn firmware_entry() -> FirmwareUpdateEntry {
+        FirmwareUpdateEntry {
+            profile: "printer".into(),
+            driver: "moonraker".into(),
+            report: FirmwareUpdateReport::unsupported(
+                FirmwareUpdateSource::MoonrakerUpdateManager,
+                "test",
+                "test",
+            ),
+            checked_at: "2026-09-19T12:00:00Z".into(),
+            stale: false,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn firmware_cache_suppresses_unchanged_entries_and_invalidates_by_name() {
+        let state = FirmwareUpdateState::default();
+        let generation = state.pool.lifecycle_generation();
+        let entry = firmware_entry();
+
+        assert!(store_firmware_update(
+            &state,
+            "printer",
+            generation,
+            entry.clone()
+        ));
+        assert!(!store_firmware_update(&state, "printer", generation, entry));
+        invalidate_firmware_updates(&state, "Printer");
+        assert!(state.entries.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn firmware_cache_marks_old_and_failed_results_stale_without_losing_them() {
+        let state = FirmwareUpdateState::default();
+        state.entries.lock().unwrap().insert(
+            "printer".into(),
+            CachedFirmwareUpdate {
+                checked_at: Instant::now() - FIRMWARE_UPDATE_STALE_AFTER - Duration::from_secs(1),
+                generation: state.pool.lifecycle_generation(),
+                entry: firmware_entry(),
+            },
+        );
+        let aged = {
+            let entries = state.entries.lock().unwrap();
+            current_firmware_entry(entries.get("printer").unwrap())
+        };
+        assert!(aged.stale);
+
+        let error = super::CommandError::new("printerTimeout");
+        let (failed, changed) = retain_firmware_update_failure(&state, "printer", &error).unwrap();
+        assert!(changed);
+        assert!(failed.stale);
+        assert_eq!(failed.error, Some(error));
+        assert_eq!(failed.report, firmware_entry().report);
+    }
 
     #[test]
     fn moonraker_timeouts_use_the_stable_printer_timeout_code() {
