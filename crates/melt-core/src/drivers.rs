@@ -3,7 +3,9 @@ use std::{fmt, time::Duration};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::{bambu, config, moonraker, trace::SharedTracer};
+use crate::{
+    bambu, config, firmware_updates::FirmwareUpdateReport, moonraker, trace::SharedTracer,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct DriverInfo {
@@ -49,6 +51,7 @@ pub struct Capabilities {
     pub fan_control: bool,
     pub light_control: bool,
     pub speed_control: bool,
+    pub firmware_update_check: bool,
 }
 
 impl Capabilities {
@@ -73,6 +76,7 @@ impl Capabilities {
             Operation::FanSet => self.fan_control,
             Operation::LightSet => self.light_control,
             Operation::SpeedSet => self.speed_control,
+            Operation::FirmwareUpdateCheck => self.firmware_update_check,
         }
     }
 }
@@ -124,6 +128,7 @@ impl Driver {
                 fan_control: true,
                 light_control: true,
                 speed_control: true,
+                firmware_update_check: true,
             },
             Self::Moonraker => Capabilities {
                 status: true,
@@ -141,6 +146,7 @@ impl Driver {
                 motion_control: true,
                 fan_control: true,
                 speed_control: true,
+                firmware_update_check: true,
                 ..Capabilities::default()
             },
         }
@@ -176,6 +182,7 @@ pub enum Operation {
     FanSet,
     LightSet,
     SpeedSet,
+    FirmwareUpdateCheck,
 }
 
 #[derive(Clone, Debug)]
@@ -297,6 +304,22 @@ pub fn status(
             .map_err(DriverError::Moonraker),
         Profile::Bambu(profile) => bambu::Client::new(profile.clone())
             .status(access_code, tls_fingerprint)
+            .map_err(DriverError::Bambu),
+    }
+}
+
+pub fn firmware_update_status(
+    profile: &Profile,
+    access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
+    refresh: bool,
+) -> Result<FirmwareUpdateReport, DriverError> {
+    match profile {
+        Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
+            .and_then(|client| client.firmware_update_status(access_code, refresh))
+            .map_err(DriverError::Moonraker),
+        Profile::Bambu(profile) => bambu::Client::new(profile.clone())
+            .firmware_update_status(access_code, tls_fingerprint, refresh)
             .map_err(DriverError::Bambu),
     }
 }

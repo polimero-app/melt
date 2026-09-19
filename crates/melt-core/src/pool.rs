@@ -15,7 +15,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{bambu, drivers, moonraker};
+use crate::{bambu, drivers, firmware_updates::FirmwareUpdateReport, moonraker};
 
 const BAMBU_SERVICE_INTERVAL: Duration = Duration::from_millis(100);
 const BAMBU_SERVICE_SLICE: Duration = Duration::from_millis(25);
@@ -108,6 +108,27 @@ impl ConnectionPool {
             client.runtime_capabilities(access_code, tls_fingerprint)
         })
         .map(Some)
+    }
+
+    pub fn firmware_update_status(
+        &self,
+        name: &str,
+        profile: &drivers::Profile,
+        access_code: Option<&str>,
+        tls_fingerprint: Option<&str>,
+        refresh: bool,
+    ) -> Result<FirmwareUpdateReport, drivers::DriverError> {
+        match profile {
+            drivers::Profile::Moonraker(profile) => self
+                .moonraker_client(name, profile)?
+                .firmware_update_status(access_code, refresh)
+                .map_err(drivers::DriverError::Moonraker),
+            drivers::Profile::Bambu(profile) => {
+                self.with_bambu(name, profile, access_code, tls_fingerprint, |client| {
+                    client.firmware_update_status(access_code, tls_fingerprint, refresh)
+                })
+            }
+        }
     }
 
     fn status_at(
