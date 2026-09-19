@@ -206,6 +206,8 @@ export type MessageKey =
   | "control.observedAt"
   | "control.observedAtTitle"
   | "firmware.title"
+  | "firmware.description"
+  | "firmware.backToPrinters"
   | "firmware.available"
   | "firmware.current"
   | "firmware.unknown"
@@ -687,6 +689,8 @@ const messages: Record<Locale, Messages> = {
     "control.observedAt": "{seconds}s ago",
     "control.observedAtTitle": "Age of the last reading received from the printer",
     "firmware.title": "Firmware & software",
+    "firmware.description": "Review the versions reported by {name}. Melt checks availability only and does not install updates.",
+    "firmware.backToPrinters": "Back to printers",
     "firmware.available": "Update available",
     "firmware.current": "Current",
     "firmware.unknown": "Availability unknown",
@@ -1165,6 +1169,8 @@ const messages: Record<Locale, Messages> = {
     "control.observedAt": "há {seconds}s",
     "control.observedAtTitle": "Idade da última leitura recebida da impressora",
     "firmware.title": "Firmware e software",
+    "firmware.description": "Revise as versões informadas por {name}. O Melt apenas verifica a disponibilidade e não instala atualizações.",
+    "firmware.backToPrinters": "Voltar para impressoras",
     "firmware.available": "Atualização disponível",
     "firmware.current": "Atual",
     "firmware.unknown": "Disponibilidade desconhecida",

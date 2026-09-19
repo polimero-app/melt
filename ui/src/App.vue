@@ -46,6 +46,7 @@ import FilePreviewDialog from './components/FilePreviewDialog.vue'
 import {
   PhArrowsClockwise,
   PhArrowsOutCardinal,
+  PhArrowLeft,
   PhArrowSquareOut,
   PhArrowUp,
   PhBroadcast,
@@ -498,6 +499,7 @@ const sectionTabs = computed<{ view: View; label: string; icon: Component }[]>((
 const PRINTER_TAB_LIMIT = 5
 const usePrinterMenu = computed(() => printers.value.length > PRINTER_TAB_LIMIT)
 const activePrinterId = ref(localStorage.getItem('activePrinterId') ?? '')
+const firmwarePrinterId = ref<string>()
 const revealedSerials = ref(new Set<string>())
 const theme = ref<'light' | 'dark' | 'system'>(
   (['light', 'dark', 'system'] as const).find((value) => value === localStorage.getItem('theme')) ?? 'system',
@@ -612,6 +614,7 @@ function toggleSerial(name: string) {
 }
 
 const activePrinter = computed(() => printers.value.find((printer) => printer.name === activePrinterId.value) ?? printers.value[0])
+const firmwarePrinter = computed(() => printers.value.find((printer) => printer.name === firmwarePrinterId.value))
 const compactNavValue = computed({
   get: () => {
     if (activeView.value !== 'control') return `view:${activeView.value}`
@@ -622,7 +625,7 @@ const compactNavValue = computed({
 const hasPrinters = computed(() => printers.value.length > 0)
 const selectedMonitor = computed(() => monitoring.value.find((entry) => entry.name === activePrinter.value?.name))
 const selectedStatus = computed(() => selectedMonitor.value?.status)
-const activeFirmwareUpdate = computed(() => updateEntryFor(firmwareUpdates.value, activePrinter.value?.name))
+const selectedFirmwareUpdate = computed(() => updateEntryFor(firmwareUpdates.value, firmwarePrinter.value?.name))
 
 const firmwareFor = (name: string) => updateEntryFor(firmwareUpdates.value, name)
 const firmwareComponentLabel = (kind: FirmwareUpdateComponentKind) => t(
@@ -1109,7 +1112,10 @@ async function checkKeychain() {
 async function selectPrinter(name: string, refresh = true, focus = refresh) {
   const request = ++selectionRequest
   activePrinterId.value = name
-  if (focus) activeView.value = 'control'
+  if (focus) {
+    firmwarePrinterId.value = undefined
+    activeView.value = 'control'
+  }
   fanDrafts.value = {}
   capabilities.value = undefined
   files.value = []
@@ -1131,8 +1137,19 @@ async function selectPrinter(name: string, refresh = true, focus = refresh) {
 }
 
 function goTo(view: View) {
+  firmwarePrinterId.value = undefined
   activeView.value = view
   if (view === 'files') void loadLibraryFiles(libraryPath.value)
+}
+
+function openFirmwareManagement(printer: Printer) {
+  firmwarePrinterId.value = printer.name
+  activeView.value = 'printers'
+  void loadFirmwareUpdates(printer.name)
+}
+
+function closeFirmwareManagement() {
+  firmwarePrinterId.value = undefined
 }
 
 function navigateCompact(value: string) {
@@ -2467,72 +2484,6 @@ onUnmounted(() => {
               </div>
             </div>
           </section>
-          <Card class="mb-5">
-            <CardHeader :title="t('firmware.title')" :icon="PhInfo">
-              <template #suffix>
-                <span
-                  v-if="activeFirmwareUpdate"
-                  class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium"
-                  :class="activeFirmwareUpdate.report.availability === 'available'
-                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-400/10 dark:text-amber-300'
-                    : activeFirmwareUpdate.report.availability === 'current'
-                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300'
-                      : 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300'"
-                >{{ firmwareAvailabilityLabel(activeFirmwareUpdate) }}</span>
-              </template>
-              <Button
-                variant="secondary"
-                :disabled="firmwareRefreshing || !capabilities?.firmwareUpdateCheck"
-                @click="loadFirmwareUpdates(activePrinter.name, true)"
-              ><PhArrowsClockwise class="size-4" :class="firmwareRefreshing && 'animate-spin'" aria-hidden="true" /> {{ t('firmware.checkAgain') }}</Button>
-            </CardHeader>
-            <div class="px-4 py-5 sm:p-6">
-              <div v-if="!activeFirmwareUpdate" class="flex items-start gap-3 text-sm text-gray-500 dark:text-gray-400" role="status">
-                <PhArrowsClockwise v-if="!firmwareError" class="mt-0.5 size-4 shrink-0 animate-spin" aria-hidden="true" />
-                <PhWarning v-else class="mt-0.5 size-4 shrink-0 text-amber-500" aria-hidden="true" />
-                <p>{{ firmwareError ?? t('firmware.checking') }}</p>
-              </div>
-              <template v-else>
-                <p v-if="activeFirmwareUpdate.report.source === 'moonrakerUpdateManager'" class="mb-4 text-sm text-gray-500 dark:text-gray-400">
-                  {{ t('firmware.klipperScope') }}
-                </p>
-                <div class="divide-y divide-gray-200 dark:divide-white/10">
-                  <div
-                    v-for="component in activeFirmwareUpdate.report.components"
-                    :key="component.id"
-                    class="grid gap-3 py-4 first:pt-0 last:pb-0 sm:grid-cols-[minmax(10rem,1fr)_minmax(0,2fr)] sm:items-center"
-                  >
-                    <div class="min-w-0">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <p class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ component.label }}</p>
-                        <span v-if="component.required" class="rounded-full bg-amber-100 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-400/10 dark:text-amber-300">{{ t('firmware.required') }}</span>
-                      </div>
-                      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ firmwareComponentLabel(component.kind) }}</p>
-                    </div>
-                    <div class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 rounded-md bg-gray-50 px-3 py-2 dark:bg-white/5">
-                      <div class="min-w-0">
-                        <p class="text-[0.65rem] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ t('firmware.installed') }}</p>
-                        <p class="truncate font-mono text-sm text-gray-800 dark:text-gray-200" :title="component.currentVersion">{{ versionRail(component).installed }}</p>
-                      </div>
-                      <PhCaretRight class="size-4 text-gray-400" aria-hidden="true" />
-                      <div class="min-w-0 text-right">
-                        <p class="text-[0.65rem] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ t('firmware.advertised') }}</p>
-                        <p class="truncate font-mono text-sm" :class="component.availability === 'available' ? 'font-semibold text-amber-700 dark:text-amber-300' : 'text-gray-800 dark:text-gray-200'" :title="component.availableVersion">{{ versionRail(component).advertised }}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 pt-4 text-xs text-gray-500 dark:border-white/10 dark:text-gray-400">
-                  <span>{{ t('firmware.lastChecked', { date: formatDate(activeFirmwareUpdate.checkedAt) }) }}</span>
-                  <span v-if="activeFirmwareUpdate.stale" class="font-medium text-amber-700 dark:text-amber-300">{{ t('firmware.stale') }}</span>
-                </div>
-                <p v-if="activeFirmwareUpdate.error" class="mt-3 text-xs text-amber-700 dark:text-amber-300">{{ message(activeFirmwareUpdate.error) }}</p>
-                <ul v-if="activeFirmwareUpdate.report.issues.length" class="mt-3 space-y-1 text-xs text-gray-500 dark:text-gray-400">
-                  <li v-for="issue in activeFirmwareUpdate.report.issues" :key="issue.code">{{ issue.message }}</li>
-                </ul>
-              </template>
-            </div>
-          </Card>
           <section class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,3fr)_minmax(18rem,1fr)]">
             <Card class="overflow-hidden">
               <CardHeader :title="t('camera.title')" :icon="PhVideoCamera">
@@ -2917,6 +2868,96 @@ onUnmounted(() => {
       </template>
 
       <template v-else-if="activeView === 'printers' || (!hasPrinters && activeView === 'control')">
+        <template v-if="firmwarePrinter">
+          <div class="mb-7 px-4 sm:px-0">
+            <Button variant="secondary" @click="closeFirmwareManagement">
+              <PhArrowLeft class="size-4" aria-hidden="true" /> {{ t('firmware.backToPrinters') }}
+            </Button>
+            <div class="mt-5 lg:flex lg:items-end lg:justify-between lg:gap-6">
+              <div class="min-w-0 flex-1">
+                <h2 class="text-2xl/7 font-bold text-gray-900 sm:text-3xl sm:tracking-tight dark:text-white">{{ t('firmware.title') }}</h2>
+                <p class="mt-2 max-w-3xl text-sm text-gray-500 dark:text-gray-400">{{ t('firmware.description', { name: firmwarePrinter.name }) }}</p>
+                <div class="mt-3 flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs text-gray-500 dark:text-gray-400">
+                  <span class="inline-flex items-center gap-1.5"><PhPrinter class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinter.driver }}</span>
+                  <span class="inline-flex items-center gap-1.5"><PhNetwork class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinter.host }}</span>
+                </div>
+              </div>
+              <div class="mt-5 flex items-center gap-2 lg:mt-0">
+                <StatusBadge :status="badgeFor(firmwarePrinter.name)" :label="statusLabel(badgeFor(firmwarePrinter.name))" />
+                <Button @click="selectPrinter(firmwarePrinter.name)"><PhCards class="size-4" aria-hidden="true" /> {{ t('printersView.openControl') }}</Button>
+              </div>
+            </div>
+          </div>
+
+          <Card class="overflow-hidden">
+            <CardHeader :title="firmwarePrinter.name" :icon="PhPrinter">
+              <template #suffix>
+                <span
+                  v-if="selectedFirmwareUpdate"
+                  class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium"
+                  :class="selectedFirmwareUpdate.report.availability === 'available'
+                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-400/10 dark:text-amber-300'
+                    : selectedFirmwareUpdate.report.availability === 'current'
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300'
+                      : 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300'"
+                >{{ firmwareAvailabilityLabel(selectedFirmwareUpdate) }}</span>
+              </template>
+              <Button
+                variant="secondary"
+                :disabled="firmwareRefreshing"
+                @click="loadFirmwareUpdates(firmwarePrinter.name, true)"
+              ><PhArrowsClockwise class="size-4" :class="firmwareRefreshing && 'animate-spin'" aria-hidden="true" /> {{ t('firmware.checkAgain') }}</Button>
+            </CardHeader>
+            <div class="px-4 py-5 sm:p-6" :aria-busy="firmwareRefreshing">
+              <div v-if="!selectedFirmwareUpdate" class="flex items-start gap-3 text-sm text-gray-500 dark:text-gray-400" role="status">
+                <PhArrowsClockwise v-if="!firmwareError" class="mt-0.5 size-4 shrink-0 animate-spin" aria-hidden="true" />
+                <PhWarning v-else class="mt-0.5 size-4 shrink-0 text-amber-500" aria-hidden="true" />
+                <p>{{ firmwareError ?? t('firmware.checking') }}</p>
+              </div>
+              <template v-else>
+                <p v-if="selectedFirmwareUpdate.report.source === 'moonrakerUpdateManager'" class="mb-4 text-sm text-gray-500 dark:text-gray-400">
+                  {{ t('firmware.klipperScope') }}
+                </p>
+                <div class="divide-y divide-gray-200 dark:divide-white/10">
+                  <div
+                    v-for="component in selectedFirmwareUpdate.report.components"
+                    :key="component.id"
+                    class="grid gap-3 py-4 first:pt-0 last:pb-0 sm:grid-cols-[minmax(10rem,1fr)_minmax(0,2fr)] sm:items-center"
+                  >
+                    <div class="min-w-0">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <p class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ component.label }}</p>
+                        <span v-if="component.required" class="rounded-full bg-amber-100 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-400/10 dark:text-amber-300">{{ t('firmware.required') }}</span>
+                      </div>
+                      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ firmwareComponentLabel(component.kind) }}</p>
+                    </div>
+                    <div class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 rounded-md bg-gray-50 px-3 py-2 dark:bg-white/5">
+                      <div class="min-w-0">
+                        <p class="text-[0.65rem] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ t('firmware.installed') }}</p>
+                        <p class="truncate font-mono text-sm text-gray-800 dark:text-gray-200" :title="component.currentVersion">{{ versionRail(component).installed }}</p>
+                      </div>
+                      <PhCaretRight class="size-4 text-gray-400" aria-hidden="true" />
+                      <div class="min-w-0 text-right">
+                        <p class="text-[0.65rem] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ t('firmware.advertised') }}</p>
+                        <p class="truncate font-mono text-sm" :class="component.availability === 'available' ? 'font-semibold text-amber-700 dark:text-amber-300' : 'text-gray-800 dark:text-gray-200'" :title="component.availableVersion">{{ versionRail(component).advertised }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 pt-4 text-xs text-gray-500 dark:border-white/10 dark:text-gray-400">
+                  <span>{{ t('firmware.lastChecked', { date: formatDate(selectedFirmwareUpdate.checkedAt) }) }}</span>
+                  <span v-if="selectedFirmwareUpdate.stale" class="font-medium text-amber-700 dark:text-amber-300">{{ t('firmware.stale') }}</span>
+                </div>
+                <p v-if="selectedFirmwareUpdate.error" class="mt-3 text-xs text-amber-700 dark:text-amber-300">{{ message(selectedFirmwareUpdate.error) }}</p>
+                <ul v-if="selectedFirmwareUpdate.report.issues.length" class="mt-3 space-y-1 text-xs text-gray-500 dark:text-gray-400">
+                  <li v-for="issue in selectedFirmwareUpdate.report.issues" :key="issue.code">{{ issue.message }}</li>
+                </ul>
+              </template>
+            </div>
+          </Card>
+        </template>
+
+        <template v-else>
         <div class="mb-7 px-4 sm:px-0 lg:flex lg:items-center lg:justify-between">
           <div class="min-w-0 flex-1">
             <h2 class="text-2xl/7 font-bold text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight dark:text-white">{{ t('printersView.title') }}</h2>
@@ -3024,7 +3065,10 @@ onUnmounted(() => {
                 <dd :class="printer.insecure ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-300'">{{ printer.insecure ? t('printersView.tlsDisabled') : t('printersView.tlsVerified') }}</dd>
               </div>
             </dl>
-            <div class="mt-5 flex items-center gap-2">
+            <Button variant="secondary" class="mt-5 w-full" @click="openFirmwareManagement(printer)">
+              <PhInfo class="size-4" aria-hidden="true" /> {{ t('firmware.title') }}
+            </Button>
+            <div class="mt-2 flex items-center gap-2">
               <Button class="min-w-0 flex-1" @click="selectPrinter(printer.name)"><PhCards class="size-4" aria-hidden="true" /> {{ t('printersView.openControl') }}</Button>
               <ActionMenu :label="t('control.printerActions')" :items="printerActionItems(printer)" />
             </div>
@@ -3038,6 +3082,7 @@ onUnmounted(() => {
             <span class="mt-2 block text-sm font-semibold text-gray-900 dark:text-white">{{ t('printersView.addAnother') }}</span>
           </button>
         </div>
+        </template>
       </template>
 
       <template v-else-if="activeView === 'settings'">
