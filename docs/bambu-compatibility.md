@@ -164,10 +164,15 @@ A unit is `controllable` only when the printer advertises
 `is_support_remote_dry` (`fun2` bit 5). P1-class firmware omits the bit and
 acknowledges `ams_filament_drying` without acting on it, so Melt shows its
 drying state but never sends it the command. Start (`mode` 1) and stop
-(`mode` 0) pass the mutation authorization gate, refuse to start while the unit
-reports a blocking reason, and complete only once the targeted unit's reported
-phase confirms the transition. Start falls back to the first loaded tray's
-filament type, then PLA, because the firmware rejects an empty type.
+(`mode` 0) pass the mutation authorization gate and complete only once the
+targeted unit's reported phase confirms the transition. Start refuses
+outright when the unit is already active, and otherwise refuses only on a
+blocking reason other than the stale `already_drying` code an idle unit can
+still report. Stop is a no-op only when the unit is fully `Off` with no time
+remaining; every other state, including the `Error` and `HeatOutOfControl`
+fault states, still sends the stop command. Start falls back to the first
+loaded tray's filament type, then PLA, because the firmware rejects an empty
+type.
 Temperature bounds are 45–65 °C for units 0–3 and 45–85 °C for units 128–135;
 duration is 1–24 h. Humidity-target mode, tray rotation, and scheduled drying
 are not implemented.

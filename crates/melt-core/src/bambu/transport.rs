@@ -996,7 +996,7 @@ impl Client {
             ));
         }
         let start = match request {
-            DryingRequest::Stop if !drying.active => {
+            DryingRequest::Stop if stop_is_noop(drying) => {
                 return Ok(DryingResult {
                     ams_id,
                     active: false,
@@ -1008,13 +1008,7 @@ impl Client {
                 hours,
                 filament,
             } => {
-                if let Some(code) = drying.blocked_reasons.first() {
-                    let message = DRY_BLOCK_REASONS
-                        .iter()
-                        .find(|(identifier, _)| identifier == code)
-                        .map_or("the printer refused to start drying", |(_, message)| {
-                            *message
-                        });
+                if let Some(message) = start_block_reason(drying) {
                     return Err(Error::DryingBlocked(message));
                 }
                 Some((
@@ -3597,6 +3591,40 @@ fn unit_drying_active(minutes: Option<u32>, status: DryingStatus) -> bool {
             status,
             DryingStatus::Checking | DryingStatus::Drying | DryingStatus::Cooling
         )
+}
+
+/// Decides whether a start request should be refused, and why.
+///
+/// An active unit is refused outright: a stale `blocked_reasons` snapshot
+/// from before the cycle started (e.g. real dakota capture: active with
+/// `dry_sf_reason: [6]`, code 6 == already_drying) must never let the
+/// "already drying" reason fall through and read as a real block on an idle
+/// unit, so `already_drying` is dropped before picking the first reason for
+/// an inactive unit.
+fn start_block_reason(drying: &AmsDrying) -> Option<&'static str> {
+    if drying.active {
+        return Some("the AMS is already drying");
+    }
+    let code = drying
+        .blocked_reasons
+        .iter()
+        .find(|reason| **reason != "already_drying")?;
+    Some(
+        DRY_BLOCK_REASONS
+            .iter()
+            .find(|(identifier, _)| identifier == code)
+            .map_or("the printer refused to start drying", |(_, message)| {
+                *message
+            }),
+    )
+}
+
+/// Decides whether a stop request is a no-op: only when the unit is fully
+/// idle (`Off`, no time left). Every fault or in-progress state (including
+/// `HeatOutOfControl`, `Error`, `Stopping`, and `Unknown`) still sends the
+/// stop command, since `drying.active` deliberately excludes those states.
+fn stop_is_noop(drying: &AmsDrying) -> bool {
+    drying.status == DryingStatus::Off && drying.minutes_remaining.is_none()
 }
 
 /// Only heater-equipped units (AMS 2 Pro, AMS HT) report `dry_time`.
@@ -6663,8 +6691,59 @@ mod tests {
             },
         );
         assert!(matches!(result, Err(Error::Unsupported(_))));
-        // The broker thread is left blocked on read. It is dropped when the
-        // test process exits, the same as the other tests' unjoined servers.
+        // The broker thread is blocked on read until `client` drops at the
+        // end of this test, which closes the socket and ends the thread on
+        // EOF; it is not left running until process exit.
+    }
+
+    #[test]
+    fn start_block_reason_table() {
+        let drying = |active, blocked_reasons: &[&'static str]| AmsDrying {
+            status: DryingStatus::Off,
+            active,
+            minutes_remaining: None,
+            setting: None,
+            blocked_reasons: blocked_reasons.to_vec(),
+            controllable: true,
+        };
+        // (active, blocked_reasons, expected)
+        let cases = [
+            (drying(true, &[]), Some("the AMS is already drying")),
+            (drying(false, &["already_drying"]), None),
+            (
+                drying(false, &["already_drying", "insufficient_power"]),
+                Some(
+                    "insufficient power: too many AMS units drying or an external PSU is required",
+                ),
+            ),
+            (drying(false, &[]), None),
+        ];
+        for (drying, expected) in cases {
+            assert_eq!(start_block_reason(&drying), expected, "{drying:?}");
+        }
+    }
+
+    #[test]
+    fn stop_is_noop_table() {
+        let drying = |status, minutes_remaining| AmsDrying {
+            status,
+            active: unit_drying_active(minutes_remaining, status),
+            minutes_remaining,
+            setting: None,
+            blocked_reasons: Vec::new(),
+            controllable: true,
+        };
+        // (status, minutes_remaining, expected no-op)
+        let cases = [
+            (drying(DryingStatus::Off, None), true),
+            (drying(DryingStatus::HeatOutOfControl, None), false),
+            (drying(DryingStatus::Error, None), false),
+            (drying(DryingStatus::Unknown, None), false),
+            (drying(DryingStatus::Drying, Some(10)), false),
+        ];
+        for (drying, expected) in cases {
+            assert_eq!(stop_is_noop(&drying), expected, "{drying:?}");
+        }
     }
 
     #[test]
