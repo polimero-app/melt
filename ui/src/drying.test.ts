@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dryingBounds, dryingDefaults } from './drying'
+import { dryingBounds, dryingDefaults, dryingFault, dryingStoppable } from './drying'
 
 describe('drying presets', () => {
   it('uses AMS 2 Pro limits for units 0-3 and AMS HT limits for 128-135', () => {
@@ -19,5 +19,25 @@ describe('drying presets', () => {
     expect(dryingDefaults(128, 'PA6-CF')?.filament).toBe('PA')
     expect(dryingDefaults(0, undefined)?.filament).toBe('PLA')
     expect(dryingDefaults(0, 'Mystery')?.filament).toBe('PLA')
+  })
+})
+
+describe('dryingFault', () => {
+  it('is true only for the heater fault states', () => {
+    expect(dryingFault({ status: 'error' })).toBe(true)
+    expect(dryingFault({ status: 'heatOutOfControl' })).toBe(true)
+    expect(dryingFault({ status: 'drying' })).toBe(false)
+    expect(dryingFault({ status: 'off' })).toBe(false)
+    expect(dryingFault({ status: 'stopping' })).toBe(false)
+  })
+})
+
+describe('dryingStoppable', () => {
+  it('offers stop whenever active or stuck in a fault state', () => {
+    expect(dryingStoppable({ active: true, status: 'drying' })).toBe(true)
+    expect(dryingStoppable({ active: false, status: 'error' })).toBe(true)
+    expect(dryingStoppable({ active: false, status: 'heatOutOfControl' })).toBe(true)
+    expect(dryingStoppable({ active: false, status: 'off' })).toBe(false)
+    expect(dryingStoppable({ active: false, status: 'stopping' })).toBe(false)
   })
 })

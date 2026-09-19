@@ -6,7 +6,7 @@ import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plug
 import { locales, preferredLocale, translate, type Locale, type MessageKey } from './i18n'
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration, remainingTimePresentation } from './formatting'
-import { dryingBounds, dryingDefaults, type AmsDrying, type DryingStatus } from './drying'
+import { dryingBounds, dryingDefaults, dryingFault, dryingStoppable, type AmsDrying, type DryingStatus } from './drying'
 import { printTargetState } from './printing'
 import { printStageLabel } from './stages'
 import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
@@ -2835,6 +2835,10 @@ onUnmounted(() => {
                         <span>{{ system.drying.minutesRemaining ? t('drying.remaining', { time: formatDuration(system.drying.minutesRemaining * 60) }) : t(dryingStatusKey(system.drying.status)) }}</span>
                         <span v-if="system.drying.setting" class="font-mono">{{ system.drying.setting.temperatureC }} °C</span>
                       </span>
+                      <span v-else-if="system.drying && dryingFault(system.drying)" class="flex items-center gap-1 text-red-600 dark:text-red-400">
+                        <PhWarning class="size-4" aria-hidden="true" />
+                        <span>{{ t(dryingStatusKey(system.drying.status)) }}</span>
+                      </span>
                     </div>
                   </div>
                   <div class="flex flex-wrap gap-3">
@@ -2857,7 +2861,7 @@ onUnmounted(() => {
                   </div>
                   <div v-if="capabilities?.amsDrying && system.drying" class="mt-3 flex flex-wrap items-center gap-2 text-xs">
                     <template v-if="system.drying.controllable">
-                      <Button v-if="system.drying.active" :disabled="dryingBusy" @click="setDrying(system, false)">{{ t('drying.stop') }}</Button>
+                      <Button v-if="dryingStoppable(system.drying)" :disabled="dryingBusy" @click="setDrying(system, false)">{{ t('drying.stop') }}</Button>
                       <template v-else-if="dryingForm?.unitId === system.unitId">
                         <label class="flex items-center gap-1">{{ t('drying.temperature') }}
                           <input

@@ -30,6 +30,16 @@ export function dryingBounds(unitId: number): { min: number; max: number } | und
   return undefined
 }
 
+/** True for heater fault states the badge must surface even though they are not `active`. */
+export function dryingFault(drying: Pick<AmsDrying, 'status'>): boolean {
+  return drying.status === 'error' || drying.status === 'heatOutOfControl'
+}
+
+/** True whenever a stop command should be offered: mid-cycle, or stuck in a fault state. */
+export function dryingStoppable(drying: Pick<AmsDrying, 'active' | 'status'>): boolean {
+  return drying.active || dryingFault(drying)
+}
+
 export function dryingDefaults(unitId: number, filament?: string) {
   if (!dryingBounds(unitId)) return undefined
   const raw = (filament ?? '').split(' ')[0].toUpperCase()
