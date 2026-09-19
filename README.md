@@ -223,6 +223,7 @@ it switches the application id to the bundle identifier and breaks the match.
 - [OpenBambuAPI](https://github.com/Doridian/OpenBambuAPI)
 - [BambuHelper](https://github.com/Keralots/BambuHelper)
 - [Bambuddy](https://github.com/maziggy/bambuddy)
+- [bambulabs_api (Go)](https://github.com/torbenconto/bambulabs_api)
 
 Undocumented behavior from these projects is treated as scoped evidence, not
 permanent product truth. Conflicting reports stay provisional until sanitized

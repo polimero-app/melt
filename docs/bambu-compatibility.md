@@ -87,6 +87,25 @@ sequence namespace. Locally generated sequence IDs remain positive and within
 the signed 32-bit range, including after wrap, to avoid exposing future
 AMS-facing commands to known unsafe oversized identifiers.
 
+Detailed status also preserves every nonzero HMS tuple with its raw
+`AAAA-BBBB-SSSS-CCCC` identifier, firmware severity, normalized description,
+and alert disposition. Error and warning events remain printer alerts; unknown
+notification-severity events remain diagnostic-only. The known MQTT command
+verification event and slot-scoped AMS auto-refill progress/completion events
+are diagnostic-only regardless of their encoded severity, so they cannot
+create false print-fault notifications. A printer whose primary state is
+explicitly `error` still receives a generic error when no actionable event
+explains it.
+
+## Print preparation stages
+
+Bambu stage codes 0–66, 74, and 77 are mapped to stable identifiers and
+localized in the desktop. The raw `stageCode` is retained in detailed status
+for future firmware values. A stage is displayed only while printing or
+paused, because some idle firmware continues to report stage 0. Unknown active
+codes render as the conservative `Preparing` label rather than an invented
+operation; idle sentinels -1 and 255 are omitted.
+
 ## Temperature, fan, and light inventory
 
 Detailed status exposes a `controls` inventory alongside the legacy portable
@@ -137,6 +156,13 @@ axis, and no more than 16 million pixels before they enter memory/disk caches.
 The cache key includes physical printer identity, remote path, size, and
 modification marker; preview failure never affects download or printing.
 
+Large uploads, downloads, and printer-thumbnail reads share a bounded
+per-serial transfer gate across all in-process clients. Transfers to different
+printers remain concurrent, and MQTT control—including emergency stop—does not
+acquire the storage gate. FTPS upload completion closes the data socket without
+waiting for a TLS `close_notify`, which can stall on affected firmware, then
+requires the final 226/250 control reply before reporting success.
+
 ## Compatibility diagnostics
 
 Diagnostics identify printers only as report-local `printer-N` labels. They
@@ -165,6 +191,11 @@ keyed by the normalized physical serial, retained for 60 seconds, and enriches
 configured profiles with last-seen model/firmware observations. A newly
 advertised address is displayed as a suggestion only: discovery never rewrites
 the configured endpoint, TLS identity, certificate pin, or credentials.
+Fresh authenticated status can provide the same advisory address from
+`wifi_ip` or the packed little-endian `net.info[].ip` field. Invalid
+unspecified, loopback, multicast, and broadcast values are discarded. Status
+observations use the same explicit suggestion UI and likewise never rewrite a
+profile.
 
 ## Implemented compatibility behavior
 
@@ -186,6 +217,10 @@ the configured endpoint, TLS identity, certificate pin, or credentials.
   after integrity checks.
 - Preserve preparation progress, plate/queue metadata, raw job states, and raw
   printer error/image identifiers alongside normalized status.
+- Preserve raw HMS and stage codes while suppressing informational events from
+  the actionable printer-alert list.
+- Serialize heavy storage transfers per physical printer without blocking
+  MQTT control or transfers to other printers.
 - Execute local prints as explicit inspect, capability, material, destination,
   storage, upload, verify, send, acceptance, and observed-start stages.
 
