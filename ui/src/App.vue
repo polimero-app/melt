@@ -5,7 +5,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog'
 import { locales, preferredLocale, translate, type Locale, type MessageKey } from './i18n'
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
-import { clampTarget, remainingTimePresentation } from './formatting'
+import { clampTarget, formatDuration, remainingTimePresentation } from './formatting'
+import { dryingBounds, dryingDefaults, type AmsDrying, type DryingStatus } from './drying'
 import { printTargetState } from './printing'
 import { printStageLabel } from './stages'
 import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
@@ -140,6 +141,7 @@ type Capabilities = {
   motionControl: boolean
   fanControl: boolean
   tlsRefresh: boolean
+  amsDrying?: boolean
 }
 
 type DiscoveredPrinter = {
@@ -201,6 +203,7 @@ type AmsUnitStatus = {
   humidityLevel?: string
   temperature?: number
   trays: AmsTrayStatus[]
+  drying?: AmsDrying
 }
 
 type PrinterStatus = {
@@ -350,9 +353,12 @@ interface MaterialSlot {
 
 interface MaterialSystemView {
   name: string
+  unitId: number
   temperature?: number
   humidity?: string
   slots: MaterialSlot[]
+  drying?: AmsDrying
+  firstFilament?: string
 }
 
 type NotificationSetting = {
@@ -762,6 +768,30 @@ const lightLabel = (key: string) => {
   const messageKey = lightMessageKeys[key]
   return messageKey ? t(messageKey) : key
 }
+const dryingStatusMessageKeys: Record<DryingStatus, MessageKey> = {
+  off: 'drying.status.off',
+  checking: 'drying.status.checking',
+  drying: 'drying.status.drying',
+  cooling: 'drying.status.cooling',
+  stopping: 'drying.status.stopping',
+  error: 'drying.status.error',
+  heatOutOfControl: 'drying.status.heatOutOfControl',
+  unknown: 'drying.status.unknown',
+}
+const dryingStatusKey = (status: DryingStatus) => dryingStatusMessageKeys[status] ?? 'drying.status.unknown'
+const dryingBlockedMessageKeys: Record<string, MessageKey> = {
+  printer_busy: 'drying.blocked.printer_busy',
+  insufficient_power: 'drying.blocked.insufficient_power',
+  ams_busy: 'drying.blocked.ams_busy',
+  filament_at_outlet: 'drying.blocked.filament_at_outlet',
+  already_starting: 'drying.blocked.already_starting',
+  unsupported_in_2d_mode: 'drying.blocked.unsupported_in_2d_mode',
+  already_drying: 'drying.blocked.already_drying',
+  firmware_upgrading: 'drying.blocked.firmware_upgrading',
+  external_power_required: 'drying.blocked.external_power_required',
+  unknown: 'drying.blocked.unknown',
+}
+const dryingBlockedKey = (reason: string) => dryingBlockedMessageKeys[reason] ?? 'drying.blocked.unknown'
 // Material inventory currently travels in the shared Bambu-shaped extension;
 // its user-facing terminology still follows the selected printer's driver.
 const materialSystems = computed<MaterialSystemView[]>(() => {
@@ -770,8 +800,11 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
   const materialUnitCount = units.filter((unit) => unit.id < 254).length
   return units.map((unit) => ({
     name: materialSystemLabel(driver, unit.id, t('materials.externalSpool'), materialUnitCount),
+    unitId: unit.id,
     temperature: unit.temperature,
     humidity: unit.humidityLevel,
+    drying: unit.drying,
+    firstFilament: unit.trays.find((tray) => tray.filamentType)?.filamentType,
     slots: unit.trays.map((tray) => ({
       slot: unit.id >= 254 ? t('materials.slotExternal') : String(tray.slot + 1),
       type: tray.filamentType ?? '—',
@@ -1546,6 +1579,42 @@ async function toggleLight(light: string, on: boolean) {
     showToast(message(reason), 'error')
     void refreshMonitoring()
   }
+}
+
+const dryingForm = ref<{ unitId: number; temperatureC: number; hours: number; filament: string } | undefined>()
+const dryingBusy = ref(false)
+
+function openDryingForm(system: MaterialSystemView) {
+  const defaults = dryingDefaults(system.unitId, system.firstFilament)
+  if (defaults) dryingForm.value = { unitId: system.unitId, ...defaults }
+}
+
+function setDrying(system: MaterialSystemView, start: boolean) {
+  if (!activePrinter.value) return
+  const name = activePrinter.value.name
+  const form = dryingForm.value
+  const drying = start && form
+    ? { action: 'start', temperatureC: form.temperatureC, hours: form.hours, filament: form.filament }
+    : { action: 'stop' }
+  askConfirmation(
+    start
+      ? { title: 'drying.startTitle', description: 'drying.startDescription', confirm: 'drying.startConfirm' }
+      : { title: 'drying.stopTitle', description: 'drying.stopDescription', confirm: 'drying.stopConfirm' },
+    { unit: system.name, temperature: String(form?.temperatureC ?? ''), hours: String(form?.hours ?? '') },
+    async () => {
+      dryingBusy.value = true
+      try {
+        await invoke('printer_ams_drying_set', { request: { name, amsId: system.unitId, drying } })
+        dryingForm.value = undefined
+        showToast(t(start ? 'drying.started' : 'drying.stopped', { unit: system.name }))
+      } catch (reason) {
+        showToast(message(reason), 'error')
+      } finally {
+        dryingBusy.value = false
+        void refreshMonitoring()
+      }
+    },
+  )
 }
 
 function emergencyStop() {
@@ -2761,6 +2830,11 @@ onUnmounted(() => {
                     <div v-if="system.temperature !== undefined || system.humidity !== undefined" class="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
                       <span v-if="system.humidity !== undefined" class="flex items-center gap-1"><PhDrop class="size-4" aria-hidden="true" /><span class="sr-only">{{ t('materials.humidity') }} </span><span class="font-mono">{{ system.humidity }}</span></span>
                       <span v-if="system.temperature !== undefined" class="flex items-center gap-1"><PhThermometerSimple class="size-4" aria-hidden="true" /><span class="sr-only">{{ t('materials.temperature') }} </span><span class="font-mono">{{ formatTemperature(system.temperature) }} °C</span></span>
+                      <span v-if="system.drying?.active" class="flex items-center gap-1 text-orange-600 dark:text-orange-400">
+                        <PhSun class="size-4" aria-hidden="true" />
+                        <span>{{ system.drying.minutesRemaining ? t('drying.remaining', { time: formatDuration(system.drying.minutesRemaining * 60) }) : t(dryingStatusKey(system.drying.status)) }}</span>
+                        <span v-if="system.drying.setting" class="font-mono">{{ system.drying.setting.temperatureC }} °C</span>
+                      </span>
                     </div>
                   </div>
                   <div class="flex flex-wrap gap-3">
@@ -2780,6 +2854,36 @@ onUnmounted(() => {
                         <span v-if="material.remainingGrams !== undefined" class="text-[10px] font-medium">{{ material.remainingGrams }} g</span>
                       </span>
                     </div>
+                  </div>
+                  <div v-if="capabilities?.amsDrying && system.drying" class="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                    <template v-if="system.drying.controllable">
+                      <Button v-if="system.drying.active" :disabled="dryingBusy" @click="setDrying(system, false)">{{ t('drying.stop') }}</Button>
+                      <template v-else-if="dryingForm?.unitId === system.unitId">
+                        <label class="flex items-center gap-1">{{ t('drying.temperature') }}
+                          <input
+                            v-model.number="dryingForm.temperatureC"
+                            type="number"
+                            inputmode="numeric"
+                            :min="dryingBounds(system.unitId)?.min"
+                            :max="dryingBounds(system.unitId)?.max"
+                            class="w-16 rounded-md bg-white py-1.5 text-center font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+                          /> °C</label>
+                        <label class="flex items-center gap-1">{{ t('drying.hours') }}
+                          <input
+                            v-model.number="dryingForm.hours"
+                            type="number"
+                            inputmode="numeric"
+                            min="1"
+                            max="24"
+                            class="w-14 rounded-md bg-white py-1.5 text-center font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+                          /> h</label>
+                        <Button variant="primary" :disabled="dryingBusy" @click="setDrying(system, true)">{{ t('drying.start') }}</Button>
+                        <Button @click="dryingForm = undefined">{{ t('common.cancel') }}</Button>
+                      </template>
+                      <Button v-else :disabled="dryingBusy || Boolean(system.drying.blockedReasons?.length)" @click="openDryingForm(system)">{{ t('drying.dry') }}</Button>
+                      <span v-if="!system.drying.active && system.drying.blockedReasons?.length" class="text-gray-500 dark:text-gray-400">{{ t(dryingBlockedKey(system.drying.blockedReasons[0])) }}</span>
+                    </template>
+                    <span v-else class="text-gray-500 dark:text-gray-400">{{ t('drying.screenOnly') }}</span>
                   </div>
                 </div>
               </div>
