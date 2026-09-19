@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::firmware_updates::{
-    FirmwareUpdateAvailability, FirmwareUpdateComponent, FirmwareUpdateComponentKind,
-    FirmwareUpdateIssue, FirmwareUpdateReport, FirmwareUpdateSource, MAX_COMPONENT_ID_BYTES,
+    FirmwareEvidenceRole, FirmwareEvidenceSource, FirmwareUpdateAvailability,
+    FirmwareUpdateComponent, FirmwareUpdateComponentKind, FirmwareUpdateIssue, FirmwareUpdateReport,
+    FirmwareUpdateSource, FirmwareVersionEvidence, MAX_COMPONENT_ID_BYTES,
     MAX_COMPONENT_LABEL_BYTES, MAX_VERSION_BYTES, bounded_provider_text, provider_data_truncated,
 };
 
@@ -145,10 +146,16 @@ pub fn update_report(status: &Value, inventory: &FirmwareInventory) -> FirmwareU
                 kind: component_kind(&id),
                 id,
                 label,
-                current_version: (!version.is_empty()).then_some(version),
+                current_version: (!version.is_empty()).then_some(version.clone()),
                 available_version: None,
                 availability: FirmwareUpdateAvailability::Unknown,
                 required: false,
+                evidence: (!version.is_empty()).then(|| vec![FirmwareVersionEvidence {
+                    source: FirmwareEvidenceSource::BambuLanInventory,
+                    role: FirmwareEvidenceRole::Installed,
+                    version: Some(version.clone()),
+                    required: false,
+                }]).unwrap_or_default(),
             },
         );
     }
@@ -306,10 +313,17 @@ fn merge_target(
             available_version: None,
             availability: FirmwareUpdateAvailability::Unknown,
             required: false,
+            evidence: Vec::new(),
         });
     component.required |= required;
     if let Some(target) = target {
         component.available_version = Some(target.clone());
+        component.evidence.push(FirmwareVersionEvidence {
+            source: FirmwareEvidenceSource::BambuLanAdvertisement,
+            role: FirmwareEvidenceRole::PrinterAdvertised,
+            version: Some(target.clone()),
+            required,
+        });
         component.availability = match component.current_version.as_deref() {
             None => FirmwareUpdateAvailability::Available,
             Some(current) => {

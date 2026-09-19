@@ -1095,6 +1095,7 @@ fn moonraker_update_report(result: &Value) -> FirmwareUpdateReport {
             available_version,
             availability,
             required: false,
+            evidence: Vec::new(),
         }],
         issues,
     )
