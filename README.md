@@ -38,6 +38,9 @@ Fyne GUI, and Go application implementations.
 - **Diagnostics** — export redacted compatibility information covering model
   identity, module firmware, capability provenance, authorization, negotiated
   transports, TLS-pin presence, camera-owner state, and active/inactive quirks.
+- **Read-only update checks** — inspect Bambu firmware advertisements and the
+  Moonraker Update Manager's Klipper software status without downloading or
+  installing updates.
 - **Automation contract** — request stable JSON envelopes and exit codes from
   the same executable used by the desktop application.
 
@@ -65,6 +68,7 @@ The command groups cover:
 
 - `printer add|list|remove|drivers|discover|capabilities|tls refresh`;
 - `status`;
+- `firmware check`;
 - `camera snapshot|stream`;
 - `files roots|list|download|upload`;
 - `jobs preflight|start|pause|resume|cancel`;
@@ -87,6 +91,7 @@ melt printer discover
 melt printer add workshop --driver bambu-lan --host 192.0.2.10 \
   --serial SANITIZED_SERIAL --access-code-file ./access-code.txt
 melt status workshop --detailed
+melt firmware check workshop --refresh
 melt printer capabilities workshop --output json
 melt jobs preflight ./part.gcode.3mf --output json
 ```
@@ -142,14 +147,19 @@ diagnostics available.
 
 Moonraker profiles support status, G-code listing/upload/download, jobs,
 emergency stop, bounded temperature control, motion, part-cooling fan, and
-speed controls through the shared core. Generic Klipper light control remains
-an explicit capability error.
+speed controls through the shared core. Read-only update checks cover the
+configured Klipper software updater; they do not claim to inspect controller
+board firmware. Generic Klipper light control remains an explicit capability
+error.
 
 Bambu LAN supports pinned-TLS MQTT status and controls, authenticated storage
 operations, SSDP/UDP discovery, camera snapshots/streams, and sliced 3MF
-preflight. Live observations and safe protocol probes take precedence over
-model-family assumptions. Unknown models and fields remain operable but are
-not misclassified as supported or unsupported without evidence.
+preflight. Firmware checks use only version inventory and update advertisements
+already exposed by the printer over LAN MQTT; they never invoke an upgrade
+command or contact the Bambu cloud. Live observations and safe protocol probes
+take precedence over model-family assumptions. Unknown models and fields remain
+operable but are not misclassified as supported or unsupported without
+evidence.
 
 The print workflow preserves project, plate, display, and storage names
 separately; reconciles available AMS/nozzle data; probes storage protocols

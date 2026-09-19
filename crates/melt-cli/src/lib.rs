@@ -19,12 +19,16 @@ use melt_core::{
     config::{Config, ConfigError, NamedProfile, config_dir},
     diagnostics,
     drivers::{self, DriverError},
+    firmware_updates::{
+        FirmwareUpdateAvailability, FirmwareUpdateComponentKind, FirmwareUpdateReport,
+    },
     keychain::{SERVICE, SecretError, SecretStore, SystemKeychain, account},
     moonraker,
     profiles::{self, ProfileError},
     trace::JsonlTracer,
 };
 use serde::Serialize;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 #[derive(Clone, Copy)]
 enum OutputFormat {
@@ -69,6 +73,12 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
         short: "Set fan speed percentage on a printer",
         args: "<printer> <fan> <percent> [flags]",
         flags: "  -h, --help                    help for set\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["firmware", "check"],
+        short: "Check for firmware and printer-software updates",
+        args: "<printer> [flags]",
+        flags: "  -h, --help                    help for check\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --refresh                 request fresh provider metadata without installing anything\n      --timeout string          override the profile connection timeout (e.g. 10s)",
     },
     LeafCommand {
         path: &["files", "delete"],
@@ -225,6 +235,7 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
                 "Immediately halt all printer motion and heating",
             ),
             ("fans", "Fan control operations on a named printer"),
+            ("firmware", "Firmware and printer-software update checks"),
             ("files", "File operations on a named printer"),
             ("help", "Help about any command"),
             ("jobs", "Job control operations on a named printer"),
@@ -254,6 +265,11 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
         path: &["fans"],
         short: "Fan control operations on a named printer",
         commands: &[("set", "Set fan speed percentage on a printer")],
+    },
+    CommandGroup {
+        path: &["firmware"],
+        short: "Firmware and printer-software update checks",
+        commands: &[("check", "Check for available updates")],
     },
     CommandGroup {
         path: &["files"],
@@ -501,6 +517,11 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         }
         [status, rest @ ..] if status.as_str() == "status" => {
             printer_status(invocation.format, rest, out, err)
+        }
+        [firmware, check, rest @ ..]
+            if firmware.as_str() == "firmware" && check.as_str() == "check" =>
+        {
+            firmware_check(invocation.format, rest, out, err)
         }
         [printer, remove, name] if printer.as_str() == "printer" && remove.as_str() == "remove" => {
             remove_profile(invocation.format, name, false, out, err)
@@ -880,6 +901,142 @@ fn printer_status(
         }
         Err(error) => write_error("status", format, driver_error(error), out, err),
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FirmwareCheckData {
+    profile: String,
+    driver: &'static str,
+    checked_at: String,
+    #[serde(flatten)]
+    report: FirmwareUpdateReport,
+    capabilities: drivers::Capabilities,
+}
+
+fn firmware_check(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let command = "firmware check";
+    let (positionals, options) = match parse_options(
+        args,
+        &["insecure", "refresh"],
+        &["timeout", "protocol-trace"],
+    ) {
+        Ok(value) => value,
+        Err(error) => return write_error(command, format, AppError::usage(error), out, err),
+    };
+    let name = match one_positional(command, &positionals) {
+        Ok(name) => name,
+        Err(error) => return write_error(command, format, error, out, err),
+    };
+    let connection = match connection_options(&options) {
+        Ok(connection) => connection,
+        Err(error) => return write_error(command, format, error, out, err),
+    };
+    let printer = match resolve_printer(name, connection, drivers::Operation::FirmwareUpdateCheck) {
+        Ok(printer) => printer,
+        Err(error) => return write_error(command, format, error, out, err),
+    };
+    let report = match drivers::firmware_update_status(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+        options.enabled("refresh"),
+    ) {
+        Ok(report) => report,
+        Err(error) => return write_error(command, format, driver_error(error), out, err),
+    };
+    if report.availability == FirmwareUpdateAvailability::Unsupported {
+        return write_error(
+            command,
+            format,
+            AppError {
+                exit_code: 5,
+                code: "capability_unsupported",
+                message: report
+                    .issues
+                    .first()
+                    .map_or("firmware update checks are unavailable", |issue| {
+                        issue.message
+                    })
+                    .into(),
+            },
+            out,
+            err,
+        );
+    }
+
+    let human = human_firmware_updates(&printer.name, &report);
+    let checked_at = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .expect("RFC 3339 formatting is infallible");
+    write_success(
+        command,
+        format,
+        FirmwareCheckData {
+            profile: printer.name,
+            driver: printer.driver_kind.name(),
+            checked_at,
+            report,
+            capabilities: printer.driver_kind.capabilities(),
+        },
+        |out| writeln!(out, "{human}"),
+        out,
+    )
+}
+
+fn human_firmware_updates(profile: &str, report: &FirmwareUpdateReport) -> String {
+    let availability = match report.availability {
+        FirmwareUpdateAvailability::Available => "update available",
+        FirmwareUpdateAvailability::Current => "current",
+        FirmwareUpdateAvailability::Unknown => "unknown",
+        FirmwareUpdateAvailability::Unsupported => "unsupported",
+    };
+    let mut lines = vec![
+        format!("Printer: {}", sanitize(profile)),
+        format!("Availability: {availability}"),
+    ];
+    for component in &report.components {
+        let kind = match component.kind {
+            FirmwareUpdateComponentKind::PrinterFirmware => "Printer firmware",
+            FirmwareUpdateComponentKind::AccessoryFirmware => "Accessory firmware",
+            FirmwareUpdateComponentKind::PrinterSoftware => "Printer software",
+        };
+        let current = component.current_version.as_deref().unwrap_or("unknown");
+        let version = match component.availability {
+            FirmwareUpdateAvailability::Available => {
+                component.available_version.as_deref().map_or_else(
+                    || sanitize(current),
+                    |target| format!("{} -> {}", sanitize(current), sanitize(target)),
+                )
+            }
+            FirmwareUpdateAvailability::Current => format!("{} (current)", sanitize(current)),
+            FirmwareUpdateAvailability::Unknown => {
+                format!("{} (no update advertised)", sanitize(current))
+            }
+            FirmwareUpdateAvailability::Unsupported => sanitize(current),
+        };
+        lines.push(format!(
+            "{kind} ({}): {version}",
+            sanitize(&component.label)
+        ));
+    }
+    lines.push(format!(
+        "Required: {}",
+        if report.components.iter().any(|component| component.required) {
+            "yes"
+        } else {
+            "no"
+        }
+    ));
+    for issue in &report.issues {
+        lines.push(format!("Warning: {}", sanitize(issue.message)));
+    }
+    lines.join("\n")
 }
 
 #[derive(Serialize)]
@@ -4980,6 +5137,36 @@ mod tests {
         );
         // Anything that is not plain UTC passes through untouched.
         assert_eq!(format_modified_time("whenever"), "whenever");
+    }
+
+    #[test]
+    fn firmware_update_human_output_sanitizes_provider_text() {
+        use melt_core::firmware_updates::{
+            FirmwareUpdateComponent, FirmwareUpdateIssue, FirmwareUpdateSource,
+        };
+
+        let report = FirmwareUpdateReport::from_components(
+            FirmwareUpdateSource::BambuMqtt,
+            vec![FirmwareUpdateComponent {
+                id: "ota".into(),
+                label: "Printer\u{1b}[31m".into(),
+                kind: FirmwareUpdateComponentKind::PrinterFirmware,
+                current_version: Some("1.0\nold".into()),
+                available_version: Some("2.0".into()),
+                availability: FirmwareUpdateAvailability::Available,
+                required: true,
+            }],
+            vec![FirmwareUpdateIssue {
+                code: "test",
+                message: "Review\rnow",
+            }],
+        );
+
+        let output = human_firmware_updates("workshop", &report);
+        assert!(!output.contains('\u{1b}'));
+        assert!(!output.contains("old\n"));
+        assert!(output.contains("Availability: update available"));
+        assert!(output.contains("Required: yes"));
     }
 
     #[test]
