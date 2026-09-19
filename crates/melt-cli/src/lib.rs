@@ -4441,6 +4441,12 @@ fn driver_error(error: DriverError) -> AppError {
             code: "capability_unsupported",
             message: error.to_string(),
         },
+        DriverError::Moonraker(melt_core::moonraker::Error::UpdateRefreshRejected) => AppError {
+            exit_code: 4,
+            code: "operation_rejected",
+            message: "Moonraker rejected the metadata refresh while the updater or printer was busy"
+                .into(),
+        },
         DriverError::Moonraker(melt_core::moonraker::Error::InvalidDevicePath)
         | DriverError::Moonraker(melt_core::moonraker::Error::InvalidTemperatureTarget)
         | DriverError::Moonraker(melt_core::moonraker::Error::InvalidJog)
@@ -5186,6 +5192,44 @@ mod tests {
         assert!(!output.contains("old\n"));
         assert!(output.contains("Availability: update available"));
         assert!(output.contains("Required: yes"));
+    }
+
+    #[test]
+    fn firmware_update_human_output_names_every_availability_state() {
+        use melt_core::firmware_updates::{FirmwareUpdateComponent, FirmwareUpdateSource};
+
+        for (availability, expected) in [
+            (FirmwareUpdateAvailability::Available, "update available"),
+            (FirmwareUpdateAvailability::Current, "current"),
+            (FirmwareUpdateAvailability::Unknown, "unknown"),
+        ] {
+            let report = FirmwareUpdateReport::from_components(
+                FirmwareUpdateSource::BambuMqtt,
+                vec![FirmwareUpdateComponent {
+                    id: "ota".into(),
+                    label: "Printer".into(),
+                    kind: FirmwareUpdateComponentKind::PrinterFirmware,
+                    current_version: Some("1.0".into()),
+                    available_version: None,
+                    availability,
+                    required: false,
+                }],
+                Vec::new(),
+            );
+            assert!(
+                human_firmware_updates("workshop", &report)
+                    .contains(&format!("Availability: {expected}"))
+            );
+        }
+
+        let unsupported = FirmwareUpdateReport::unsupported(
+            FirmwareUpdateSource::MoonrakerUpdateManager,
+            "missing",
+            "missing",
+        );
+        assert!(
+            human_firmware_updates("workshop", &unsupported).contains("Availability: unsupported")
+        );
     }
 
     #[test]

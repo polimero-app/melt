@@ -3689,6 +3689,9 @@ fn operation_error(error: DriverError, operation: Operation) -> CommandError {
         }
         DriverError::Moonraker(melt_core::moonraker::Error::Timeout)
         | DriverError::Bambu(melt_core::bambu::TransportError::Timeout) => "printerTimeout",
+        DriverError::Moonraker(melt_core::moonraker::Error::UpdateRefreshRejected) => {
+            "firmwareRefreshRejected"
+        }
         DriverError::Camera(melt_core::bambu::CameraError::MissingAccessCode) => {
             "cameraAccessCodeUnavailable"
         }

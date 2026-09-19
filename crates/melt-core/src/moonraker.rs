@@ -134,6 +134,8 @@ pub enum Error {
     MissingResult,
     #[error("Moonraker API returned an error")]
     Api,
+    #[error("Moonraker rejected the update metadata refresh while the updater was busy")]
+    UpdateRefreshRejected,
     #[error("invalid device path")]
     InvalidDevicePath,
     #[error("Moonraker response is missing a requested printer object")]
@@ -870,7 +872,15 @@ impl Client {
         }) {
             return Err(Error::Authentication);
         }
-        if envelope.error.is_some() {
+        if let Some(error) = envelope.error {
+            let message = error.message.to_ascii_lowercase();
+            if endpoint == "machine/update/refresh"
+                && ["busy", "print", "update"]
+                    .iter()
+                    .any(|reason| message.contains(reason))
+            {
+                return Err(Error::UpdateRefreshRejected);
+            }
             return Err(Error::Api);
         }
         serde_json::from_value(envelope.result.ok_or(Error::MissingResult)?)
@@ -1020,6 +1030,13 @@ fn moonraker_update_report(result: &Value) -> FirmwareUpdateReport {
     let available_version = bounded_update_value(klipper, &["remote_version"], &mut issues);
     let current_hash = update_text(klipper, "current_hash");
     let remote_hash = update_text(klipper, "remote_hash");
+    let hash_match = current_hash
+        .zip(remote_hash)
+        .map(|(current, remote)| current == remote);
+    let version_match = current_version
+        .as_deref()
+        .zip(available_version.as_deref())
+        .map(|(current, available)| current == available);
     let commits_behind = klipper
         .get("commits_behind_count")
         .and_then(Value::as_u64)
@@ -1030,31 +1047,35 @@ fn moonraker_update_report(result: &Value) -> FirmwareUpdateReport {
             .is_some_and(|commits| !commits.is_empty());
     let invalid = klipper.get("is_valid").and_then(Value::as_bool) == Some(false)
         || klipper.get("corrupt").and_then(Value::as_bool) == Some(true);
+    let warnings = klipper
+        .get("warnings")
+        .is_some_and(|warnings| match warnings {
+            Value::Null => false,
+            Value::String(value) => !value.trim().is_empty(),
+            Value::Array(values) => !values.is_empty(),
+            Value::Object(values) => !values.is_empty(),
+            Value::Bool(value) => *value,
+            Value::Number(_) => true,
+        });
 
-    let availability = if invalid {
+    let availability = if invalid || warnings {
         issues.push(FirmwareUpdateIssue {
             code: "invalidRepositoryState",
-            message: "Moonraker reports that the local Klipper repository is not valid.",
+            message: "Moonraker reports that the local Klipper updater cannot safely determine updates.",
+        });
+        FirmwareUpdateAvailability::Unknown
+    } else if hash_match.is_none() && version_match.is_none() {
+        issues.push(FirmwareUpdateIssue {
+            code: "incompleteUpdateData",
+            message: "Moonraker did not provide enough version data to determine update availability.",
         });
         FirmwareUpdateAvailability::Unknown
     } else if commits_behind
-        || current_hash
-            .zip(remote_hash)
-            .is_some_and(|(current, remote)| current != remote)
-        || current_version
-            .as_deref()
-            .zip(available_version.as_deref())
-            .is_some_and(|(current, available)| current != available)
+        || hash_match == Some(false)
+        || (hash_match.is_none() && version_match == Some(false))
     {
         FirmwareUpdateAvailability::Available
-    } else if current_hash
-        .zip(remote_hash)
-        .is_some_and(|(current, remote)| current == remote)
-        || current_version
-            .as_deref()
-            .zip(available_version.as_deref())
-            .is_some_and(|(current, available)| current == available)
-    {
+    } else if hash_match == Some(true) || (hash_match.is_none() && version_match == Some(true)) {
         FirmwareUpdateAvailability::Current
     } else {
         issues.push(FirmwareUpdateIssue {
@@ -2303,6 +2324,41 @@ mod tests {
         assert!(request.contains("/machine/update/refresh "));
         assert!(request.to_ascii_lowercase().contains("x-api-key: secret"));
         assert!(request.ends_with(r#"{"name":"klipper"}"#));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn firmware_update_status_prefers_hashes_and_rejects_warning_states() {
+        let hash_authoritative = serde_json::json!({"version_info":{"klipper":{
+            "version":"v1", "remote_version":"v2",
+            "current_hash":"same", "remote_hash":"same", "is_valid":true
+        }}});
+        assert_eq!(
+            moonraker_update_report(&hash_authoritative).availability,
+            FirmwareUpdateAvailability::Current
+        );
+
+        let warned = serde_json::json!({"version_info":{"klipper":{
+            "version":"v1", "remote_version":"v2",
+            "is_valid":true, "warnings":["detached repository"]
+        }}});
+        assert_eq!(
+            moonraker_update_report(&warned).availability,
+            FirmwareUpdateAvailability::Unknown
+        );
+    }
+
+    #[test]
+    fn firmware_update_refresh_has_a_specific_busy_error() {
+        let (host, _requests, server) = scripted_server(vec![
+            r#"{"error":{"code":409,"message":"Update refresh is busy while printing"}}"#,
+        ]);
+        let error = Client::new(Profile::new(&host, false, DEFAULT_TIMEOUT).unwrap())
+            .unwrap()
+            .firmware_update_status(None, true)
+            .unwrap_err();
+
+        assert!(matches!(error, Error::UpdateRefreshRejected));
         server.join().unwrap();
     }
 

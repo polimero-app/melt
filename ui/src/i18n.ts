@@ -410,6 +410,7 @@ export type MessageKey =
   | "errors.jobFileInvalid"
   | "errors.temperatureTargetMissing"
   | "errors.driverUnsupported"
+  | "errors.firmwareRefreshRejected"
   | "errors.printerAuthFailed"
   | "errors.printerSigningRequired"
   | "errors.printerAuthorizationConflict"
@@ -907,6 +908,7 @@ const messages: Record<Locale, Messages> = {
     "errors.jobFileInvalid": "This 3MF is not sliced or does not contain a printable plate.",
     "errors.temperatureTargetMissing": "Choose a temperature target first.",
     "errors.driverUnsupported": "This driver does not support {operation}.",
+    "errors.firmwareRefreshRejected": "Moonraker could not refresh update metadata while the printer or updater was busy. The previous result is still shown.",
     "errors.printerAuthFailed": "Printer authentication failed.",
     "errors.printerSigningRequired": "The printer requires signed commands for {operation}. Melt does not support signed mutations; enable Developer Mode/LAN-only mode.",
     "errors.printerAuthorizationConflict": "Conflicting printer security evidence blocks {operation}. Refresh status and inspect Compatibility diagnostics before retrying.",
@@ -1384,6 +1386,7 @@ const messages: Record<Locale, Messages> = {
     "errors.jobFileInvalid": "Este 3MF não está fatiado ou não contém uma mesa imprimível.",
     "errors.temperatureTargetMissing": "Escolha primeiro uma temperatura alvo.",
     "errors.driverUnsupported": "Este driver não suporta {operation}.",
+    "errors.firmwareRefreshRejected": "O Moonraker não pôde atualizar os metadados enquanto a impressora ou o atualizador estava ocupado. O resultado anterior continua visível.",
     "errors.printerAuthFailed": "A autenticação da impressora falhou.",
     "errors.printerSigningRequired": "A impressora exige comandos assinados para {operation}. O Melt não oferece suporte a mutações assinadas; ative o Modo de Desenvolvedor/modo somente LAN.",
     "errors.printerAuthorizationConflict": "Evidências conflitantes de segurança bloqueiam {operation}. Atualize o status e verifique os diagnósticos de Compatibilidade antes de tentar novamente.",
