@@ -1,11 +1,15 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "baseline": {
     "repository": "../app",
     "workingRevision": "6b67ff58b8b7a123f3e560f76c8c62a3a47e7a6d",
     "contractRevision": "16f2a9570affdc0ab20ee41b20d273bc4743a68d"
   },
   "globalFlags": ["--output <human|json>", "--verbose"],
+  "meltNativeCommands": [
+    {"path": "firmware", "arguments": "", "flags": [], "implementation": "implemented"},
+    {"path": "firmware check", "arguments": "<printer>", "flags": ["--refresh", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"}
+  ],
   "commands": [
     {"path": "melt", "arguments": "", "flags": [], "implementation": "implemented"},
     {"path": "camera", "arguments": "", "flags": [], "implementation": "implemented"},

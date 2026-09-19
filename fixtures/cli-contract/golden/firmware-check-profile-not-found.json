@@ -1,0 +1,12 @@
+{
+  "ok": false,
+  "data": null,
+  "error": {
+    "code": "config_error",
+    "message": "printer profile \"garage\" not found",
+    "details": {}
+  },
+  "meta": {
+    "command": "firmware check"
+  }
+}

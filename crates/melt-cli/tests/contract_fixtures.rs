@@ -31,7 +31,7 @@ fn contract_fixtures_match_the_cli_envelope_and_exit_contract() {
     let _lock = CONFIG_ENV_LOCK.lock().unwrap();
     let _config_dir = ConfigDirGuard::set(Path::new(FIXTURE_ROOT).join("config/empty"));
     let inventory: Value = read_json("inventory.json");
-    assert_eq!(inventory["schemaVersion"], 1);
+    assert_eq!(inventory["schemaVersion"], 2);
     let commands = inventory["commands"].as_array().expect("commands array");
     assert_eq!(commands.len(), 37);
     assert!(
@@ -40,19 +40,28 @@ fn contract_fixtures_match_the_cli_envelope_and_exit_contract() {
             .all(|command| command["implementation"] == "implemented"),
         "every public command path must be implemented"
     );
+    let native_commands = inventory["meltNativeCommands"]
+        .as_array()
+        .expect("Melt-native commands array");
+    assert!(
+        native_commands
+            .iter()
+            .all(|command| command["implementation"] == "implemented")
+    );
     let command_paths: HashSet<_> = commands
         .iter()
+        .chain(native_commands)
         .map(|command| command["path"].as_str().expect("command path"))
         .collect();
     assert_eq!(
         command_paths.len(),
-        commands.len(),
+        commands.len() + native_commands.len(),
         "duplicate command path"
     );
 
     let manifest: Manifest = serde_json::from_value(read_json("manifest.json")).expect("manifest");
     assert_eq!(manifest.schema_version, 1);
-    assert_eq!(manifest.fixtures.len(), 8);
+    assert_eq!(manifest.fixtures.len(), 9);
     let mut fixture_ids = HashSet::new();
 
     for fixture in manifest.fixtures {

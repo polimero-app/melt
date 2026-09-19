@@ -72,6 +72,15 @@
       "stdout": "golden/files-delete-profile-not-found.json",
       "stderr": "",
       "ignoreJsonPointers": []
+    },
+    {
+      "id": "firmware-check-profile-not-found-json",
+      "command": "firmware check",
+      "args": ["firmware", "check", "garage", "--output", "json"],
+      "exitCode": 2,
+      "stdout": "golden/firmware-check-profile-not-found.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
     }
   ]
 }

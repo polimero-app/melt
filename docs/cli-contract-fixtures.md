@@ -5,6 +5,10 @@ every public command in the Go contract, its arguments and flags, and whether
 the Rust CLI implements it. Do not remove an inventory row when a command is
 implemented; change its `implementation` value and add a fixture.
 
+Schema version 2 keeps post-migration commands in `meltNativeCommands`. These
+commands participate in the same fixture and help coverage without being
+misrepresented as part of the frozen Go baseline.
+
 `fixtures/cli-contract/manifest.json` maps a reproducible invocation to its
 exit code and JSON golden response. Golden responses are captured from the Go
 working baseline at `6b67ff58b8b7a123f3e560f76c8c62a3a47e7a6d`. The accepted
