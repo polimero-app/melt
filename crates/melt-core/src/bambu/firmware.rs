@@ -268,6 +268,160 @@ pub fn update_report(status: &Value, inventory: &FirmwareInventory) -> FirmwareU
     finish_report(components, issues, truncated)
 }
 
+/// Adds the read-only `upgrade.get_history` catalogue to an existing LAN
+/// report. History is treated as a device catalogue, not as proof that the
+/// printer has accepted or staged an update.
+pub fn merge_history_report(mut report: FirmwareUpdateReport, history: &Value) -> FirmwareUpdateReport {
+    let mut components = report
+        .components
+        .drain(..)
+        .map(|component| (component.id.to_ascii_lowercase(), component))
+        .collect::<BTreeMap<_, _>>();
+    let mut issues = report.issues;
+    let mut truncated = false;
+
+    let Some(upgrade) = history.get("upgrade").and_then(Value::as_object) else {
+        return FirmwareUpdateReport::from_components(report.source, components.into_values().collect(), issues);
+    };
+    let firmware_optional = upgrade
+        .get("firmware_optional")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten();
+    for entry in firmware_optional {
+        let Some(firmware) = entry.get("firmware").and_then(Value::as_object) else {
+            continue;
+        };
+        let Some(version) = firmware.get("version").and_then(Value::as_str) else {
+            continue;
+        };
+        merge_catalogue_target(
+            &mut components,
+            "ota",
+            "Printer firmware",
+            version,
+            firmware.get("force_update").and_then(Value::as_bool).unwrap_or(false),
+            &mut issues,
+            &mut truncated,
+        );
+        for ams in entry.get("ams").and_then(Value::as_array).into_iter().flatten() {
+            let Some(ams_object) = ams.as_object() else {
+                continue;
+            };
+            let id = ["device_id", "dev_model_name", "address"]
+                .into_iter()
+                .find_map(|key| ams_object.get(key).and_then(Value::as_str))
+                .filter(|value| !value.trim().is_empty());
+            let Some(id) = id else { continue };
+            let label = ams_object
+                .get("dev_model_name")
+                .and_then(Value::as_str)
+                .unwrap_or(id);
+            for firmware in ams_object
+                .get("firmware")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let Some(version) = firmware.get("version").and_then(Value::as_str) else {
+                    continue;
+                };
+                merge_catalogue_target(
+                    &mut components,
+                    id,
+                    label,
+                    version,
+                    firmware.get("force_update").and_then(Value::as_bool).unwrap_or(false),
+                    &mut issues,
+                    &mut truncated,
+                );
+            }
+        }
+    }
+    if truncated {
+        push_issue(&mut issues, provider_data_truncated());
+    }
+    FirmwareUpdateReport::from_components(report.source, components.into_values().collect(), issues)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn merge_catalogue_target(
+    components: &mut BTreeMap<String, FirmwareUpdateComponent>,
+    raw_id: &str,
+    raw_label: &str,
+    raw_target: &str,
+    required: bool,
+    issues: &mut Vec<FirmwareUpdateIssue>,
+    truncated: &mut bool,
+) {
+    let (id, id_truncated) = bounded_provider_text(raw_id, MAX_COMPONENT_ID_BYTES);
+    let (label, label_truncated) = bounded_provider_text(raw_label, MAX_COMPONENT_LABEL_BYTES);
+    let (target, version_truncated) = bounded_provider_text(raw_target, MAX_VERSION_BYTES);
+    *truncated |= id_truncated || label_truncated || version_truncated;
+    if target.is_empty() || !meaningful_version(&target) {
+        return;
+    }
+    let key = id.to_ascii_lowercase();
+    let component = components.entry(key).or_insert_with(|| FirmwareUpdateComponent {
+        kind: component_kind(&id),
+        id,
+        label,
+        current_version: None,
+        available_version: None,
+        availability: FirmwareUpdateAvailability::Unknown,
+        required: false,
+        evidence: Vec::new(),
+    });
+    component.required |= required;
+    component.evidence.push(FirmwareVersionEvidence {
+        source: FirmwareEvidenceSource::BambuLanHistory,
+        role: FirmwareEvidenceRole::DeviceCatalogue,
+        version: Some(target.clone()),
+        required,
+    });
+    let comparison = component.current_version.as_deref().map(|current| {
+        let current = FirmwareVersion::parse(current);
+        let target_version = FirmwareVersion::parse(&target);
+        if current.numeric.is_empty() || target_version.numeric.is_empty() {
+            None
+        } else {
+            Some(target_version.numeric_cmp(&current))
+        }
+    });
+    match (component.current_version.is_none(), comparison.flatten()) {
+        (true, _) => {
+            component.available_version = Some(target);
+            component.availability = FirmwareUpdateAvailability::Available;
+        }
+        (false, Some(Ordering::Greater)) => {
+            component.available_version = Some(target);
+            component.availability = FirmwareUpdateAvailability::Available;
+        }
+        (false, Some(Ordering::Equal)) => {
+            if component.availability != FirmwareUpdateAvailability::Available {
+                component.availability = FirmwareUpdateAvailability::Current;
+            }
+        }
+        (false, Some(Ordering::Less)) => push_issue(
+            issues,
+            FirmwareUpdateIssue {
+                code: "historyTargetNotNewer",
+                message: "The device catalogue reported a version older than the installed version.",
+            },
+        ),
+        (false, None) => push_issue(
+            issues,
+            FirmwareUpdateIssue {
+                code: "uncomparableHistoryVersion",
+                message: "A device catalogue version could not be compared safely.",
+            },
+        ),
+    }
+    if component.required {
+        component.availability = FirmwareUpdateAvailability::Available;
+    }
+}
+
 fn component_kind(id: &str) -> FirmwareUpdateComponentKind {
     if id.eq_ignore_ascii_case("ota") {
         FirmwareUpdateComponentKind::PrinterFirmware
@@ -480,5 +634,28 @@ mod tests {
             &malformed_inventory,
         );
         assert_eq!(malformed.availability, FirmwareUpdateAvailability::Unknown);
+    }
+
+    #[test]
+    fn history_adds_device_catalogue_evidence_without_update_mutations() {
+        let inventory = FirmwareInventory::from_version_info(
+            &json!({"module":[{"name":"ota","sw_ver":"01.08.00.00"}]}),
+        );
+        let report = update_report(&json!({"print":{}}), &inventory);
+        let merged = merge_history_report(
+            report,
+            &json!({"upgrade":{"firmware_optional":[{
+                "firmware":{"version":"01.09.00.00","force_update":false},
+                "ams":[{"device_id":"ams-0","dev_model_name":"AMS","firmware":[{"version":"00.01.00.00"}]}]
+            }]}}),
+        );
+        assert_eq!(merged.availability, FirmwareUpdateAvailability::Available);
+        let ota = merged.components.iter().find(|component| component.id == "ota").unwrap();
+        assert_eq!(ota.available_version.as_deref(), Some("01.09.00.00"));
+        assert!(ota.evidence.iter().any(|evidence| {
+            evidence.source == FirmwareEvidenceSource::BambuLanHistory
+                && evidence.role == FirmwareEvidenceRole::DeviceCatalogue
+        }));
+        assert!(merged.components.iter().any(|component| component.id == "ams-0"));
     }
 }

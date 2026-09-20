@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::firmware_updates::FirmwareUpdateReport;
+use crate::firmware_updates::{FirmwareUpdateIssue, FirmwareUpdateReport};
 use crate::moonraker::{
     AmsData, AmsDrying, AmsTray, AmsUnit, BambuExtension, ControlInventory, DryingRequest,
     DryingResult, DryingSetting, DryingStatus, Extensions, FanControl, FanKind, FanMode, FanResult,
@@ -259,6 +259,20 @@ impl Client {
         fingerprint: Option<&str>,
         refresh: bool,
     ) -> Result<FirmwareUpdateReport, Error> {
+        self.firmware_update_status_with_history(access_code, fingerprint, refresh, false)
+    }
+
+    /// Reads LAN update availability and, when requested, the printer's
+    /// read-only device catalogue. The history command is deliberately kept
+    /// separate from `exchange`: it never sends a pushall refresh or any
+    /// update command.
+    pub fn firmware_update_status_with_history(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        refresh: bool,
+        include_history: bool,
+    ) -> Result<FirmwareUpdateReport, Error> {
         self.with_mqtt(access_code, fingerprint, |mqtt| {
             if refresh || mqtt.status_document.is_none() {
                 mqtt.exchange(pushall_payload(next_sequence()), is_full_report)?;
@@ -269,7 +283,25 @@ impl Client {
                 .status_document
                 .as_ref()
                 .ok_or(Error::InvalidResponse)?;
-            Ok(update_report(status, &inventory))
+            let report = update_report(status, &inventory);
+            if !include_history {
+                return Ok(report);
+            }
+            match mqtt.query_history() {
+                Ok(history) => Ok(super::firmware::merge_history_report(report, &history)),
+                Err(_) => {
+                    let mut issues = report.issues.clone();
+                    issues.push(FirmwareUpdateIssue {
+                        code: "historyUnavailable",
+                        message: "The printer's read-only firmware catalogue could not be queried.",
+                    });
+                    Ok(FirmwareUpdateReport::from_components(
+                        report.source,
+                        report.components,
+                        issues,
+                    ))
+                }
+            }
         })
     }
 
@@ -1816,6 +1848,37 @@ impl MqttConnection {
                 Some(_) => {}
                 None if Instant::now() >= self.deadline => return Err(Error::Timeout),
                 None if attempts >= VERSION_MAX_ATTEMPTS => return Err(Error::InvalidResponse),
+                None => {}
+            }
+        }
+    }
+
+    fn query_history(&mut self) -> Result<Value, Error> {
+        let payload = json!({"upgrade": {
+            "sequence_id": next_sequence_id(),
+            "command": "get_history"
+        }})
+        .to_string();
+        self.publish(&payload)?;
+        let deadline = self.deadline;
+        loop {
+            match self.read_packet_until(self.deadline.min(deadline))? {
+                Some(packet) if packet.kind >> 4 == 3 => {
+                    let report = mqtt_publish_payload(packet.kind, &packet.payload)?;
+                    let Ok(value) = serde_json::from_slice::<Value>(&report) else {
+                        continue;
+                    };
+                    if value
+                        .get("upgrade")
+                        .and_then(Value::as_object)
+                        .and_then(|upgrade| upgrade.get("firmware_optional"))
+                        .is_some()
+                    {
+                        return Ok(value);
+                    }
+                }
+                Some(_) => {}
+                None if Instant::now() >= deadline => return Err(Error::Timeout),
                 None => {}
             }
         }
