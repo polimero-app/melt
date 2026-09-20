@@ -6,6 +6,7 @@ const printerDraft: PrinterDraftFields = {
   driver: 'moonraker',
   host: 'printer.local',
   serial: '',
+  model: '',
   timeout: '10s',
   insecure: false,
   accessCode: '',
