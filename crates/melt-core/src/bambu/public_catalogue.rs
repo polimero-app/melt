@@ -36,15 +36,15 @@ pub struct PublicFirmwareRelease {
 
 pub fn public_catalogue_url(model: CanonicalModel) -> Option<&'static str> {
     let slug = match model {
-        CanonicalModel::A1 => "a1",
-        CanonicalModel::A1Mini => "a1-mini",
+        CanonicalModel::A1 | CanonicalModel::A1Mini => "a1",
         CanonicalModel::A2 => "a2",
-        CanonicalModel::P1P => "p1p",
-        CanonicalModel::P1S => "p1s",
+        // Bambu publishes one P-series catalogue for both P1 variants. Using
+        // the model-specific paths returns a generic 404 page, so the parser
+        // never gets a release even when the official catalogue has one.
+        CanonicalModel::P1P | CanonicalModel::P1S => "p1",
         CanonicalModel::P2S => "p2s",
-        CanonicalModel::X1 => "x1",
-        CanonicalModel::X1Carbon => "x1c",
-        CanonicalModel::X1E => "x1e",
+        // X1/X1C/X1E share the X1 catalogue and release history.
+        CanonicalModel::X1 | CanonicalModel::X1Carbon | CanonicalModel::X1E => "x1",
         CanonicalModel::X2 => "x2",
         CanonicalModel::H2D => "h2d",
         CanonicalModel::H2S => "h2s",
@@ -53,14 +53,10 @@ pub fn public_catalogue_url(model: CanonicalModel) -> Option<&'static str> {
     };
     Some(match slug {
         "a1" => "https://bambulab.com/en-us/support/firmware-download/a1",
-        "a1-mini" => "https://bambulab.com/en-us/support/firmware-download/a1-mini",
         "a2" => "https://bambulab.com/en-us/support/firmware-download/a2",
-        "p1p" => "https://bambulab.com/en-us/support/firmware-download/p1p",
-        "p1s" => "https://bambulab.com/en-us/support/firmware-download/p1s",
+        "p1" => "https://bambulab.com/en-us/support/firmware-download/p1",
         "p2s" => "https://bambulab.com/en-us/support/firmware-download/p2s",
         "x1" => "https://bambulab.com/en-us/support/firmware-download/x1",
-        "x1c" => "https://bambulab.com/en-us/support/firmware-download/x1c",
-        "x1e" => "https://bambulab.com/en-us/support/firmware-download/x1e",
         "x2" => "https://bambulab.com/en-us/support/firmware-download/x2",
         "h2d" => "https://bambulab.com/en-us/support/firmware-download/h2d",
         "h2s" => "https://bambulab.com/en-us/support/firmware-download/h2s",

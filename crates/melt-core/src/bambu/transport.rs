@@ -302,7 +302,18 @@ impl Client {
         let model = super::ModelIdentity::parse(self.profile.model()).canonical;
         match fetch_public_firmware(model, self.profile.timeout()) {
             Ok(release) => Ok(merge_public_catalogue_report(report, &release.version)),
-            Err(super::PublicCatalogueError::UnsupportedModel) => Ok(report),
+            Err(super::PublicCatalogueError::UnsupportedModel) => {
+                let mut issues = report.issues.clone();
+                issues.push(FirmwareUpdateIssue {
+                    code: "publicCatalogueUnsupportedModel",
+                    message: "The configured printer model is not mapped to an official public firmware catalogue.",
+                });
+                Ok(FirmwareUpdateReport::from_components(
+                    report.source,
+                    report.components,
+                    issues,
+                ))
+            }
             Err(_) => {
                 let mut issues = report.issues.clone();
                 issues.push(FirmwareUpdateIssue {
@@ -1906,8 +1917,9 @@ impl MqttConnection {
     }
 
     fn query_history(&mut self) -> Result<Value, Error> {
+        let sequence_id = next_sequence_id();
         let payload = json!({"upgrade": {
-            "sequence_id": next_sequence_id(),
+            "sequence_id": sequence_id,
             "command": "get_history"
         }})
         .to_string();
@@ -1920,12 +1932,26 @@ impl MqttConnection {
                     let Ok(value) = serde_json::from_slice::<Value>(&report) else {
                         continue;
                     };
-                    if value
-                        .get("upgrade")
-                        .and_then(Value::as_object)
-                        .and_then(|upgrade| upgrade.get("firmware_optional"))
-                        .is_some()
+                    let Some(upgrade) = value.get("upgrade").and_then(Value::as_object) else {
+                        continue;
+                    };
+                    // A status stream can contain an older upgrade envelope
+                    // while this request is in flight. Only accept the
+                    // response correlated to this command; otherwise an
+                    // unrelated empty catalogue masks the real response.
+                    if upgrade.get("sequence_id").and_then(Value::as_str)
+                        != Some(sequence_id.as_str())
+                        || upgrade.get("command").and_then(Value::as_str)
+                            != Some("get_history")
                     {
+                        continue;
+                    }
+                    if upgrade.get("result").and_then(Value::as_str)
+                        .is_some_and(|result| result != "success")
+                    {
+                        return Err(Error::CommandRejected);
+                    }
+                    if upgrade.get("firmware_optional").is_some() {
                         return Ok(value);
                     }
                 }

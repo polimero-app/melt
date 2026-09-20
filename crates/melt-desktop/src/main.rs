@@ -1130,15 +1130,20 @@ fn firmware_source_checks(
 ) -> Vec<FirmwareSourceCheck> {
     let source_seen = |source: FirmwareEvidenceSource| report.evidence_sources.contains(&source);
     let failed = |code: &str| report.issues.iter().any(|issue| issue.code == code);
-    let make = |source: FirmwareEvidenceSource, enabled: bool, failed_code: Option<&str>| {
-        FirmwareSourceCheck {
-            source,
-            checked_at: checked_at.to_owned(),
-            outcome: if !enabled {
-                FirmwareSourceOutcome::Disabled
-            } else if report.availability == FirmwareUpdateAvailability::Unsupported {
-                FirmwareSourceOutcome::Unsupported
-            } else if source_seen(source) {
+    let make = |source: FirmwareEvidenceSource,
+                enabled: bool,
+                failed_code: Option<&str>,
+                unsupported_code: Option<&str>| {
+            FirmwareSourceCheck {
+                source,
+                checked_at: checked_at.to_owned(),
+                outcome: if !enabled {
+                    FirmwareSourceOutcome::Disabled
+                } else if unsupported_code.is_some_and(failed) {
+                    FirmwareSourceOutcome::Unsupported
+                } else if report.availability == FirmwareUpdateAvailability::Unsupported {
+                    FirmwareSourceOutcome::Unsupported
+                } else if source_seen(source) {
                 FirmwareSourceOutcome::Success
             } else if failed_code.is_some_and(failed) {
                 FirmwareSourceOutcome::Failed
@@ -1153,22 +1158,25 @@ fn firmware_source_checks(
     };
     match report.source {
         melt_core::firmware_updates::FirmwareUpdateSource::BambuMqtt => vec![
-            make(FirmwareEvidenceSource::BambuLanInventory, true, None),
-            make(FirmwareEvidenceSource::BambuLanAdvertisement, true, None),
+            make(FirmwareEvidenceSource::BambuLanInventory, true, None, None),
+            make(FirmwareEvidenceSource::BambuLanAdvertisement, true, None, None),
             make(
                 FirmwareEvidenceSource::BambuLanHistory,
                 true,
                 Some("historyUnavailable"),
+                None,
             ),
             make(
                 FirmwareEvidenceSource::BambuPublicCatalogue,
                 public_enabled,
                 Some("publicCatalogueUnavailable"),
+                Some("publicCatalogueUnsupportedModel"),
             ),
         ],
         melt_core::firmware_updates::FirmwareUpdateSource::MoonrakerUpdateManager => vec![make(
             FirmwareEvidenceSource::MoonrakerUpdateManager,
             true,
+            None,
             None,
         )],
     }
