@@ -1112,7 +1112,14 @@ fn printer_firmware_updates(
     // read-only evidence set, including the official public catalogue. A
     // passive (non-refresh) load still follows the persisted preference,
     // same as the background worker.
-    check_firmware_updates(&state, &app, normalized, profile, refresh, refresh.then_some(true))
+    check_firmware_updates(
+        &state,
+        &app,
+        normalized,
+        profile,
+        refresh,
+        refresh.then_some(true),
+    )
 }
 
 /// Performs a one-shot public catalogue check without changing the persisted
