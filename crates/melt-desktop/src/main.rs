@@ -1096,6 +1096,7 @@ fn printer_firmware_updates(
     refresh: bool,
     app: tauri::AppHandle,
     state: tauri::State<'_, FirmwareUpdateState>,
+    presence: tauri::State<'_, PresenceState>,
 ) -> Result<FirmwareUpdateEntry, CommandError> {
     let config = Config::load().map_err(|_| unreadable_config())?;
     let normalized = name.to_ascii_lowercase();
@@ -1103,6 +1104,7 @@ fn printer_firmware_updates(
         .get_profile(&normalized)
         .ok_or_else(|| CommandError::new("profileNotFound"))?
         .clone();
+    let profile = profile_with_observed_model(profile, &presence);
     if !refresh && let Some(entry) = fresh_firmware_entry(&state, &normalized) {
         return Ok(entry);
     }
@@ -1120,6 +1122,7 @@ fn printer_public_firmware_catalogue(
     name: String,
     app: tauri::AppHandle,
     state: tauri::State<'_, FirmwareUpdateState>,
+    presence: tauri::State<'_, PresenceState>,
 ) -> Result<FirmwareUpdateEntry, CommandError> {
     let config = Config::load().map_err(|_| unreadable_config())?;
     let normalized = name.to_ascii_lowercase();
@@ -1127,7 +1130,20 @@ fn printer_public_firmware_catalogue(
         .get_profile(&normalized)
         .ok_or_else(|| CommandError::new("profileNotFound"))?
         .clone();
+    let profile = profile_with_observed_model(profile, &presence);
     check_firmware_updates(&state, &app, normalized, profile, true, Some(true))
+}
+
+fn profile_with_observed_model(mut profile: Profile, presence: &PresenceState) -> Profile {
+    if profile.model.trim().is_empty()
+        && !profile.serial.trim().is_empty()
+        && let Ok(cache) = presence.cache.lock()
+        && let Some(observed) = cache.get(&profile.serial)
+        && !observed.model.trim().is_empty()
+    {
+        profile.model = observed.model.clone();
+    }
+    profile
 }
 
 fn fresh_firmware_entry(state: &FirmwareUpdateState, name: &str) -> Option<FirmwareUpdateEntry> {
