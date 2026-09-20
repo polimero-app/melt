@@ -313,6 +313,12 @@ pub struct ModelDetection {
 /// a stale `--model` is visible without demoting a confidently detected
 /// printer. An unrecognized name is still returned verbatim with an unknown
 /// canonical model, because new firmware must stay operable and diagnosable.
+///
+/// The configured string is the one channel that can go stale, so it decides
+/// only when the printer itself named nothing. A model this table has never
+/// seen still outranks a recognized one typed by hand: routing an unreleased
+/// printer as a P1S is a misclassification, and it would erase the only
+/// evidence a new row could be added from.
 pub fn detect(serial: &str, configured: &str, firmware: &FirmwareInventory) -> ModelDetection {
     let named = |pick: fn(&FirmwareModule) -> Option<&String>| {
         firmware
@@ -342,8 +348,17 @@ pub fn detect(serial: &str, configured: &str, firmware: &FirmwareInventory) -> M
     let resolved = candidates
         .iter()
         .find(|(_, identity)| identity.canonical != CanonicalModel::Unknown);
-    let Some((source, identity)) = resolved else {
-        // Nothing matched the table. Keep whatever the printer actually said
+    let reported = candidates
+        .iter()
+        .filter(|(source, _)| *source != ModelSource::Configured)
+        .find(|(_, identity)| !identity.raw.trim().is_empty());
+    let chosen = match (resolved, reported) {
+        (Some(candidate), _) if candidate.0 != ModelSource::Configured => Some(candidate),
+        (_, Some(candidate)) => Some(candidate),
+        (candidate, None) => candidate,
+    };
+    let Some((source, identity)) = chosen else {
+        // Only the configured string exists and it matched nothing. Keep it
         // so an unmapped model is inventoried rather than erased.
         let (source, identity) = candidates
             .into_iter()
@@ -643,6 +658,57 @@ mod tests {
         assert_eq!(detection.identity.canonical, CanonicalModel::Unknown);
         assert_eq!(detection.identity.raw, "Bambu Lab H3X");
         assert_eq!(detection.source, ModelSource::VersionProductName);
+        assert!(detection.conflicts.is_empty());
+    }
+
+    /// A model this table has never seen still outranks a recognized one
+    /// typed by hand. Resolving the configured string here would route an
+    /// unreleased printer as a P1S and erase the only evidence a new row
+    /// could be added from.
+    #[test]
+    fn an_unmapped_report_outranks_a_recognized_configured_string() {
+        let detection = detect(
+            "ZZZ00000000000",
+            "P1S",
+            &inventory(serde_json::json!({"module":[
+                {"name":"ota","product_name":"Bambu Lab H3X","sw_ver":"09.00.00.00"}
+            ]})),
+        );
+        assert_eq!(detection.identity.canonical, CanonicalModel::Unknown);
+        assert_eq!(detection.identity.raw, "Bambu Lab H3X");
+        assert_eq!(detection.source, ModelSource::VersionProductName);
+        assert_eq!(
+            detection.conflicts,
+            [ModelConflict {
+                source: ModelSource::Configured,
+                canonical: CanonicalModel::P1S,
+            }]
+        );
+    }
+
+    /// Both firmware names are the printer's own authenticated report, so an
+    /// unrecognized `product_name` must not suppress a `project_name` the
+    /// table does know.
+    #[test]
+    fn an_unmapped_product_name_yields_to_a_known_project_name() {
+        let detection = detect(
+            "ZZZ00000000000",
+            "",
+            &inventory(serde_json::json!({"module":[
+                {"name":"ota","product_name":"Bambu Lab H3X","project_name":"N2S"}
+            ]})),
+        );
+        assert_eq!(detection.identity.canonical, CanonicalModel::A1);
+        assert_eq!(detection.source, ModelSource::VersionProjectName);
+        assert!(detection.conflicts.is_empty());
+    }
+
+    /// The configured string still decides when the printer named nothing.
+    #[test]
+    fn the_configured_string_decides_a_silent_printer() {
+        let detection = detect("ZZZ00000000000", "P1S", &FirmwareInventory::default());
+        assert_eq!(detection.identity.canonical, CanonicalModel::P1S);
+        assert_eq!(detection.source, ModelSource::Configured);
         assert!(detection.conflicts.is_empty());
     }
 

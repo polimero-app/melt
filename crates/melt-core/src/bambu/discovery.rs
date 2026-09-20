@@ -206,10 +206,16 @@ fn parse_ssdp_response(payload: &[u8], source: IpAddr) -> Option<DiscoveredPrint
     // Printers send the serial bare (`USN: 22E8BJ610801473`); the
     // `uuid:<serial>::<target>` form comes from emulators and from Bambu's
     // own SSDP samples. Requiring the prefix left every real printer with an
-    // empty serial, which `PrinterPresence::observe` then discards.
+    // empty serial, which `PrinterPresence::observe` then discards. The
+    // scheme is case-insensitive, so a `UUID:` sender must not end up with
+    // the prefix baked into its serial and silently fail profile matching.
     let serial = headers
         .get("USN")
-        .map(|usn| usn.strip_prefix("uuid:").unwrap_or(usn))
+        .map(|usn| {
+            usn.get(..5)
+                .filter(|prefix| prefix.eq_ignore_ascii_case("uuid:"))
+                .map_or(*usn, |_| &usn[5..])
+        })
         .and_then(|usn| usn.split("::").next())
         .unwrap_or_default()
         .trim()
@@ -319,6 +325,15 @@ mod tests {
         .unwrap();
         assert_eq!(prefixed.host, "192.0.2.10");
         assert_eq!(prefixed.serial, "SN001");
+
+        // The URN scheme is case-insensitive; a `UUID:` sender must not keep
+        // the prefix in its serial and silently stop matching a profile.
+        let uppercase = parse_ssdp_response(
+            b"HTTP/1.1 200 OK\r\nST: urn:bambulab-com:device:3dprinter:1\r\nUSN: UUID:SN001::urn:bambulab-com:device:3dprinter:1\r\nDevModel.bambu.com: C12\r\n\r\n",
+            IpAddr::from_str("192.0.2.10").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(uppercase.serial, "SN001");
 
         let entries = merge(vec![
             printer("192.0.2.10".into(), "".into(), "C12".into(), "".into()),

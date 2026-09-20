@@ -247,13 +247,21 @@ unauthenticated broadcast any host on the segment can send, so it stays
 advisory input to `printer discover` and to presence, and never decides
 capabilities on an authenticated connection.
 
-The highest-ranked channel that resolves a known model wins. Lower-ranked
-channels that named a *different* model are recorded as conflicts and reported
-by diagnostics and `printer capabilities`; they never change the resolved
-model. A conflict names the channel only, never the value it read, so a serial
-prefix is never serialized. A raw value that matches nothing is preserved
-verbatim with an unknown canonical model, so unreleased firmware stays
-inventoried instead of being silently discarded.
+The highest-ranked channel that resolves a known model wins, except that the
+configured string decides only when the printer itself named nothing. A model
+the table has never seen still outranks a recognised one typed by hand:
+routing an unreleased printer as a P1S is a misclassification, and it would
+erase the only evidence a new table row could be added from. Where both
+firmware names are present, an unrecognised `product_name` still yields to a
+`project_name` the table knows, because both are the printer's own
+authenticated report.
+
+Lower-ranked channels that named a *different* model are recorded as conflicts
+and reported by diagnostics and `printer capabilities`; they never change the
+resolved model. A conflict names the channel only, never the value it read, so
+a serial prefix is never serialized. A raw value that matches nothing is
+preserved verbatim with an unknown canonical model, so unreleased firmware
+stays inventoried instead of being silently discarded.
 
 Detection is observational. It re-derives the model-keyed defaults — camera and
 storage transport, storage volumes, extruder count, quirk matches — before live
