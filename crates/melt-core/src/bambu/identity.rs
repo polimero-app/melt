@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::ModelFamily;
+use super::{FirmwareInventory, FirmwareModule, ModelFamily};
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -268,6 +268,112 @@ fn marketing_suffix(normalized: &str) -> Option<CanonicalModel> {
         })
 }
 
+/// Which LAN channel named the printer, in descending order of trust.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelSource {
+    /// `info.get_version` module `product_name`.
+    VersionProductName,
+    /// `info.get_version` module `project_name`, sent by legacy firmware.
+    VersionProjectName,
+    /// Leading three characters of the configured, TLS-bound serial.
+    SerialPrefix,
+    /// The model string stored in the profile.
+    Configured,
+    #[default]
+    None,
+}
+
+/// A lower-trust channel that named a different model. Retained so a
+/// disagreement is visible in diagnostics; it never changes the resolved
+/// model, and it never carries the serial it was derived from.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelConflict {
+    pub source: ModelSource,
+    pub canonical: CanonicalModel,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ModelDetection {
+    pub identity: ModelIdentity,
+    pub source: ModelSource,
+    pub conflicts: Vec<ModelConflict>,
+}
+
+/// Resolves the model from every LAN channel available to this session.
+///
+/// SSDP is deliberately excluded. `DevModel.bambu.com` carries the model code,
+/// but it is an unauthenticated broadcast any host on the network can forge,
+/// while the serial prefix is derived from the serial the pinned certificate
+/// binds to this physical printer. SSDP stays advisory input to discovery.
+///
+/// The highest-trust channel that resolves wins; every lower channel that
+/// named a different model is recorded as a conflict rather than resolved, so
+/// a stale `--model` is visible without demoting a confidently detected
+/// printer. An unrecognized name is still returned verbatim with an unknown
+/// canonical model, because new firmware must stay operable and diagnosable.
+pub fn detect(serial: &str, configured: &str, firmware: &FirmwareInventory) -> ModelDetection {
+    let named = |pick: fn(&FirmwareModule) -> Option<&String>| {
+        firmware
+            .modules
+            .iter()
+            .filter(|module| !module.is_accessory())
+            .find_map(pick)
+            .map(ModelIdentity::parse)
+            .unwrap_or_default()
+    };
+    let candidates = [
+        (
+            ModelSource::VersionProductName,
+            named(|module| module.product.as_ref()),
+        ),
+        (
+            ModelSource::VersionProjectName,
+            named(|module| module.project.as_ref()),
+        ),
+        (
+            ModelSource::SerialPrefix,
+            ModelIdentity::from_serial(serial),
+        ),
+        (ModelSource::Configured, ModelIdentity::parse(configured)),
+    ];
+
+    let resolved = candidates
+        .iter()
+        .find(|(_, identity)| identity.canonical != CanonicalModel::Unknown);
+    let Some((source, identity)) = resolved else {
+        // Nothing matched the table. Keep whatever the printer actually said
+        // so an unmapped model is inventoried rather than erased.
+        let (source, identity) = candidates
+            .into_iter()
+            .find(|(_, identity)| !identity.raw.trim().is_empty())
+            .unwrap_or_default();
+        return ModelDetection {
+            identity,
+            source,
+            conflicts: Vec::new(),
+        };
+    };
+    let conflicts = candidates
+        .iter()
+        .filter(|(candidate, other)| {
+            *candidate != *source
+                && other.canonical != CanonicalModel::Unknown
+                && other.canonical != identity.canonical
+        })
+        .map(|(source, other)| ModelConflict {
+            source: *source,
+            canonical: other.canonical,
+        })
+        .collect();
+    ModelDetection {
+        identity: identity.clone(),
+        source: *source,
+        conflicts,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,5 +534,185 @@ mod tests {
     fn unknown_has_no_code_and_a_placeholder_name() {
         assert_eq!(CanonicalModel::Unknown.code(), None);
         assert_eq!(CanonicalModel::Unknown.display_name(), "Unknown");
+    }
+
+    fn inventory(info: serde_json::Value) -> FirmwareInventory {
+        FirmwareInventory::from_version_info(&info)
+    }
+
+    #[test]
+    fn prefers_product_name_over_every_other_channel() {
+        let detection = detect(
+            "22E8BJ610801473",
+            "P1S",
+            &inventory(serde_json::json!({"module":[
+                {"name":"ota","product_name":"Bambu Lab P2S","sw_ver":"01.02.00.00"}
+            ]})),
+        );
+        assert_eq!(detection.identity.canonical, CanonicalModel::P2S);
+        assert_eq!(detection.source, ModelSource::VersionProductName);
+        assert_eq!(detection.identity.raw, "Bambu Lab P2S");
+        assert_eq!(
+            detection.conflicts,
+            [ModelConflict {
+                source: ModelSource::Configured,
+                canonical: CanonicalModel::P1S,
+            }]
+        );
+    }
+
+    /// The A1 fixture: no `product_name` anywhere, `project_name` on every
+    /// module, and an AMS Lite whose own `project_name` is blank.
+    #[test]
+    fn falls_back_to_project_name_on_legacy_firmware() {
+        let detection = detect(
+            "",
+            "",
+            &inventory(serde_json::json!({"module":[
+                {"name":"ota","project_name":"N2S","sw_ver":"01.05.00.00","hw_ver":"OTA"},
+                {"name":"esp32","project_name":"N2S","sw_ver":"01.13.33.99","hw_ver":"AP05"},
+                {"name":"ams_f1/0","project_name":"","hw_ver":"AMS_F102"}
+            ]})),
+        );
+        assert_eq!(detection.identity.canonical, CanonicalModel::A1);
+        assert_eq!(detection.source, ModelSource::VersionProjectName);
+        assert!(detection.conflicts.is_empty());
+    }
+
+    #[test]
+    fn never_reads_the_model_from_an_accessory() {
+        let detection = detect(
+            "03912345678901",
+            "",
+            &inventory(serde_json::json!({"module":[
+                {"name":"ams_f1/0","product_name":"AMS Lite (1)"},
+                {"name":"n3s/128","product_name":"AMS HT (1)"},
+                {"name":"ota","product_name":"Bambu Lab A1"}
+            ]})),
+        );
+        assert_eq!(detection.identity.canonical, CanonicalModel::A1);
+        assert_eq!(detection.source, ModelSource::VersionProductName);
+    }
+
+    /// X1-series firmware names itself in neither field, so the serial is the
+    /// only thing that separates an X1 from an X1 Carbon.
+    #[test]
+    fn separates_x1_from_x1_carbon_by_serial_when_firmware_is_silent() {
+        let silent = inventory(serde_json::json!({"module":[
+            {"name":"ota","sw_ver":"01.01.01.00","hw_ver":"","sn":""},
+            {"name":"rv1126","hw_ver":"AP05","sw_ver":"00.00.14.74"},
+            {"name":"xm","hw_ver":"","sn":"","sw_ver":"00.00.00.00"}
+        ]}));
+        let carbon = detect("00M00000000000", "", &silent);
+        assert_eq!(carbon.identity.canonical, CanonicalModel::X1Carbon);
+        assert_eq!(carbon.source, ModelSource::SerialPrefix);
+        assert_eq!(
+            detect("00W00000000000", "", &silent).identity.canonical,
+            CanonicalModel::X1
+        );
+    }
+
+    #[test]
+    fn a_configured_model_is_the_last_resort_not_the_first() {
+        let detection = detect("", "C12", &FirmwareInventory::default());
+        assert_eq!(detection.identity.canonical, CanonicalModel::P1S);
+        assert_eq!(detection.source, ModelSource::Configured);
+        assert!(detection.conflicts.is_empty());
+    }
+
+    #[test]
+    fn an_unresolvable_printer_stays_unknown_without_conflicts() {
+        let detection = detect("", "", &FirmwareInventory::default());
+        assert_eq!(detection.identity.canonical, CanonicalModel::Unknown);
+        assert_eq!(detection.source, ModelSource::None);
+        assert!(detection.identity.raw.is_empty());
+        assert!(detection.conflicts.is_empty());
+    }
+
+    /// An unmapped model must stay inventoried and operable: keep what the
+    /// printer said, and say which channel said it.
+    #[test]
+    fn an_unmapped_product_name_is_preserved_verbatim() {
+        let detection = detect(
+            "ZZZ00000000000",
+            "",
+            &inventory(serde_json::json!({"module":[
+                {"name":"ota","product_name":"Bambu Lab H3X","sw_ver":"09.00.00.00"}
+            ]})),
+        );
+        assert_eq!(detection.identity.canonical, CanonicalModel::Unknown);
+        assert_eq!(detection.identity.raw, "Bambu Lab H3X");
+        assert_eq!(detection.source, ModelSource::VersionProductName);
+        assert!(detection.conflicts.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_configured_string_is_not_a_conflict() {
+        let detection = detect(
+            "01P00000000000",
+            "future_dev_42",
+            &FirmwareInventory::default(),
+        );
+        assert_eq!(detection.identity.canonical, CanonicalModel::P1S);
+        assert_eq!(detection.source, ModelSource::SerialPrefix);
+        assert!(detection.conflicts.is_empty());
+    }
+
+    #[test]
+    fn agreeing_channels_are_not_conflicts() {
+        let detection = detect(
+            "01P00000000000",
+            "Bambu Lab P1S",
+            &inventory(serde_json::json!({"module":[
+                {"name":"ota","product_name":"Bambu Lab P1S","project_name":"C12"}
+            ]})),
+        );
+        assert_eq!(detection.source, ModelSource::VersionProductName);
+        assert!(detection.conflicts.is_empty());
+    }
+
+    #[test]
+    fn every_disagreeing_channel_is_recorded() {
+        let detection = detect(
+            "00M00000000000",
+            "A1",
+            &inventory(serde_json::json!({"module":[
+                {"name":"ota","product_name":"Bambu Lab H2D","project_name":"O1S"}
+            ]})),
+        );
+        assert_eq!(detection.identity.canonical, CanonicalModel::H2D);
+        assert_eq!(
+            detection.conflicts,
+            [
+                ModelConflict {
+                    source: ModelSource::VersionProjectName,
+                    canonical: CanonicalModel::H2S,
+                },
+                ModelConflict {
+                    source: ModelSource::SerialPrefix,
+                    canonical: CanonicalModel::X1Carbon,
+                },
+                ModelConflict {
+                    source: ModelSource::Configured,
+                    canonical: CanonicalModel::A1,
+                },
+            ]
+        );
+    }
+
+    /// Conflicts reach diagnostics, so they must not carry the serial they
+    /// were derived from.
+    #[test]
+    fn a_serial_prefix_conflict_does_not_carry_the_serial() {
+        let detection = detect(
+            "00MSECRETSERIAL",
+            "",
+            &inventory(serde_json::json!({"module":[
+                {"name":"ota","product_name":"Bambu Lab A1"}
+            ]})),
+        );
+        let serialized = serde_json::to_string(&detection.conflicts).unwrap();
+        assert!(!serialized.contains("SECRET"), "{serialized}");
+        assert!(!serialized.contains("00M"), "{serialized}");
     }
 }

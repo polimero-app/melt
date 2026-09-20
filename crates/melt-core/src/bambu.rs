@@ -48,7 +48,10 @@ pub use firmware::{
     FirmwareInventory, FirmwareModule, FirmwareVersion, merge_history_report,
     merge_public_catalogue_report,
 };
-pub use identity::{CanonicalModel, ModelEntry, ModelIdentity, models};
+pub use identity::{
+    CanonicalModel, ModelConflict, ModelDetection, ModelEntry, ModelIdentity, ModelSource, detect,
+    models,
+};
 pub use mapping::{FilamentAssignment, FilamentMapping, MappingStatus, reconcile_filaments};
 pub use names::{JobNames, NameError, derive_job_names, validate_remote_filename};
 pub use package::{
