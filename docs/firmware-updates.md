@@ -40,8 +40,10 @@ redirects, and never sends an access code, serial number, cookie, or token.
 The Manage printers firmware screen shows installed, printer-advertised,
 device-catalogue, and public-stable rails separately. History checks are
 read-only and cached with the normal firmware result. Public checks are disabled
-by default and can be enabled under Settings → Firmware sources; a failed
-optional source leaves the other evidence visible and records a bounded issue.
+by default and can be enabled under Settings → Firmware sources. The firmware
+screen also offers a one-shot public-catalogue check without changing that
+preference; a failed optional source leaves the other evidence visible and
+records a bounded issue.
 
 ## Interpretation
 
