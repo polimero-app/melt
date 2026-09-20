@@ -1,4 +1,9 @@
-use std::{io::Read, time::Duration};
+use std::{
+    collections::HashMap,
+    io::Read,
+    sync::{Arc, Mutex, OnceLock},
+    time::{Duration, Instant},
+};
 
 use reqwest::blocking::Client;
 use reqwest::redirect::Policy;
@@ -8,6 +13,10 @@ use super::CanonicalModel;
 
 pub const MAX_PUBLIC_CATALOGUE_BYTES: usize = 2 << 20;
 const PUBLIC_CATALOGUE_HOSTS: [&str; 2] = ["bambulab.com", "www.bambulab.com"];
+/// Bambu ships at most one stable release per model per day and serves these
+/// pages behind Cloudflare, so a short TTL would buy nothing and risk being
+/// rate limited.
+const PUBLIC_CATALOGUE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, Error)]
 pub enum PublicCatalogueError {
@@ -71,7 +80,55 @@ pub fn public_catalogue_urls(model: CanonicalModel) -> &'static [&'static str] {
     }
 }
 
+struct CachedRelease {
+    release: PublicFirmwareRelease,
+    fetched_at: Instant,
+}
+
+fn fresh(entry: &CachedRelease) -> bool {
+    entry.fetched_at.elapsed() < PUBLIC_CATALOGUE_TTL
+}
+
+/// One slot per canonical model, shared by every profile of that model, so a
+/// result is reused across printers instead of refetched per printer.
+type Slot = Arc<Mutex<Option<CachedRelease>>>;
+
+fn slot(model: CanonicalModel) -> Slot {
+    static SLOTS: OnceLock<Mutex<HashMap<CanonicalModel, Slot>>> = OnceLock::new();
+    let slots = SLOTS.get_or_init(Mutex::default);
+    let mut slots = slots.lock().unwrap_or_else(|error| error.into_inner());
+    slots.entry(model).or_default().clone()
+}
+
+/// Fetches the latest public stable release for a model, reusing a cached
+/// result for [`PUBLIC_CATALOGUE_TTL`].
+///
+/// The per-model slot is held across the fetch, so concurrent callers for the
+/// same model wait for the first request and share its result rather than
+/// each issuing their own. A waiting caller can therefore block for longer
+/// than its own `timeout`, which is the point: one request per model.
 pub fn fetch_public_firmware(
+    model: CanonicalModel,
+    timeout: Duration,
+) -> Result<PublicFirmwareRelease, PublicCatalogueError> {
+    let slot = slot(model);
+    let mut cached = slot.lock().unwrap_or_else(|error| error.into_inner());
+    if let Some(entry) = cached.as_ref().filter(|entry| fresh(entry)) {
+        return Ok(entry.release.clone());
+    }
+    // ponytail: successes only, so a transient Cloudflare block or parse
+    // failure retries on the next check instead of being pinned for a day.
+    // Add negative caching with backoff if those retries ever read as
+    // rate limiting.
+    let release = fetch_uncached(model, timeout)?;
+    *cached = Some(CachedRelease {
+        release: release.clone(),
+        fetched_at: Instant::now(),
+    });
+    Ok(release)
+}
+
+fn fetch_uncached(
     model: CanonicalModel,
     timeout: Duration,
 ) -> Result<PublicFirmwareRelease, PublicCatalogueError> {
@@ -240,6 +297,39 @@ mod tests {
                     "{model:?} falls back to another model's page: {fallback}"
                 );
             }
+        }
+    }
+
+    /// A cache hit must answer without touching the network, and an entry
+    /// older than the TTL must stop counting as one.
+    #[test]
+    fn public_catalogue_results_are_cached_per_model_until_the_ttl_expires() {
+        let model = CanonicalModel::H2C;
+        let release = PublicFirmwareRelease {
+            model,
+            version: "01.02.03.04".into(),
+            url: public_catalogue_url(model).unwrap().to_owned(),
+        };
+        let slot = slot(model);
+        *slot.lock().unwrap() = Some(CachedRelease {
+            release: release.clone(),
+            fetched_at: Instant::now(),
+        });
+
+        // A zero timeout makes any real request fail, so a success here can
+        // only have come from the cache.
+        assert_eq!(
+            fetch_public_firmware(model, Duration::ZERO).unwrap(),
+            release
+        );
+
+        if let Some(expired) =
+            Instant::now().checked_sub(PUBLIC_CATALOGUE_TTL + Duration::from_secs(1))
+        {
+            assert!(!fresh(&CachedRelease {
+                release,
+                fetched_at: expired,
+            }));
         }
     }
 

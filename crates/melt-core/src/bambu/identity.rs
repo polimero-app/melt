@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ModelFamily;
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CanonicalModel {
     A1,

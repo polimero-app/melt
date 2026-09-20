@@ -45,6 +45,12 @@ Settings → Firmware sources. The firmware screen also offers a one-shot
 public-catalogue check without changing that preference; a failed optional
 source leaves the other evidence visible and records a bounded issue.
 
+A successful public-catalogue result is cached per printer model for 24 hours
+and shared by every profile of that model, and concurrent checks for the same
+model wait for a single request. Refreshes and the one-shot check are served
+from that cache while it is valid, so repeatedly checking never repeatedly
+contacts Bambu. Failures are not cached and are retried on the next check.
+
 ## Interpretation
 
 Assessment priority is `Required`, `ConfirmedAvailable`, `Conflict`,
