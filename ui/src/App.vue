@@ -20,6 +20,7 @@ import {
   updateEntryFor,
   versionRail,
   type FirmwareEvidenceRole,
+  type FirmwareSourceCheck,
   type FirmwareUpdateAssessment,
   type FirmwareUpdateComponentKind,
   type FirmwareUpdateEntry,
@@ -683,6 +684,25 @@ const firmwareEvidenceLabel = (role: FirmwareEvidenceRole) => {
 const componentHasEvidence = (component: FirmwareUpdateEntry['report']['components'][number], role: FirmwareEvidenceRole) =>
   component.evidence?.some((evidence) => evidence.role === role) ?? false
 const firmwareEvidenceRoles: FirmwareEvidenceRole[] = ['printerAdvertised', 'deviceCatalogue', 'publicStable']
+const firmwareSourceName = (source: FirmwareSourceCheck['source']) => {
+  if (source === 'bambuLanInventory') return t('firmware.installed')
+  if (source === 'bambuLanAdvertisement') return t('firmware.sourcePrinter')
+  if (source === 'bambuLanHistory') return t('firmware.sourceDeviceCatalogue')
+  if (source === 'bambuPublicCatalogue') return t('firmware.sourcePublicStable')
+  return t('firmware.printerSoftware')
+}
+const firmwareSourceOutcomeLabel = (outcome: FirmwareSourceCheck['outcome']): string => {
+  const key: MessageKey = outcome === 'success'
+    ? 'firmware.sourceSuccess'
+    : outcome === 'empty'
+      ? 'firmware.sourceEmpty'
+      : outcome === 'failed'
+        ? 'firmware.sourceFailed'
+        : outcome === 'disabled'
+          ? 'firmware.sourceDisabled'
+          : 'firmware.sourceUnsupported'
+  return t(key)
+}
 
 function badgeFor(name: string): PrinterBadge {
   const entry = monitoring.value.find((candidate) => candidate.name === name)
@@ -3074,6 +3094,12 @@ onUnmounted(() => {
                   <span class="rounded-full bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800 dark:bg-cyan-400/10 dark:text-cyan-300">{{ firmwareAssessmentLabel(selectedFirmwareUpdate.report.assessment) }}</span>
                   <span v-for="role in firmwareEvidenceRoles" v-show="selectedFirmwareUpdate.report.components.some((component) => componentHasEvidence(component, role))" :key="role" class="rounded-full border border-gray-300 px-2 py-0.5 text-xs text-gray-600 dark:border-white/15 dark:text-gray-300">
                     {{ firmwareEvidenceLabel(role) }}
+                  </span>
+                </div>
+                <div v-if="selectedFirmwareUpdate.sources?.length" class="mb-4 flex flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
+                  <span v-for="source in selectedFirmwareUpdate.sources" :key="source.source" class="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 dark:border-white/10">
+                    <span class="font-medium text-gray-700 dark:text-gray-300">{{ firmwareSourceName(source.source) }}</span>
+                    <span>· {{ firmwareSourceOutcomeLabel(source.outcome) }}</span>
                   </span>
                 </div>
                 <div class="divide-y divide-gray-200 dark:divide-white/10">

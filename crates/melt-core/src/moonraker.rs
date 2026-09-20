@@ -23,8 +23,9 @@ use url::Url;
 
 use crate::{
     firmware_updates::{
-        FirmwareUpdateAvailability, FirmwareUpdateComponent, FirmwareUpdateComponentKind,
-        FirmwareUpdateIssue, FirmwareUpdateReport, FirmwareUpdateSource, MAX_VERSION_BYTES,
+        FirmwareEvidenceRole, FirmwareEvidenceSource, FirmwareUpdateAvailability,
+        FirmwareUpdateComponent, FirmwareUpdateComponentKind, FirmwareUpdateIssue,
+        FirmwareUpdateReport, FirmwareUpdateSource, FirmwareVersionEvidence, MAX_VERSION_BYTES,
         bounded_provider_text, provider_data_truncated,
     },
     trace::{SharedTracer, TraceEvent, next_tracer_generation},
@@ -1091,11 +1092,27 @@ fn moonraker_update_report(result: &Value) -> FirmwareUpdateReport {
             id: "klipper".into(),
             label: "Klipper software".into(),
             kind: FirmwareUpdateComponentKind::PrinterSoftware,
-            current_version,
-            available_version,
+            current_version: current_version.clone(),
+            available_version: available_version.clone(),
             availability,
             required: false,
-            evidence: Vec::new(),
+            evidence: [
+                current_version.as_ref().map(|version| FirmwareVersionEvidence {
+                    source: FirmwareEvidenceSource::MoonrakerUpdateManager,
+                    role: FirmwareEvidenceRole::Installed,
+                    version: Some(version.clone()),
+                    required: false,
+                }),
+                available_version.as_ref().map(|version| FirmwareVersionEvidence {
+                    source: FirmwareEvidenceSource::MoonrakerUpdateManager,
+                    role: FirmwareEvidenceRole::UpstreamCurrent,
+                    version: Some(version.clone()),
+                    required: false,
+                }),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
         }],
         issues,
     )

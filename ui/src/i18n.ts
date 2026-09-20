@@ -238,6 +238,11 @@ export type MessageKey =
   | "firmware.sourcePublicStable"
   | "firmware.deviceCatalogue"
   | "firmware.publicStable"
+  | "firmware.sourceSuccess"
+  | "firmware.sourceEmpty"
+  | "firmware.sourceFailed"
+  | "firmware.sourceDisabled"
+  | "firmware.sourceUnsupported"
   | "camera.title"
   | "camera.live"
   | "camera.snapshotLabel"
@@ -771,6 +776,11 @@ const messages: Record<Locale, Messages> = {
     "firmware.sourcePublicStable": "Public stable",
     "firmware.deviceCatalogue": "Device catalogue",
     "firmware.publicStable": "Public stable",
+    "firmware.sourceSuccess": "checked",
+    "firmware.sourceEmpty": "no comparable version",
+    "firmware.sourceFailed": "unavailable",
+    "firmware.sourceDisabled": "disabled",
+    "firmware.sourceUnsupported": "unsupported",
     "camera.title": "Camera",
     "camera.live": "LIVE",
     "camera.snapshotLabel": "SNAPSHOT",
@@ -1301,6 +1311,11 @@ const messages: Record<Locale, Messages> = {
     "firmware.sourcePublicStable": "Versão pública estável",
     "firmware.deviceCatalogue": "Catálogo do dispositivo",
     "firmware.publicStable": "Versão pública estável",
+    "firmware.sourceSuccess": "verificada",
+    "firmware.sourceEmpty": "sem versão comparável",
+    "firmware.sourceFailed": "indisponível",
+    "firmware.sourceDisabled": "desativada",
+    "firmware.sourceUnsupported": "não suportada",
     "camera.title": "Câmera",
     "camera.live": "AO VIVO",
     "camera.snapshotLabel": "CAPTURA",

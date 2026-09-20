@@ -17,7 +17,7 @@ use melt_core::{
     config::{Config, ConfigError, Profile, config_dir},
     diagnostics,
     drivers::{self, Capabilities, DriverError, Operation},
-    firmware_updates::FirmwareUpdateReport,
+    firmware_updates::{FirmwareEvidenceSource, FirmwareUpdateAvailability, FirmwareUpdateReport},
     keychain::{SERVICE, SecretError, SecretStore, SystemKeychain, account},
     monitor, moonraker,
     pool::ConnectionPool,
@@ -379,7 +379,29 @@ struct FirmwareUpdateEntry {
     profile: String,
     driver: String,
     report: FirmwareUpdateReport,
+    sources: Vec<FirmwareSourceCheck>,
     checked_at: String,
+    stale: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<CommandError>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum FirmwareSourceOutcome {
+    Success,
+    Empty,
+    Failed,
+    Disabled,
+    Unsupported,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FirmwareSourceCheck {
+    source: FirmwareEvidenceSource,
+    checked_at: String,
+    outcome: FirmwareSourceOutcome,
     stale: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<CommandError>,
@@ -1101,6 +1123,53 @@ fn current_firmware_entry(cached: &CachedFirmwareUpdate) -> FirmwareUpdateEntry 
     entry
 }
 
+fn firmware_source_checks(
+    report: &FirmwareUpdateReport,
+    checked_at: &str,
+    public_enabled: bool,
+) -> Vec<FirmwareSourceCheck> {
+    let source_seen = |source: FirmwareEvidenceSource| {
+        report.evidence_sources.contains(&source)
+    };
+    let failed = |code: &str| report.issues.iter().any(|issue| issue.code == code);
+    let make = |source: FirmwareEvidenceSource, enabled: bool, failed_code: Option<&str>| FirmwareSourceCheck {
+        source,
+        checked_at: checked_at.to_owned(),
+        outcome: if !enabled {
+            FirmwareSourceOutcome::Disabled
+        } else if report.availability == FirmwareUpdateAvailability::Unsupported {
+            FirmwareSourceOutcome::Unsupported
+        } else if source_seen(source) {
+            FirmwareSourceOutcome::Success
+        } else if failed_code.is_some_and(failed) {
+            FirmwareSourceOutcome::Failed
+        } else {
+            FirmwareSourceOutcome::Empty
+        },
+        stale: false,
+        error: failed_code
+            .filter(|code| enabled && failed(code))
+            .map(|_| CommandError::new("firmwareSourceUnavailable")),
+    };
+    match report.source {
+        melt_core::firmware_updates::FirmwareUpdateSource::BambuMqtt => vec![
+            make(FirmwareEvidenceSource::BambuLanInventory, true, None),
+            make(FirmwareEvidenceSource::BambuLanAdvertisement, true, None),
+            make(FirmwareEvidenceSource::BambuLanHistory, true, Some("historyUnavailable")),
+            make(
+                FirmwareEvidenceSource::BambuPublicCatalogue,
+                public_enabled,
+                Some("publicCatalogueUnavailable"),
+            ),
+        ],
+        melt_core::firmware_updates::FirmwareUpdateSource::MoonrakerUpdateManager => vec![make(
+            FirmwareEvidenceSource::MoonrakerUpdateManager,
+            true,
+            None,
+        )],
+    }
+}
+
 fn check_firmware_updates(
     state: &FirmwareUpdateState,
     app: &tauri::AppHandle,
@@ -1130,11 +1199,16 @@ fn check_firmware_updates(
     }
     match result {
         Ok(report) => {
+            let checked_at = format_modified(SystemTime::now()).unwrap_or_default();
+            let public_catalogue = preferences::Preferences::load()
+                .map(|settings| settings.public_firmware_catalogue)
+                .unwrap_or(false);
             let entry = FirmwareUpdateEntry {
                 profile: name.clone(),
                 driver: kind.name().into(),
+                sources: firmware_source_checks(&report, &checked_at, public_catalogue),
                 report,
-                checked_at: format_modified(SystemTime::now()).unwrap_or_default(),
+                checked_at,
                 stale: false,
                 error: None,
             };
@@ -3955,6 +4029,7 @@ mod tests {
                 "test",
                 "test",
             ),
+            sources: Vec::new(),
             checked_at: "2026-09-19T12:00:00Z".into(),
             stale: false,
             error: None,

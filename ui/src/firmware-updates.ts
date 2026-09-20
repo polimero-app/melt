@@ -10,6 +10,13 @@ export type FirmwareVersionEvidence = {
   version?: string
   required: boolean
 }
+export type FirmwareSourceCheck = {
+  source: FirmwareEvidenceSource
+  checkedAt: string
+  outcome: 'success' | 'empty' | 'failed' | 'disabled' | 'unsupported'
+  stale: boolean
+  error?: { code: string; detail?: string }
+}
 
 export type FirmwareUpdateComponent = {
   id: string
@@ -27,6 +34,7 @@ export type FirmwareUpdateEntry = {
   driver: string
   checkedAt: string
   stale: boolean
+  sources?: FirmwareSourceCheck[]
   report: {
     availability: FirmwareUpdateAvailability
     assessment: FirmwareUpdateAssessment
