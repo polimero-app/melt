@@ -1197,6 +1197,43 @@ fn printer_capabilities(
     )
 }
 
+/// Names the channel that resolved the model. The serial prefix is named as
+/// a channel only; the prefix itself is three characters of a TLS-bound
+/// serial and never reaches the terminal.
+fn model_source_label(source: bambu::ModelSource) -> &'static str {
+    match source {
+        bambu::ModelSource::VersionProductName => "detected from firmware product name",
+        bambu::ModelSource::VersionProjectName => "detected from firmware project name",
+        bambu::ModelSource::SerialPrefix => "detected from serial prefix",
+        bambu::ModelSource::Configured => "from the configured profile",
+        bambu::ModelSource::None => "unidentified",
+    }
+}
+
+fn model_lines(report: &diagnostics::BambuCompatibilityReport) -> String {
+    let name = match report.canonical_model {
+        bambu::CanonicalModel::Unknown if report.model_raw.is_empty() => "unknown".into(),
+        bambu::CanonicalModel::Unknown => format!("unknown ({})", sanitize(&report.model_raw)),
+        canonical => match canonical.code() {
+            Some(code) => format!("{} ({code})", canonical.display_name()),
+            None => canonical.display_name().into(),
+        },
+    };
+    let mut lines = format!(
+        "{name} [{:?}, {}]",
+        report.model_family,
+        model_source_label(report.model_source)
+    );
+    for conflict in &report.model_conflicts {
+        lines.push_str(&format!(
+            "\n       conflict: {} says {}",
+            model_source_label(conflict.source),
+            conflict.canonical.display_name()
+        ));
+    }
+    lines
+}
+
 fn human_capabilities(profile: &str, report: &diagnostics::BambuCompatibilityReport) -> String {
     let firmware = report
         .firmware_modules
@@ -1217,11 +1254,9 @@ fn human_capabilities(profile: &str, report: &diagnostics::BambuCompatibilityRep
         },
     );
     format!(
-        "Profile: {}\nModel: {} ({:?}, {:?})\nFirmware: {}\nUpdates: {}\nAuthorization: {:?}{}\nCamera: {:?} ({:?})\nStorage: {:?}\nQuirks: {} active, {} matching but inactive\nObservations: {} (values redacted)",
+        "Profile: {}\nModel: {}\nFirmware: {}\nUpdates: {}\nAuthorization: {:?}{}\nCamera: {:?} ({:?})\nStorage: {:?}\nQuirks: {} active, {} matching but inactive\nObservations: {} (values redacted)",
         sanitize(profile),
-        sanitize(&report.model_raw),
-        report.canonical_model,
-        report.model_family,
+        model_lines(report),
         if firmware.is_empty() {
             "unobserved"
         } else {
@@ -5527,6 +5562,37 @@ mod tests {
         assert!(!output.contains("old\n"));
         assert!(output.contains("Availability: update available"));
         assert!(output.contains("Required: yes"));
+    }
+
+    /// The model line has to say which channel decided, because a
+    /// disagreement between a typed `--model` and the printer's own report
+    /// is the only visible symptom of a stale profile.
+    #[test]
+    fn the_model_line_names_the_detection_source_and_every_conflict() {
+        let detection =
+            melt_core::bambu::detect("01P00000000000", "X1 Carbon", &Default::default());
+        let mut capabilities =
+            melt_core::bambu::RuntimeCapabilities::for_identity(detection.identity);
+        capabilities.model_source = detection.source;
+        capabilities.model_conflicts = detection.conflicts;
+        let report = melt_core::diagnostics::bambu_compatibility_report(
+            1,
+            &capabilities,
+            &melt_core::bambu::CameraSelection {
+                preferred: melt_core::bambu::CameraTransport::Unknown,
+                source: melt_core::bambu::CameraSelectionSource::Unknown,
+                rejected_advertisement: None,
+                quirk_ids: Vec::new(),
+            },
+            true,
+            None,
+        );
+
+        let output = human_capabilities("workshop", &report);
+        assert!(output.contains("Model: Bambu Lab P1S (C12)"));
+        assert!(output.contains("detected from serial prefix"));
+        assert!(output.contains("conflict: from the configured profile says Bambu Lab X1 Carbon"));
+        assert!(!output.contains("01P"));
     }
 
     #[test]

@@ -34,6 +34,8 @@ pub struct BambuCompatibilityReport {
     pub model_raw: String,
     pub canonical_model: bambu::CanonicalModel,
     pub model_family: bambu::ModelFamily,
+    pub model_source: bambu::ModelSource,
+    pub model_conflicts: Vec<bambu::ModelConflict>,
     pub firmware_modules: Vec<FirmwareModuleReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub firmware_updates: Option<FirmwareUpdateReport>,
@@ -195,6 +197,8 @@ pub fn bambu_compatibility_report_with_updates(
         model_raw: capabilities.identity.raw.clone(),
         canonical_model: capabilities.identity.canonical,
         model_family: capabilities.model_family,
+        model_source: capabilities.model_source,
+        model_conflicts: capabilities.model_conflicts.clone(),
         firmware_modules: capabilities
             .firmware
             .modules
@@ -349,5 +353,43 @@ mod tests {
                     && observation.value_summary == "object-redacted")
         );
         assert!(json.contains("string-redacted") || json.contains("object-redacted"));
+    }
+
+    /// The detection source names a channel, never the evidence that
+    /// channel read. A serial prefix is three characters of a serial, so
+    /// reporting it at all would leak part of a TLS-bound identifier.
+    #[test]
+    fn the_detection_source_is_reported_without_the_serial_behind_it() {
+        let detection = bambu::detect("01P00SECRETSERIAL", "X1 Carbon", &Default::default());
+        let mut capabilities = RuntimeCapabilities::for_identity(detection.identity);
+        capabilities.model_source = detection.source;
+        capabilities.model_conflicts = detection.conflicts;
+
+        let report = bambu_compatibility_report(
+            1,
+            &capabilities,
+            &CameraSelection {
+                preferred: bambu::CameraTransport::Unknown,
+                source: bambu::CameraSelectionSource::Unknown,
+                rejected_advertisement: None,
+                quirk_ids: Vec::new(),
+            },
+            true,
+            None,
+        );
+        let json = serde_json::to_string(&report).unwrap();
+
+        assert_eq!(report.model_source, bambu::ModelSource::SerialPrefix);
+        assert_eq!(report.canonical_model, bambu::CanonicalModel::P1S);
+        assert_eq!(
+            report.model_conflicts,
+            [bambu::ModelConflict {
+                source: bambu::ModelSource::Configured,
+                canonical: bambu::CanonicalModel::X1Carbon,
+            }]
+        );
+        assert!(json.contains("\"modelSource\":\"serialPrefix\""));
+        assert!(!json.contains("SECRETSERIAL"));
+        assert!(!json.contains("01P"));
     }
 }
