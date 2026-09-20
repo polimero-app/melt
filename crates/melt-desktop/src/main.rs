@@ -1106,7 +1106,25 @@ fn printer_firmware_updates(
     if !refresh && let Some(entry) = fresh_firmware_entry(&state, &normalized) {
         return Ok(entry);
     }
-    check_firmware_updates(&state, &app, normalized, profile, refresh)
+    check_firmware_updates(&state, &app, normalized, profile, refresh, None)
+}
+
+/// Performs a one-shot public catalogue check without changing the persisted
+/// source preference. This gives users a direct way to request external
+/// evidence from the firmware screen when the optional source is disabled.
+#[tauri::command(async)]
+fn printer_public_firmware_catalogue(
+    name: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, FirmwareUpdateState>,
+) -> Result<FirmwareUpdateEntry, CommandError> {
+    let config = Config::load().map_err(|_| unreadable_config())?;
+    let normalized = name.to_ascii_lowercase();
+    let profile = config
+        .get_profile(&normalized)
+        .ok_or_else(|| CommandError::new("profileNotFound"))?
+        .clone();
+    check_firmware_updates(&state, &app, normalized, profile, true, Some(true))
 }
 
 fn fresh_firmware_entry(state: &FirmwareUpdateState, name: &str) -> Option<FirmwareUpdateEntry> {
@@ -1188,15 +1206,16 @@ fn check_firmware_updates(
     name: String,
     profile: Profile,
     refresh: bool,
+    public_catalogue_override: Option<bool>,
 ) -> Result<FirmwareUpdateEntry, CommandError> {
     let generation = state.pool.lifecycle_generation();
     let driver = drivers::profile(&profile).map_err(|_| CommandError::new("profileInvalid"))?;
     let kind = driver.driver();
     let access_code = access_code(&profile.driver, &name, kind)?;
     let fingerprint = tls_fingerprint(&profile.driver, &name, kind, profile.insecure)?;
-    let public_catalogue = preferences::Preferences::load()
+    let public_catalogue = public_catalogue_override.unwrap_or_else(|| preferences::Preferences::load()
         .map(|settings| settings.public_firmware_catalogue)
-        .unwrap_or(false);
+        .unwrap_or(false));
     let result = state.pool.firmware_update_status_with_sources(
         &name,
         &driver,
@@ -1212,9 +1231,9 @@ fn check_firmware_updates(
     match result {
         Ok(report) => {
             let checked_at = format_modified(SystemTime::now()).unwrap_or_default();
-            let public_catalogue = preferences::Preferences::load()
+            let public_catalogue = public_catalogue_override.unwrap_or_else(|| preferences::Preferences::load()
                 .map(|settings| settings.public_firmware_catalogue)
-                .unwrap_or(false);
+                .unwrap_or(false));
             let entry = FirmwareUpdateEntry {
                 profile: name.clone(),
                 driver: kind.name().into(),
@@ -1513,6 +1532,7 @@ fn start_firmware_update_worker(app: tauri::AppHandle, state: FirmwareUpdateStat
                                     named.name,
                                     named.profile,
                                     false,
+                                    None,
                                 );
                             });
                         }
@@ -3936,6 +3956,7 @@ fn main() {
             cached_monitoring,
             cached_firmware_updates,
             printer_firmware_updates,
+            printer_public_firmware_catalogue,
             probe_keychain,
             printer_status,
             create_configured_printer,
