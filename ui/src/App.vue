@@ -117,6 +117,7 @@ type Printer = {
   driver: string
   host: string
   serial: string
+  model: string
   timeout: string
   insecure: boolean
   presence?: {
@@ -1429,6 +1430,7 @@ async function addPrinter() {
       driver: profile.driver,
       host: profile.host,
       serial: profile.serial,
+      model: profile.model,
       timeout: profile.timeout,
       insecure: profile.insecure,
     }
@@ -3090,6 +3092,7 @@ onUnmounted(() => {
                 <div class="mt-3 flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs text-gray-500 dark:text-gray-400">
                   <span class="inline-flex items-center gap-1.5"><PhPrinter class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinter.driver }}</span>
                   <span class="inline-flex items-center gap-1.5"><PhNetwork class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinter.host }}</span>
+                  <span v-if="firmwarePrinter.model || firmwarePrinter.presence?.model" class="inline-flex items-center gap-1.5"><PhInfo class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinter.model || firmwarePrinter.presence?.model }}</span>
                 </div>
               </div>
               <div class="mt-5 flex items-center gap-2 lg:mt-0">

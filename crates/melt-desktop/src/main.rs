@@ -1106,7 +1106,10 @@ fn printer_firmware_updates(
     if !refresh && let Some(entry) = fresh_firmware_entry(&state, &normalized) {
         return Ok(entry);
     }
-    check_firmware_updates(&state, &app, normalized, profile, refresh, None)
+    // A user-triggered refresh is an explicit request for the complete
+    // read-only evidence set, including the official public catalogue. The
+    // background worker still follows the persisted preference.
+    check_firmware_updates(&state, &app, normalized, profile, refresh, Some(true))
 }
 
 /// Performs a one-shot public catalogue check without changing the persisted
