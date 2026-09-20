@@ -168,7 +168,10 @@ Per-component evidence remains separate so a public release cannot silently
 become a printer-confirmed offer. See
 [`docs/firmware-updates.md`](docs/firmware-updates.md) for the source and
 assessment contract. Live observations and safe protocol probes take
-precedence over model-family assumptions. Unknown models and fields remain
+precedence over model-family assumptions. The Bambu model itself is identified
+from what the printer reports — the firmware module product name, then the
+legacy project name, then the serial prefix — so a configured `--model` is a
+fallback rather than the source of truth. Unknown models and fields remain
 operable but are not misclassified as supported or unsupported without
 evidence. AMS drying status is shown for heater-equipped units, and start/stop
 is offered only when the firmware advertises remote drying.
@@ -256,6 +259,9 @@ it switches the application id to the bundle identifier and breaks the match.
 - [BambuHelper](https://github.com/Keralots/BambuHelper)
 - [Bambuddy](https://github.com/maziggy/bambuddy)
 - [bambulabs_api (Go)](https://github.com/torbenconto/bambulabs_api)
+- [BambuStudio](https://github.com/bambulab/BambuStudio) — the `resources/printers/*.json` model tables
+- [ha-bambulab](https://github.com/greghesp/ha-bambulab)
+- [Kiln](https://github.com/codeofaxel/Kiln)
 
 Undocumented behavior from these projects is treated as scoped evidence, not
 permanent product truth. Conflicting reports stay provisional until sanitized

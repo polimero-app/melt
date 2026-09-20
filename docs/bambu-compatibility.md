@@ -203,7 +203,8 @@ requires the final 226/250 control reply before reporting success.
 ## Compatibility diagnostics
 
 Diagnostics identify printers only as report-local `printer-N` labels. They
-include raw/canonical model names, module software and hardware versions,
+include raw/canonical model names, the channel that identified the model and
+any channel that disagreed, module software and hardware versions,
 capability field names with provenance and age, authorization resolution,
 camera/storage selection, active and inactive quirks, TLS-pin presence, and
 redacted camera-owner state. Module serials, unknown module values, observed
@@ -222,6 +223,43 @@ contract. Runtime observations and safe protocol probes take precedence over
 the model family. Unknown models and unknown fields remain distinct from an
 explicitly unsupported feature, so new firmware can degrade conservatively
 without being misclassified.
+
+### Model detection
+
+Every LAN channel reports the model differently — `info.get_version` modules
+carry a marketing `product_name` on current firmware, a `model_id` in
+`project_name` on legacy A1/P1 firmware, and neither on the oldest X1/X1C
+firmware, where only the serial prefix separates an X1 from an X1 Carbon. The
+model is therefore resolved from four channels in a fixed trust order:
+
+1. `info.get_version` module `product_name`
+2. `info.get_version` module `project_name`
+3. The leading three characters of the configured serial
+4. The model string stored in the profile
+
+The serial outranks the profile because it is bound to the pinned TLS
+certificate, which carries it as the subject common name: a wrong serial makes
+the connection fail rather than misreport. A typed `--model` is the only
+channel a stale or mistaken profile can affect, so it ranks last.
+
+SSDP is deliberately excluded from the order. `DevModel.bambu.com` is an
+unauthenticated broadcast any host on the segment can send, so it stays
+advisory input to `printer discover` and to presence, and never decides
+capabilities on an authenticated connection.
+
+The highest-ranked channel that resolves a known model wins. Lower-ranked
+channels that named a *different* model are recorded as conflicts and reported
+by diagnostics and `printer capabilities`; they never change the resolved
+model. A conflict names the channel only, never the value it read, so a serial
+prefix is never serialized. A raw value that matches nothing is preserved
+verbatim with an unknown canonical model, so unreleased firmware stays
+inventoried instead of being silently discarded.
+
+Detection is observational. It re-derives the model-keyed defaults — camera and
+storage transport, storage volumes, extruder count, quirk matches — before live
+observations are merged, so observation still wins over every default. It never
+rewrites the configured profile, in the same way discovery never rewrites an
+endpoint.
 
 Desktop discovery also runs continuously on a bounded cadence. Presence is
 keyed by the normalized physical serial, retained for 60 seconds, and enriches
