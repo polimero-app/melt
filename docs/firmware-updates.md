@@ -46,6 +46,10 @@ opt-in that adds public-catalogue evidence without changing that preference;
 a failed optional source leaves the other evidence visible and records a
 bounded issue.
 
+Bambu publishes firmware per model, so the one-shot check needs a known model
+and is unavailable until the printer profile has one. Discovery fills the model
+in automatically; a hand-added printer may need it set on the printer form.
+
 A successful public-catalogue result is cached per printer model for 24 hours
 and shared by every profile of that model, and concurrent checks for the same
 model wait for a single request. The one-shot check is served from that cache

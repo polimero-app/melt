@@ -629,6 +629,9 @@ function toggleSerial(name: string) {
 
 const activePrinter = computed(() => printers.value.find((printer) => printer.name === activePrinterId.value) ?? printers.value[0])
 const firmwarePrinter = computed(() => printers.value.find((printer) => printer.name === firmwarePrinterId.value))
+// Bambu's public pages are per model, so without one there is nothing to look
+// up. Discovery fills this in; a hand-added printer may have neither.
+const firmwarePrinterModel = computed(() => firmwarePrinter.value?.model || firmwarePrinter.value?.presence?.model || '')
 const compactNavValue = computed({
   get: () => {
     if (activeView.value !== 'control') return `view:${activeView.value}`
@@ -3096,7 +3099,7 @@ onUnmounted(() => {
                 <div class="mt-3 flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs text-gray-500 dark:text-gray-400">
                   <span class="inline-flex items-center gap-1.5"><PhPrinter class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinter.driver }}</span>
                   <span class="inline-flex items-center gap-1.5"><PhNetwork class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinter.host }}</span>
-                  <span v-if="firmwarePrinter.model || firmwarePrinter.presence?.model" class="inline-flex items-center gap-1.5"><PhInfo class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinter.model || firmwarePrinter.presence?.model }}</span>
+                  <span v-if="firmwarePrinterModel" class="inline-flex items-center gap-1.5"><PhInfo class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinterModel }}</span>
                 </div>
               </div>
               <div class="mt-5 flex items-center gap-2 lg:mt-0">
@@ -3126,7 +3129,7 @@ onUnmounted(() => {
               ><PhArrowsClockwise class="size-4" :class="firmwareRefreshing && 'animate-spin'" aria-hidden="true" /> {{ t('firmware.checkAgain') }}</Button>
               <Button
                 variant="secondary"
-                :disabled="firmwareRefreshing"
+                :disabled="firmwareRefreshing || !firmwarePrinterModel"
                 @click="loadPublicFirmwareCatalogue(firmwarePrinter.name)"
               ><PhGlobe class="size-4" :class="firmwareRefreshing && 'animate-spin'" aria-hidden="true" /> {{ t('firmware.checkPublicCatalogue') }}</Button>
             </CardHeader>
@@ -3137,6 +3140,10 @@ onUnmounted(() => {
                 <p>{{ firmwareError ?? t('firmware.checking') }}</p>
               </div>
               <template v-else>
+                <p v-if="!firmwarePrinterModel && selectedFirmwareUpdate.report.source === 'bambuMqtt'" class="mb-4 flex items-start gap-2 text-sm text-gray-500 dark:text-gray-400">
+                  <PhInfo class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                  {{ t('firmware.modelRequired') }}
+                </p>
                 <p v-if="selectedFirmwareUpdate.report.source === 'moonrakerUpdateManager'" class="mb-4 text-sm text-gray-500 dark:text-gray-400">
                   {{ t('firmware.klipperScope') }}
                 </p>

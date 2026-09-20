@@ -215,6 +215,7 @@ export type MessageKey =
   | "firmware.unsupported"
   | "firmware.checkAgain"
   | "firmware.checkPublicCatalogue"
+  | "firmware.modelRequired"
   | "firmware.checking"
   | "firmware.checkFailed"
   | "firmware.klipperScope"
@@ -759,6 +760,7 @@ const messages: Record<Locale, Messages> = {
     "firmware.unsupported": "Not available",
     "firmware.checkAgain": "Refresh",
     "firmware.checkPublicCatalogue": "Also check Bambu.com",
+    "firmware.modelRequired": "Set the printer model to check Bambu's public firmware catalogue. Bambu publishes firmware per model, so there is nothing to look up without one.",
     "firmware.checking": "Checking update availability…",
     "firmware.checkFailed": "The update check failed.",
     "firmware.klipperScope": "This checks Klipper software through Moonraker. Controller-board firmware is not checked.",
@@ -1300,6 +1302,7 @@ const messages: Record<Locale, Messages> = {
     "firmware.unsupported": "Indisponível",
     "firmware.checkAgain": "Atualizar",
     "firmware.checkPublicCatalogue": "Consultar também o Bambu.com",
+    "firmware.modelRequired": "Defina o modelo da impressora para consultar o catálogo público de firmware da Bambu. A Bambu publica firmware por modelo, então não há o que consultar sem ele.",
     "firmware.checking": "Verificando atualizações disponíveis…",
     "firmware.checkFailed": "A verificação de atualizações falhou.",
     "firmware.klipperScope": "Esta verificação cobre o software Klipper via Moonraker. O firmware da placa controladora não é verificado.",
