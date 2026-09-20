@@ -93,6 +93,7 @@ struct PresenceState {
 struct PreferencesResponse {
     notifications: NotificationPreferences,
     slicers: Vec<Slicer>,
+    public_firmware_catalogue: bool,
 }
 
 #[derive(Deserialize)]
@@ -118,6 +119,12 @@ struct SlicerEnabledRequest {
     enabled: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FirmwareCataloguePreferencesRequest {
+    public_firmware_catalogue: bool,
+}
+
 fn preferences_error(error: PreferencesError) -> CommandError {
     CommandError::new(match error {
         PreferencesError::UnsupportedVersion { .. } | PreferencesError::Malformed(_) => {
@@ -137,6 +144,7 @@ fn preferences_response(mut preferences: preferences::Preferences) -> Preference
     PreferencesResponse {
         notifications: preferences.notifications,
         slicers: preferences.slicers,
+        public_firmware_catalogue: preferences.public_firmware_catalogue,
     }
 }
 
@@ -165,6 +173,22 @@ fn update_notification_preferences(
     };
     stored.save(&dir).map_err(preferences_error)?;
     Ok(stored.notifications)
+}
+
+#[tauri::command(async)]
+fn update_firmware_catalogue_preferences(
+    request: FirmwareCataloguePreferencesRequest,
+    state: tauri::State<'_, PreferencesState>,
+) -> Result<bool, CommandError> {
+    let _guard = state
+        .write_lock
+        .lock()
+        .map_err(|_| CommandError::new("preferencesUnwritable"))?;
+    let dir = preferences::preferences_dir().map_err(preferences_error)?;
+    let mut stored = preferences::Preferences::open(&dir).map_err(preferences_error)?;
+    stored.public_firmware_catalogue = request.public_firmware_catalogue;
+    stored.save(&dir).map_err(preferences_error)?;
+    Ok(stored.public_firmware_catalogue)
 }
 
 #[tauri::command(async)]
@@ -1089,12 +1113,17 @@ fn check_firmware_updates(
     let kind = driver.driver();
     let access_code = access_code(&profile.driver, &name, kind)?;
     let fingerprint = tls_fingerprint(&profile.driver, &name, kind, profile.insecure)?;
-    let result = state.pool.firmware_update_status(
+    let public_catalogue = preferences::Preferences::load()
+        .map(|settings| settings.public_firmware_catalogue)
+        .unwrap_or(false);
+    let result = state.pool.firmware_update_status_with_sources(
         &name,
         &driver,
         access_code.as_deref(),
         fingerprint.as_deref(),
         refresh,
+        true,
+        public_catalogue,
     );
     if !state.pool.is_current_generation(generation) {
         return Err(CommandError::new("profileNotFound"));
@@ -3808,6 +3837,7 @@ fn main() {
             app_info,
             get_preferences,
             update_notification_preferences,
+            update_firmware_catalogue_preferences,
             save_slicer,
             set_slicer_enabled,
             remove_slicer,

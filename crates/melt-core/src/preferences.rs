@@ -68,6 +68,8 @@ struct PreferencesFile {
     slicers: Vec<Slicer>,
     #[serde(default)]
     library_path: Option<String>,
+    #[serde(default)]
+    public_firmware_catalogue: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
@@ -78,6 +80,8 @@ pub struct Preferences {
     /// The folder the file library last browsed, so it reopens where the
     /// user left off; `None` until they've either browsed or chosen one.
     pub library_path: Option<String>,
+    /// Allow an explicit HTTPS request to Bambu's public stable firmware page.
+    pub public_firmware_catalogue: bool,
     #[serde(skip)]
     digest: Option<[u8; 32]>,
 }
@@ -106,6 +110,7 @@ impl Preferences {
             notifications: file.notifications,
             slicers: file.slicers,
             library_path: file.library_path,
+            public_firmware_catalogue: file.public_firmware_catalogue,
             digest: Some(digest(&bytes)),
         })
     }
@@ -165,6 +170,7 @@ impl Preferences {
             notifications: self.notifications.clone(),
             slicers: self.slicers.clone(),
             library_path: self.library_path.clone(),
+            public_firmware_catalogue: self.public_firmware_catalogue,
         })?
         .into_bytes();
         let mut temp = NamedTempFile::new_in(dir)?;
