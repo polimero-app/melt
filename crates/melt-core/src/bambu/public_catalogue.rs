@@ -9,7 +9,7 @@ use reqwest::blocking::Client;
 use reqwest::redirect::Policy;
 use thiserror::Error;
 
-use super::CanonicalModel;
+use super::{CanonicalModel, ModelFamily};
 
 pub const MAX_PUBLIC_CATALOGUE_BYTES: usize = 2 << 20;
 const PUBLIC_CATALOGUE_HOSTS: [&str; 2] = ["bambulab.com", "www.bambulab.com"];
@@ -56,11 +56,10 @@ pub fn public_catalogue_url(model: CanonicalModel) -> Option<&'static str> {
 /// printer's public-stable release. `public_catalogue_family_pages_are_shared`
 /// locks that invariant in.
 ///
-// ponytail: bambulab.com answers 403 to non-browser clients, so the a2l, x2d,
-// and h2d-pro slugs cannot be checked from CI. A wrong slug degrades to
-// `publicCatalogueUnavailable`, never to another model's firmware version, so
-// the shared-page test covers the failure that matters. Confirm the slugs
-// during physical qualification of those models.
+/// Every slug here was confirmed to answer 200 to Melt's own user agent on
+/// 2026-09-20. bambulab.com blocks some tooling user agents, so this is not
+/// checkable from CI; a slug that rots degrades to
+/// `publicCatalogueUnavailable`, never to another model's firmware version.
 pub fn public_catalogue_urls(model: CanonicalModel) -> &'static [&'static str] {
     match model {
         CanonicalModel::A1 => &["https://bambulab.com/en-us/support/firmware-download/a1"],
@@ -191,7 +190,7 @@ fn fetch_uncached(
             continue;
         }
         let html = String::from_utf8_lossy(&body);
-        if let Some(version) = parse_public_firmware_version(&html) {
+        if let Some(version) = parse_public_firmware_version(&html, model) {
             return Ok(PublicFirmwareRelease {
                 model,
                 version,
@@ -203,61 +202,86 @@ fn fetch_uncached(
     Err(last_error)
 }
 
-/// Extracts the highest stable-looking Bambu firmware version from the page's
-/// rendered/embedded HTML. The parser intentionally ignores prerelease labels
-/// next to a candidate and never treats arbitrary download URLs as evidence.
-pub fn parse_public_firmware_version(html: &str) -> Option<String> {
-    let bytes = html.as_bytes();
-    let mut candidates = Vec::new();
-    let mut index = 0;
-    while index < bytes.len() {
-        if !bytes[index].is_ascii_digit() {
-            index += 1;
-            continue;
-        }
-        let start = index;
-        let mut parts = 0;
-        let mut valid = true;
-        while index < bytes.len() {
-            let part_start = index;
-            while index < bytes.len() && bytes[index].is_ascii_digit() {
-                index += 1;
-            }
-            if part_start == index || index - part_start > 4 {
-                valid = false;
-                break;
-            }
-            parts += 1;
-            if index >= bytes.len() || bytes[index] != b'.' {
-                break;
-            }
-            index += 1;
-        }
-        if !valid || !(3..=4).contains(&parts) {
-            continue;
-        }
-        let end = index;
-        let version = &html[start..end];
-        // Bambu's pages are localised, so 96 bytes back from an ASCII digit
-        // routinely lands inside a multi-byte character. Snap to a boundary
-        // rather than slicing blind; index 0 always is one, so this ends.
-        let mut context_start = start.saturating_sub(96);
-        while !html.is_char_boundary(context_start) {
-            context_start -= 1;
-        }
-        let context = html[context_start..end].to_ascii_lowercase();
-        if context.contains("beta") || context.contains("alpha") || context.contains("candidate") {
-            continue;
-        }
-        candidates.push((
-            crate::bambu::FirmwareVersion::parse(version),
-            version.to_owned(),
-        ));
+/// The shape every Bambu firmware version takes, on the public pages and in
+/// the `sw_ver` a printer reports alike: four groups of exactly two digits.
+/// A looser shape reads page furniture as firmware -- an inline SVG path
+/// (`a.938.938 0 011.323.078l5`) once reported `011.323.078` for an A1 mini.
+const VERSION_SHAPE: &[u8] = b"dd.dd.dd.dd";
+
+/// Extracts the highest firmware version the page publishes *for this model*.
+///
+/// Every download page embeds the whole catalogue, keyed by the same
+/// `devModel` code the printer reports, and the release notes quote the
+/// recommended versions of attached accessories. Reading the page at large
+/// therefore reports whichever product happens to carry the highest number --
+/// on the A1 mini page, an AMS 2 Pro's `04.00.21.87`. Only the entries
+/// published under this model's own code count.
+pub fn parse_public_firmware_version(html: &str, model: CanonicalModel) -> Option<String> {
+    let family = model_family(model)?;
+    // Bambu ships one binary per family and does not publish every model
+    // separately: the P1S takes the P1P's `C11`, the X1 the X1 Carbon's
+    // `BL-P001`. Widen to the family only when the model publishes nothing of
+    // its own, so an A1 mini never picks up the A1's release.
+    highest_published(html, |entry| entry.canonical == model)
+        .or_else(|| highest_published(html, |entry| model_family(entry.canonical) == Some(family)))
+}
+
+/// `None` for a model with no family, the one case where widening the search
+/// would sweep in every printer Bambu sells.
+fn model_family(model: CanonicalModel) -> Option<ModelFamily> {
+    match crate::bambu::ModelIdentity::parse(model.display_name()).family {
+        ModelFamily::Unknown => None,
+        family => Some(family),
     }
-    candidates
-        .into_iter()
-        .max_by(|left, right| left.0.numeric_cmp(&right.0))
-        .map(|(_, version)| version)
+}
+
+fn highest_published(
+    html: &str,
+    mut wanted: impl FnMut(&crate::bambu::ModelEntry) -> bool,
+) -> Option<String> {
+    crate::bambu::models()
+        .iter()
+        .filter(|entry| wanted(entry))
+        .flat_map(|entry| std::iter::once(entry.code).chain(entry.aliases.iter().copied()))
+        .flat_map(|code| model_download_versions(html, code))
+        .max_by(|left, right| {
+            crate::bambu::FirmwareVersion::parse(left)
+                .numeric_cmp(&crate::bambu::FirmwareVersion::parse(right))
+        })
+}
+
+/// Versions from the catalogue entries published under one `devModel` code.
+///
+/// The code is matched as a prefix so a hardware revision counts as the same
+/// machine -- the H2C is published as `O1C2-V2`. The URL is not a reliable
+/// anchor on its own: the X2D is keyed `N6` but served from `/X2D/`.
+fn model_download_versions(html: &str, code: &str) -> Vec<String> {
+    let anchor = format!("\"devModel\":\"{code}");
+    html.match_indices(&anchor)
+        .filter_map(|(index, _)| {
+            let rest = html.get(index + anchor.len()..)?;
+            // Either the code ends here or a hardware revision follows it.
+            if !rest.starts_with('"') && !rest.starts_with('-') {
+                return None;
+            }
+            // Stay inside this entry. The same key also introduces a product
+            // blurb, which carries no version at all.
+            let entry = rest.split('}').next()?;
+            let version = entry.split("\"version\":\"").nth(1)?.split('"').next()?;
+            is_version(version).then(|| version.to_owned())
+        })
+        .collect()
+}
+
+fn is_version(text: &str) -> bool {
+    text.len() == VERSION_SHAPE.len()
+        && text
+            .bytes()
+            .zip(VERSION_SHAPE)
+            .all(|(byte, shape)| match shape {
+                b'.' => byte == b'.',
+                _ => byte.is_ascii_digit(),
+            })
 }
 
 #[cfg(test)]
@@ -340,38 +364,68 @@ mod tests {
         }
     }
 
+    /// An abbreviated copy of the payload every download page embeds: the
+    /// whole catalogue keyed by `devModel`, plus release notes that quote the
+    /// recommended versions of attached accessories.
+    const CATALOGUE: &str = r##"
+      <div class="version">Version 01.08.00.00</div><div class="time">2026/05/13</div>
+      <svg><path d="M7.19 3.674a.938.938 0 011.323.078l5 5.625a.938.938 0 010 1.246l-5 5.625a.9"/></svg>
+      {"devModel":"N1","name":"Bambu Lab A1 mini","desc":"The printer for everyone"}
+      {"devModel":"N1","url":"https://public-cdn.bblmw.com/upgrade/device/offline/N1/01.07.02.00/45ea644d25/offline-ota-n1_v01.07.02.00.zip","name":"offline-ota-n1_v01.07.02.00.zip","md5":"0","version":"01.07.02.00","state":1,"id":1,"release_notes_en":"# Version 01.07.02.00"}
+      {"devModel":"N1","url":"https://public-cdn.bblmw.com/upgrade/device/offline/N1/01.08.00.00/45ea644d25/offline-ota-n1_v01.08.00.00.zip","name":"offline-ota-n1_v01.08.00.00.zip","md5":"0","version":"01.08.00.00","state":1,"id":2,"release_notes_en":"# Version 01.08.00.00\n\u5907\u6ce8 011.323.078\n  - AMS: 01.00.06.87\n  - AMS 2 Pro: 04.00.21.87"}
+      {"devModel":"BL-P001","url":"https://public-cdn.bblmw.com/upgrade/device/offline/BL-P001/01.12.00.00/33fb5e89fd/offline-ota-p001_v01.12.00.00.zip","name":"offline-ota-p001_v01.12.00.00.zip","md5":"0","version":"01.12.00.00","state":1,"id":3}
+      {"devModel":"O1C2-V2","url":"https://public-cdn.bblmw.com/upgrade/device/offline/O1C/01.02.00.00/9b1c10b10e/offline-ota-o1c_v01.02.00.00.zip","name":"offline-ota-o1c_v01.02.00.00.zip","md5":"0","version":"01.02.00.00","state":1,"id":4}
+    "##;
+
+    /// The A1 mini reported `011.323.078` as its firmware, read out of an
+    /// inline SVG path. Every page also embeds the whole catalogue and quotes
+    /// accessory versions in its release notes, so reading the page at large
+    /// finds numbers larger than the model's own.
     #[test]
-    fn extracts_highest_stable_version_and_ignores_prereleases() {
-        let html = r#"
-          <script>latestVersion="01.08.00.00-beta";</script>
-          <div>Firmware version 01.07.00.00</div>
-          <div>Firmware version 01.09.00.00</div>
-        "#;
+    fn reads_only_the_versions_published_for_the_requested_model() {
         assert_eq!(
-            parse_public_firmware_version(html).as_deref(),
-            Some("01.09.00.00")
+            parse_public_firmware_version(CATALOGUE, CanonicalModel::A1Mini).as_deref(),
+            Some("01.08.00.00")
+        );
+        assert_eq!(
+            parse_public_firmware_version(CATALOGUE, CanonicalModel::X1Carbon).as_deref(),
+            Some("01.12.00.00")
         );
     }
 
-    /// Bambu's pages carry localised copy, so the 96-byte lookbehind used to
-    /// reject prereleases lands mid-character and used to panic the whole
-    /// firmware worker rather than return a version.
+    /// The H2C is published under a hardware revision of its code, and the
+    /// X2D is keyed `N6` while being served from `/X2D/`, so neither the
+    /// exact code nor the URL path works alone.
     #[test]
-    fn a_multi_byte_character_in_the_lookbehind_is_not_a_panic() {
-        // '内' straddles the byte the lookbehind would start on.
-        let html = format!("内{} 01.09.00.00", "x".repeat(94));
-        assert!(!html.is_char_boundary(html.find("01.09").unwrap() - 96));
+    fn matches_a_code_that_carries_a_hardware_revision() {
         assert_eq!(
-            parse_public_firmware_version(&html).as_deref(),
-            Some("01.09.00.00")
+            parse_public_firmware_version(CATALOGUE, CanonicalModel::H2C).as_deref(),
+            Some("01.02.00.00")
         );
     }
 
-    /// The lookbehind still has to see a prerelease label written next to a
-    /// version in a localised page.
+    /// A model missing from the catalogue takes its family's firmware, which
+    /// is how Bambu actually ships: there is no `C12` or `BL-P002` entry
+    /// because the P1S runs the P1P's binary and the X1 the X1 Carbon's.
     #[test]
-    fn a_prerelease_label_is_still_rejected_past_a_multi_byte_character() {
-        let html = format!("内{} beta 01.09.00.00", "x".repeat(94));
-        assert_eq!(parse_public_firmware_version(&html), None);
+    fn a_model_bambu_does_not_publish_takes_its_family_release() {
+        assert_eq!(
+            parse_public_firmware_version(CATALOGUE, CanonicalModel::X1).as_deref(),
+            Some("01.12.00.00")
+        );
+    }
+
+    /// A model the page does not publish has no version, rather than the
+    /// highest one belonging to some other printer.
+    #[test]
+    fn a_model_missing_from_the_catalogue_has_no_version() {
+        assert_eq!(
+            parse_public_firmware_version(CATALOGUE, CanonicalModel::P2S),
+            None
+        );
+        assert_eq!(
+            parse_public_firmware_version(CATALOGUE, CanonicalModel::Unknown),
+            None
+        );
     }
 }
