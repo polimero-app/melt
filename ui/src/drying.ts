@@ -53,3 +53,13 @@ export function dryingTargetShown(temperature: number | undefined, target: numbe
   if (target === undefined) return false
   return temperature === undefined || Math.round(temperature) !== target
 }
+
+/** Guards the Start action: an emptied number input yields '', and a number
+ *  input's own min/max are not enforced outside a form submit. */
+export function dryingRequestValid(unitId: number, temperatureC: number, hours: number): boolean {
+  const bounds = dryingBounds(unitId)
+  if (!bounds) return false
+  const numeric = (value: number) => typeof value === 'number' && Number.isFinite(value)
+  if (!numeric(temperatureC) || !numeric(hours)) return false
+  return temperatureC >= bounds.min && temperatureC <= bounds.max && hours >= 1 && hours <= 24
+}

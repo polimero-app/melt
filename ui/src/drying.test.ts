@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dryingBounds, dryingDefaults, dryingFault, dryingStoppable, dryingTargetShown } from './drying'
+import { dryingBounds, dryingDefaults, dryingFault, dryingRequestValid, dryingStoppable, dryingTargetShown } from './drying'
 
 describe('drying presets', () => {
   it('uses AMS 2 Pro limits for units 0-3 and AMS HT limits for 128-135', () => {
@@ -49,5 +49,25 @@ describe('dryingTargetShown', () => {
     expect(dryingTargetShown(38.2, 45)).toBe(true)
     expect(dryingTargetShown(undefined, 45)).toBe(true)
     expect(dryingTargetShown(45, undefined)).toBe(false)
+  })
+})
+
+describe('dryingRequestValid', () => {
+  it('accepts only numeric values inside the unit bounds', () => {
+    expect(dryingRequestValid(0, 45, 12)).toBe(true)
+    expect(dryingRequestValid(0, 65, 24)).toBe(true)
+    expect(dryingRequestValid(0, 66, 12)).toBe(false) // above AMS 2 Pro range
+    expect(dryingRequestValid(128, 85, 1)).toBe(true)
+    expect(dryingRequestValid(128, 44, 12)).toBe(false)
+    expect(dryingRequestValid(254, 45, 12)).toBe(false) // no heater, no bounds
+  })
+
+  it('rejects an emptied number input', () => {
+    // v-model.number yields '' for an empty field, and Number('') is 0.
+    expect(dryingRequestValid(0, '' as unknown as number, 12)).toBe(false)
+    expect(dryingRequestValid(0, 45, '' as unknown as number)).toBe(false)
+    expect(dryingRequestValid(0, Number.NaN, 12)).toBe(false)
+    expect(dryingRequestValid(0, 45, 0)).toBe(false)
+    expect(dryingRequestValid(0, 45, 25)).toBe(false)
   })
 })

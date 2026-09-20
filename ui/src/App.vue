@@ -6,7 +6,7 @@ import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plug
 import { locales, preferredLocale, translate, type Locale, type MessageKey } from './i18n'
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration, remainingTimePresentation } from './formatting'
-import { dryingBounds, dryingDefaults, dryingFault, dryingStoppable, dryingTargetShown, type AmsDrying, type DryingStatus } from './drying'
+import { dryingBounds, dryingDefaults, dryingFault, dryingRequestValid, dryingStoppable, dryingTargetShown, type AmsDrying, type DryingStatus } from './drying'
 import { printTargetState } from './printing'
 import { printStageLabel } from './stages'
 import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
@@ -1652,6 +1652,20 @@ async function toggleLight(light: string, on: boolean) {
 const dryingForm = ref<{ unitId: number; temperatureC: number; hours: number; filament: string } | undefined>()
 const dryingBusy = ref(false)
 const dryingFormSystem = computed(() => materialSystems.value.find((system) => system.unitId === dryingForm.value?.unitId))
+const dryingFormValid = computed(() =>
+  Boolean(dryingForm.value) && dryingRequestValid(dryingForm.value!.unitId, dryingForm.value!.temperatureC, dryingForm.value!.hours),
+)
+
+// An open panel carries only a unit id, so a printer switch would aim Start at
+// the newly selected printer's unit of the same id. Close it with the switch,
+// and drop it when the status stops reporting that unit at all — judged only
+// when other units are still reported, so a momentary gap keeps the panel.
+watch(() => activePrinter.value?.name, () => {
+  dryingForm.value = undefined
+})
+watch([dryingFormSystem, materialSystems], ([system, systems]) => {
+  if (dryingForm.value && systems.length && !system) dryingForm.value = undefined
+})
 
 function openDryingForm(system: MaterialSystemView) {
   const defaults = dryingDefaults(system.unitId, system.firstFilament)
@@ -1691,6 +1705,9 @@ function dryingActionItems(system: MaterialSystemView): ActionMenuItem[] {
   if (dryingStoppable(system.drying)) {
     return [{ label: `${system.name}: ${t('drying.stop')}`, icon: PhStop, disabled: dryingBusy.value, onSelect: () => setDrying(system, false) }]
   }
+  // `controllable` is the printer-wide remote-dry bit. Starting also needs
+  // presets and bounds for this unit, which only the known id ranges have.
+  if (!dryingBounds(system.unitId)) return []
   return [
     {
       label: `${system.name}: ${t('drying.dry')}`,
@@ -3763,7 +3780,7 @@ onUnmounted(() => {
       </div>
       <template #footer>
         <Button :disabled="dryingBusy" @click="dryingForm = undefined">{{ t('common.cancel') }}</Button>
-        <Button v-if="dryingFormSystem" variant="primary" :disabled="dryingBusy" @click="setDrying(dryingFormSystem, true)">{{ t('drying.start') }}</Button>
+        <Button v-if="dryingFormSystem" variant="primary" :disabled="dryingBusy || !dryingFormValid" @click="setDrying(dryingFormSystem, true)">{{ t('drying.start') }}</Button>
       </template>
     </SlideOver>
 
