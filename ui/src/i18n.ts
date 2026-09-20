@@ -54,6 +54,8 @@ export type MessageKey =
   | "addition.host"
 | "addition.serial"
 | "addition.model"
+| "addition.modelPending"
+| "addition.modelHint"
   | "addition.timeout"
   | "addition.accessCode"
   | "addition.accessCodeKeep"
@@ -601,6 +603,8 @@ const messages: Record<Locale, Messages> = {
     "addition.host": "Host or base URL",
     "addition.serial": "Serial number",
     "addition.model": "Printer model",
+    "addition.modelPending": "Identified on connection",
+    "addition.modelHint": "Detected from the printer; not editable.",
     "addition.timeout": "Connection timeout",
     "addition.accessCode": "Access code",
     "addition.accessCodeKeep": "Access code (leave blank to keep existing)",
@@ -1145,6 +1149,8 @@ const messages: Record<Locale, Messages> = {
     "addition.host": "Host ou URL base",
     "addition.serial": "Número de série",
     "addition.model": "Modelo da impressora",
+    "addition.modelPending": "Identificado na conexão",
+    "addition.modelHint": "Detectado a partir da impressora; não editável.",
     "addition.timeout": "Tempo limite de conexão",
     "addition.accessCode": "Código de acesso",
     "addition.accessCodeKeep": "Código de acesso (deixe em branco para manter o atual)",

@@ -1155,10 +1155,20 @@ fn printer_public_firmware_catalogue(
     check_firmware_updates(&state, &app, normalized, profile, true, Some(true))
 }
 
+/// Fills in a model the profile does not carry, so a public-catalogue lookup
+/// is possible for a printer that was never given one by hand. Detection from
+/// the TLS-bound serial is preferred; an unauthenticated discovery broadcast
+/// is the fallback, for a model this build has no table row for.
 fn profile_with_observed_model(mut profile: Profile, presence: &PresenceState) -> Profile {
-    if profile.model.trim().is_empty()
-        && !profile.serial.trim().is_empty()
-        && let Ok(cache) = presence.cache.lock()
+    if !profile.model.trim().is_empty() || profile.serial.trim().is_empty() {
+        return profile;
+    }
+    let detected = melt_core::bambu::detect(&profile.serial, "", &Default::default());
+    if detected.identity.canonical != melt_core::bambu::CanonicalModel::Unknown {
+        profile.model = detected.identity.display_name().to_owned();
+        return profile;
+    }
+    if let Ok(cache) = presence.cache.lock()
         && let Some(observed) = cache.get(&profile.serial)
         && !observed.model.trim().is_empty()
     {
@@ -4078,7 +4088,7 @@ mod tests {
     use std::{
         io::{BufRead, BufReader, Write},
         net::TcpListener,
-        sync::mpsc,
+        sync::{Arc, Mutex, mpsc},
         thread,
         time::{Duration, Instant},
     };
@@ -4092,12 +4102,12 @@ mod tests {
     use super::{
         CachedFirmwareUpdate, CachedMonitor, DesktopPrinter, FIRMWARE_UPDATE_STALE_AFTER,
         FirmwareUpdateEntry, FirmwareUpdateState, MonitorConnectionState, MonitorEntry,
-        MonitorState, Profile, STATUS_CACHE_HEARTBEAT, StatusCacheThrottle,
-        cached_monitor_entry_at, cached_ui_monitor_entry, camera_preview_request,
-        current_firmware_entry, ensure_state, extract_3mf_thumbnail, h264_codec, h264_frame_header,
-        invalidate_firmware_updates, load_status_cache_from, monitor_connection_state,
-        operation_error, retain_firmware_update_failure, save_status_cache_to,
-        store_firmware_update,
+        MonitorState, PresenceCache, PresenceState, Profile, STATUS_CACHE_HEARTBEAT,
+        StatusCacheThrottle, cached_monitor_entry_at, cached_ui_monitor_entry,
+        camera_preview_request, current_firmware_entry, ensure_state, extract_3mf_thumbnail,
+        h264_codec, h264_frame_header, invalidate_firmware_updates, load_status_cache_from,
+        monitor_connection_state, operation_error, profile_with_observed_model,
+        retain_firmware_update_failure, save_status_cache_to, store_firmware_update,
     };
 
     const TOKEN: &str = "/stream/0123456789abcdef0123456789abcdef";
@@ -4169,6 +4179,40 @@ mod tests {
 
         assert_eq!(error.code, "printerTimeout");
         assert_eq!(error.operation, Some("status"));
+    }
+
+    /// The settings panel shows the model rather than accepting one, so a
+    /// hand-added printer that was never discovered has to get its model from
+    /// the serial. Without this, its public-catalogue lookup stays disabled.
+    #[test]
+    fn an_undiscovered_printer_still_resolves_a_model_for_the_catalogue() {
+        let presence = PresenceState {
+            cache: Arc::new(Mutex::new(PresenceCache::default())),
+            scan_lock: Arc::new(Mutex::new(())),
+        };
+        let profile = Profile {
+            driver: "bambu-lan".into(),
+            host: "192.0.2.10".into(),
+            serial: "01P00000000000".into(),
+            model: String::new(),
+            timeout: "10s".into(),
+            insecure: false,
+            created: String::new(),
+            updated: String::new(),
+        };
+
+        let resolved = profile_with_observed_model(profile.clone(), &presence);
+        assert_eq!(resolved.model, "Bambu Lab P1S");
+
+        // A model already on the profile is never overwritten.
+        let configured = Profile {
+            model: "H2D".into(),
+            ..profile
+        };
+        assert_eq!(
+            profile_with_observed_model(configured, &presence).model,
+            "H2D"
+        );
     }
 
     #[test]

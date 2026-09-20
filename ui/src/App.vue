@@ -458,6 +458,10 @@ const adding = ref(false)
 const additionOpen = ref(false)
 const additionError = ref<string>()
 const discovered = ref<DiscoveredPrinter[]>([])
+// Display only. The model is resolved from the printer, so the panel shows
+// it rather than accepting it; `draft.model` still carries the stored value
+// so saving never discards the hint a hand-added profile was created with.
+const detectedModelName = ref('')
 const discovering = ref(false)
 const discoveryError = ref<string>()
 const tlsOpen = ref(false)
@@ -599,6 +603,7 @@ function resetAdditionPanelState() {
   additionError.value = undefined
   discoveryError.value = undefined
   discovered.value = []
+  detectedModelName.value = ''
 }
 
 function openEdit(printer: Printer) {
@@ -615,6 +620,7 @@ function openEdit(printer: Printer) {
   }
   additionBaseline.value = { ...draft.value }
   resetAdditionPanelState()
+  detectedModelName.value = printer.detectedModel || printer.presence?.model || ''
   additionOpen.value = true
 }
 
@@ -1427,6 +1433,7 @@ function useDiscoveredPrinter(printer: DiscoveredPrinter) {
   draft.value.host = printer.host
   draft.value.serial = printer.serial
   draft.value.model = printer.model
+  detectedModelName.value = printer.displayModel
   if (!draft.value.name) draft.value.name = printer.name || printer.displayModel
   discovered.value = []
 }
@@ -2588,7 +2595,7 @@ onUnmounted(() => {
             <div class="mt-1 flex flex-col sm:mt-0 sm:flex-row sm:flex-wrap sm:space-x-6">
               <div class="mt-2 flex items-center font-mono text-sm text-gray-500 dark:text-gray-400">
                 <PhPrinter class="mr-1.5 size-5 shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
-                {{ activePrinter.driver }}
+                {{ activePrinter.detectedModel || activePrinter.presence?.model || activePrinter.driver }}
               </div>
               <div class="mt-2 flex items-center font-mono text-sm text-gray-500 dark:text-gray-400">
                 <PhNetwork class="mr-1.5 size-5 shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
@@ -3802,7 +3809,8 @@ onUnmounted(() => {
           </div>
           <div>
             <label for="printer-model" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.model') }}</label>
-            <input id="printer-model" name="printer-model" v-model="draft.model" autocomplete="off" placeholder="A1 mini, H2C, P1S…" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+            <input id="printer-model" name="printer-model" :value="detectedModelName" readonly aria-readonly="true" :placeholder="t('addition.modelPending')" class="mt-2 block w-full cursor-default rounded-md bg-gray-50 px-3 py-1.5 text-base text-gray-500 outline-1 -outline-offset-1 outline-gray-300 sm:text-sm/6 dark:bg-white/5 dark:text-gray-400 dark:outline-white/10" />
+            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ t('addition.modelHint') }}</p>
           </div>
           <div>
             <label for="printer-timeout" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.timeout') }}</label>
