@@ -344,6 +344,106 @@ pub fn merge_history_report(mut report: FirmwareUpdateReport, history: &Value) -
     FirmwareUpdateReport::from_components(report.source, components.into_values().collect(), issues)
 }
 
+/// Adds a public stable release candidate without replacing a printer-owned
+/// advertisement. Public catalogue evidence is informational when the two
+/// sources disagree.
+pub fn merge_public_catalogue_report(
+    mut report: FirmwareUpdateReport,
+    version: &str,
+) -> FirmwareUpdateReport {
+    let mut components = report
+        .components
+        .drain(..)
+        .map(|component| (component.id.to_ascii_lowercase(), component))
+        .collect::<BTreeMap<_, _>>();
+    let mut issues = report.issues;
+    let mut truncated = false;
+    merge_public_target(
+        &mut components,
+        "ota",
+        "Printer firmware",
+        version,
+        &mut issues,
+        &mut truncated,
+    );
+    if truncated {
+        push_issue(&mut issues, provider_data_truncated());
+    }
+    FirmwareUpdateReport::from_components(report.source, components.into_values().collect(), issues)
+}
+
+fn merge_public_target(
+    components: &mut BTreeMap<String, FirmwareUpdateComponent>,
+    raw_id: &str,
+    raw_label: &str,
+    raw_target: &str,
+    issues: &mut Vec<FirmwareUpdateIssue>,
+    truncated: &mut bool,
+) {
+    let (id, id_truncated) = bounded_provider_text(raw_id, MAX_COMPONENT_ID_BYTES);
+    let (label, label_truncated) = bounded_provider_text(raw_label, MAX_COMPONENT_LABEL_BYTES);
+    let (target, version_truncated) = bounded_provider_text(raw_target, MAX_VERSION_BYTES);
+    *truncated |= id_truncated || label_truncated || version_truncated;
+    if target.is_empty() || !meaningful_version(&target) {
+        return;
+    }
+    let key = id.to_ascii_lowercase();
+    let component = components.entry(key).or_insert_with(|| FirmwareUpdateComponent {
+        kind: component_kind(&id),
+        id,
+        label,
+        current_version: None,
+        available_version: None,
+        availability: FirmwareUpdateAvailability::Unknown,
+        required: false,
+        evidence: Vec::new(),
+    });
+    component.evidence.push(FirmwareVersionEvidence {
+        source: FirmwareEvidenceSource::BambuPublicCatalogue,
+        role: FirmwareEvidenceRole::PublicStable,
+        version: Some(target.clone()),
+        required: false,
+    });
+    let Some(current) = component.current_version.as_deref() else {
+        if component.available_version.is_none() {
+            component.available_version = Some(target);
+            component.availability = FirmwareUpdateAvailability::Available;
+        }
+        return;
+    };
+    let current = FirmwareVersion::parse(current);
+    let target_version = FirmwareVersion::parse(&target);
+    if current.numeric.is_empty() || target_version.numeric.is_empty() {
+        push_issue(
+            issues,
+            FirmwareUpdateIssue {
+                code: "uncomparablePublicVersion",
+                message: "A public catalogue version could not be compared safely.",
+            },
+        );
+        return;
+    }
+    match target_version.numeric_cmp(&current) {
+        Ordering::Greater => {
+            if component.available_version.is_none() {
+                component.available_version = Some(target);
+                component.availability = FirmwareUpdateAvailability::Available;
+            }
+        }
+        Ordering::Equal if component.availability != FirmwareUpdateAvailability::Available => {
+            component.availability = FirmwareUpdateAvailability::Current;
+        }
+        Ordering::Less => push_issue(
+            issues,
+            FirmwareUpdateIssue {
+                code: "publicTargetNotNewer",
+                message: "The public catalogue reported a version older than the installed version.",
+            },
+        ),
+        Ordering::Equal => {}
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn merge_catalogue_target(
     components: &mut BTreeMap<String, FirmwareUpdateComponent>,
@@ -657,5 +757,19 @@ mod tests {
                 && evidence.role == FirmwareEvidenceRole::DeviceCatalogue
         }));
         assert!(merged.components.iter().any(|component| component.id == "ams-0"));
+    }
+
+    #[test]
+    fn public_catalogue_adds_distinct_evidence() {
+        let inventory = FirmwareInventory::from_version_info(
+            &json!({"module":[{"name":"ota","sw_ver":"01.08.00.00"}]}),
+        );
+        let merged = merge_public_catalogue_report(update_report(&json!({"print":{}}), &inventory), "01.09.00.00");
+        let ota = merged.components.iter().find(|component| component.id == "ota").unwrap();
+        assert_eq!(merged.assessment, FirmwareUpdateAssessment::PublicReleaseNewer);
+        assert!(ota.evidence.iter().any(|evidence| {
+            evidence.source == FirmwareEvidenceSource::BambuPublicCatalogue
+                && evidence.role == FirmwareEvidenceRole::PublicStable
+        }));
     }
 }
