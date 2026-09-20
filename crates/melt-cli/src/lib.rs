@@ -2733,6 +2733,7 @@ fn discover_printers(
                     host: printer.host,
                     serial: printer.serial,
                     model: printer.model,
+                    display_model: printer.display_model,
                     name: printer.name,
                 })
                 .collect::<Vec<_>>();
@@ -2754,7 +2755,7 @@ fn discover_printers(
                                 "{}\t{}\t{}\t{}\t{}",
                                 printer.name,
                                 printer.serial,
-                                printer.model,
+                                printer.display_model,
                                 printer.host,
                                 printer.configured_as.as_deref().unwrap_or("-")
                             )?;
@@ -2792,6 +2793,7 @@ struct DiscoveryPrinter {
     host: String,
     serial: String,
     model: String,
+    display_model: String,
     name: String,
     configured_as: Option<String>,
 }

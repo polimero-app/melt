@@ -12,6 +12,11 @@ use url::Url;
 use super::validate_host;
 
 const BAMBU_BROADCAST_PORT: u16 = 2021;
+// ponytail: printers alternate their announcement destination between ports
+// 1990 and 2021 on a roughly 5 s period, so a 2021-only listener sees a given
+// device about every 10 s. That is inside the default scan window. Bind 1990
+// too only if a scan is observed to miss a printer, rather than doubling the
+// socket count against a ceiling nobody has hit.
 const SSDP_MULTICAST: &str = "239.255.255.250:1900";
 const SSDP_TARGET: &str = "urn:bambulab-com:device:3dprinter:1";
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -22,7 +27,11 @@ pub struct DiscoveredPrinter {
     pub driver: &'static str,
     pub host: String,
     pub serial: String,
+    /// Exactly as broadcast. `DevModel.bambu.com` carries a `model_id` such
+    /// as `C12`, which is the evidence and what `printer add --model` takes.
     pub model: String,
+    /// The marketing name for `model`, or `model` itself when unrecognised.
+    pub display_model: String,
     pub name: String,
     pub firmware: Option<String>,
     pub schema_version: Option<String>,
@@ -184,17 +193,27 @@ fn parse_ssdp_response(payload: &[u8], source: IpAddr) -> Option<DiscoveredPrint
         return None;
     }
     let source = source.to_string();
+    // A real printer sends a bare IPv4 here with no scheme, so `Url::parse`
+    // fails and the datagram's source address is used instead. That is the
+    // same printer and the harder of the two to forge; the fallback is the
+    // intended path, not a parser bug.
     let host = headers
         .get("LOCATION")
         .and_then(|location| Url::parse(location).ok())
         .and_then(|location| location.host_str().map(str::to_owned))
         .filter(|host| validate_host(host).is_ok())
         .unwrap_or(source);
+    // Printers send the serial bare (`USN: 22E8BJ610801473`); the
+    // `uuid:<serial>::<target>` form comes from emulators and from Bambu's
+    // own SSDP samples. Requiring the prefix left every real printer with an
+    // empty serial, which `PrinterPresence::observe` then discards.
     let serial = headers
         .get("USN")
-        .and_then(|usn| usn.strip_prefix("uuid:"))
-        .map(|value| value.split(':').next().unwrap_or_default().to_owned())
-        .unwrap_or_default();
+        .map(|usn| usn.strip_prefix("uuid:").unwrap_or(usn))
+        .and_then(|usn| usn.split("::").next())
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
     Some(printer(
         host,
         serial,
@@ -216,6 +235,7 @@ fn printer(host: String, serial: String, model: String, name: String) -> Discove
         driver: "bambu-lan",
         host,
         serial,
+        display_model: display_model(&model),
         model,
         name,
         firmware: None,
@@ -224,6 +244,13 @@ fn printer(host: String, serial: String, model: String, name: String) -> Discove
         bind_state: None,
         security_mode: None,
         interface: None,
+    }
+}
+
+fn display_model(model: &str) -> String {
+    match super::ModelIdentity::parse(model).canonical {
+        super::CanonicalModel::Unknown => model.to_owned(),
+        canonical => canonical.display_name().to_owned(),
     }
 }
 
@@ -238,6 +265,7 @@ fn merge(entries: Vec<DiscoveredPrinter>) -> Vec<DiscoveredPrinter> {
                 existing.serial = entry.serial;
             }
             if existing.model.is_empty() {
+                existing.display_model = entry.display_model;
                 existing.model = entry.model;
             }
             if existing.name.is_empty() {
@@ -270,15 +298,30 @@ mod tests {
 
     #[test]
     fn parses_bambu_ssdp_and_merges_partial_results() {
+        // The shape a printer actually sends: bare serial, bare IPv4
+        // location, a `model_id` rather than a marketing name.
         let discovered = parse_ssdp_response(
-            b"HTTP/1.1 200 OK\r\nST: urn:bambulab-com:device:3dprinter:1\r\nLOCATION: http://192.0.2.10/\r\nUSN: uuid:SN001::urn:bambulab-com:device:3dprinter:1\r\nDevModel.bambu.com: P1S\r\n\r\n",
-            IpAddr::from_str("192.0.2.20").unwrap(),
+            b"HTTP/1.1 200 OK\r\nST: urn:bambulab-com:device:3dprinter:1\r\nLOCATION: 192.0.2.10\r\nUSN: SN001\r\nDevModel.bambu.com: C12\r\n\r\n",
+            IpAddr::from_str("192.0.2.10").unwrap(),
         )
         .unwrap();
         assert_eq!(discovered.host, "192.0.2.10");
         assert_eq!(discovered.serial, "SN001");
+        assert_eq!(discovered.model, "C12");
+        assert_eq!(discovered.display_model, "Bambu Lab P1S");
+
+        // The `uuid:<serial>::<target>` form still parses; emulators and
+        // Bambu's own SSDP samples use it.
+        let prefixed = parse_ssdp_response(
+            b"HTTP/1.1 200 OK\r\nST: urn:bambulab-com:device:3dprinter:1\r\nLOCATION: http://192.0.2.10/\r\nUSN: uuid:SN001::urn:bambulab-com:device:3dprinter:1\r\nDevModel.bambu.com: P1S\r\n\r\n",
+            IpAddr::from_str("192.0.2.20").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(prefixed.host, "192.0.2.10");
+        assert_eq!(prefixed.serial, "SN001");
+
         let entries = merge(vec![
-            printer("192.0.2.10".into(), "".into(), "P1S".into(), "".into()),
+            printer("192.0.2.10".into(), "".into(), "C12".into(), "".into()),
             printer(
                 "192.0.2.10".into(),
                 "SN001".into(),
@@ -288,8 +331,23 @@ mod tests {
         ]);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].serial, "SN001");
-        assert_eq!(entries[0].model, "P1S");
+        assert_eq!(entries[0].model, "C12");
+        assert_eq!(entries[0].display_model, "Bambu Lab P1S");
         assert_eq!(entries[0].name, "My P1S");
+    }
+
+    /// An unrecognised broadcast still has to reach the operator; the raw
+    /// value is what `printer add --model` consumes either way.
+    #[test]
+    fn an_unknown_model_code_is_displayed_verbatim() {
+        let discovered = printer(
+            "192.0.2.10".into(),
+            "SN001".into(),
+            "Z9".into(),
+            "Future".into(),
+        );
+        assert_eq!(discovered.model, "Z9");
+        assert_eq!(discovered.display_model, "Z9");
     }
 
     #[test]
