@@ -267,6 +267,10 @@ struct PrinterSummary {
     host: String,
     serial: String,
     model: String,
+    /// The marketing name resolved from the serial prefix and the configured
+    /// model. Offline by construction: this command reads config and the
+    /// presence cache only, so the firmware rungs are unavailable here.
+    detected_model: String,
     timeout: String,
     insecure: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -925,6 +929,21 @@ fn preview_cache_key(request: &FilePreviewRequest, printer_key: &str) -> String 
     )
 }
 
+/// Resolves the marketing model name without touching the network. Only the
+/// serial-prefix and configured rungs are available offline; the firmware
+/// rungs need an authenticated `get_version`, which the settings list does
+/// not make. An unrecognized value is returned verbatim rather than blanked,
+/// so a printer this build has no table row for is still named.
+fn detected_model_name(profile: &melt_core::config::Profile) -> String {
+    if profile.driver != "bambu-lan" {
+        return profile.model.clone();
+    }
+    melt_core::bambu::detect(&profile.serial, &profile.model, &Default::default())
+        .identity
+        .display_name()
+        .to_owned()
+}
+
 #[tauri::command(async)]
 fn configured_printers(
     state: tauri::State<'_, PresenceState>,
@@ -940,10 +959,12 @@ fn configured_printers(
                 .into_iter()
                 .map(|profile| {
                     let observed = presence.get(&profile.profile.serial);
+                    let detected_model = detected_model_name(&profile.profile);
                     PrinterSummary {
                         name: profile.name,
                         driver: profile.profile.driver,
                         host: profile.profile.host,
+                        detected_model,
                         serial: profile.profile.serial,
                         model: profile.profile.model,
                         timeout: profile.profile.timeout,

@@ -330,6 +330,7 @@ export type MessageKey =
   | "printersView.scanComplete"
   | "printersView.discovered"
   | "printersView.unknownModel"
+  | "printersView.modelName"
   | "printersView.removed"
   | "printersView.tlsRefreshRequested"
   | "printersView.scanning"
@@ -876,6 +877,7 @@ const messages: Record<Locale, Messages> = {
     "printersView.scanComplete": "Discovery scan complete",
     "printersView.discovered": "1 printer discovered",
     "printersView.unknownModel": "unrecognised model",
+    "printersView.modelName": "Model name",
     "printersView.removed": "Printer removed",
     "printersView.tlsRefreshRequested": "TLS certificate refresh requested",
     "printersView.scanning": "Scanning…",
@@ -1419,6 +1421,7 @@ const messages: Record<Locale, Messages> = {
     "printersView.scanComplete": "Busca de descoberta concluída",
     "printersView.discovered": "1 impressora descoberta",
     "printersView.unknownModel": "modelo não reconhecido",
+    "printersView.modelName": "Nome do modelo",
     "printersView.removed": "Impressora removida",
     "printersView.tlsRefreshRequested": "Atualização do certificado TLS solicitada",
     "printersView.scanning": "Buscando…",

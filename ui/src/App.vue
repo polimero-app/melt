@@ -118,6 +118,7 @@ type Printer = {
   host: string
   serial: string
   model: string
+  detectedModel: string
   timeout: string
   insecure: boolean
   presence?: {
@@ -1440,21 +1441,14 @@ async function addPrinter() {
     const profile = replacing
       ? await invoke<Printer>('update_configured_printer', { name: replacing, request: draft.value })
       : await invoke<Printer>('create_configured_printer', { request: draft.value })
-    const printer = {
-      name: profile.name,
-      driver: profile.driver,
-      host: profile.host,
-      serial: profile.serial,
-      model: profile.model,
-      timeout: profile.timeout,
-      insecure: profile.insecure,
-    }
-    printers.value = [...printers.value.filter((entry) => entry.name !== replacing), printer]
-      .sort((left, right) => left.name.localeCompare(right.name))
+    // Re-read the list rather than rebuilding a row by hand: the backend
+    // derives fields the create/update result does not carry, such as the
+    // detected model name, and it already returns them sorted.
+    printers.value = await invoke<Printer[]>('configured_printers')
     additionOpen.value = false
     editingPrinter.value = undefined
     draft.value.accessCode = ''
-    await selectPrinter(printer.name)
+    await selectPrinter(profile.name)
   } catch (reason) {
     additionError.value = message(reason)
   } finally {
@@ -3294,6 +3288,10 @@ onUnmounted(() => {
             </div>
             <!-- Description list -->
             <dl class="mt-2 divide-y divide-gray-200 text-xs dark:divide-white/10">
+              <div class="flex items-center justify-between py-2">
+                <dt class="text-gray-500 dark:text-gray-400">{{ t('printersView.modelName') }}</dt>
+                <dd class="text-gray-900 dark:text-gray-300">{{ printer.detectedModel || printer.presence?.model || '—' }}</dd>
+              </div>
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t('addition.serial') }}</dt>
                 <dd class="font-mono text-gray-900 dark:text-gray-300">

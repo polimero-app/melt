@@ -1339,6 +1339,15 @@ fn human_status(name: &str, status: &moonraker::Status, detailed: bool) -> Strin
         format!("State: {}", status.state.as_str()),
     ];
     if detailed
+        && let Some(model) = status
+            .extensions
+            .bambu_lan
+            .as_ref()
+            .and_then(|bambu| bambu.detected_model.as_deref())
+    {
+        lines.push(format!("Model: {}", sanitize(model)));
+    }
+    if detailed
         && let Some(stage) = status.stage
         && status.state != moonraker::PrinterState::Idle
     {
@@ -5272,6 +5281,7 @@ mod tests {
             firmware_version: Some("01.08.00.00".into()),
             extensions: moonraker::Extensions {
                 bambu_lan: Some(moonraker::BambuExtension {
+                    detected_model: None,
                     ams: Some(moonraker::AmsData {
                         units: vec![moonraker::AmsUnit {
                             id: 0,
@@ -5341,6 +5351,20 @@ mod tests {
             detailed.contains("Fans:\n  Part cooling: 75%\n  Exhaust: 40%"),
             "{detailed}"
         );
+    }
+
+    /// The configured `--model` is a fallback, so the identified model is
+    /// worth naming: it is the only place the operator sees which model Melt
+    /// actually settled on.
+    #[test]
+    fn detailed_status_names_the_detected_model() {
+        let mut status = sample_status();
+        status.extensions.bambu_lan.as_mut().unwrap().detected_model = Some("Bambu Lab P1S".into());
+
+        let detailed = human_status("dakota", &status, true);
+        assert!(detailed.contains("Model: Bambu Lab P1S"), "{detailed}");
+        // The brief envelope keeps the reference layout.
+        assert!(!human_status("dakota", &status, false).contains("Model:"));
     }
 
     #[test]

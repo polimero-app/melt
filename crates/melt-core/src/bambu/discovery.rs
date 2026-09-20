@@ -254,10 +254,7 @@ fn printer(host: String, serial: String, model: String, name: String) -> Discove
 }
 
 fn display_model(model: &str) -> String {
-    match super::ModelIdentity::parse(model).canonical {
-        super::CanonicalModel::Unknown => model.to_owned(),
-        canonical => canonical.display_name().to_owned(),
-    }
+    super::ModelIdentity::parse(model).display_name().to_owned()
 }
 
 fn merge(entries: Vec<DiscoveredPrinter>) -> Vec<DiscoveredPrinter> {

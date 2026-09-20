@@ -1568,6 +1568,12 @@ pub struct AmsData {
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BambuExtension {
+    /// Marketing name for the model Melt identified, which is not
+    /// necessarily the one configured on the profile. Resolved from the
+    /// serial prefix and the configured string: a status exchange makes no
+    /// `get_version` call, so the firmware rungs are unavailable here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detected_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ams: Option<AmsData>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1596,7 +1602,8 @@ fn is_false(value: &bool) -> bool {
 
 impl BambuExtension {
     pub fn is_empty(&self) -> bool {
-        self.ams.is_none()
+        self.detected_model.is_none()
+            && self.ams.is_none()
             && self.sd_card_state.is_none()
             && self.emmc_storage.is_none()
             && self.extruder_count.is_none()

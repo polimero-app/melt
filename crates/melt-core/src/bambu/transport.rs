@@ -223,7 +223,23 @@ impl Client {
         let payload = pushall_payload(next_sequence());
         let report = self.exchange(access_code, fingerprint, payload, is_full_report)?;
         self.observe_runtime_status(&report);
-        parse_status(&report)
+        let mut status = parse_status(&report)?;
+        // `observe_runtime_status` has just re-run detection, so the cached
+        // identity is the freshest one a status exchange can produce.
+        if let Some(model) = self.detected_model_name() {
+            status
+                .extensions
+                .bambu_lan
+                .get_or_insert_with(BambuExtension::default)
+                .detected_model = Some(model);
+        }
+        Ok(status)
+    }
+
+    fn detected_model_name(&self) -> Option<String> {
+        let cached = self.capabilities.lock().ok()?;
+        let name = cached.as_ref()?.identity.display_name();
+        (!name.is_empty()).then(|| name.to_owned())
     }
 
     /// Queries firmware module information on the persistent MQTT session and
@@ -3017,6 +3033,9 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
     let lights = lights(report);
     let (controls, airduct_fans) = control_inventory(print, &temperatures, &fans, &lights);
     let extension = BambuExtension {
+        // Filled in by the caller, which holds the detected identity; the
+        // status report alone never names the model.
+        detected_model: None,
         ams: ams_data(print),
         sd_card_state: sd_card_state(print),
         emmc_storage: has_emmc(print),
@@ -6580,6 +6599,23 @@ mod tests {
         assert_eq!(observed.model_source, negotiated.model_source);
         assert_eq!(observed.model_conflicts, negotiated.model_conflicts);
         assert_eq!(observed.firmware, negotiated.firmware);
+    }
+
+    /// `melt status --detailed` names the model, and a status exchange makes
+    /// no `get_version` call, so the name has to come from the detection the
+    /// status observation itself performs.
+    #[test]
+    fn a_status_observation_is_enough_to_name_the_model() {
+        let client = Client::new(Profile::new("printer.local", "01P00000000000", true).unwrap());
+        assert_eq!(client.detected_model_name(), None);
+
+        client.observe_runtime_status(
+            br#"{"print":{"command":"push_status","msg":0,"sequence_id":"1"}}"#,
+        );
+        assert_eq!(
+            client.detected_model_name().as_deref(),
+            Some("Bambu Lab P1S")
+        );
     }
 
     #[test]

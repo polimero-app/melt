@@ -190,6 +190,16 @@ fn normalize(raw: &str) -> String {
 }
 
 impl ModelIdentity {
+    /// The marketing name when the model is recognized, the raw value
+    /// verbatim when it is not. Empty only when nothing identified the
+    /// printer at all, so a caller can decide what to show in its place.
+    pub fn display_name(&self) -> &str {
+        match self.canonical {
+            CanonicalModel::Unknown => self.raw.as_str(),
+            canonical => canonical.display_name(),
+        }
+    }
+
     /// Accepts a Bambu `model_id` (`C12`), a legacy `DevModel` alias
     /// (`3DPrinter-X1-Carbon`), a marketing name (`Bambu Lab P1S`), or the
     /// bare marketing suffix a user is likely to type (`P1S`).
