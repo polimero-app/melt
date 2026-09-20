@@ -118,6 +118,27 @@ impl ConnectionPool {
         tls_fingerprint: Option<&str>,
         refresh: bool,
     ) -> Result<FirmwareUpdateReport, drivers::DriverError> {
+        self.firmware_update_status_with_sources(
+            name,
+            profile,
+            access_code,
+            tls_fingerprint,
+            refresh,
+            false,
+            false,
+        )
+    }
+
+    pub fn firmware_update_status_with_sources(
+        &self,
+        name: &str,
+        profile: &drivers::Profile,
+        access_code: Option<&str>,
+        tls_fingerprint: Option<&str>,
+        refresh: bool,
+        include_history: bool,
+        include_public_catalogue: bool,
+    ) -> Result<FirmwareUpdateReport, drivers::DriverError> {
         match profile {
             drivers::Profile::Moonraker(profile) => self
                 .moonraker_client(name, profile)?
@@ -125,7 +146,13 @@ impl ConnectionPool {
                 .map_err(drivers::DriverError::Moonraker),
             drivers::Profile::Bambu(profile) => {
                 self.with_bambu(name, profile, access_code, tls_fingerprint, |client| {
-                    client.firmware_update_status(access_code, tls_fingerprint, refresh)
+                    client.firmware_update_status_with_sources(
+                        access_code,
+                        tls_fingerprint,
+                        refresh,
+                        include_history,
+                        include_public_catalogue,
+                    )
                 })
             }
         }

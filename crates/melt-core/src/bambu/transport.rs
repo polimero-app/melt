@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::firmware_updates::FirmwareUpdateReport;
+use crate::firmware_updates::{FirmwareUpdateIssue, FirmwareUpdateReport};
 use crate::moonraker::{
     AmsData, AmsDrying, AmsTray, AmsUnit, BambuExtension, ControlInventory, DryingRequest,
     DryingResult, DryingSetting, DryingStatus, Extensions, FanControl, FanKind, FanMode, FanResult,
@@ -33,9 +33,9 @@ use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rf
 use super::{
     AuthorizationMode, BedLevelingSupport, FirmwareInventory, MQTT_USERNAME, MappingStatus,
     MqttTopics, PrintStage, PrintStageEvent, Profile, RuntimeCapabilities, StorageTransport,
-    StorageVolume, TlsPinError, firmware::update_report, is_pushall_payload,
-    is_valid_tls_fingerprint, preflight_print_package, pushall_payload, resolve_authorization,
-    tls_fingerprint, tunnel, verify_tls_fingerprint,
+    StorageVolume, TlsPinError, fetch_public_firmware, firmware::update_report, is_pushall_payload,
+    is_valid_tls_fingerprint, merge_public_catalogue_report, preflight_print_package,
+    pushall_payload, resolve_authorization, tls_fingerprint, tunnel, verify_tls_fingerprint,
 };
 
 #[cfg(test)]
@@ -259,6 +259,72 @@ impl Client {
         fingerprint: Option<&str>,
         refresh: bool,
     ) -> Result<FirmwareUpdateReport, Error> {
+        self.firmware_update_status_with_history(access_code, fingerprint, refresh, false)
+    }
+
+    /// Reads LAN update availability and, when requested, the printer's
+    /// read-only device catalogue. The history command is deliberately kept
+    /// separate from `exchange`: it never sends a pushall refresh or any
+    /// update command.
+    pub fn firmware_update_status_with_history(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        refresh: bool,
+        include_history: bool,
+    ) -> Result<FirmwareUpdateReport, Error> {
+        self.firmware_update_status_with_sources(
+            access_code,
+            fingerprint,
+            refresh,
+            include_history,
+            false,
+        )
+    }
+
+    pub fn firmware_update_status_with_sources(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        refresh: bool,
+        include_history: bool,
+        include_public_catalogue: bool,
+    ) -> Result<FirmwareUpdateReport, Error> {
+        let report = self.firmware_update_status_with_history_inner(
+            access_code,
+            fingerprint,
+            refresh,
+            include_history,
+        )?;
+        if !include_public_catalogue {
+            return Ok(report);
+        }
+        let model = super::ModelIdentity::parse(self.profile.model()).canonical;
+        match fetch_public_firmware(model, self.profile.timeout()) {
+            Ok(release) => Ok(merge_public_catalogue_report(report, &release.version)),
+            Err(super::PublicCatalogueError::UnsupportedModel) => Ok(report),
+            Err(_) => {
+                let mut issues = report.issues.clone();
+                issues.push(FirmwareUpdateIssue {
+                    code: "publicCatalogueUnavailable",
+                    message: "The public firmware catalogue could not be queried.",
+                });
+                Ok(FirmwareUpdateReport::from_components(
+                    report.source,
+                    report.components,
+                    issues,
+                ))
+            }
+        }
+    }
+
+    fn firmware_update_status_with_history_inner(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        refresh: bool,
+        include_history: bool,
+    ) -> Result<FirmwareUpdateReport, Error> {
         self.with_mqtt(access_code, fingerprint, |mqtt| {
             if refresh || mqtt.status_document.is_none() {
                 mqtt.exchange(pushall_payload(next_sequence()), is_full_report)?;
@@ -269,7 +335,25 @@ impl Client {
                 .status_document
                 .as_ref()
                 .ok_or(Error::InvalidResponse)?;
-            Ok(update_report(status, &inventory))
+            let report = update_report(status, &inventory);
+            if !include_history {
+                return Ok(report);
+            }
+            match mqtt.query_history() {
+                Ok(history) => Ok(super::firmware::merge_history_report(report, &history)),
+                Err(_) => {
+                    let mut issues = report.issues.clone();
+                    issues.push(FirmwareUpdateIssue {
+                        code: "historyUnavailable",
+                        message: "The printer's read-only firmware catalogue could not be queried.",
+                    });
+                    Ok(FirmwareUpdateReport::from_components(
+                        report.source,
+                        report.components,
+                        issues,
+                    ))
+                }
+            }
         })
     }
 
@@ -1816,6 +1900,37 @@ impl MqttConnection {
                 Some(_) => {}
                 None if Instant::now() >= self.deadline => return Err(Error::Timeout),
                 None if attempts >= VERSION_MAX_ATTEMPTS => return Err(Error::InvalidResponse),
+                None => {}
+            }
+        }
+    }
+
+    fn query_history(&mut self) -> Result<Value, Error> {
+        let payload = json!({"upgrade": {
+            "sequence_id": next_sequence_id(),
+            "command": "get_history"
+        }})
+        .to_string();
+        self.publish(&payload)?;
+        let deadline = self.deadline;
+        loop {
+            match self.read_packet_until(self.deadline.min(deadline))? {
+                Some(packet) if packet.kind >> 4 == 3 => {
+                    let report = mqtt_publish_payload(packet.kind, &packet.payload)?;
+                    let Ok(value) = serde_json::from_slice::<Value>(&report) else {
+                        continue;
+                    };
+                    if value
+                        .get("upgrade")
+                        .and_then(Value::as_object)
+                        .and_then(|upgrade| upgrade.get("firmware_optional"))
+                        .is_some()
+                    {
+                        return Ok(value);
+                    }
+                }
+                Some(_) => {}
+                None if Instant::now() >= deadline => return Err(Error::Timeout),
                 None => {}
             }
         }

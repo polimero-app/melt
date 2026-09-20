@@ -19,6 +19,9 @@ import {
   hasRequiredUpdate,
   updateEntryFor,
   versionRail,
+  type FirmwareEvidenceRole,
+  type FirmwareSourceCheck,
+  type FirmwareUpdateAssessment,
   type FirmwareUpdateComponentKind,
   type FirmwareUpdateEntry,
 } from './firmware-updates'
@@ -387,6 +390,7 @@ type SlicerSetting = {
 type BackendPreferences = {
   notifications: Record<NotificationSetting['id'], boolean>
   slicers: SlicerSetting[]
+  publicFirmwareCatalogue: boolean
 }
 
 const modelTones: Record<ModelTone, { preview: string; shape: string }> = {
@@ -566,6 +570,7 @@ const defaultNotifications: NotificationSetting[] = [
 const defaultSlicers: SlicerSetting[] = []
 const notifications = ref<NotificationSetting[]>(defaultNotifications)
 const slicers = ref<SlicerSetting[]>(defaultSlicers)
+const publicFirmwareCatalogue = ref(false)
 const slicerDraft = ref({ name: '', path: '' })
 const slicerBusy = ref(false)
 const slicerError = ref<string>()
@@ -650,6 +655,54 @@ const firmwareAvailabilityLabel = (entry: FirmwareUpdateEntry) => t(
         ? 'firmware.unsupported'
         : 'firmware.unknown',
 )
+const firmwareAssessmentLabel = (assessment: FirmwareUpdateAssessment) => {
+  const key: MessageKey = assessment === 'required'
+    ? 'firmware.assessmentRequired'
+    : assessment === 'deviceCatalogueNewer'
+      ? 'firmware.assessmentDeviceCatalogue'
+      : assessment === 'publicReleaseNewer'
+        ? 'firmware.assessmentPublicRelease'
+        : assessment === 'confirmedAvailable'
+          ? 'firmware.assessmentConfirmed'
+          : assessment === 'current'
+            ? 'firmware.assessmentCurrent'
+            : assessment === 'conflict'
+              ? 'firmware.assessmentConflict'
+              : 'firmware.unknown'
+  return t(key)
+}
+const firmwareEvidenceLabel = (role: FirmwareEvidenceRole) => {
+  const key: MessageKey = role === 'printerAdvertised'
+    ? 'firmware.sourcePrinter'
+    : role === 'deviceCatalogue'
+      ? 'firmware.sourceDeviceCatalogue'
+      : role === 'publicStable'
+        ? 'firmware.sourcePublicStable'
+        : 'firmware.installed'
+  return t(key)
+}
+const componentHasEvidence = (component: FirmwareUpdateEntry['report']['components'][number], role: FirmwareEvidenceRole) =>
+  component.evidence?.some((evidence) => evidence.role === role) ?? false
+const firmwareEvidenceRoles: FirmwareEvidenceRole[] = ['printerAdvertised', 'deviceCatalogue', 'publicStable']
+const firmwareSourceName = (source: FirmwareSourceCheck['source']) => {
+  if (source === 'bambuLanInventory') return t('firmware.installed')
+  if (source === 'bambuLanAdvertisement') return t('firmware.sourcePrinter')
+  if (source === 'bambuLanHistory') return t('firmware.sourceDeviceCatalogue')
+  if (source === 'bambuPublicCatalogue') return t('firmware.sourcePublicStable')
+  return t('firmware.printerSoftware')
+}
+const firmwareSourceOutcomeLabel = (outcome: FirmwareSourceCheck['outcome']): string => {
+  const key: MessageKey = outcome === 'success'
+    ? 'firmware.sourceSuccess'
+    : outcome === 'empty'
+      ? 'firmware.sourceEmpty'
+      : outcome === 'failed'
+        ? 'firmware.sourceFailed'
+        : outcome === 'disabled'
+          ? 'firmware.sourceDisabled'
+          : 'firmware.sourceUnsupported'
+  return t(key)
+}
 
 function badgeFor(name: string): PrinterBadge {
   const entry = monitoring.value.find((candidate) => candidate.name === name)
@@ -960,6 +1013,7 @@ function applyPreferences(preferences: BackendPreferences) {
     enabled: preferences.notifications[notification.id],
   }))
   slicers.value = preferences.slicers
+  publicFirmwareCatalogue.value = preferences.publicFirmwareCatalogue
 }
 
 async function loadPreferences() {
@@ -981,6 +1035,19 @@ async function updateNotification(id: NotificationSetting['id'], enabled: boolea
     notifications.value = notifications.value.map((notification) => ({ ...notification, enabled: saved[notification.id] }))
   } catch (reason) {
     notifications.value = previous
+    showToast(message(reason), 'error')
+  }
+}
+
+async function updatePublicFirmwareCatalogue(enabled: boolean) {
+  const previous = publicFirmwareCatalogue.value
+  publicFirmwareCatalogue.value = enabled
+  try {
+    publicFirmwareCatalogue.value = await invoke<boolean>('update_firmware_catalogue_preferences', {
+      request: { publicFirmwareCatalogue: enabled },
+    })
+  } catch (reason) {
+    publicFirmwareCatalogue.value = previous
     showToast(message(reason), 'error')
   }
 }
@@ -3039,6 +3106,19 @@ onUnmounted(() => {
                 <p v-if="selectedFirmwareUpdate.report.source === 'moonrakerUpdateManager'" class="mb-4 text-sm text-gray-500 dark:text-gray-400">
                   {{ t('firmware.klipperScope') }}
                 </p>
+                <div class="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 dark:border-white/10 dark:bg-white/5">
+                  <span class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ t('firmware.assessment') }}</span>
+                  <span class="rounded-full bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800 dark:bg-cyan-400/10 dark:text-cyan-300">{{ firmwareAssessmentLabel(selectedFirmwareUpdate.report.assessment) }}</span>
+                  <span v-for="role in firmwareEvidenceRoles" v-show="selectedFirmwareUpdate.report.components.some((component) => componentHasEvidence(component, role))" :key="role" class="rounded-full border border-gray-300 px-2 py-0.5 text-xs text-gray-600 dark:border-white/15 dark:text-gray-300">
+                    {{ firmwareEvidenceLabel(role) }}
+                  </span>
+                </div>
+                <div v-if="selectedFirmwareUpdate.sources?.length" class="mb-4 flex flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
+                  <span v-for="source in selectedFirmwareUpdate.sources" :key="source.source" class="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 dark:border-white/10">
+                    <span class="font-medium text-gray-700 dark:text-gray-300">{{ firmwareSourceName(source.source) }}</span>
+                    <span>· {{ firmwareSourceOutcomeLabel(source.outcome) }}</span>
+                  </span>
+                </div>
                 <div class="divide-y divide-gray-200 dark:divide-white/10">
                   <div
                     v-for="component in selectedFirmwareUpdate.report.components"
@@ -3052,15 +3132,22 @@ onUnmounted(() => {
                       </div>
                       <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ firmwareComponentLabel(component.kind) }}</p>
                     </div>
-                    <div class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 rounded-md bg-gray-50 px-3 py-2 dark:bg-white/5">
+                    <div class="grid gap-2 rounded-md bg-gray-50 px-3 py-2 dark:bg-white/5 sm:grid-cols-4">
                       <div class="min-w-0">
                         <p class="text-[0.65rem] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ t('firmware.installed') }}</p>
                         <p class="truncate font-mono text-sm text-gray-800 dark:text-gray-200" :title="component.currentVersion">{{ versionRail(component).installed }}</p>
                       </div>
-                      <PhCaretRight class="size-4 text-gray-400" aria-hidden="true" />
-                      <div class="min-w-0 text-right">
-                        <p class="text-[0.65rem] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ t('firmware.advertised') }}</p>
-                        <p class="truncate font-mono text-sm" :class="component.availability === 'available' ? 'font-semibold text-amber-700 dark:text-amber-300' : 'text-gray-800 dark:text-gray-200'" :title="component.availableVersion">{{ versionRail(component).advertised }}</p>
+                      <div class="min-w-0">
+                        <p class="text-[0.65rem] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-300">{{ t('firmware.advertised') }}</p>
+                        <p class="truncate font-mono text-sm" :class="componentHasEvidence(component, 'printerAdvertised') ? 'font-semibold text-amber-700 dark:text-amber-300' : 'text-gray-800 dark:text-gray-200'" :title="component.availableVersion">{{ versionRail(component).advertised }}</p>
+                      </div>
+                      <div class="min-w-0">
+                        <p class="text-[0.65rem] font-medium uppercase tracking-wide text-cyan-600 dark:text-cyan-300">{{ t('firmware.deviceCatalogue') }}</p>
+                        <p class="truncate font-mono text-sm text-gray-800 dark:text-gray-200" :title="versionRail(component).deviceCatalogue">{{ versionRail(component).deviceCatalogue }}</p>
+                      </div>
+                      <div class="min-w-0">
+                        <p class="text-[0.65rem] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ t('firmware.publicStable') }}</p>
+                        <p class="truncate font-mono text-sm text-gray-800 dark:text-gray-200" :title="versionRail(component).publicStable">{{ versionRail(component).publicStable }}</p>
                       </div>
                     </div>
                   </div>
@@ -3225,6 +3312,16 @@ onUnmounted(() => {
                 <Switch :id="`notification-${notification.id}`" v-model="notification.enabled" :label="t(notification.label)" @update:model-value="updateNotification(notification.id, $event)" />
               </label>
             </div>
+          </Card>
+          <Card as="section" class="overflow-hidden">
+            <CardHeader :title="t('settingsView.firmwareSources')" :icon="PhInfo" />
+            <label for="public-firmware-catalogue" class="flex cursor-pointer items-center justify-between gap-3 px-4 py-5 hover:bg-gray-50 sm:px-6 dark:hover:bg-white/5">
+              <span class="flex grow flex-col">
+                <span class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('settingsView.publicFirmwareCatalogue') }}</span>
+                <span class="text-sm text-gray-500 dark:text-gray-400">{{ t('settingsView.publicFirmwareCatalogueDescription') }}</span>
+              </span>
+              <Switch id="public-firmware-catalogue" v-model="publicFirmwareCatalogue" :label="t('settingsView.publicFirmwareCatalogue')" @update:model-value="updatePublicFirmwareCatalogue" />
+            </label>
           </Card>
           <Card as="section" class="overflow-hidden">
             <CardHeader :title="t('settingsView.slicers')" :icon="PhDesktop" />

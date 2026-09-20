@@ -26,6 +26,7 @@ mod mapping;
 mod names;
 mod package;
 mod presence;
+mod public_catalogue;
 mod quirks;
 mod rtsp;
 mod transport;
@@ -43,7 +44,10 @@ pub use camera_manager::{
 pub use camera_negotiation::{CameraSelection, CameraSelectionSource, select_camera_transport};
 pub use capabilities::{CapabilityObservations, ObservationSource, Observed, ReportKind};
 pub use discovery::{DiscoveredPrinter, DiscoveryError, discover};
-pub use firmware::{FirmwareInventory, FirmwareModule, FirmwareVersion};
+pub use firmware::{
+    FirmwareInventory, FirmwareModule, FirmwareVersion, merge_history_report,
+    merge_public_catalogue_report,
+};
 pub use identity::{CanonicalModel, ModelIdentity};
 pub use mapping::{FilamentAssignment, FilamentMapping, MappingStatus, reconcile_filaments};
 pub use names::{JobNames, NameError, derive_job_names, validate_remote_filename};
@@ -52,6 +56,10 @@ pub use package::{
     PrintPackage, inspect_print_package,
 };
 pub use presence::{PresenceCache, PrinterPresence};
+pub use public_catalogue::{
+    PublicCatalogueError, PublicFirmwareRelease, fetch_public_firmware,
+    parse_public_firmware_version, public_catalogue_url,
+};
 pub use quirks::{
     Qualification as QuirkQualification, QuirkEffect, QuirkEntry, RegistryIssue,
     applicable as applicable_quirks, matching as matching_quirks, registry as quirk_registry,

@@ -90,7 +90,7 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
         path: &["firmware", "check"],
         short: "Check for firmware and printer-software updates",
         args: "<printer> [flags]",
-        flags: "  -h, --help                    help for check\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --refresh                 request fresh provider metadata without installing anything\n      --timeout string          override the profile connection timeout (e.g. 10s)",
+        flags: "  -h, --help                    help for check\n      --include-history         query the printer's read-only firmware catalogue\n      --include-public-catalogue query Bambu's public stable firmware catalogue\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --refresh                 request fresh provider metadata without installing anything\n      --timeout string          override the profile connection timeout (e.g. 10s)",
     },
     LeafCommand {
         path: &["files", "delete"],
@@ -962,7 +962,12 @@ fn firmware_check(
     let command = "firmware check";
     let (positionals, options) = match parse_options(
         args,
-        &["insecure", "refresh"],
+        &[
+            "insecure",
+            "refresh",
+            "include-history",
+            "include-public-catalogue",
+        ],
         &["timeout", "protocol-trace"],
     ) {
         Ok(value) => value,
@@ -980,11 +985,13 @@ fn firmware_check(
         Ok(printer) => printer,
         Err(error) => return write_error(command, format, error, out, err),
     };
-    let report = match drivers::firmware_update_status(
+    let report = match drivers::firmware_update_status_with_sources(
         &printer.driver,
         printer.access_code.as_deref(),
         printer.tls_fingerprint.as_deref(),
         options.enabled("refresh"),
+        options.enabled("include-history"),
+        options.enabled("include-public-catalogue"),
     ) {
         Ok(report) => report,
         Err(error) => return write_error(command, format, driver_error(error), out, err),
@@ -1038,6 +1045,20 @@ fn human_firmware_updates(profile: &str, report: &FirmwareUpdateReport) -> Strin
     let mut lines = vec![
         format!("Printer: {}", sanitize(profile)),
         format!("Availability: {availability}"),
+        format!("Assessment: {:?}", report.assessment),
+        format!(
+            "Evidence sources: {}",
+            if report.evidence_sources.is_empty() {
+                "none".to_owned()
+            } else {
+                report
+                    .evidence_sources
+                    .iter()
+                    .map(|source| format!("{source:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        ),
     ];
     for component in &report.components {
         let kind = match component.kind {
@@ -5493,6 +5514,7 @@ mod tests {
                 available_version: Some("2.0".into()),
                 availability: FirmwareUpdateAvailability::Available,
                 required: true,
+                evidence: Vec::new(),
             }],
             vec![FirmwareUpdateIssue {
                 code: "test",
@@ -5526,6 +5548,7 @@ mod tests {
                     available_version: None,
                     availability,
                     required: false,
+                    evidence: Vec::new(),
                 }],
                 Vec::new(),
             );

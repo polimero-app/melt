@@ -318,12 +318,36 @@ pub fn firmware_update_status(
     tls_fingerprint: Option<&str>,
     refresh: bool,
 ) -> Result<FirmwareUpdateReport, DriverError> {
+    firmware_update_status_with_sources(
+        profile,
+        access_code,
+        tls_fingerprint,
+        refresh,
+        false,
+        false,
+    )
+}
+
+pub fn firmware_update_status_with_sources(
+    profile: &Profile,
+    access_code: Option<&str>,
+    tls_fingerprint: Option<&str>,
+    refresh: bool,
+    include_history: bool,
+    include_public_catalogue: bool,
+) -> Result<FirmwareUpdateReport, DriverError> {
     match profile {
         Profile::Moonraker(profile) => moonraker::Client::new(profile.clone())
             .and_then(|client| client.firmware_update_status(access_code, refresh))
             .map_err(DriverError::Moonraker),
         Profile::Bambu(profile) => bambu::Client::new(profile.clone())
-            .firmware_update_status(access_code, tls_fingerprint, refresh)
+            .firmware_update_status_with_sources(
+                access_code,
+                tls_fingerprint,
+                refresh,
+                include_history,
+                include_public_catalogue,
+            )
             .map_err(DriverError::Bambu),
     }
 }

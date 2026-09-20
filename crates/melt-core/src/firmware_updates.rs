@@ -32,6 +32,49 @@ pub enum FirmwareUpdateSource {
     MoonrakerUpdateManager,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FirmwareEvidenceSource {
+    BambuLanInventory,
+    BambuLanAdvertisement,
+    BambuLanHistory,
+    BambuPublicCatalogue,
+    MoonrakerUpdateManager,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FirmwareEvidenceRole {
+    Installed,
+    PrinterAdvertised,
+    DeviceCatalogue,
+    PublicStable,
+    UpstreamCurrent,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirmwareVersionEvidence {
+    pub source: FirmwareEvidenceSource,
+    pub role: FirmwareEvidenceRole,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    pub required: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FirmwareUpdateAssessment {
+    Required,
+    ConfirmedAvailable,
+    DeviceCatalogueNewer,
+    PublicReleaseNewer,
+    Current,
+    Conflict,
+    Unknown,
+    Unsupported,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FirmwareUpdateComponent {
@@ -44,6 +87,8 @@ pub struct FirmwareUpdateComponent {
     pub available_version: Option<String>,
     pub availability: FirmwareUpdateAvailability,
     pub required: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<FirmwareVersionEvidence>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -57,9 +102,12 @@ pub struct FirmwareUpdateIssue {
 #[serde(rename_all = "camelCase")]
 pub struct FirmwareUpdateReport {
     pub availability: FirmwareUpdateAvailability,
+    pub assessment: FirmwareUpdateAssessment,
     pub source: FirmwareUpdateSource,
     pub components: Vec<FirmwareUpdateComponent>,
     pub issues: Vec<FirmwareUpdateIssue>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence_sources: Vec<FirmwareEvidenceSource>,
 }
 
 impl FirmwareUpdateReport {
@@ -101,11 +149,20 @@ impl FirmwareUpdateReport {
         } else {
             FirmwareUpdateAvailability::Unknown
         };
+        let assessment = assessment_for(&components, availability, &issues);
+        let mut evidence_sources = components
+            .iter()
+            .flat_map(|component| component.evidence.iter().map(|evidence| evidence.source))
+            .collect::<Vec<_>>();
+        evidence_sources.sort_unstable();
+        evidence_sources.dedup();
         Self {
             availability,
+            assessment,
             source,
             components,
             issues,
+            evidence_sources,
         }
     }
 
@@ -116,11 +173,115 @@ impl FirmwareUpdateReport {
     ) -> Self {
         Self {
             availability: FirmwareUpdateAvailability::Unsupported,
+            assessment: FirmwareUpdateAssessment::Unsupported,
             source,
             components: Vec::new(),
             issues: vec![FirmwareUpdateIssue { code, message }],
+            evidence_sources: Vec::new(),
         }
     }
+}
+
+fn assessment_for(
+    components: &[FirmwareUpdateComponent],
+    availability: FirmwareUpdateAvailability,
+    issues: &[FirmwareUpdateIssue],
+) -> FirmwareUpdateAssessment {
+    if components.iter().any(|component| component.required) {
+        return FirmwareUpdateAssessment::Required;
+    }
+    if availability == FirmwareUpdateAvailability::Available {
+        return FirmwareUpdateAssessment::ConfirmedAvailable;
+    }
+    if issues.iter().any(|issue| {
+        matches!(
+            issue.code,
+            "targetNotNewer"
+                | "historyTargetNotNewer"
+                | "uncomparableVersion"
+                | "uncomparableHistoryVersion"
+                | "uncomparablePublicVersion"
+                | "publicTargetNotNewer"
+        )
+    }) || components.iter().any(conflicting_evidence)
+    {
+        return FirmwareUpdateAssessment::Conflict;
+    }
+    if components
+        .iter()
+        .any(|component| evidence_newer(component, FirmwareEvidenceRole::DeviceCatalogue))
+    {
+        return FirmwareUpdateAssessment::DeviceCatalogueNewer;
+    }
+    if components
+        .iter()
+        .any(|component| evidence_newer(component, FirmwareEvidenceRole::PublicStable))
+    {
+        return FirmwareUpdateAssessment::PublicReleaseNewer;
+    }
+    match availability {
+        FirmwareUpdateAvailability::Available => FirmwareUpdateAssessment::ConfirmedAvailable,
+        FirmwareUpdateAvailability::Current => FirmwareUpdateAssessment::Current,
+        FirmwareUpdateAvailability::Unsupported => FirmwareUpdateAssessment::Unsupported,
+        FirmwareUpdateAvailability::Unknown => FirmwareUpdateAssessment::Unknown,
+    }
+}
+
+fn numeric_version(value: &str) -> Option<Vec<u64>> {
+    let numbers = value
+        .split(|character: char| !character.is_ascii_digit() && character != '.')
+        .next()
+        .unwrap_or_default();
+    let parsed = numbers
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .map(str::parse)
+        .collect::<Result<Vec<u64>, _>>()
+        .ok()?;
+    (!parsed.is_empty()).then_some(parsed)
+}
+
+fn evidence_newer(component: &FirmwareUpdateComponent, role: FirmwareEvidenceRole) -> bool {
+    let Some(current) = component
+        .current_version
+        .as_deref()
+        .and_then(numeric_version)
+    else {
+        return false;
+    };
+    component.evidence.iter().any(|evidence| {
+        evidence.role == role
+            && evidence
+                .version
+                .as_deref()
+                .and_then(numeric_version)
+                .is_some_and(|target| {
+                    compare_numeric_versions(&target, &current) == std::cmp::Ordering::Greater
+                })
+    })
+}
+
+fn compare_numeric_versions(left: &[u64], right: &[u64]) -> std::cmp::Ordering {
+    let length = left.len().max(right.len());
+    (0..length)
+        .map(|index| {
+            left.get(index)
+                .copied()
+                .unwrap_or(0)
+                .cmp(&right.get(index).copied().unwrap_or(0))
+        })
+        .find(|ordering| *ordering != std::cmp::Ordering::Equal)
+        .unwrap_or(std::cmp::Ordering::Equal)
+}
+
+fn conflicting_evidence(component: &FirmwareUpdateComponent) -> bool {
+    let versions = component
+        .evidence
+        .iter()
+        .filter(|evidence| evidence.role != FirmwareEvidenceRole::Installed)
+        .filter_map(|evidence| evidence.version.as_deref())
+        .collect::<std::collections::BTreeSet<_>>();
+    versions.len() > 1 && component.availability != FirmwareUpdateAvailability::Available
 }
 
 pub(crate) fn bounded_provider_text(value: &str, maximum_bytes: usize) -> (String, bool) {
@@ -159,6 +320,7 @@ mod tests {
             available_version: None,
             availability,
             required: false,
+            evidence: Vec::new(),
         }
     }
 
@@ -236,5 +398,35 @@ mod tests {
         assert_eq!(value["availability"], "unsupported");
         assert_eq!(value["source"], "moonrakerUpdateManager");
         assert_eq!(value["issues"][0]["code"], "missing");
+    }
+
+    #[test]
+    fn report_collects_evidence_sources_and_assessment() {
+        let mut component = component(
+            "ota",
+            FirmwareUpdateComponentKind::PrinterFirmware,
+            FirmwareUpdateAvailability::Unknown,
+        );
+        component.current_version = Some("01.08.00.00".into());
+        component.available_version = Some("01.09.00.00".into());
+        component.evidence.push(FirmwareVersionEvidence {
+            source: FirmwareEvidenceSource::BambuPublicCatalogue,
+            role: FirmwareEvidenceRole::PublicStable,
+            version: component.available_version.clone(),
+            required: false,
+        });
+        let report = FirmwareUpdateReport::from_components(
+            FirmwareUpdateSource::BambuMqtt,
+            vec![component],
+            Vec::new(),
+        );
+        assert_eq!(
+            report.assessment,
+            FirmwareUpdateAssessment::PublicReleaseNewer
+        );
+        assert_eq!(
+            report.evidence_sources,
+            [FirmwareEvidenceSource::BambuPublicCatalogue]
+        );
     }
 }

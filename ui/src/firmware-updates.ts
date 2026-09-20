@@ -1,5 +1,22 @@
 export type FirmwareUpdateAvailability = 'available' | 'current' | 'unknown' | 'unsupported'
 export type FirmwareUpdateComponentKind = 'printerFirmware' | 'accessoryFirmware' | 'printerSoftware'
+export type FirmwareEvidenceSource = 'bambuLanInventory' | 'bambuLanAdvertisement' | 'bambuLanHistory' | 'bambuPublicCatalogue' | 'moonrakerUpdateManager'
+export type FirmwareEvidenceRole = 'installed' | 'printerAdvertised' | 'deviceCatalogue' | 'publicStable' | 'upstreamCurrent'
+export type FirmwareUpdateAssessment = 'required' | 'confirmedAvailable' | 'deviceCatalogueNewer' | 'publicReleaseNewer' | 'current' | 'conflict' | 'unknown' | 'unsupported'
+
+export type FirmwareVersionEvidence = {
+  source: FirmwareEvidenceSource
+  role: FirmwareEvidenceRole
+  version?: string
+  required: boolean
+}
+export type FirmwareSourceCheck = {
+  source: FirmwareEvidenceSource
+  checkedAt: string
+  outcome: 'success' | 'empty' | 'failed' | 'disabled' | 'unsupported'
+  stale: boolean
+  error?: { code: string; detail?: string }
+}
 
 export type FirmwareUpdateComponent = {
   id: string
@@ -9,6 +26,7 @@ export type FirmwareUpdateComponent = {
   availableVersion?: string
   availability: FirmwareUpdateAvailability
   required: boolean
+  evidence?: FirmwareVersionEvidence[]
 }
 
 export type FirmwareUpdateEntry = {
@@ -16,11 +34,14 @@ export type FirmwareUpdateEntry = {
   driver: string
   checkedAt: string
   stale: boolean
+  sources?: FirmwareSourceCheck[]
   report: {
     availability: FirmwareUpdateAvailability
+    assessment: FirmwareUpdateAssessment
     source: 'bambuMqtt' | 'moonrakerUpdateManager'
     components: FirmwareUpdateComponent[]
     issues: { code: string; message: string }[]
+    evidenceSources?: FirmwareEvidenceSource[]
   }
   error?: { code: string; detail?: string }
 }
@@ -39,9 +60,13 @@ export function updateEntryFor(entries: FirmwareUpdateEntry[], profile: string |
 }
 
 export function versionRail(component: FirmwareUpdateComponent) {
+  const evidence = component.evidence ?? []
+  const versionFor = (role: FirmwareEvidenceRole) => evidence.find((item) => item.role === role)?.version
   return {
     installed: component.currentVersion || '—',
     advertised: component.availableVersion || '—',
+    deviceCatalogue: versionFor('deviceCatalogue') || '—',
+    publicStable: versionFor('publicStable') || '—',
     hasTarget: Boolean(component.availableVersion),
   }
 }
