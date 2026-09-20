@@ -242,6 +242,25 @@ impl Client {
         (!name.is_empty()).then(|| name.to_owned())
     }
 
+    /// The best model this client knows, not merely the one the profile was
+    /// typed with. A profile often carries no model at all, and any exchange
+    /// that has already run has cached the printer's own report.
+    fn detected_model(&self) -> super::CanonicalModel {
+        if let Ok(cached) = self.capabilities.lock()
+            && let Some(capabilities) = cached.as_ref()
+            && capabilities.identity.canonical != super::CanonicalModel::Unknown
+        {
+            return capabilities.identity.canonical;
+        }
+        super::detect(
+            self.profile.serial(),
+            self.profile.model(),
+            &Default::default(),
+        )
+        .identity
+        .canonical
+    }
+
     /// Queries firmware module information on the persistent MQTT session and
     /// refines conservative model defaults with facts observed from firmware.
     pub fn runtime_capabilities(
@@ -319,7 +338,7 @@ impl Client {
         if !include_public_catalogue {
             return Ok(report);
         }
-        let model = super::ModelIdentity::parse(self.profile.model()).canonical;
+        let model = self.detected_model();
         match fetch_public_firmware(model, self.profile.timeout()) {
             Ok(release) => Ok(merge_public_catalogue_report(report, &release.version)),
             Err(super::PublicCatalogueError::UnsupportedModel) => {
@@ -6604,6 +6623,24 @@ mod tests {
     /// `melt status --detailed` names the model, and a status exchange makes
     /// no `get_version` call, so the name has to come from the detection the
     /// status observation itself performs.
+    /// The public catalogue is looked up per model, and it used to read only
+    /// the model string the profile was typed with. A profile usually carries
+    /// none, which made the lookup impossible for a printer the serial alone
+    /// identifies.
+    #[test]
+    fn the_public_catalogue_looks_up_the_detected_model_not_the_typed_one() {
+        let client = Client::new(Profile::new("printer.local", "01P00000000000", true).unwrap());
+        assert_eq!(client.profile.model(), "");
+        assert_eq!(client.detected_model(), CanonicalModel::P1S);
+
+        // The printer's own report outranks the serial once anything has
+        // exchanged with it.
+        client.observe_runtime_status(
+            br#"{"print":{"command":"push_status","msg":0,"sequence_id":"1"}}"#,
+        );
+        assert_eq!(client.detected_model(), CanonicalModel::P1S);
+    }
+
     #[test]
     fn a_status_observation_is_enough_to_name_the_model() {
         let client = Client::new(Profile::new("printer.local", "01P00000000000", true).unwrap());

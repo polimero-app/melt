@@ -638,8 +638,9 @@ function toggleSerial(name: string) {
 const activePrinter = computed(() => printers.value.find((printer) => printer.name === activePrinterId.value) ?? printers.value[0])
 const firmwarePrinter = computed(() => printers.value.find((printer) => printer.name === firmwarePrinterId.value))
 // Bambu's public pages are per model, so without one there is nothing to look
-// up. Discovery fills this in; a hand-added printer may have neither.
-const firmwarePrinterModel = computed(() => firmwarePrinter.value?.model || firmwarePrinter.value?.presence?.model || '')
+// up. Detection resolves it from the serial or the printer's own report; the
+// typed string and the discovery broadcast are the remaining fallbacks.
+const firmwarePrinterModel = computed(() => firmwarePrinter.value?.detectedModel || firmwarePrinter.value?.model || firmwarePrinter.value?.presence?.model || '')
 const compactNavValue = computed({
   get: () => {
     if (activeView.value !== 'control') return `view:${activeView.value}`
@@ -3106,9 +3107,8 @@ onUnmounted(() => {
                 <h2 class="text-2xl/7 font-bold text-gray-900 sm:text-3xl sm:tracking-tight dark:text-white">{{ t('firmware.title') }}</h2>
                 <p class="mt-2 max-w-3xl text-sm text-gray-500 dark:text-gray-400">{{ t('firmware.description', { name: firmwarePrinter.name }) }}</p>
                 <div class="mt-3 flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs text-gray-500 dark:text-gray-400">
-                  <span class="inline-flex items-center gap-1.5"><PhPrinter class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinter.driver }}</span>
+                  <span class="inline-flex items-center gap-1.5"><PhPrinter class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinterModel || firmwarePrinter.driver }}</span>
                   <span class="inline-flex items-center gap-1.5"><PhNetwork class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinter.host }}</span>
-                  <span v-if="firmwarePrinterModel" class="inline-flex items-center gap-1.5"><PhInfo class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinterModel }}</span>
                 </div>
               </div>
               <div class="mt-5 flex items-center gap-2 lg:mt-0">
