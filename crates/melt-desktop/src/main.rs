@@ -1108,18 +1108,10 @@ fn printer_firmware_updates(
     if !refresh && let Some(entry) = fresh_firmware_entry(&state, &normalized) {
         return Ok(entry);
     }
-    // A user-triggered refresh is an explicit request for the complete
-    // read-only evidence set, including the official public catalogue. A
-    // passive (non-refresh) load still follows the persisted preference,
-    // same as the background worker.
-    check_firmware_updates(
-        &state,
-        &app,
-        normalized,
-        profile,
-        refresh,
-        refresh.then_some(true),
-    )
+    // Both a passive load and an explicit refresh follow the persisted
+    // source preference, so a LAN-only setup never contacts Bambu from this
+    // command. `printer_public_firmware_catalogue` is the one-shot opt-in.
+    check_firmware_updates(&state, &app, normalized, profile, refresh, None)
 }
 
 /// Performs a one-shot public catalogue check without changing the persisted

@@ -39,17 +39,18 @@ redirects, and never sends an access code, serial number, cookie, or token.
 
 The Manage printers firmware screen shows installed, printer-advertised,
 device-catalogue, and public-stable rails separately. History checks are
-read-only and cached with the normal firmware result. An explicit firmware
-refresh includes the public catalogue; background checks remain controlled by
-Settings → Firmware sources. The firmware screen also offers a one-shot
-public-catalogue check without changing that preference; a failed optional
-source leaves the other evidence visible and records a bounded issue.
+read-only and cached with the normal firmware result. **Refresh** re-runs the
+check against the sources enabled under Settings → Firmware sources, so a
+LAN-only setup never contacts Bambu. **Also check Bambu.com** is a one-shot
+opt-in that adds public-catalogue evidence without changing that preference;
+a failed optional source leaves the other evidence visible and records a
+bounded issue.
 
 A successful public-catalogue result is cached per printer model for 24 hours
 and shared by every profile of that model, and concurrent checks for the same
-model wait for a single request. Refreshes and the one-shot check are served
-from that cache while it is valid, so repeatedly checking never repeatedly
-contacts Bambu. Failures are not cached and are retried on the next check.
+model wait for a single request. The one-shot check is served from that cache
+while it is valid, so repeatedly checking never repeatedly contacts Bambu.
+Failures are not cached and are retried on the next check.
 
 ## Interpretation
 
