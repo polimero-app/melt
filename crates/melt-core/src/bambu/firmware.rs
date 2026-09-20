@@ -300,7 +300,7 @@ pub fn merge_history_report(mut report: FirmwareUpdateReport, history: &Value) -
             "ota",
             "Printer firmware",
             version,
-            firmware.get("force_update").and_then(Value::as_bool).unwrap_or(false),
+            false,
             &mut issues,
             &mut truncated,
         );
@@ -331,7 +331,7 @@ pub fn merge_history_report(mut report: FirmwareUpdateReport, history: &Value) -
                     id,
                     label,
                     version,
-                    firmware.get("force_update").and_then(Value::as_bool).unwrap_or(false),
+                    false,
                     &mut issues,
                     &mut truncated,
                 );
@@ -404,13 +404,7 @@ fn merge_public_target(
         version: Some(target.clone()),
         required: false,
     });
-    let Some(current) = component.current_version.as_deref() else {
-        if component.available_version.is_none() {
-            component.available_version = Some(target);
-            component.availability = FirmwareUpdateAvailability::Available;
-        }
-        return;
-    };
+    let Some(current) = component.current_version.as_deref() else { return };
     let current = FirmwareVersion::parse(current);
     let target_version = FirmwareVersion::parse(&target);
     if current.numeric.is_empty() || target_version.numeric.is_empty() {
@@ -424,15 +418,7 @@ fn merge_public_target(
         return;
     }
     match target_version.numeric_cmp(&current) {
-        Ordering::Greater => {
-            if component.available_version.is_none() {
-                component.available_version = Some(target);
-                component.availability = FirmwareUpdateAvailability::Available;
-            }
-        }
-        Ordering::Equal if component.availability != FirmwareUpdateAvailability::Available => {
-            component.availability = FirmwareUpdateAvailability::Current;
-        }
+        Ordering::Greater | Ordering::Equal => {}
         Ordering::Less => push_issue(
             issues,
             FirmwareUpdateIssue {
@@ -440,7 +426,6 @@ fn merge_public_target(
                 message: "The public catalogue reported a version older than the installed version.",
             },
         ),
-        Ordering::Equal => {}
     }
 }
 
@@ -472,7 +457,7 @@ fn merge_catalogue_target(
         required: false,
         evidence: Vec::new(),
     });
-    component.required |= required;
+    let _ = required;
     component.evidence.push(FirmwareVersionEvidence {
         source: FirmwareEvidenceSource::BambuLanHistory,
         role: FirmwareEvidenceRole::DeviceCatalogue,
@@ -489,19 +474,7 @@ fn merge_catalogue_target(
         }
     });
     match (component.current_version.is_none(), comparison.flatten()) {
-        (true, _) => {
-            component.available_version = Some(target);
-            component.availability = FirmwareUpdateAvailability::Available;
-        }
-        (false, Some(Ordering::Greater)) => {
-            component.available_version = Some(target);
-            component.availability = FirmwareUpdateAvailability::Available;
-        }
-        (false, Some(Ordering::Equal)) => {
-            if component.availability != FirmwareUpdateAvailability::Available {
-                component.availability = FirmwareUpdateAvailability::Current;
-            }
-        }
+        (true, _) | (false, Some(Ordering::Greater)) | (false, Some(Ordering::Equal)) => {}
         (false, Some(Ordering::Less)) => push_issue(
             issues,
             FirmwareUpdateIssue {
@@ -516,9 +489,6 @@ fn merge_catalogue_target(
                 message: "A device catalogue version could not be compared safely.",
             },
         ),
-    }
-    if component.required {
-        component.availability = FirmwareUpdateAvailability::Available;
     }
 }
 
@@ -640,6 +610,7 @@ fn finish_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::firmware_updates::FirmwareUpdateAssessment;
     use serde_json::json;
 
     #[test]
@@ -749,9 +720,11 @@ mod tests {
                 "ams":[{"device_id":"ams-0","dev_model_name":"AMS","firmware":[{"version":"00.01.00.00"}]}]
             }]}}),
         );
-        assert_eq!(merged.availability, FirmwareUpdateAvailability::Available);
+        assert_eq!(merged.availability, FirmwareUpdateAvailability::Unknown);
+        assert_eq!(merged.assessment, FirmwareUpdateAssessment::DeviceCatalogueNewer);
         let ota = merged.components.iter().find(|component| component.id == "ota").unwrap();
-        assert_eq!(ota.available_version.as_deref(), Some("01.09.00.00"));
+        assert_eq!(ota.available_version, None);
+        assert!(ota.evidence.iter().any(|evidence| evidence.version.as_deref() == Some("01.09.00.00")));
         assert!(ota.evidence.iter().any(|evidence| {
             evidence.source == FirmwareEvidenceSource::BambuLanHistory
                 && evidence.role == FirmwareEvidenceRole::DeviceCatalogue

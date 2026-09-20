@@ -39,9 +39,10 @@ Fyne GUI, and Go application implementations.
 - **Diagnostics** — export redacted compatibility information covering model
   identity, module firmware, capability provenance, authorization, negotiated
   transports, TLS-pin presence, camera-owner state, and active/inactive quirks.
-- **Read-only update checks** — inspect Bambu firmware advertisements and the
-  Moonraker Update Manager's Klipper software status without downloading or
-  installing updates.
+- **Read-only update checks** — inspect Bambu firmware inventory, printer
+  advertisements, optional `upgrade.get_history` catalogue evidence, and the
+  opt-in official public stable catalogue alongside Moonraker software status;
+  Melt never downloads or installs updates.
 - **Automation contract** — request stable JSON envelopes and exit codes from
   the same executable used by the desktop application.
 
@@ -93,6 +94,8 @@ melt printer add workshop --driver bambu-lan --host 192.0.2.10 \
   --serial SANITIZED_SERIAL --access-code-file ./access-code.txt
 melt status workshop --detailed
 melt firmware check workshop --refresh
+melt firmware check workshop --include-history --output json
+melt firmware check workshop --include-history --include-public-catalogue --output json
 melt printer capabilities workshop --output json
 melt jobs preflight ./part.gcode.3mf --output json
 ```
@@ -155,10 +158,17 @@ error.
 
 Bambu LAN supports pinned-TLS MQTT status and controls, authenticated storage
 operations, SSDP/UDP discovery, camera snapshots/streams, and sliced 3MF
-preflight. Firmware checks use only version inventory and update advertisements
-already exposed by the printer over LAN MQTT; they never invoke an upgrade
-command or contact the Bambu cloud. Live observations and safe protocol probes
-take precedence over model-family assumptions. Unknown models and fields remain
+preflight. Firmware checks use read-only LAN inventory and advertisements and
+can optionally query `upgrade.get_history`. The CLI flags make each optional
+source explicit; the desktop keeps history checks read-only and exposes a
+separate setting for the official public stable catalogue. Public checks use
+only an allowlisted HTTPS model page, send no credentials, and never follow
+download links. Melt never invokes an upgrade command or cloud account API.
+Per-component evidence remains separate so a public release cannot silently
+become a printer-confirmed offer. See
+[`docs/firmware-updates.md`](docs/firmware-updates.md) for the source and
+assessment contract. Live observations and safe protocol probes take
+precedence over model-family assumptions. Unknown models and fields remain
 operable but are not misclassified as supported or unsupported without
 evidence. AMS drying status is shown for heater-equipped units, and start/stop
 is offered only when the firmware advertises remote drying.

@@ -149,7 +149,7 @@ impl FirmwareUpdateReport {
         } else {
             FirmwareUpdateAvailability::Unknown
         };
-        let assessment = assessment_for(&components, availability);
+        let assessment = assessment_for(&components, availability, &issues);
         let mut evidence_sources = components
             .iter()
             .flat_map(|component| component.evidence.iter().map(|evidence| evidence.source))
@@ -185,22 +185,35 @@ impl FirmwareUpdateReport {
 fn assessment_for(
     components: &[FirmwareUpdateComponent],
     availability: FirmwareUpdateAvailability,
+    issues: &[FirmwareUpdateIssue],
 ) -> FirmwareUpdateAssessment {
     if components.iter().any(|component| component.required) {
         return FirmwareUpdateAssessment::Required;
     }
+    if availability == FirmwareUpdateAvailability::Available {
+        return FirmwareUpdateAssessment::ConfirmedAvailable;
+    }
+    if issues.iter().any(|issue| {
+        matches!(
+            issue.code,
+            "targetNotNewer"
+                | "historyTargetNotNewer"
+                | "uncomparableVersion"
+                | "uncomparableHistoryVersion"
+                | "uncomparablePublicVersion"
+                | "publicTargetNotNewer"
+        )
+    }) || components.iter().any(conflicting_evidence)
+    {
+        return FirmwareUpdateAssessment::Conflict;
+    }
     if components.iter().any(|component| {
-        component.evidence.iter().any(|evidence| {
-            evidence.role == FirmwareEvidenceRole::DeviceCatalogue
-                && evidence.version.is_some()
-        }) && component.availability == FirmwareUpdateAvailability::Available
+        evidence_newer(component, FirmwareEvidenceRole::DeviceCatalogue)
     }) {
         return FirmwareUpdateAssessment::DeviceCatalogueNewer;
     }
     if components.iter().any(|component| {
-        component.evidence.iter().any(|evidence| {
-            evidence.role == FirmwareEvidenceRole::PublicStable && evidence.version.is_some()
-        }) && component.availability == FirmwareUpdateAvailability::Available
+        evidence_newer(component, FirmwareEvidenceRole::PublicStable)
     }) {
         return FirmwareUpdateAssessment::PublicReleaseNewer;
     }
@@ -210,6 +223,55 @@ fn assessment_for(
         FirmwareUpdateAvailability::Unsupported => FirmwareUpdateAssessment::Unsupported,
         FirmwareUpdateAvailability::Unknown => FirmwareUpdateAssessment::Unknown,
     }
+}
+
+fn numeric_version(value: &str) -> Option<Vec<u64>> {
+    let numbers = value
+        .split(|character: char| !character.is_ascii_digit() && character != '.')
+        .next()
+        .unwrap_or_default();
+    let parsed = numbers
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .map(str::parse)
+        .collect::<Result<Vec<u64>, _>>()
+        .ok()?;
+    (!parsed.is_empty()).then_some(parsed)
+}
+
+fn evidence_newer(component: &FirmwareUpdateComponent, role: FirmwareEvidenceRole) -> bool {
+    let Some(current) = component.current_version.as_deref().and_then(numeric_version) else {
+        return false;
+    };
+    component.evidence.iter().any(|evidence| {
+        evidence.role == role
+            && evidence.version.as_deref().and_then(numeric_version).is_some_and(|target| {
+                compare_numeric_versions(&target, &current) == std::cmp::Ordering::Greater
+            })
+    })
+}
+
+fn compare_numeric_versions(left: &[u64], right: &[u64]) -> std::cmp::Ordering {
+    let length = left.len().max(right.len());
+    (0..length)
+        .map(|index| {
+            left.get(index)
+                .copied()
+                .unwrap_or(0)
+                .cmp(&right.get(index).copied().unwrap_or(0))
+        })
+        .find(|ordering| *ordering != std::cmp::Ordering::Equal)
+        .unwrap_or(std::cmp::Ordering::Equal)
+}
+
+fn conflicting_evidence(component: &FirmwareUpdateComponent) -> bool {
+    let versions = component
+        .evidence
+        .iter()
+        .filter(|evidence| evidence.role != FirmwareEvidenceRole::Installed)
+        .filter_map(|evidence| evidence.version.as_deref())
+        .collect::<std::collections::BTreeSet<_>>();
+    versions.len() > 1 && component.availability != FirmwareUpdateAvailability::Available
 }
 
 pub(crate) fn bounded_provider_text(value: &str, maximum_bytes: usize) -> (String, bool) {
