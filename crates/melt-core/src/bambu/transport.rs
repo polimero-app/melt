@@ -34,8 +34,9 @@ use super::{
     AuthorizationMode, BedLevelingSupport, FirmwareInventory, MQTT_USERNAME, MappingStatus,
     MqttTopics, PrintStage, PrintStageEvent, Profile, RuntimeCapabilities, StorageTransport,
     StorageVolume, TlsPinError, firmware::update_report, is_pushall_payload,
-    is_valid_tls_fingerprint, preflight_print_package, pushall_payload, resolve_authorization,
-    tls_fingerprint, tunnel, verify_tls_fingerprint,
+    fetch_public_firmware, is_valid_tls_fingerprint, merge_public_catalogue_report,
+    preflight_print_package, pushall_payload, resolve_authorization, tls_fingerprint, tunnel,
+    verify_tls_fingerprint,
 };
 
 #[cfg(test)]
@@ -267,6 +268,58 @@ impl Client {
     /// separate from `exchange`: it never sends a pushall refresh or any
     /// update command.
     pub fn firmware_update_status_with_history(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        refresh: bool,
+        include_history: bool,
+    ) -> Result<FirmwareUpdateReport, Error> {
+        self.firmware_update_status_with_sources(
+            access_code,
+            fingerprint,
+            refresh,
+            include_history,
+            false,
+        )
+    }
+
+    pub fn firmware_update_status_with_sources(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        refresh: bool,
+        include_history: bool,
+        include_public_catalogue: bool,
+    ) -> Result<FirmwareUpdateReport, Error> {
+        let report = self.firmware_update_status_with_history_inner(
+            access_code,
+            fingerprint,
+            refresh,
+            include_history,
+        )?;
+        if !include_public_catalogue {
+            return Ok(report);
+        }
+        let model = super::ModelIdentity::parse(self.profile.model()).canonical;
+        match fetch_public_firmware(model, self.profile.timeout()) {
+            Ok(release) => Ok(merge_public_catalogue_report(report, &release.version)),
+            Err(super::PublicCatalogueError::UnsupportedModel) => Ok(report),
+            Err(_) => {
+                let mut issues = report.issues.clone();
+                issues.push(FirmwareUpdateIssue {
+                    code: "publicCatalogueUnavailable",
+                    message: "The public firmware catalogue could not be queried.",
+                });
+                Ok(FirmwareUpdateReport::from_components(
+                    report.source,
+                    report.components,
+                    issues,
+                ))
+            }
+        }
+    }
+
+    fn firmware_update_status_with_history_inner(
         &self,
         access_code: Option<&str>,
         fingerprint: Option<&str>,
