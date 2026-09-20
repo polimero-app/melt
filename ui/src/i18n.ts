@@ -226,6 +226,18 @@ export type MessageKey =
   | "firmware.stale"
   | "firmware.updateAvailable"
   | "firmware.requiredUpdate"
+  | "firmware.assessment"
+  | "firmware.assessmentRequired"
+  | "firmware.assessmentDeviceCatalogue"
+  | "firmware.assessmentPublicRelease"
+  | "firmware.assessmentConfirmed"
+  | "firmware.assessmentCurrent"
+  | "firmware.assessmentConflict"
+  | "firmware.sourcePrinter"
+  | "firmware.sourceDeviceCatalogue"
+  | "firmware.sourcePublicStable"
+  | "firmware.deviceCatalogue"
+  | "firmware.publicStable"
   | "camera.title"
   | "camera.live"
   | "camera.snapshotLabel"
@@ -310,6 +322,9 @@ export type MessageKey =
   | "printersView.scanning"
   | "settingsView.description"
   | "settingsView.notifications"
+  | "settingsView.firmwareSources"
+  | "settingsView.publicFirmwareCatalogue"
+  | "settingsView.publicFirmwareCatalogueDescription"
   | "settingsView.notifyComplete"
   | "settingsView.notifyCompleteDescription"
   | "settingsView.notifyFailure"
@@ -744,6 +759,18 @@ const messages: Record<Locale, Messages> = {
     "firmware.stale": "Stored result — confirmation is more than 24 hours old",
     "firmware.updateAvailable": "Update available",
     "firmware.requiredUpdate": "Required update",
+    "firmware.assessment": "Assessment",
+    "firmware.assessmentRequired": "Required update",
+    "firmware.assessmentDeviceCatalogue": "Device catalogue is newer",
+    "firmware.assessmentPublicRelease": "Public stable release is newer",
+    "firmware.assessmentConfirmed": "Update confirmed by printer",
+    "firmware.assessmentCurrent": "Current against checked sources",
+    "firmware.assessmentConflict": "Sources disagree",
+    "firmware.sourcePrinter": "Printer advertised",
+    "firmware.sourceDeviceCatalogue": "Device catalogue",
+    "firmware.sourcePublicStable": "Public stable",
+    "firmware.deviceCatalogue": "Device catalogue",
+    "firmware.publicStable": "Public stable",
     "camera.title": "Camera",
     "camera.live": "LIVE",
     "camera.snapshotLabel": "SNAPSHOT",
@@ -828,6 +855,9 @@ const messages: Record<Locale, Messages> = {
     "printersView.scanning": "Scanning…",
     "settingsView.description": "Choose how Melt keeps you informed and which tools are available to your team.",
     "settingsView.notifications": "Notifications",
+    "settingsView.firmwareSources": "Firmware sources",
+    "settingsView.publicFirmwareCatalogue": "Public Bambu catalogue",
+    "settingsView.publicFirmwareCatalogueDescription": "Allow HTTPS checks of Bambu's public stable firmware pages. No cloud login or printer credentials are sent.",
     "settingsView.notifyComplete": "Print complete",
     "settingsView.notifyCompleteDescription": "Show a notification when a print finishes.",
     "settingsView.notifyFailure": "Print failure",
@@ -1259,6 +1289,18 @@ const messages: Record<Locale, Messages> = {
     "firmware.stale": "Resultado armazenado — confirmação há mais de 24 horas",
     "firmware.updateAvailable": "Atualização disponível",
     "firmware.requiredUpdate": "Atualização obrigatória",
+    "firmware.assessment": "Avaliação",
+    "firmware.assessmentRequired": "Atualização obrigatória",
+    "firmware.assessmentDeviceCatalogue": "Catálogo do dispositivo é mais recente",
+    "firmware.assessmentPublicRelease": "Versão pública estável é mais recente",
+    "firmware.assessmentConfirmed": "Atualização confirmada pela impressora",
+    "firmware.assessmentCurrent": "Atual contra as fontes consultadas",
+    "firmware.assessmentConflict": "As fontes divergem",
+    "firmware.sourcePrinter": "Anunciado pela impressora",
+    "firmware.sourceDeviceCatalogue": "Catálogo do dispositivo",
+    "firmware.sourcePublicStable": "Versão pública estável",
+    "firmware.deviceCatalogue": "Catálogo do dispositivo",
+    "firmware.publicStable": "Versão pública estável",
     "camera.title": "Câmera",
     "camera.live": "AO VIVO",
     "camera.snapshotLabel": "CAPTURA",
@@ -1343,6 +1385,9 @@ const messages: Record<Locale, Messages> = {
     "printersView.scanning": "Buscando…",
     "settingsView.description": "Escolha como o Melt mantém você informado e quais ferramentas estão disponíveis para a sua equipe.",
     "settingsView.notifications": "Notificações",
+    "settingsView.firmwareSources": "Fontes de firmware",
+    "settingsView.publicFirmwareCatalogue": "Catálogo público da Bambu",
+    "settingsView.publicFirmwareCatalogueDescription": "Permitir consultas HTTPS às páginas públicas de firmware estável da Bambu. Nenhum login ou credencial da impressora é enviado.",
     "settingsView.notifyComplete": "Impressão concluída",
     "settingsView.notifyCompleteDescription": "Mostrar uma notificação quando uma impressão terminar.",
     "settingsView.notifyFailure": "Falha de impressão",

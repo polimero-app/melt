@@ -14,6 +14,7 @@ const entry: FirmwareUpdateEntry = {
   stale: false,
   report: {
     availability: 'available',
+    assessment: 'confirmedAvailable',
     source: 'bambuMqtt',
     components: [{
       id: 'ota',
@@ -25,6 +26,7 @@ const entry: FirmwareUpdateEntry = {
       required: true,
     }],
     issues: [],
+    evidenceSources: [],
   },
 }
 
@@ -37,6 +39,6 @@ describe('firmware update presentation', () => {
 
   it('keeps missing versions visibly unknown', () => {
     expect(versionRail({ ...entry.report.components[0], currentVersion: undefined, availableVersion: undefined }))
-      .toEqual({ installed: '—', advertised: '—', hasTarget: false })
+      .toEqual({ installed: '—', advertised: '—', deviceCatalogue: '—', publicStable: '—', hasTarget: false })
   })
 })
