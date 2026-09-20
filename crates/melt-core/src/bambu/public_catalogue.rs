@@ -35,85 +35,112 @@ pub struct PublicFirmwareRelease {
 }
 
 pub fn public_catalogue_url(model: CanonicalModel) -> Option<&'static str> {
-    let slug = match model {
-        CanonicalModel::A1 => "a1",
-        CanonicalModel::A1Mini => "a1-mini",
-        CanonicalModel::A2 => "a2",
-        CanonicalModel::P1P => "p1p",
-        CanonicalModel::P1S => "p1s",
-        CanonicalModel::P2S => "p2s",
-        CanonicalModel::X1 => "x1",
-        CanonicalModel::X1Carbon => "x1c",
-        CanonicalModel::X1E => "x1e",
-        CanonicalModel::X2 => "x2",
-        CanonicalModel::H2D => "h2d",
-        CanonicalModel::H2S => "h2s",
-        CanonicalModel::H2C => "h2c",
-        CanonicalModel::Unknown => return None,
-    };
-    Some(match slug {
-        "a1" => "https://bambulab.com/en-us/support/firmware-download/a1",
-        "a1-mini" => "https://bambulab.com/en-us/support/firmware-download/a1-mini",
-        "a2" => "https://bambulab.com/en-us/support/firmware-download/a2",
-        "p1p" => "https://bambulab.com/en-us/support/firmware-download/p1p",
-        "p1s" => "https://bambulab.com/en-us/support/firmware-download/p1s",
-        "p2s" => "https://bambulab.com/en-us/support/firmware-download/p2s",
-        "x1" => "https://bambulab.com/en-us/support/firmware-download/x1",
-        "x1c" => "https://bambulab.com/en-us/support/firmware-download/x1c",
-        "x1e" => "https://bambulab.com/en-us/support/firmware-download/x1e",
-        "x2" => "https://bambulab.com/en-us/support/firmware-download/x2",
-        "h2d" => "https://bambulab.com/en-us/support/firmware-download/h2d",
-        "h2s" => "https://bambulab.com/en-us/support/firmware-download/h2s",
-        "h2c" => "https://bambulab.com/en-us/support/firmware-download/h2c",
-        _ => unreachable!(),
-    })
+    public_catalogue_urls(model).first().copied()
+}
+
+/// Returns the model-specific official page first, followed by a family page
+/// where Bambu publishes a shared release history. Keeping both routes means
+/// an existing model-specific source is never silently discarded.
+pub fn public_catalogue_urls(model: CanonicalModel) -> &'static [&'static str] {
+    match model {
+        CanonicalModel::A1 => &["https://bambulab.com/en-us/support/firmware-download/a1"],
+        CanonicalModel::A1Mini => &[
+            "https://bambulab.com/en-us/support/firmware-download/a1-mini",
+            "https://bambulab.com/en-us/support/firmware-download/a1",
+        ],
+        CanonicalModel::A2 => &["https://bambulab.com/en-us/support/firmware-download/a2"],
+        CanonicalModel::P1P => &[
+            "https://bambulab.com/en-us/support/firmware-download/p1p",
+            "https://bambulab.com/en-us/support/firmware-download/p1",
+        ],
+        CanonicalModel::P1S => &[
+            "https://bambulab.com/en-us/support/firmware-download/p1s",
+            "https://bambulab.com/en-us/support/firmware-download/p1",
+        ],
+        CanonicalModel::P2S => &["https://bambulab.com/en-us/support/firmware-download/p2s"],
+        CanonicalModel::X1 => &["https://bambulab.com/en-us/support/firmware-download/x1"],
+        CanonicalModel::X1Carbon => &[
+            "https://bambulab.com/en-us/support/firmware-download/x1c",
+            "https://bambulab.com/en-us/support/firmware-download/x1",
+        ],
+        CanonicalModel::X1E => &[
+            "https://bambulab.com/en-us/support/firmware-download/x1e",
+            "https://bambulab.com/en-us/support/firmware-download/x1",
+        ],
+        CanonicalModel::X2 => &["https://bambulab.com/en-us/support/firmware-download/x2"],
+        CanonicalModel::H2D => &["https://bambulab.com/en-us/support/firmware-download/h2d"],
+        CanonicalModel::H2S => &["https://bambulab.com/en-us/support/firmware-download/h2s"],
+        CanonicalModel::H2C => &["https://bambulab.com/en-us/support/firmware-download/h2c"],
+        CanonicalModel::Unknown => &[],
+    }
 }
 
 pub fn fetch_public_firmware(
     model: CanonicalModel,
     timeout: Duration,
 ) -> Result<PublicFirmwareRelease, PublicCatalogueError> {
-    let url = public_catalogue_url(model).ok_or(PublicCatalogueError::UnsupportedModel)?;
-    let parsed = reqwest::Url::parse(url).map_err(|_| PublicCatalogueError::InvalidUrl)?;
-    if parsed.scheme() != "https"
-        || !parsed
-            .host_str()
-            .is_some_and(|host| PUBLIC_CATALOGUE_HOSTS.contains(&host))
-    {
-        return Err(PublicCatalogueError::InvalidUrl);
+    let urls = public_catalogue_urls(model);
+    if urls.is_empty() {
+        return Err(PublicCatalogueError::UnsupportedModel);
     }
     let client = Client::builder()
         .timeout(timeout)
         .redirect(Policy::none())
         .user_agent("Melt firmware availability/1.0")
         .build()?;
-    let mut response = client.get(parsed.clone()).send()?;
-    if !response.status().is_success() {
-        return Err(PublicCatalogueError::Status);
+    let mut last_error = PublicCatalogueError::Status;
+    for url in urls {
+        let parsed = reqwest::Url::parse(url).map_err(|_| PublicCatalogueError::InvalidUrl)?;
+        if parsed.scheme() != "https"
+            || !parsed
+                .host_str()
+                .is_some_and(|host| PUBLIC_CATALOGUE_HOSTS.contains(&host))
+        {
+            return Err(PublicCatalogueError::InvalidUrl);
+        }
+        let mut response = match client.get(parsed).send() {
+            Ok(response) => response,
+            Err(error) => {
+                last_error = PublicCatalogueError::Request(error);
+                continue;
+            }
+        };
+        if !response.status().is_success() {
+            last_error = PublicCatalogueError::Status;
+            continue;
+        }
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_PUBLIC_CATALOGUE_BYTES as u64)
+        {
+            last_error = PublicCatalogueError::TooLarge;
+            continue;
+        }
+        let mut body = Vec::new();
+        if response
+            .by_ref()
+            .take((MAX_PUBLIC_CATALOGUE_BYTES + 1) as u64)
+            .read_to_end(&mut body)
+            .is_err()
+        {
+            last_error = PublicCatalogueError::Read;
+            continue;
+        }
+        if body.len() > MAX_PUBLIC_CATALOGUE_BYTES {
+            last_error = PublicCatalogueError::TooLarge;
+            continue;
+        }
+        let html = String::from_utf8_lossy(&body);
+        if let Some(version) = parse_public_firmware_version(&html) {
+            return Ok(PublicFirmwareRelease {
+                model,
+                version,
+                url: (*url).to_owned(),
+            });
+        }
+        last_error = PublicCatalogueError::VersionNotFound;
     }
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_PUBLIC_CATALOGUE_BYTES as u64)
-    {
-        return Err(PublicCatalogueError::TooLarge);
-    }
-    let mut body = Vec::new();
-    response
-        .by_ref()
-        .take((MAX_PUBLIC_CATALOGUE_BYTES + 1) as u64)
-        .read_to_end(&mut body)
-        .map_err(|_| PublicCatalogueError::Read)?;
-    if body.len() > MAX_PUBLIC_CATALOGUE_BYTES {
-        return Err(PublicCatalogueError::TooLarge);
-    }
-    let html = String::from_utf8_lossy(&body);
-    let version =
-        parse_public_firmware_version(&html).ok_or(PublicCatalogueError::VersionNotFound)?;
-    Ok(PublicFirmwareRelease {
-        model,
-        version,
-        url: url.to_owned(),
-    })
+    Err(last_error)
 }
 
 /// Extracts the highest stable-looking Bambu firmware version from the page's
@@ -175,6 +202,13 @@ mod tests {
     fn allowlists_known_models_and_rejects_unknown() {
         assert!(public_catalogue_url(CanonicalModel::P1S).is_some());
         assert!(public_catalogue_url(CanonicalModel::Unknown).is_none());
+        assert_eq!(
+            public_catalogue_url(CanonicalModel::A1Mini),
+            Some("https://bambulab.com/en-us/support/firmware-download/a1-mini")
+        );
+        assert!(public_catalogue_urls(CanonicalModel::P1S).contains(
+            &"https://bambulab.com/en-us/support/firmware-download/p1"
+        ));
     }
 
     #[test]

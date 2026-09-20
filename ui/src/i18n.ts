@@ -213,6 +213,7 @@ export type MessageKey =
   | "firmware.unknown"
   | "firmware.unsupported"
   | "firmware.checkAgain"
+  | "firmware.checkPublicCatalogue"
   | "firmware.checking"
   | "firmware.checkFailed"
   | "firmware.klipperScope"
@@ -755,6 +756,7 @@ const messages: Record<Locale, Messages> = {
     "firmware.unknown": "Availability unknown",
     "firmware.unsupported": "Not available",
     "firmware.checkAgain": "Check again",
+    "firmware.checkPublicCatalogue": "Check public catalogue",
     "firmware.checking": "Checking update availability…",
     "firmware.checkFailed": "The update check failed.",
     "firmware.klipperScope": "This checks Klipper software through Moonraker. Controller-board firmware is not checked.",
@@ -1294,6 +1296,7 @@ const messages: Record<Locale, Messages> = {
     "firmware.unknown": "Disponibilidade desconhecida",
     "firmware.unsupported": "Indisponível",
     "firmware.checkAgain": "Verificar novamente",
+    "firmware.checkPublicCatalogue": "Consultar catálogo público",
     "firmware.checking": "Verificando atualizações disponíveis…",
     "firmware.checkFailed": "A verificação de atualizações falhou.",
     "firmware.klipperScope": "Esta verificação cobre o software Klipper via Moonraker. O firmware da placa controladora não é verificado.",

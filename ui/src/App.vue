@@ -1176,6 +1176,23 @@ async function loadFirmwareUpdates(name: string, refresh = false) {
   }
 }
 
+async function loadPublicFirmwareCatalogue(name: string) {
+  if (firmwareRefreshing.value) return
+  firmwareRefreshing.value = true
+  firmwareError.value = undefined
+  try {
+    const entry = await invoke<FirmwareUpdateEntry>('printer_public_firmware_catalogue', { name })
+    const index = firmwareUpdates.value.findIndex((candidate) => candidate.profile === entry.profile)
+    if (index === -1) firmwareUpdates.value.push(entry)
+    else firmwareUpdates.value.splice(index, 1, entry)
+  } catch (reason) {
+    firmwareError.value = message(reason)
+    showToast(firmwareError.value ?? t('firmware.checkFailed'), 'error')
+  } finally {
+    firmwareRefreshing.value = false
+  }
+}
+
 // Refreshes only the active printer (every caller acts on it specifically),
 // not a full re-probe of every configured printer. Other printers' badges
 // stay fed by the periodic `monitoring-updated` broadcast.
@@ -3099,6 +3116,11 @@ onUnmounted(() => {
                 :disabled="firmwareRefreshing"
                 @click="loadFirmwareUpdates(firmwarePrinter.name, true)"
               ><PhArrowsClockwise class="size-4" :class="firmwareRefreshing && 'animate-spin'" aria-hidden="true" /> {{ t('firmware.checkAgain') }}</Button>
+              <Button
+                variant="secondary"
+                :disabled="firmwareRefreshing"
+                @click="loadPublicFirmwareCatalogue(firmwarePrinter.name)"
+              ><PhGlobe class="size-4" :class="firmwareRefreshing && 'animate-spin'" aria-hidden="true" /> {{ t('firmware.checkPublicCatalogue') }}</Button>
             </CardHeader>
             <div class="px-4 py-5 sm:p-6" :aria-busy="firmwareRefreshing">
               <div v-if="!selectedFirmwareUpdate" class="flex items-start gap-3 text-sm text-gray-500 dark:text-gray-400" role="status">
