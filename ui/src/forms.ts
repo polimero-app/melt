@@ -3,6 +3,7 @@ export type PrinterDraftFields = {
   driver: string
   host: string
   serial: string
+  model: string
   timeout: string
   insecure: boolean
   accessCode: string

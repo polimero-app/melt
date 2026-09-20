@@ -584,6 +584,7 @@ const draft = ref<PrinterDraftFields>({
   driver: '',
   host: '',
   serial: '',
+  model: '',
   timeout: '10s',
   insecure: false,
   accessCode: '',
@@ -605,6 +606,7 @@ function openEdit(printer: Printer) {
     driver: printer.driver,
     host: printer.host,
     serial: printer.serial,
+    model: printer.model || printer.presence?.model || '',
     timeout: printer.timeout,
     accessCode: '',
     insecure: printer.insecure,
@@ -1360,6 +1362,7 @@ function openAddition() {
     driver: drivers.value.find((driver) => driver.name === 'moonraker')?.name ?? drivers.value[0]?.name ?? '',
     host: '',
     serial: '',
+    model: '',
     timeout: '10s',
     insecure: false,
     accessCode: '',
@@ -1411,6 +1414,7 @@ function useDiscoveredPrinter(printer: DiscoveredPrinter) {
   draft.value.driver = printer.driver
   draft.value.host = printer.host
   draft.value.serial = printer.serial
+  draft.value.model = printer.model
   if (!draft.value.name) draft.value.name = printer.name || printer.model
   discovered.value = []
 }
@@ -3782,6 +3786,10 @@ onUnmounted(() => {
           <div>
             <label for="printer-serial" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.serial') }}</label>
             <input id="printer-serial" name="printer-serial" v-model="draft.serial" autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+          </div>
+          <div>
+            <label for="printer-model" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.model') }}</label>
+            <input id="printer-model" name="printer-model" v-model="draft.model" autocomplete="off" placeholder="A1 mini, H2C, P1S…" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
           </div>
           <div>
             <label for="printer-timeout" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.timeout') }}</label>

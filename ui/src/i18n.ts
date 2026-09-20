@@ -52,7 +52,8 @@ export type MessageKey =
   | "addition.name"
   | "addition.driver"
   | "addition.host"
-  | "addition.serial"
+| "addition.serial"
+| "addition.model"
   | "addition.timeout"
   | "addition.accessCode"
   | "addition.accessCodeKeep"
@@ -596,6 +597,7 @@ const messages: Record<Locale, Messages> = {
     "addition.driver": "Driver",
     "addition.host": "Host or base URL",
     "addition.serial": "Serial number",
+    "addition.model": "Printer model",
     "addition.timeout": "Connection timeout",
     "addition.accessCode": "Access code",
     "addition.accessCodeKeep": "Access code (leave blank to keep existing)",
@@ -1136,6 +1138,7 @@ const messages: Record<Locale, Messages> = {
     "addition.driver": "Driver",
     "addition.host": "Host ou URL base",
     "addition.serial": "Número de série",
+    "addition.model": "Modelo da impressora",
     "addition.timeout": "Tempo limite de conexão",
     "addition.accessCode": "Código de acesso",
     "addition.accessCodeKeep": "Código de acesso (deixe em branco para manter o atual)",
