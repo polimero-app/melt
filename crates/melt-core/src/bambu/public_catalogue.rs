@@ -55,11 +55,17 @@ pub fn public_catalogue_url(model: CanonicalModel) -> Option<&'static str> {
 /// `.../a1` for an A1 mini would report a different printer's version as this
 /// printer's public-stable release. `public_catalogue_family_pages_are_shared`
 /// locks that invariant in.
+///
+// ponytail: bambulab.com answers 403 to non-browser clients, so the a2l, x2d,
+// and h2d-pro slugs cannot be checked from CI. A wrong slug degrades to
+// `publicCatalogueUnavailable`, never to another model's firmware version, so
+// the shared-page test covers the failure that matters. Confirm the slugs
+// during physical qualification of those models.
 pub fn public_catalogue_urls(model: CanonicalModel) -> &'static [&'static str] {
     match model {
         CanonicalModel::A1 => &["https://bambulab.com/en-us/support/firmware-download/a1"],
         CanonicalModel::A1Mini => &["https://bambulab.com/en-us/support/firmware-download/a1-mini"],
-        CanonicalModel::A2 => &["https://bambulab.com/en-us/support/firmware-download/a2"],
+        CanonicalModel::A2L => &["https://bambulab.com/en-us/support/firmware-download/a2l"],
         CanonicalModel::P1P => &[
             "https://bambulab.com/en-us/support/firmware-download/p1p",
             "https://bambulab.com/en-us/support/firmware-download/p1",
@@ -72,8 +78,9 @@ pub fn public_catalogue_urls(model: CanonicalModel) -> &'static [&'static str] {
         CanonicalModel::X1 => &["https://bambulab.com/en-us/support/firmware-download/x1"],
         CanonicalModel::X1Carbon => &["https://bambulab.com/en-us/support/firmware-download/x1c"],
         CanonicalModel::X1E => &["https://bambulab.com/en-us/support/firmware-download/x1e"],
-        CanonicalModel::X2 => &["https://bambulab.com/en-us/support/firmware-download/x2"],
+        CanonicalModel::X2D => &["https://bambulab.com/en-us/support/firmware-download/x2d"],
         CanonicalModel::H2D => &["https://bambulab.com/en-us/support/firmware-download/h2d"],
+        CanonicalModel::H2DPro => &["https://bambulab.com/en-us/support/firmware-download/h2d-pro"],
         CanonicalModel::H2S => &["https://bambulab.com/en-us/support/firmware-download/h2s"],
         CanonicalModel::H2C => &["https://bambulab.com/en-us/support/firmware-download/h2c"],
         CanonicalModel::Unknown => &[],
@@ -270,27 +277,21 @@ mod tests {
     /// `.../a1-mini` would silently report the A1's version for an A1 mini.
     #[test]
     fn public_catalogue_family_pages_are_shared() {
-        const MODELS: [CanonicalModel; 14] = [
-            CanonicalModel::A1,
-            CanonicalModel::A1Mini,
-            CanonicalModel::A2,
-            CanonicalModel::P1P,
-            CanonicalModel::P1S,
-            CanonicalModel::P2S,
-            CanonicalModel::X1,
-            CanonicalModel::X1Carbon,
-            CanonicalModel::X1E,
-            CanonicalModel::X2,
-            CanonicalModel::H2D,
-            CanonicalModel::H2S,
-            CanonicalModel::H2C,
-            CanonicalModel::Unknown,
-        ];
-        let primaries: Vec<&str> = MODELS
+        let models = super::super::models()
+            .iter()
+            .map(|entry| entry.canonical)
+            .chain([CanonicalModel::Unknown])
+            .collect::<Vec<_>>();
+        let primaries: Vec<&str> = models
             .iter()
             .filter_map(|model| public_catalogue_url(*model))
             .collect();
-        for model in MODELS {
+        for model in models {
+            assert_eq!(
+                public_catalogue_url(model).is_some(),
+                model != CanonicalModel::Unknown,
+                "{model:?} has no official catalogue page"
+            );
             for fallback in public_catalogue_urls(model).iter().skip(1) {
                 assert!(
                     !primaries.contains(fallback),
