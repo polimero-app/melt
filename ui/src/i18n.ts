@@ -233,11 +233,15 @@ export type MessageKey =
   | "firmware.assessmentConfirmed"
   | "firmware.assessmentCurrent"
   | "firmware.assessmentConflict"
+  | "firmware.assessmentUnknown"
   | "firmware.sourcePrinter"
   | "firmware.sourceDeviceCatalogue"
   | "firmware.sourcePublicStable"
   | "firmware.deviceCatalogue"
   | "firmware.publicStable"
+  | "firmware.modules"
+  | "firmware.comparable"
+  | "firmware.noComparable"
   | "firmware.sourceSuccess"
   | "firmware.sourceEmpty"
   | "firmware.sourceFailed"
@@ -744,7 +748,7 @@ const messages: Record<Locale, Messages> = {
     "control.observedAt": "{seconds}s ago",
     "control.observedAtTitle": "Age of the last reading received from the printer",
     "firmware.title": "Firmware & software",
-    "firmware.description": "Review the versions reported by {name}. Melt checks availability only and does not install updates.",
+    "firmware.description": "Compare installed versions with printer, device-catalogue, and public evidence. Melt never installs updates.",
     "firmware.backToPrinters": "Back to printers",
     "firmware.available": "Update available",
     "firmware.current": "Current",
@@ -771,11 +775,15 @@ const messages: Record<Locale, Messages> = {
     "firmware.assessmentConfirmed": "Update confirmed by printer",
     "firmware.assessmentCurrent": "Current against checked sources",
     "firmware.assessmentConflict": "Sources disagree",
+    "firmware.assessmentUnknown": "No newer version found",
     "firmware.sourcePrinter": "Printer advertised",
     "firmware.sourceDeviceCatalogue": "Device catalogue",
     "firmware.sourcePublicStable": "Public stable",
     "firmware.deviceCatalogue": "Device catalogue",
     "firmware.publicStable": "Public stable",
+    "firmware.modules": "modules",
+    "firmware.comparable": "with evidence",
+    "firmware.noComparable": "No comparable release from checked sources",
     "firmware.sourceSuccess": "checked",
     "firmware.sourceEmpty": "no comparable version",
     "firmware.sourceFailed": "unavailable",
@@ -1279,7 +1287,7 @@ const messages: Record<Locale, Messages> = {
     "control.observedAt": "há {seconds}s",
     "control.observedAtTitle": "Idade da última leitura recebida da impressora",
     "firmware.title": "Firmware e software",
-    "firmware.description": "Revise as versões informadas por {name}. O Melt apenas verifica a disponibilidade e não instala atualizações.",
+    "firmware.description": "Compare as versões instaladas com evidências da impressora, do catálogo e públicas. O Melt nunca instala atualizações.",
     "firmware.backToPrinters": "Voltar para impressoras",
     "firmware.available": "Atualização disponível",
     "firmware.current": "Atual",
@@ -1306,11 +1314,15 @@ const messages: Record<Locale, Messages> = {
     "firmware.assessmentConfirmed": "Atualização confirmada pela impressora",
     "firmware.assessmentCurrent": "Atual contra as fontes consultadas",
     "firmware.assessmentConflict": "As fontes divergem",
+    "firmware.assessmentUnknown": "Nenhuma versão mais recente encontrada",
     "firmware.sourcePrinter": "Anunciado pela impressora",
     "firmware.sourceDeviceCatalogue": "Catálogo do dispositivo",
     "firmware.sourcePublicStable": "Versão pública estável",
     "firmware.deviceCatalogue": "Catálogo do dispositivo",
     "firmware.publicStable": "Versão pública estável",
+    "firmware.modules": "módulos",
+    "firmware.comparable": "com evidência",
+    "firmware.noComparable": "Nenhuma versão comparável nas fontes consultadas",
     "firmware.sourceSuccess": "verificada",
     "firmware.sourceEmpty": "sem versão comparável",
     "firmware.sourceFailed": "indisponível",

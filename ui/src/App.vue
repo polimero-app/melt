@@ -18,7 +18,6 @@ import {
   hasAvailableUpdate,
   hasRequiredUpdate,
   updateEntryFor,
-  versionRail,
   type FirmwareEvidenceRole,
   type FirmwareSourceCheck,
   type FirmwareUpdateAssessment,
@@ -668,7 +667,9 @@ const firmwareAssessmentLabel = (assessment: FirmwareUpdateAssessment) => {
             ? 'firmware.assessmentCurrent'
             : assessment === 'conflict'
               ? 'firmware.assessmentConflict'
-              : 'firmware.unknown'
+              : assessment === 'unsupported'
+                ? 'firmware.unsupported'
+                : 'firmware.assessmentUnknown'
   return t(key)
 }
 const firmwareEvidenceLabel = (role: FirmwareEvidenceRole) => {
@@ -683,6 +684,9 @@ const firmwareEvidenceLabel = (role: FirmwareEvidenceRole) => {
 }
 const componentHasEvidence = (component: FirmwareUpdateEntry['report']['components'][number], role: FirmwareEvidenceRole) =>
   component.evidence?.some((evidence) => evidence.role === role) ?? false
+const firmwareEvidenceFor = (component: FirmwareUpdateEntry['report']['components'][number]) =>
+  (component.evidence ?? []).filter((evidence) => evidence.role !== 'installed' && Boolean(evidence.version))
+const firmwareComparableCount = (entry: FirmwareUpdateEntry) => entry.report.components.filter((component) => firmwareEvidenceFor(component).length > 0).length
 const firmwareEvidenceRoles: FirmwareEvidenceRole[] = ['printerAdvertised', 'deviceCatalogue', 'publicStable']
 const firmwareSourceName = (source: FirmwareSourceCheck['source']) => {
   if (source === 'bambuLanInventory') return t('firmware.installed')
@@ -3109,6 +3113,7 @@ onUnmounted(() => {
                 <div class="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 dark:border-white/10 dark:bg-white/5">
                   <span class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ t('firmware.assessment') }}</span>
                   <span class="rounded-full bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800 dark:bg-cyan-400/10 dark:text-cyan-300">{{ firmwareAssessmentLabel(selectedFirmwareUpdate.report.assessment) }}</span>
+                  <span class="ml-auto font-mono text-xs text-gray-500 dark:text-gray-400">{{ selectedFirmwareUpdate.report.components.length }} {{ t('firmware.modules') }} · {{ firmwareComparableCount(selectedFirmwareUpdate) }} {{ t('firmware.comparable') }}</span>
                   <span v-for="role in firmwareEvidenceRoles" v-show="selectedFirmwareUpdate.report.components.some((component) => componentHasEvidence(component, role))" :key="role" class="rounded-full border border-gray-300 px-2 py-0.5 text-xs text-gray-600 dark:border-white/15 dark:text-gray-300">
                     {{ firmwareEvidenceLabel(role) }}
                   </span>
@@ -3132,23 +3137,27 @@ onUnmounted(() => {
                       </div>
                       <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ firmwareComponentLabel(component.kind) }}</p>
                     </div>
-                    <div class="grid gap-2 rounded-md bg-gray-50 px-3 py-2 dark:bg-white/5 sm:grid-cols-4">
-                      <div class="min-w-0">
-                        <p class="text-[0.65rem] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ t('firmware.installed') }}</p>
-                        <p class="truncate font-mono text-sm text-gray-800 dark:text-gray-200" :title="component.currentVersion">{{ versionRail(component).installed }}</p>
+                    <div class="min-w-0 rounded-md bg-gray-50 px-3 py-2 dark:bg-white/5">
+                      <div class="flex items-baseline justify-between gap-3">
+                        <span class="text-[0.65rem] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ t('firmware.installed') }}</span>
+                        <span class="truncate font-mono text-sm text-gray-800 dark:text-gray-200" :title="component.currentVersion">{{ component.currentVersion || '—' }}</span>
                       </div>
-                      <div class="min-w-0">
-                        <p class="text-[0.65rem] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-300">{{ t('firmware.advertised') }}</p>
-                        <p class="truncate font-mono text-sm" :class="componentHasEvidence(component, 'printerAdvertised') ? 'font-semibold text-amber-700 dark:text-amber-300' : 'text-gray-800 dark:text-gray-200'" :title="component.availableVersion">{{ versionRail(component).advertised }}</p>
+                      <div v-if="firmwareEvidenceFor(component).length" class="mt-2 flex flex-wrap gap-1.5">
+                        <span
+                          v-for="evidence in firmwareEvidenceFor(component)"
+                          :key="`${evidence.role}-${evidence.version}`"
+                          class="inline-flex items-center gap-1 rounded border px-2 py-1 text-[0.65rem]"
+                          :class="evidence.role === 'printerAdvertised'
+                            ? 'border-amber-300/60 bg-amber-100/60 text-amber-800 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-300'
+                            : evidence.role === 'deviceCatalogue'
+                              ? 'border-cyan-300/60 bg-cyan-100/60 text-cyan-800 dark:border-cyan-400/20 dark:bg-cyan-400/10 dark:text-cyan-300'
+                              : 'border-gray-300 bg-white text-gray-700 dark:border-white/15 dark:bg-white/5 dark:text-gray-300'"
+                        >
+                          <span>{{ firmwareEvidenceLabel(evidence.role) }}</span>
+                          <span class="font-mono font-semibold">{{ evidence.version }}</span>
+                        </span>
                       </div>
-                      <div class="min-w-0">
-                        <p class="text-[0.65rem] font-medium uppercase tracking-wide text-cyan-600 dark:text-cyan-300">{{ t('firmware.deviceCatalogue') }}</p>
-                        <p class="truncate font-mono text-sm text-gray-800 dark:text-gray-200" :title="versionRail(component).deviceCatalogue">{{ versionRail(component).deviceCatalogue }}</p>
-                      </div>
-                      <div class="min-w-0">
-                        <p class="text-[0.65rem] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ t('firmware.publicStable') }}</p>
-                        <p class="truncate font-mono text-sm text-gray-800 dark:text-gray-200" :title="versionRail(component).publicStable">{{ versionRail(component).publicStable }}</p>
-                      </div>
+                      <span v-else class="mt-2 block text-xs text-gray-400 dark:text-gray-500">{{ t('firmware.noComparable') }}</span>
                     </div>
                   </div>
                 </div>
