@@ -235,6 +235,7 @@ impl Client {
     ) -> Result<RuntimeCapabilities, Error> {
         let defaults = self.profile.default_capabilities();
         let serial = self.profile.serial();
+        let configured_model = self.profile.model();
         let capabilities = self.with_mqtt(access_code, fingerprint, |mqtt| {
             if mqtt.status_document.is_none() {
                 mqtt.exchange(pushall_payload(next_sequence()), is_full_report)?;
@@ -243,6 +244,7 @@ impl Client {
             Ok(refine_runtime_capabilities(
                 defaults,
                 serial,
+                configured_model,
                 mqtt.status_document.as_ref(),
                 Some(&version),
             ))
@@ -433,6 +435,7 @@ impl Client {
             *cached = Some(refine_runtime_capabilities(
                 baseline,
                 self.profile.serial(),
+                self.profile.model(),
                 Some(&status),
                 None,
             ));
@@ -2748,6 +2751,7 @@ fn version_info(report: &Value) -> Option<Value> {
 fn refine_runtime_capabilities(
     mut capabilities: RuntimeCapabilities,
     serial: &str,
+    configured_model: &str,
     status: Option<&Value>,
     info: Option<&Value>,
 ) -> RuntimeCapabilities {
@@ -2755,10 +2759,15 @@ fn refine_runtime_capabilities(
     // before any observation merges on top of them. The configured model is
     // only the lowest-trust candidate: a profile added without `--model`
     // would otherwise route an H2D as an unknown printer forever.
+    //
+    // It is read from the profile rather than from `capabilities.identity`,
+    // because this runs again on every status report and the identity already
+    // holds the *detected* model by then -- re-reading it there would erase a
+    // conflict against a stale configured model after the first refine.
     let firmware = info.map(FirmwareInventory::from_version_info);
     let detection = super::detect(
         serial,
-        &capabilities.identity.raw,
+        configured_model,
         firmware.as_ref().unwrap_or(&capabilities.firmware),
     );
     if detection.identity != capabilities.identity {
@@ -6357,6 +6366,7 @@ mod tests {
         let capabilities = refine_runtime_capabilities(
             profile.default_capabilities(),
             profile.serial(),
+            profile.model(),
             mqtt.status_document.as_ref(),
             Some(&version),
         );
@@ -6395,6 +6405,7 @@ mod tests {
         let capabilities = refine_runtime_capabilities(
             RuntimeCapabilities::for_model(""),
             "094SANITIZED0001",
+            "",
             None,
             Some(&version_info(json!([
                 {"name":"ota","product_name":"Bambu Lab H2D","sw_ver":"01.02.00.00"}
@@ -6418,6 +6429,7 @@ mod tests {
         let capabilities = refine_runtime_capabilities(
             RuntimeCapabilities::for_model(""),
             "01P00000000000",
+            "",
             None,
             None,
         );
@@ -6433,6 +6445,7 @@ mod tests {
         let capabilities = refine_runtime_capabilities(
             RuntimeCapabilities::for_model(""),
             "01P00000000000",
+            "",
             Some(&json!({"print": {
                 "command": "push_status",
                 "msg": 0,
@@ -6456,6 +6469,7 @@ mod tests {
         let capabilities = refine_runtime_capabilities(
             RuntimeCapabilities::for_model("X1C"),
             "030SANITIZED0001",
+            "X1C",
             None,
             Some(&version_info(json!([
                 {"name":"ams_f1/0","product_name":"AMS Lite (1)"},
@@ -6479,6 +6493,7 @@ mod tests {
         let capabilities = refine_runtime_capabilities(
             RuntimeCapabilities::for_model(""),
             "ZZZ00000000000",
+            "",
             None,
             Some(&version_info(json!([
                 {"name":"ota","sw_ver":"09.00.00.00"}
@@ -6503,6 +6518,7 @@ mod tests {
         let baseline = refine_runtime_capabilities(
             RuntimeCapabilities::for_model(""),
             "",
+            "",
             Some(
                 &json!({"print": {"command": "push_status", "msg": 0, "support_timelapse": true}}),
             ),
@@ -6519,6 +6535,7 @@ mod tests {
         let capabilities = refine_runtime_capabilities(
             baseline,
             "22E00000000000",
+            "",
             None,
             Some(&version_info(json!([
                 {"name":"ota","product_name":"Bambu Lab P2S"}
@@ -6531,6 +6548,38 @@ mod tests {
                 .values
                 .contains_key("support_timelapse")
         );
+    }
+
+    /// `observe_runtime_status` refines the cached capabilities on every MQTT
+    /// report and passes no `get_version`, so re-detection has to settle on
+    /// the same identity. If it did not, the rebuild would drop the firmware
+    /// inventory that only the negotiate path can supply.
+    #[test]
+    fn re_detecting_on_every_status_report_is_stable() {
+        let negotiated = refine_runtime_capabilities(
+            RuntimeCapabilities::for_model("X1 Carbon"),
+            "01P00000000000",
+            "X1 Carbon",
+            Some(&json!({"print": {"command": "push_status", "msg": 0}})),
+            Some(&version_info(json!([
+                {"name":"ota","product_name":"Bambu Lab P1S","sw_ver":"01.02.03.04"}
+            ]))),
+        );
+        assert_eq!(negotiated.identity.canonical, CanonicalModel::P1S);
+        assert_eq!(negotiated.model_source, ModelSource::VersionProductName);
+        assert_eq!(negotiated.firmware.modules.len(), 1);
+
+        let observed = refine_runtime_capabilities(
+            negotiated.clone(),
+            "01P00000000000",
+            "X1 Carbon",
+            Some(&json!({"print": {"command": "push_status", "msg": 1}})),
+            None,
+        );
+        assert_eq!(observed.identity, negotiated.identity);
+        assert_eq!(observed.model_source, negotiated.model_source);
+        assert_eq!(observed.model_conflicts, negotiated.model_conflicts);
+        assert_eq!(observed.firmware, negotiated.firmware);
     }
 
     #[test]
