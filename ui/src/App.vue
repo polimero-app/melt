@@ -60,6 +60,7 @@ import {
   PhCheckCircle,
   PhCheckSquareOffset,
   PhCornersOut,
+  PhCpu,
   PhCube,
   PhDesktop,
   PhDownloadSimple,
@@ -3104,8 +3105,8 @@ onUnmounted(() => {
             </Button>
             <div class="mt-5 lg:flex lg:items-end lg:justify-between lg:gap-6">
               <div class="min-w-0 flex-1">
-                <h2 class="text-2xl/7 font-bold text-gray-900 sm:text-3xl sm:tracking-tight dark:text-white">{{ t('firmware.title') }}</h2>
-                <p class="mt-2 max-w-3xl text-sm text-gray-500 dark:text-gray-400">{{ t('firmware.description', { name: firmwarePrinter.name }) }}</p>
+                <h2 class="text-2xl/7 font-bold text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight dark:text-white">{{ firmwarePrinter.name }}</h2>
+                <p class="mt-2 max-w-3xl text-sm text-gray-500 dark:text-gray-400">{{ t('firmware.description') }}</p>
                 <div class="mt-3 flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs text-gray-500 dark:text-gray-400">
                   <span class="inline-flex items-center gap-1.5"><PhPrinter class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinterModel || firmwarePrinter.driver }}</span>
                   <span class="inline-flex items-center gap-1.5"><PhNetwork class="size-4 text-gray-400 dark:text-gray-500" aria-hidden="true" />{{ firmwarePrinter.host }}</span>
@@ -3119,7 +3120,7 @@ onUnmounted(() => {
           </div>
 
           <Card class="overflow-hidden">
-            <CardHeader :title="firmwarePrinter.name" :icon="PhPrinter">
+            <CardHeader :title="t('firmware.title')" :icon="PhCpu">
               <template #suffix>
                 <span
                   v-if="selectedFirmwareUpdate"
