@@ -643,6 +643,13 @@ const hasPrinters = computed(() => printers.value.length > 0)
 const selectedMonitor = computed(() => monitoring.value.find((entry) => entry.name === activePrinter.value?.name))
 const selectedStatus = computed(() => selectedMonitor.value?.status)
 const selectedFirmwareUpdate = computed(() => updateEntryFor(firmwareUpdates.value, firmwarePrinter.value?.name))
+// Only explain the disabled catalogue button when the report has not already
+// reported the same unknown model, otherwise the card says it twice.
+const firmwareNeedsModel = computed(() => {
+  const report = selectedFirmwareUpdate.value?.report
+  if (!report || report.source !== 'bambuMqtt' || firmwarePrinterModel.value) return false
+  return !report.issues.some((issue) => issue.code === 'publicCatalogueUnsupportedModel')
+})
 
 const firmwareFor = (name: string) => updateEntryFor(firmwareUpdates.value, name)
 const firmwareComponentLabel = (kind: FirmwareUpdateComponentKind) => t(
@@ -3140,7 +3147,7 @@ onUnmounted(() => {
                 <p>{{ firmwareError ?? t('firmware.checking') }}</p>
               </div>
               <template v-else>
-                <p v-if="!firmwarePrinterModel && selectedFirmwareUpdate.report.source === 'bambuMqtt'" class="mb-4 flex items-start gap-2 text-sm text-gray-500 dark:text-gray-400">
+                <p v-if="firmwareNeedsModel" class="mb-4 flex items-start gap-2 text-sm text-gray-500 dark:text-gray-400">
                   <PhInfo class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                   {{ t('firmware.modelRequired') }}
                 </p>
