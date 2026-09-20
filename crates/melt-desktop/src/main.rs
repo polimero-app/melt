@@ -1179,16 +1179,16 @@ fn firmware_source_checks(
                 enabled: bool,
                 failed_code: Option<&str>,
                 unsupported_code: Option<&str>| {
-            FirmwareSourceCheck {
-                source,
-                checked_at: checked_at.to_owned(),
-                outcome: if !enabled {
-                    FirmwareSourceOutcome::Disabled
-                } else if unsupported_code.is_some_and(failed) {
-                    FirmwareSourceOutcome::Unsupported
-                } else if report.availability == FirmwareUpdateAvailability::Unsupported {
-                    FirmwareSourceOutcome::Unsupported
-                } else if source_seen(source) {
+        FirmwareSourceCheck {
+            source,
+            checked_at: checked_at.to_owned(),
+            outcome: if !enabled {
+                FirmwareSourceOutcome::Disabled
+            } else if unsupported_code.is_some_and(failed)
+                || report.availability == FirmwareUpdateAvailability::Unsupported
+            {
+                FirmwareSourceOutcome::Unsupported
+            } else if source_seen(source) {
                 FirmwareSourceOutcome::Success
             } else if failed_code.is_some_and(failed) {
                 FirmwareSourceOutcome::Failed
@@ -1204,7 +1204,12 @@ fn firmware_source_checks(
     match report.source {
         melt_core::firmware_updates::FirmwareUpdateSource::BambuMqtt => vec![
             make(FirmwareEvidenceSource::BambuLanInventory, true, None, None),
-            make(FirmwareEvidenceSource::BambuLanAdvertisement, true, None, None),
+            make(
+                FirmwareEvidenceSource::BambuLanAdvertisement,
+                true,
+                None,
+                None,
+            ),
             make(
                 FirmwareEvidenceSource::BambuLanHistory,
                 true,
@@ -1240,9 +1245,11 @@ fn check_firmware_updates(
     let kind = driver.driver();
     let access_code = access_code(&profile.driver, &name, kind)?;
     let fingerprint = tls_fingerprint(&profile.driver, &name, kind, profile.insecure)?;
-    let public_catalogue = public_catalogue_override.unwrap_or_else(|| preferences::Preferences::load()
-        .map(|settings| settings.public_firmware_catalogue)
-        .unwrap_or(false));
+    let public_catalogue = public_catalogue_override.unwrap_or_else(|| {
+        preferences::Preferences::load()
+            .map(|settings| settings.public_firmware_catalogue)
+            .unwrap_or(false)
+    });
     let result = state.pool.firmware_update_status_with_sources(
         &name,
         &driver,
@@ -1258,9 +1265,11 @@ fn check_firmware_updates(
     match result {
         Ok(report) => {
             let checked_at = format_modified(SystemTime::now()).unwrap_or_default();
-            let public_catalogue = public_catalogue_override.unwrap_or_else(|| preferences::Preferences::load()
-                .map(|settings| settings.public_firmware_catalogue)
-                .unwrap_or(false));
+            let public_catalogue = public_catalogue_override.unwrap_or_else(|| {
+                preferences::Preferences::load()
+                    .map(|settings| settings.public_firmware_catalogue)
+                    .unwrap_or(false)
+            });
             let entry = FirmwareUpdateEntry {
                 profile: name.clone(),
                 driver: kind.name().into(),

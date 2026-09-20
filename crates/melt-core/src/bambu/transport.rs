@@ -1941,12 +1941,13 @@ impl MqttConnection {
                     // unrelated empty catalogue masks the real response.
                     if upgrade.get("sequence_id").and_then(Value::as_str)
                         != Some(sequence_id.as_str())
-                        || upgrade.get("command").and_then(Value::as_str)
-                            != Some("get_history")
+                        || upgrade.get("command").and_then(Value::as_str) != Some("get_history")
                     {
                         continue;
                     }
-                    if upgrade.get("result").and_then(Value::as_str)
+                    if upgrade
+                        .get("result")
+                        .and_then(Value::as_str)
                         .is_some_and(|result| result != "success")
                     {
                         return Err(Error::CommandRejected);
