@@ -62,7 +62,29 @@ pub struct FirmwareModule {
     pub hardware: Option<String>,
     pub serial: Option<String>,
     pub project: Option<String>,
+    /// Marketing name reported by modern firmware, for example
+    /// `Bambu Lab P2S` on the `ota` module or `AMS 2 Pro (1)` on an
+    /// accessory. Legacy firmware sends an empty string instead.
+    pub product: Option<String>,
     pub unknown: BTreeMap<String, Value>,
+}
+
+/// Module names that belong to attached hardware rather than to the printer.
+/// An `n3f/0` reports `AMS 2 Pro (1)` in the same `product_name` field the
+/// printer uses for its own marketing name.
+const ACCESSORY_PREFIXES: &[&str] = &["ams/", "ams_f1/", "n3f/", "n3s/"];
+const ACCESSORY_NAMES: &[&str] = &["ahb", "eef"];
+
+impl FirmwareModule {
+    /// Reading a model name from an accessory makes an A1 with an AMS Lite
+    /// identify as its own filament changer.
+    pub fn is_accessory(&self) -> bool {
+        let name = self.name.to_ascii_lowercase();
+        ACCESSORY_NAMES.contains(&name.as_str())
+            || ACCESSORY_PREFIXES
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -87,7 +109,14 @@ impl FirmwareInventory {
                         .and_then(Value::as_str)
                         .unwrap_or_default(),
                 );
-                let known = ["name", "sw_ver", "hw_ver", "sn", "project_name"];
+                let known = [
+                    "name",
+                    "sw_ver",
+                    "hw_ver",
+                    "sn",
+                    "project_name",
+                    "product_name",
+                ];
                 let unknown = module
                     .iter()
                     .filter(|(key, _)| !known.contains(&key.as_str()))
@@ -101,10 +130,8 @@ impl FirmwareInventory {
                         .and_then(Value::as_str)
                         .map(str::to_owned),
                     serial: module.get("sn").and_then(Value::as_str).map(str::to_owned),
-                    project: module
-                        .get("project_name")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
+                    project: named(module, "project_name"),
+                    product: named(module, "product_name"),
                     unknown,
                 })
             })
@@ -118,6 +145,17 @@ impl FirmwareInventory {
             .find(|module| module.name == name)
             .map(|module| &module.software)
     }
+}
+
+/// Legacy firmware sends `"product_name": ""` on modules it has no marketing
+/// name for, so an empty value is absence rather than a name.
+fn named(module: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
+    module
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
 }
 
 /// Builds a conservative update report from an accumulated Bambu status
@@ -648,6 +686,55 @@ mod tests {
             Some("-beta1")
         );
         assert_eq!(inventory.modules[0].unknown["future"], 7);
+    }
+
+    #[test]
+    fn promotes_product_name_out_of_unknown_fields() {
+        let inventory = FirmwareInventory::from_version_info(&json!({"module": [
+            {"name":"ota","product_name":"Bambu Lab P2S","sw_ver":"01.02.00.00"},
+            {"name":"esp32","product_name":"","hw_ver":"AP04"}
+        ]}));
+        assert_eq!(
+            inventory.modules[0].product.as_deref(),
+            Some("Bambu Lab P2S")
+        );
+        assert_eq!(inventory.modules[1].product, None);
+        for module in &inventory.modules {
+            assert!(!module.unknown.contains_key("product_name"));
+        }
+    }
+
+    /// Legacy firmware blanks `project_name` on modules it has no name for.
+    /// An empty label used to shadow the module name in the update report.
+    #[test]
+    fn an_empty_project_name_is_absence_not_a_label() {
+        let inventory = FirmwareInventory::from_version_info(&json!({"module": [
+            {"name":"ams_f1/0","project_name":"","hw_ver":"AMS_F102"}
+        ]}));
+        assert_eq!(inventory.modules[0].project, None);
+        let report = update_report(&json!({}), &inventory);
+        assert_eq!(report.components[0].label, "ams_f1/0");
+    }
+
+    #[test]
+    fn identifies_accessory_modules() {
+        let inventory = FirmwareInventory::from_version_info(&json!({"module": [
+            {"name":"ams/0"},{"name":"ams_f1/0"},{"name":"n3f/0"},{"name":"n3s/128"},
+            {"name":"ahb"},{"name":"eef"},
+            {"name":"ota"},{"name":"esp32"},{"name":"mc"},{"name":"mc-sub"},
+            {"name":"th"},{"name":"ap"},{"name":"ap2"},{"name":"rv1126"},
+            {"name":"xm"},{"name":"ext"},{"name":"smc"}
+        ]}));
+        let accessories = inventory
+            .modules
+            .iter()
+            .filter(|module| module.is_accessory())
+            .map(|module| module.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            accessories,
+            ["ams/0", "ams_f1/0", "n3f/0", "n3s/128", "ahb", "eef"]
+        );
     }
 
     #[test]

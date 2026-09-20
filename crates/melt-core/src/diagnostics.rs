@@ -302,6 +302,7 @@ mod tests {
             hardware: Some("AP05".into()),
             serial: Some("SECRET-MODULE-SERIAL".into()),
             project: None,
+            product: Some("Bambu Lab P1S".into()),
             unknown: BTreeMap::from([(
                 "endpoint".into(),
                 serde_json::json!("rtsps://192.0.2.99/private"),
