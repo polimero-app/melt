@@ -57,8 +57,8 @@ pub use package::{
 };
 pub use presence::{PresenceCache, PrinterPresence};
 pub use public_catalogue::{
-    PublicCatalogueError, PublicFirmwareRelease, fetch_public_firmware, parse_public_firmware_version,
-    public_catalogue_url,
+    PublicCatalogueError, PublicFirmwareRelease, fetch_public_firmware,
+    parse_public_firmware_version, public_catalogue_url,
 };
 pub use quirks::{
     Qualification as QuirkQualification, QuirkEffect, QuirkEntry, RegistryIssue,

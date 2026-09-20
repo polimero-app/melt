@@ -318,7 +318,14 @@ pub fn firmware_update_status(
     tls_fingerprint: Option<&str>,
     refresh: bool,
 ) -> Result<FirmwareUpdateReport, DriverError> {
-    firmware_update_status_with_sources(profile, access_code, tls_fingerprint, refresh, false, false)
+    firmware_update_status_with_sources(
+        profile,
+        access_code,
+        tls_fingerprint,
+        refresh,
+        false,
+        false,
+    )
 }
 
 pub fn firmware_update_status_with_sources(

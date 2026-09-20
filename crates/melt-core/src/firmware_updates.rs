@@ -207,14 +207,16 @@ fn assessment_for(
     {
         return FirmwareUpdateAssessment::Conflict;
     }
-    if components.iter().any(|component| {
-        evidence_newer(component, FirmwareEvidenceRole::DeviceCatalogue)
-    }) {
+    if components
+        .iter()
+        .any(|component| evidence_newer(component, FirmwareEvidenceRole::DeviceCatalogue))
+    {
         return FirmwareUpdateAssessment::DeviceCatalogueNewer;
     }
-    if components.iter().any(|component| {
-        evidence_newer(component, FirmwareEvidenceRole::PublicStable)
-    }) {
+    if components
+        .iter()
+        .any(|component| evidence_newer(component, FirmwareEvidenceRole::PublicStable))
+    {
         return FirmwareUpdateAssessment::PublicReleaseNewer;
     }
     match availability {
@@ -240,14 +242,22 @@ fn numeric_version(value: &str) -> Option<Vec<u64>> {
 }
 
 fn evidence_newer(component: &FirmwareUpdateComponent, role: FirmwareEvidenceRole) -> bool {
-    let Some(current) = component.current_version.as_deref().and_then(numeric_version) else {
+    let Some(current) = component
+        .current_version
+        .as_deref()
+        .and_then(numeric_version)
+    else {
         return false;
     };
     component.evidence.iter().any(|evidence| {
         evidence.role == role
-            && evidence.version.as_deref().and_then(numeric_version).is_some_and(|target| {
-                compare_numeric_versions(&target, &current) == std::cmp::Ordering::Greater
-            })
+            && evidence
+                .version
+                .as_deref()
+                .and_then(numeric_version)
+                .is_some_and(|target| {
+                    compare_numeric_versions(&target, &current) == std::cmp::Ordering::Greater
+                })
     })
 }
 
@@ -410,7 +420,13 @@ mod tests {
             vec![component],
             Vec::new(),
         );
-        assert_eq!(report.assessment, FirmwareUpdateAssessment::PublicReleaseNewer);
-        assert_eq!(report.evidence_sources, [FirmwareEvidenceSource::BambuPublicCatalogue]);
+        assert_eq!(
+            report.assessment,
+            FirmwareUpdateAssessment::PublicReleaseNewer
+        );
+        assert_eq!(
+            report.evidence_sources,
+            [FirmwareEvidenceSource::BambuPublicCatalogue]
+        );
     }
 }

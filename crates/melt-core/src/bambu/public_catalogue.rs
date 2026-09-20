@@ -91,9 +91,10 @@ pub fn fetch_public_firmware(
     if !response.status().is_success() {
         return Err(PublicCatalogueError::Status);
     }
-    if response.content_length().is_some_and(|length| {
-        length > MAX_PUBLIC_CATALOGUE_BYTES as u64
-    }) {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_PUBLIC_CATALOGUE_BYTES as u64)
+    {
         return Err(PublicCatalogueError::TooLarge);
     }
     let mut body = Vec::new();
@@ -106,7 +107,8 @@ pub fn fetch_public_firmware(
         return Err(PublicCatalogueError::TooLarge);
     }
     let html = String::from_utf8_lossy(&body);
-    let version = parse_public_firmware_version(&html).ok_or(PublicCatalogueError::VersionNotFound)?;
+    let version =
+        parse_public_firmware_version(&html).ok_or(PublicCatalogueError::VersionNotFound)?;
     Ok(PublicFirmwareRelease {
         model,
         version,
@@ -154,7 +156,10 @@ pub fn parse_public_firmware_version(html: &str) -> Option<String> {
         if context.contains("beta") || context.contains("alpha") || context.contains("candidate") {
             continue;
         }
-        candidates.push((crate::bambu::FirmwareVersion::parse(version), version.to_owned()));
+        candidates.push((
+            crate::bambu::FirmwareVersion::parse(version),
+            version.to_owned(),
+        ));
     }
     candidates
         .into_iter()
@@ -179,6 +184,9 @@ mod tests {
           <div>Firmware version 01.07.00.00</div>
           <div>Firmware version 01.09.00.00</div>
         "#;
-        assert_eq!(parse_public_firmware_version(html).as_deref(), Some("01.09.00.00"));
+        assert_eq!(
+            parse_public_firmware_version(html).as_deref(),
+            Some("01.09.00.00")
+        );
     }
 }

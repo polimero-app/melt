@@ -5,8 +5,8 @@ use serde_json::Value;
 
 use crate::firmware_updates::{
     FirmwareEvidenceRole, FirmwareEvidenceSource, FirmwareUpdateAvailability,
-    FirmwareUpdateComponent, FirmwareUpdateComponentKind, FirmwareUpdateIssue, FirmwareUpdateReport,
-    FirmwareUpdateSource, FirmwareVersionEvidence, MAX_COMPONENT_ID_BYTES,
+    FirmwareUpdateComponent, FirmwareUpdateComponentKind, FirmwareUpdateIssue,
+    FirmwareUpdateReport, FirmwareUpdateSource, FirmwareVersionEvidence, MAX_COMPONENT_ID_BYTES,
     MAX_COMPONENT_LABEL_BYTES, MAX_VERSION_BYTES, bounded_provider_text, provider_data_truncated,
 };
 
@@ -150,12 +150,16 @@ pub fn update_report(status: &Value, inventory: &FirmwareInventory) -> FirmwareU
                 available_version: None,
                 availability: FirmwareUpdateAvailability::Unknown,
                 required: false,
-                evidence: (!version.is_empty()).then(|| vec![FirmwareVersionEvidence {
-                    source: FirmwareEvidenceSource::BambuLanInventory,
-                    role: FirmwareEvidenceRole::Installed,
-                    version: Some(version.clone()),
-                    required: false,
-                }]).unwrap_or_default(),
+                evidence: (!version.is_empty())
+                    .then(|| {
+                        vec![FirmwareVersionEvidence {
+                            source: FirmwareEvidenceSource::BambuLanInventory,
+                            role: FirmwareEvidenceRole::Installed,
+                            version: Some(version.clone()),
+                            required: false,
+                        }]
+                    })
+                    .unwrap_or_default(),
             },
         );
     }
@@ -271,7 +275,10 @@ pub fn update_report(status: &Value, inventory: &FirmwareInventory) -> FirmwareU
 /// Adds the read-only `upgrade.get_history` catalogue to an existing LAN
 /// report. History is treated as a device catalogue, not as proof that the
 /// printer has accepted or staged an update.
-pub fn merge_history_report(mut report: FirmwareUpdateReport, history: &Value) -> FirmwareUpdateReport {
+pub fn merge_history_report(
+    mut report: FirmwareUpdateReport,
+    history: &Value,
+) -> FirmwareUpdateReport {
     let mut components = report
         .components
         .drain(..)
@@ -281,7 +288,11 @@ pub fn merge_history_report(mut report: FirmwareUpdateReport, history: &Value) -
     let mut truncated = false;
 
     let Some(upgrade) = history.get("upgrade").and_then(Value::as_object) else {
-        return FirmwareUpdateReport::from_components(report.source, components.into_values().collect(), issues);
+        return FirmwareUpdateReport::from_components(
+            report.source,
+            components.into_values().collect(),
+            issues,
+        );
     };
     let firmware_optional = upgrade
         .get("firmware_optional")
@@ -304,7 +315,12 @@ pub fn merge_history_report(mut report: FirmwareUpdateReport, history: &Value) -
             &mut issues,
             &mut truncated,
         );
-        for ams in entry.get("ams").and_then(Value::as_array).into_iter().flatten() {
+        for ams in entry
+            .get("ams")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             let Some(ams_object) = ams.as_object() else {
                 continue;
             };
@@ -388,23 +404,27 @@ fn merge_public_target(
         return;
     }
     let key = id.to_ascii_lowercase();
-    let component = components.entry(key).or_insert_with(|| FirmwareUpdateComponent {
-        kind: component_kind(&id),
-        id,
-        label,
-        current_version: None,
-        available_version: None,
-        availability: FirmwareUpdateAvailability::Unknown,
-        required: false,
-        evidence: Vec::new(),
-    });
+    let component = components
+        .entry(key)
+        .or_insert_with(|| FirmwareUpdateComponent {
+            kind: component_kind(&id),
+            id,
+            label,
+            current_version: None,
+            available_version: None,
+            availability: FirmwareUpdateAvailability::Unknown,
+            required: false,
+            evidence: Vec::new(),
+        });
     component.evidence.push(FirmwareVersionEvidence {
         source: FirmwareEvidenceSource::BambuPublicCatalogue,
         role: FirmwareEvidenceRole::PublicStable,
         version: Some(target.clone()),
         required: false,
     });
-    let Some(current) = component.current_version.as_deref() else { return };
+    let Some(current) = component.current_version.as_deref() else {
+        return;
+    };
     let current = FirmwareVersion::parse(current);
     let target_version = FirmwareVersion::parse(&target);
     if current.numeric.is_empty() || target_version.numeric.is_empty() {
@@ -447,16 +467,18 @@ fn merge_catalogue_target(
         return;
     }
     let key = id.to_ascii_lowercase();
-    let component = components.entry(key).or_insert_with(|| FirmwareUpdateComponent {
-        kind: component_kind(&id),
-        id,
-        label,
-        current_version: None,
-        available_version: None,
-        availability: FirmwareUpdateAvailability::Unknown,
-        required: false,
-        evidence: Vec::new(),
-    });
+    let component = components
+        .entry(key)
+        .or_insert_with(|| FirmwareUpdateComponent {
+            kind: component_kind(&id),
+            id,
+            label,
+            current_version: None,
+            available_version: None,
+            availability: FirmwareUpdateAvailability::Unknown,
+            required: false,
+            evidence: Vec::new(),
+        });
     let _ = required;
     component.evidence.push(FirmwareVersionEvidence {
         source: FirmwareEvidenceSource::BambuLanHistory,
@@ -721,15 +743,31 @@ mod tests {
             }]}}),
         );
         assert_eq!(merged.availability, FirmwareUpdateAvailability::Unknown);
-        assert_eq!(merged.assessment, FirmwareUpdateAssessment::DeviceCatalogueNewer);
-        let ota = merged.components.iter().find(|component| component.id == "ota").unwrap();
+        assert_eq!(
+            merged.assessment,
+            FirmwareUpdateAssessment::DeviceCatalogueNewer
+        );
+        let ota = merged
+            .components
+            .iter()
+            .find(|component| component.id == "ota")
+            .unwrap();
         assert_eq!(ota.available_version, None);
-        assert!(ota.evidence.iter().any(|evidence| evidence.version.as_deref() == Some("01.09.00.00")));
+        assert!(
+            ota.evidence
+                .iter()
+                .any(|evidence| evidence.version.as_deref() == Some("01.09.00.00"))
+        );
         assert!(ota.evidence.iter().any(|evidence| {
             evidence.source == FirmwareEvidenceSource::BambuLanHistory
                 && evidence.role == FirmwareEvidenceRole::DeviceCatalogue
         }));
-        assert!(merged.components.iter().any(|component| component.id == "ams-0"));
+        assert!(
+            merged
+                .components
+                .iter()
+                .any(|component| component.id == "ams-0")
+        );
     }
 
     #[test]
@@ -737,9 +775,19 @@ mod tests {
         let inventory = FirmwareInventory::from_version_info(
             &json!({"module":[{"name":"ota","sw_ver":"01.08.00.00"}]}),
         );
-        let merged = merge_public_catalogue_report(update_report(&json!({"print":{}}), &inventory), "01.09.00.00");
-        let ota = merged.components.iter().find(|component| component.id == "ota").unwrap();
-        assert_eq!(merged.assessment, FirmwareUpdateAssessment::PublicReleaseNewer);
+        let merged = merge_public_catalogue_report(
+            update_report(&json!({"print":{}}), &inventory),
+            "01.09.00.00",
+        );
+        let ota = merged
+            .components
+            .iter()
+            .find(|component| component.id == "ota")
+            .unwrap();
+        assert_eq!(
+            merged.assessment,
+            FirmwareUpdateAssessment::PublicReleaseNewer
+        );
         assert!(ota.evidence.iter().any(|evidence| {
             evidence.source == FirmwareEvidenceSource::BambuPublicCatalogue
                 && evidence.role == FirmwareEvidenceRole::PublicStable

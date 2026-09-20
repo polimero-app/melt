@@ -118,7 +118,15 @@ impl ConnectionPool {
         tls_fingerprint: Option<&str>,
         refresh: bool,
     ) -> Result<FirmwareUpdateReport, drivers::DriverError> {
-        self.firmware_update_status_with_sources(name, profile, access_code, tls_fingerprint, refresh, false, false)
+        self.firmware_update_status_with_sources(
+            name,
+            profile,
+            access_code,
+            tls_fingerprint,
+            refresh,
+            false,
+            false,
+        )
     }
 
     pub fn firmware_update_status_with_sources(

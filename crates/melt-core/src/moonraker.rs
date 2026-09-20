@@ -1097,18 +1097,22 @@ fn moonraker_update_report(result: &Value) -> FirmwareUpdateReport {
             availability,
             required: false,
             evidence: [
-                current_version.as_ref().map(|version| FirmwareVersionEvidence {
-                    source: FirmwareEvidenceSource::MoonrakerUpdateManager,
-                    role: FirmwareEvidenceRole::Installed,
-                    version: Some(version.clone()),
-                    required: false,
-                }),
-                available_version.as_ref().map(|version| FirmwareVersionEvidence {
-                    source: FirmwareEvidenceSource::MoonrakerUpdateManager,
-                    role: FirmwareEvidenceRole::UpstreamCurrent,
-                    version: Some(version.clone()),
-                    required: false,
-                }),
+                current_version
+                    .as_ref()
+                    .map(|version| FirmwareVersionEvidence {
+                        source: FirmwareEvidenceSource::MoonrakerUpdateManager,
+                        role: FirmwareEvidenceRole::Installed,
+                        version: Some(version.clone()),
+                        required: false,
+                    }),
+                available_version
+                    .as_ref()
+                    .map(|version| FirmwareVersionEvidence {
+                        source: FirmwareEvidenceSource::MoonrakerUpdateManager,
+                        role: FirmwareEvidenceRole::UpstreamCurrent,
+                        version: Some(version.clone()),
+                        required: false,
+                    }),
             ]
             .into_iter()
             .flatten()

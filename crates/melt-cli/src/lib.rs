@@ -962,7 +962,12 @@ fn firmware_check(
     let command = "firmware check";
     let (positionals, options) = match parse_options(
         args,
-        &["insecure", "refresh", "include-history", "include-public-catalogue"],
+        &[
+            "insecure",
+            "refresh",
+            "include-history",
+            "include-public-catalogue",
+        ],
         &["timeout", "protocol-trace"],
     ) {
         Ok(value) => value,

@@ -33,10 +33,9 @@ use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rf
 use super::{
     AuthorizationMode, BedLevelingSupport, FirmwareInventory, MQTT_USERNAME, MappingStatus,
     MqttTopics, PrintStage, PrintStageEvent, Profile, RuntimeCapabilities, StorageTransport,
-    StorageVolume, TlsPinError, firmware::update_report, is_pushall_payload,
-    fetch_public_firmware, is_valid_tls_fingerprint, merge_public_catalogue_report,
-    preflight_print_package, pushall_payload, resolve_authorization, tls_fingerprint, tunnel,
-    verify_tls_fingerprint,
+    StorageVolume, TlsPinError, fetch_public_firmware, firmware::update_report, is_pushall_payload,
+    is_valid_tls_fingerprint, merge_public_catalogue_report, preflight_print_package,
+    pushall_payload, resolve_authorization, tls_fingerprint, tunnel, verify_tls_fingerprint,
 };
 
 #[cfg(test)]

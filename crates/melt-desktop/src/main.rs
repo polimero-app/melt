@@ -1128,34 +1128,38 @@ fn firmware_source_checks(
     checked_at: &str,
     public_enabled: bool,
 ) -> Vec<FirmwareSourceCheck> {
-    let source_seen = |source: FirmwareEvidenceSource| {
-        report.evidence_sources.contains(&source)
-    };
+    let source_seen = |source: FirmwareEvidenceSource| report.evidence_sources.contains(&source);
     let failed = |code: &str| report.issues.iter().any(|issue| issue.code == code);
-    let make = |source: FirmwareEvidenceSource, enabled: bool, failed_code: Option<&str>| FirmwareSourceCheck {
-        source,
-        checked_at: checked_at.to_owned(),
-        outcome: if !enabled {
-            FirmwareSourceOutcome::Disabled
-        } else if report.availability == FirmwareUpdateAvailability::Unsupported {
-            FirmwareSourceOutcome::Unsupported
-        } else if source_seen(source) {
-            FirmwareSourceOutcome::Success
-        } else if failed_code.is_some_and(failed) {
-            FirmwareSourceOutcome::Failed
-        } else {
-            FirmwareSourceOutcome::Empty
-        },
-        stale: false,
-        error: failed_code
-            .filter(|code| enabled && failed(code))
-            .map(|_| CommandError::new("firmwareSourceUnavailable")),
+    let make = |source: FirmwareEvidenceSource, enabled: bool, failed_code: Option<&str>| {
+        FirmwareSourceCheck {
+            source,
+            checked_at: checked_at.to_owned(),
+            outcome: if !enabled {
+                FirmwareSourceOutcome::Disabled
+            } else if report.availability == FirmwareUpdateAvailability::Unsupported {
+                FirmwareSourceOutcome::Unsupported
+            } else if source_seen(source) {
+                FirmwareSourceOutcome::Success
+            } else if failed_code.is_some_and(failed) {
+                FirmwareSourceOutcome::Failed
+            } else {
+                FirmwareSourceOutcome::Empty
+            },
+            stale: false,
+            error: failed_code
+                .filter(|code| enabled && failed(code))
+                .map(|_| CommandError::new("firmwareSourceUnavailable")),
+        }
     };
     match report.source {
         melt_core::firmware_updates::FirmwareUpdateSource::BambuMqtt => vec![
             make(FirmwareEvidenceSource::BambuLanInventory, true, None),
             make(FirmwareEvidenceSource::BambuLanAdvertisement, true, None),
-            make(FirmwareEvidenceSource::BambuLanHistory, true, Some("historyUnavailable")),
+            make(
+                FirmwareEvidenceSource::BambuLanHistory,
+                true,
+                Some("historyUnavailable"),
+            ),
             make(
                 FirmwareEvidenceSource::BambuPublicCatalogue,
                 public_enabled,
