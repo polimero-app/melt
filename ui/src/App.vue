@@ -72,6 +72,7 @@ import {
   PhFolderOpen,
   PhBellRinging,
   PhGearSix,
+  PhGlobe,
   PhHexagon,
   PhHouse,
   PhInfo,
