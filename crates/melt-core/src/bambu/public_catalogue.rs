@@ -238,8 +238,14 @@ pub fn parse_public_firmware_version(html: &str) -> Option<String> {
         }
         let end = index;
         let version = &html[start..end];
-        let context_start = start.saturating_sub(96);
-        let context = html[context_start..end.min(html.len())].to_ascii_lowercase();
+        // Bambu's pages are localised, so 96 bytes back from an ASCII digit
+        // routinely lands inside a multi-byte character. Snap to a boundary
+        // rather than slicing blind; index 0 always is one, so this ends.
+        let mut context_start = start.saturating_sub(96);
+        while !html.is_char_boundary(context_start) {
+            context_start -= 1;
+        }
+        let context = html[context_start..end].to_ascii_lowercase();
         if context.contains("beta") || context.contains("alpha") || context.contains("candidate") {
             continue;
         }
@@ -345,5 +351,27 @@ mod tests {
             parse_public_firmware_version(html).as_deref(),
             Some("01.09.00.00")
         );
+    }
+
+    /// Bambu's pages carry localised copy, so the 96-byte lookbehind used to
+    /// reject prereleases lands mid-character and used to panic the whole
+    /// firmware worker rather than return a version.
+    #[test]
+    fn a_multi_byte_character_in_the_lookbehind_is_not_a_panic() {
+        // '内' straddles the byte the lookbehind would start on.
+        let html = format!("内{} 01.09.00.00", "x".repeat(94));
+        assert!(!html.is_char_boundary(html.find("01.09").unwrap() - 96));
+        assert_eq!(
+            parse_public_firmware_version(&html).as_deref(),
+            Some("01.09.00.00")
+        );
+    }
+
+    /// The lookbehind still has to see a prerelease label written next to a
+    /// version in a localised page.
+    #[test]
+    fn a_prerelease_label_is_still_rejected_past_a_multi_byte_character() {
+        let html = format!("内{} beta 01.09.00.00", "x".repeat(94));
+        assert_eq!(parse_public_firmware_version(&html), None);
     }
 }
