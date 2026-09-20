@@ -234,6 +234,7 @@ impl Client {
         fingerprint: Option<&str>,
     ) -> Result<RuntimeCapabilities, Error> {
         let defaults = self.profile.default_capabilities();
+        let serial = self.profile.serial();
         let capabilities = self.with_mqtt(access_code, fingerprint, |mqtt| {
             if mqtt.status_document.is_none() {
                 mqtt.exchange(pushall_payload(next_sequence()), is_full_report)?;
@@ -241,6 +242,7 @@ impl Client {
             let version = mqtt.query_version()?;
             Ok(refine_runtime_capabilities(
                 defaults,
+                serial,
                 mqtt.status_document.as_ref(),
                 Some(&version),
             ))
@@ -428,7 +430,12 @@ impl Client {
             let baseline = cached
                 .clone()
                 .unwrap_or_else(|| self.profile.default_capabilities());
-            *cached = Some(refine_runtime_capabilities(baseline, Some(&status), None));
+            *cached = Some(refine_runtime_capabilities(
+                baseline,
+                self.profile.serial(),
+                Some(&status),
+                None,
+            ));
         }
     }
 
@@ -2740,9 +2747,30 @@ fn version_info(report: &Value) -> Option<Value> {
 
 fn refine_runtime_capabilities(
     mut capabilities: RuntimeCapabilities,
+    serial: &str,
     status: Option<&Value>,
     info: Option<&Value>,
 ) -> RuntimeCapabilities {
+    // Identity is resolved first so the model-derived defaults are rebuilt
+    // before any observation merges on top of them. The configured model is
+    // only the lowest-trust candidate: a profile added without `--model`
+    // would otherwise route an H2D as an unknown printer forever.
+    let firmware = info.map(FirmwareInventory::from_version_info);
+    let detection = super::detect(
+        serial,
+        &capabilities.identity.raw,
+        firmware.as_ref().unwrap_or(&capabilities.firmware),
+    );
+    if detection.identity != capabilities.identity {
+        let observations = std::mem::take(&mut capabilities.observations);
+        capabilities = RuntimeCapabilities::for_identity(detection.identity);
+        capabilities.observations = observations;
+    }
+    capabilities.model_source = detection.source;
+    capabilities.model_conflicts = detection.conflicts;
+    if let Some(firmware) = firmware {
+        capabilities.firmware = firmware;
+    }
     if let Some(status) = status {
         capabilities
             .observations
@@ -2802,11 +2830,12 @@ fn refine_runtime_capabilities(
         }
         capabilities.firmware_version = firmware_version(print).or(capabilities.firmware_version);
     }
-    if let Some(info) = info {
-        capabilities.firmware = FirmwareInventory::from_version_info(info);
-        if let Some(version) = capabilities.firmware.software("ota") {
-            capabilities.firmware_version = Some(version.raw.clone());
-        }
+    // The `ota` module's own version outranks anything the status report
+    // inferred, so it is applied after the status merge, as before.
+    if info.is_some()
+        && let Some(version) = capabilities.firmware.software("ota")
+    {
+        capabilities.firmware_version = Some(version.raw.clone());
     }
     capabilities
 }
@@ -4892,6 +4921,7 @@ mod tests {
 
     use super::*;
     use crate::{
+        bambu::{CameraTransport, CanonicalModel, ModelConflict, ModelFamily, ModelSource},
         firmware_updates::FirmwareUpdateAvailability,
         trace::{Direction, ProtocolTracer},
     };
@@ -6326,6 +6356,7 @@ mod tests {
         let version = mqtt.query_version().unwrap();
         let capabilities = refine_runtime_capabilities(
             profile.default_capabilities(),
+            profile.serial(),
             mqtt.status_document.as_ref(),
             Some(&version),
         );
@@ -6350,6 +6381,156 @@ mod tests {
         );
         assert_eq!(capabilities.storage_transport, StorageTransport::Tunnel6000);
         assert!(capabilities.storage_volumes.contains(&StorageVolume::Emmc));
+    }
+
+    fn version_info(modules: Value) -> Value {
+        json!({"command": "get_version", "result": "success", "module": modules})
+    }
+
+    /// The reported bug: a profile added without `--model` canonicalized to
+    /// `unknown` forever, because the defaults were derived once from the
+    /// empty configured string and the live refine never revisited them.
+    #[test]
+    fn detects_the_model_from_live_version_info_when_the_profile_says_nothing() {
+        let capabilities = refine_runtime_capabilities(
+            RuntimeCapabilities::for_model(""),
+            "094SANITIZED0001",
+            None,
+            Some(&version_info(json!([
+                {"name":"ota","product_name":"Bambu Lab H2D","sw_ver":"01.02.00.00"}
+            ]))),
+        );
+        assert_eq!(capabilities.identity.canonical, CanonicalModel::H2D);
+        assert_eq!(capabilities.model_family, ModelFamily::H2);
+        assert_eq!(capabilities.model_source, ModelSource::VersionProductName);
+        assert_eq!(capabilities.storage_transport, StorageTransport::Tunnel6000);
+        assert_eq!(capabilities.camera, CameraTransport::RtspsH264);
+        assert_eq!(capabilities.extruder_count, Some(2));
+        assert_eq!(capabilities.ams_supported, Some(true));
+        assert_eq!(
+            capabilities.firmware_version.as_deref(),
+            Some("01.02.00.00")
+        );
+    }
+
+    #[test]
+    fn detects_from_the_serial_before_any_version_query() {
+        let capabilities = refine_runtime_capabilities(
+            RuntimeCapabilities::for_model(""),
+            "01P00000000000",
+            None,
+            None,
+        );
+        assert_eq!(capabilities.identity.canonical, CanonicalModel::P1S);
+        assert_eq!(capabilities.model_source, ModelSource::SerialPrefix);
+        assert_eq!(capabilities.storage_transport, StorageTransport::Ftps);
+        // P1S camera stays disputed; detection must not settle it.
+        assert_eq!(capabilities.camera, CameraTransport::Unknown);
+    }
+
+    #[test]
+    fn live_observations_still_outrank_the_re_derived_defaults() {
+        let capabilities = refine_runtime_capabilities(
+            RuntimeCapabilities::for_model(""),
+            "01P00000000000",
+            Some(&json!({"print": {
+                "command": "push_status",
+                "msg": 0,
+                "device": {"extruder": {"info": [{"id": 0}, {"id": 1}]}},
+                "support_bed_leveling": 2,
+                "nozzle_temp_range": [0, 320]
+            }})),
+            None,
+        );
+        assert_eq!(capabilities.identity.canonical, CanonicalModel::P1S);
+        assert_eq!(capabilities.extruder_count, Some(2));
+        assert_eq!(
+            capabilities.bed_leveling,
+            BedLevelingSupport::AutomaticOrToggle
+        );
+        assert_eq!(capabilities.nozzle_temperature_range, Some([0, 320]));
+    }
+
+    #[test]
+    fn a_stale_configured_model_is_overridden_and_recorded() {
+        let capabilities = refine_runtime_capabilities(
+            RuntimeCapabilities::for_model("X1C"),
+            "030SANITIZED0001",
+            None,
+            Some(&version_info(json!([
+                {"name":"ams_f1/0","product_name":"AMS Lite (1)"},
+                {"name":"ota","product_name":"Bambu Lab A1 mini","sw_ver":"01.05.00.00"}
+            ]))),
+        );
+        assert_eq!(capabilities.identity.canonical, CanonicalModel::A1Mini);
+        assert_eq!(capabilities.model_family, ModelFamily::A1);
+        assert_eq!(capabilities.camera, CameraTransport::MjpegTls);
+        assert_eq!(
+            capabilities.model_conflicts,
+            [ModelConflict {
+                source: ModelSource::Configured,
+                canonical: CanonicalModel::X1Carbon,
+            }]
+        );
+    }
+
+    #[test]
+    fn an_unknown_printer_keeps_conservative_defaults() {
+        let capabilities = refine_runtime_capabilities(
+            RuntimeCapabilities::for_model(""),
+            "ZZZ00000000000",
+            None,
+            Some(&version_info(json!([
+                {"name":"ota","sw_ver":"09.00.00.00"}
+            ]))),
+        );
+        assert_eq!(capabilities.identity.canonical, CanonicalModel::Unknown);
+        assert_eq!(capabilities.camera, CameraTransport::Unknown);
+        assert_eq!(capabilities.storage_transport, StorageTransport::Unknown);
+        assert!(capabilities.storage_volumes.is_empty());
+        assert_eq!(capabilities.ams_supported, None);
+        // Still inventoried and operable.
+        assert_eq!(
+            capabilities.firmware_version.as_deref(),
+            Some("09.00.00.00")
+        );
+    }
+
+    /// Detection replaces the capability set, so anything already merged from
+    /// an earlier status report has to survive it.
+    #[test]
+    fn detection_does_not_discard_observations_already_merged() {
+        let baseline = refine_runtime_capabilities(
+            RuntimeCapabilities::for_model(""),
+            "",
+            Some(
+                &json!({"print": {"command": "push_status", "msg": 0, "support_timelapse": true}}),
+            ),
+            None,
+        );
+        assert_eq!(baseline.identity.canonical, CanonicalModel::Unknown);
+        assert!(
+            baseline
+                .observations
+                .values
+                .contains_key("support_timelapse")
+        );
+
+        let capabilities = refine_runtime_capabilities(
+            baseline,
+            "22E00000000000",
+            None,
+            Some(&version_info(json!([
+                {"name":"ota","product_name":"Bambu Lab P2S"}
+            ]))),
+        );
+        assert_eq!(capabilities.identity.canonical, CanonicalModel::P2S);
+        assert!(
+            capabilities
+                .observations
+                .values
+                .contains_key("support_timelapse")
+        );
     }
 
     #[test]

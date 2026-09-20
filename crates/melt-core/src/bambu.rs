@@ -286,6 +286,10 @@ pub enum BedLevelingSupport {
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeCapabilities {
     pub identity: ModelIdentity,
+    /// Which LAN channel named the printer.
+    pub model_source: ModelSource,
+    /// Lower-trust channels that named a different model. Advisory only.
+    pub model_conflicts: Vec<ModelConflict>,
     pub firmware: FirmwareInventory,
     pub observations: CapabilityObservations,
     pub model_family: ModelFamily,
@@ -309,12 +313,14 @@ pub struct RuntimeCapabilities {
 
 impl RuntimeCapabilities {
     pub fn for_model(model: &str) -> Self {
-        let identity = ModelIdentity::parse(model);
-        let normalized = model
-            .trim()
-            .to_ascii_uppercase()
-            .replace(['-', '_', ' '], "");
-        let model_family = ModelFamily::from_model(&normalized);
+        Self::for_identity(ModelIdentity::parse(model))
+    }
+
+    /// Derives the model-dependent defaults from an already-resolved identity.
+    /// Routing keys off the canonical model rather than the raw string, which
+    /// may be a `model_id` such as `C12` that says nothing on its own.
+    pub fn for_identity(identity: ModelIdentity) -> Self {
+        let model_family = identity.family;
         let (camera, storage_transport, storage_volumes, extruder_count) = match model_family {
             ModelFamily::A1 | ModelFamily::A2 => (
                 CameraTransport::MjpegTls,
@@ -323,7 +329,7 @@ impl RuntimeCapabilities {
                 Some(1),
             ),
             ModelFamily::P1 => (
-                if normalized.starts_with("P1S") {
+                if identity.canonical == CanonicalModel::P1S {
                     // Community implementations disagree across P1S firmware;
                     // negotiate from a live advertisement or safe probe.
                     CameraTransport::Unknown
@@ -344,12 +350,10 @@ impl RuntimeCapabilities {
                 CameraTransport::RtspsH264,
                 StorageTransport::Tunnel6000,
                 vec![StorageVolume::Emmc, StorageVolume::UsbDisk],
-                if normalized.starts_with("H2D") {
-                    Some(2)
-                } else if normalized.starts_with("H2C") || normalized.starts_with("X2D") {
-                    None
-                } else {
-                    Some(1)
+                match identity.canonical {
+                    CanonicalModel::H2D | CanonicalModel::H2DPro => Some(2),
+                    CanonicalModel::H2C | CanonicalModel::X2D => None,
+                    _ => Some(1),
                 },
             ),
             ModelFamily::Unknown => (
@@ -361,6 +365,8 @@ impl RuntimeCapabilities {
         };
         Self {
             identity,
+            model_source: ModelSource::default(),
+            model_conflicts: Vec::new(),
             firmware: FirmwareInventory::default(),
             observations: CapabilityObservations::default(),
             model_family,

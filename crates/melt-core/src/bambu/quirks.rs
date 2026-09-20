@@ -299,6 +299,26 @@ mod tests {
         assert_eq!(validate_registry(), []);
     }
 
+    /// The registry keys off the canonical model, so an entry is only
+    /// reachable once detection resolves one. Before detection, a profile
+    /// added without `--model` matched nothing at all.
+    #[test]
+    fn a_detected_identity_selects_the_same_entries_as_a_configured_one() {
+        let detected = super::super::detect(
+            "01P00000000000",
+            "",
+            &FirmwareInventory::from_version_info(&serde_json::json!({"module": [
+                {"name": "ota", "product_name": "Bambu Lab P1S"}
+            ]})),
+        );
+        assert_eq!(detected.identity.canonical, CanonicalModel::P1S);
+        assert_eq!(
+            matching(&detected.identity).len(),
+            matching(&ModelIdentity::parse("P1S")).len()
+        );
+        assert_eq!(matching(&detected.identity).len(), 2);
+    }
+
     #[test]
     fn validation_rejects_invalid_and_conflicting_entries() {
         let mut invalid = QUALIFIED;
