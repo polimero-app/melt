@@ -395,7 +395,7 @@ mod tests {
         let mut component = component(
             "ota",
             FirmwareUpdateComponentKind::PrinterFirmware,
-            FirmwareUpdateAvailability::Available,
+            FirmwareUpdateAvailability::Unknown,
         );
         component.current_version = Some("01.08.00.00".into());
         component.available_version = Some("01.09.00.00".into());
