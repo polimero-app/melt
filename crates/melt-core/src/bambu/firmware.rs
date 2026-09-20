@@ -150,16 +150,16 @@ pub fn update_report(status: &Value, inventory: &FirmwareInventory) -> FirmwareU
                 available_version: None,
                 availability: FirmwareUpdateAvailability::Unknown,
                 required: false,
-                evidence: (!version.is_empty())
-                    .then(|| {
-                        vec![FirmwareVersionEvidence {
-                            source: FirmwareEvidenceSource::BambuLanInventory,
-                            role: FirmwareEvidenceRole::Installed,
-                            version: Some(version.clone()),
-                            required: false,
-                        }]
-                    })
-                    .unwrap_or_default(),
+                evidence: if version.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![FirmwareVersionEvidence {
+                        source: FirmwareEvidenceSource::BambuLanInventory,
+                        role: FirmwareEvidenceRole::Installed,
+                        version: Some(version.clone()),
+                        required: false,
+                    }]
+                },
             },
         );
     }

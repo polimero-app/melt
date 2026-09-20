@@ -129,6 +129,7 @@ impl ConnectionPool {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn firmware_update_status_with_sources(
         &self,
         name: &str,
