@@ -127,6 +127,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # The bundlers disagree with themselves: the same architecture that
+          # ships as aarch64 everywhere comes back as x64 from dmg and msi.
+          find target/release/bundle -type f -name '*_x64*' -print0 |
+            while IFS= read -r -d '' installer; do
+              mv "$installer" "${installer//_x64/_x86_64}"
+            done
           find target/release/bundle -type f \
             \( -name '*.deb' -o -name '*.rpm' -o -name '*.dmg' -o -name '*.msi' \) \
             -print0 | xargs -0 gh release upload "${{ needs.plan.outputs.tag }}" --clobber
