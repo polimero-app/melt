@@ -7,6 +7,19 @@ updates:
     groups:
       cargo:
         patterns: ["*"]
+    ignore:
+      # 0.21 replaced the whole API with a Sans-I/O core; porting the camera
+      # session is a project, not a bump. Patches still land.
+      - dependency-name: webrtc
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+      # euc pins vek 0.14: a newer vek silently splits the vertex types in two
+      # and stops implementing euc's Interpolate. Move it when euc moves.
+      - dependency-name: vek
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
 
   # ponytail: bun needs its own entry; npm does not cover bun.lock.
   - package-ecosystem: bun
@@ -16,6 +29,12 @@ updates:
     groups:
       bun:
         patterns: ["*"]
+    ignore:
+      # TypeScript 7 dropped the ./lib/tsc export that vue-tsc loads. Move
+      # when vue-tsc ships a release that peers on it.
+      - dependency-name: typescript
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /

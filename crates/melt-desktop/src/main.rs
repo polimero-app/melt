@@ -3013,8 +3013,8 @@ fn preview_cache_dir() -> Option<std::path::PathBuf> {
 }
 
 fn preview_cache_path(cache_key: &str) -> Option<std::path::PathBuf> {
-    let digest = Sha256::digest(cache_key.as_bytes());
-    Some(preview_cache_dir()?.join(format!("{digest:x}.png")))
+    let digest = hex(&Sha256::digest(cache_key.as_bytes()));
+    Some(preview_cache_dir()?.join(format!("{digest}.png")))
 }
 
 fn read_disk_preview_cache(cache_key: &str) -> Option<FilePreviewResponse> {

@@ -528,7 +528,11 @@ pub fn is_valid_tls_fingerprint(fingerprint: &str) -> bool {
 }
 
 pub fn tls_fingerprint(certificate_der: &[u8]) -> String {
-    format!("sha256:{:x}", Sha256::digest(certificate_der))
+    let digest: String = Sha256::digest(certificate_der)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("sha256:{digest}")
 }
 
 /// Verifies a presented certificate after a transport completes its handshake.

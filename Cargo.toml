@@ -20,7 +20,7 @@ reqwest = { version = "0.13", default-features = false, features = ["blocking", 
 url = "2"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-openssl"] }
 serde_yaml = "0.9"
-sha2 = "0.10"
+sha2 = "0.11"
 tempfile = "3"
 thiserror = "2"
 time = { version = "0.3", features = ["formatting", "parsing"] }
