@@ -127,9 +127,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # The bundlers disagree with themselves: the same architecture that
-          # ships as aarch64 everywhere comes back as x64 from dmg and msi.
-          find target/release/bundle -type f -name '*_x64*' -print0 |
+          # The dmg bundler calls x86_64 'x64', which neither uname nor its
+          # own aarch64 sibling agree with. The msi keeps x64: that is how
+          # Windows spells it.
+          find target/release/bundle -type f -name '*_x64*.dmg' -print0 |
             while IFS= read -r -d '' installer; do
               mv "$installer" "${installer//_x64/_x86_64}"
             done
