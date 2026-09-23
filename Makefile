@@ -116,7 +116,7 @@ ui-build: ## Build the UI
 	bun run --cwd ui build
 
 ui-test: ## Run the UI test suite
-	bun test --cwd ui
+	bun run --cwd ui test
 
 help: ## Show this help
 	@printf "\033[37mUsage:\033[0m\n"
