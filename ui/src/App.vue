@@ -2043,7 +2043,7 @@ async function fallbackCamera(printerName: string, request: number, reason: stri
     await nextTick()
     const canvas = cameraCanvas.value
     if (!canvas) throw new Error('Camera canvas is unavailable')
-    const playback = startH264Playback(canvas, stream.url, stream.codec)
+    const playback = startH264Playback(canvas, stream.url)
     cameraH264Playback = playback
     let ready = false
     void playback.done.catch((playbackError) => {

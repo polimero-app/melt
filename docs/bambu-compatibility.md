@@ -29,8 +29,22 @@ subscribe through this manager. Native-video subscriptions receive only H.264
 access units, while preview subscriptions receive only JPEG frames, so one slow
 consumer cannot fill another media type's bounded queue. The WebCodecs bridge
 uses an authenticated loopback binary stream rather than base64 IPC messages.
+The browser waits for a keyframe, converts its normalized Annex-B NAL units to
+length-prefixed AVC, and supplies an AVC decoder configuration record from the
+SPS/PPS. This avoids WebKitGTK's rejection of Annex-B input without decoder
+configuration. Later keyframe parameter-set changes reconfigure the decoder;
+unchanged keyframes do not. This changes framing only, not video encoding.
+WebRTC remains the first choice, with WebCodecs next and MJPEG as the final
+fallback when native H.264 playback fails.
 The desktop releases its camera subscription whenever the Control view or the
 application window is hidden and reconnects when that view becomes visible.
+
+On Linux, WebRTC availability depends on the installed WebKitGTK build;
+WebCodecs can render H.264 even when `RTCPeerConnection` is unavailable.
+The webview never opens the printer's RTSPS URL directly, so
+`WEBKIT_GST_ALLOWED_URI_PROTOCOLS` is not required for Melt's camera viewer.
+Authentication and TLS pinning remain in Rust, and the player leaves decoder
+hardware selection to the browser.
 
 ## Authorization policy
 

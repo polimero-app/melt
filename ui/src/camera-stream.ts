@@ -63,6 +63,50 @@ export class H264StreamParser {
   }
 }
 
+export function h264AvcAccessUnit(frame: H264Chunk): {
+  data: Uint8Array<ArrayBuffer>
+  description?: Uint8Array<ArrayBuffer>
+} {
+  const data = frame.data.slice()
+  const view = new DataView(data.buffer)
+  const starts: number[] = []
+  // Rust normalizes every NAL to a four-byte Annex-B start code.
+  for (let i = 0; i + 3 < data.length; i++) {
+    if (view.getUint32(i) === 1) {
+      starts.push(i)
+      i += 3
+    }
+  }
+  if (starts[0] !== 0) throw new Error('Invalid H.264 Annex-B access unit')
+
+  let sps: Uint8Array | undefined
+  let pps: Uint8Array | undefined
+  for (let i = 0; i < starts.length; i++) {
+    const start = starts[i]
+    const end = starts[i + 1] ?? data.length
+    const length = end - start - 4
+    if (length === 0) throw new Error('Empty H.264 NAL unit')
+    view.setUint32(start, length)
+    const nal = data.subarray(start + 4, end)
+    if ((nal[0] & 0x1f) === 7) sps = nal
+    if ((nal[0] & 0x1f) === 8) pps = nal
+  }
+  if (!frame.keyframe) return { data }
+  if (!sps || sps.length < 4 || !pps || sps.length > 0xffff || pps.length > 0xffff) {
+    throw new Error('Invalid H.264 keyframe parameter sets')
+  }
+
+  const description = new Uint8Array(11 + sps.length + pps.length)
+  const header = new DataView(description.buffer)
+  description.set([1, sps[1], sps[2], sps[3], 0xff, 0xe1])
+  header.setUint16(6, sps.length)
+  description.set(sps, 8)
+  description[8 + sps.length] = 1
+  header.setUint16(9 + sps.length, pps.length)
+  description.set(pps, 11 + sps.length)
+  return { data, description }
+}
+
 export async function supportsH264WebCodecs(codec: string): Promise<boolean> {
   if (typeof VideoDecoder === 'undefined') return false
   try {
@@ -79,7 +123,7 @@ export type H264Playback = {
   stop: () => void
 }
 
-export function startH264Playback(canvas: HTMLCanvasElement, url: string, codec: string): H264Playback {
+export function startH264Playback(canvas: HTMLCanvasElement, url: string): H264Playback {
   const context = canvas.getContext('2d', { alpha: false })
   if (!context) throw new Error('Canvas video rendering is unavailable')
 
@@ -128,31 +172,34 @@ export function startH264Playback(canvas: HTMLCanvasElement, url: string, codec:
       fail(error)
     },
   })
-  try {
-    decoder.configure({ codec, optimizeForLatency: true })
-  } catch (error) {
-    decoder.close()
-    throw error
-  }
-
   const pump = async () => {
     const response = await fetch(url, { cache: 'no-store', signal: abort.signal })
     if (!response.ok || !response.body) throw new Error(`H.264 stream returned HTTP ${response.status}`)
     const reader = response.body.getReader()
     const parser = new H264StreamParser()
+    let description: Uint8Array<ArrayBuffer> | undefined
     try {
       while (!stopped) {
         const result = await reader.read()
         if (result.done) throw new Error('H.264 stream ended')
         for (const frame of parser.push(result.value)) {
+          // A subscriber can join between keyframes; SPS/PPS arrive with the next IDR.
+          if (!description && !frame.keyframe) continue
           while (!stopped && decoder.decodeQueueSize >= MAX_DECODER_QUEUE) {
             await waitForDecoderQueue(decoder, abort.signal)
           }
           if (stopped) break
+          const avc = h264AvcAccessUnit(frame)
+          if (avc.description && (!description || avc.description.length !== description.length ||
+            avc.description.some((byte, i) => byte !== description?.[i]))) {
+            description = avc.description
+            const profile = Array.from(description.subarray(1, 4), byte => byte.toString(16).padStart(2, '0')).join('')
+            decoder.configure({ codec: `avc1.${profile}`, description, optimizeForLatency: true })
+          }
           decoder.decode(new EncodedVideoChunk({
             type: frame.keyframe ? 'key' : 'delta',
             timestamp: frame.timestamp,
-            data: frame.data,
+            data: avc.data,
           }))
         }
       }
@@ -170,6 +217,7 @@ export function startH264Playback(canvas: HTMLCanvasElement, url: string, codec:
       if (!stopped) throw error
     })
     .finally(() => {
+      abort.abort()
       if (decoder.state !== 'closed') decoder.close()
     })
 
