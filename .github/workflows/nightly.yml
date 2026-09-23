@@ -1,0 +1,165 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+      wix: ${{ steps.plan.outputs.wix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Decide whether tonight has anything to package
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          previous=$(git tag --list '[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]*' \
+            --sort=-refname | head -1)
+          if [ -n "$previous" ] && [ "$(git rev-list -n 1 "$previous")" = "$GITHUB_SHA" ]; then
+            echo "main has not moved since $previous; nothing to package"
+            exit 0
+          fi
+
+          date=$(date -u +%Y.%m.%d)
+          tag=$date
+          attempt=1
+          while git rev-parse -q --verify "refs/tags/$tag" >/dev/null; do
+            attempt=$((attempt + 1))
+            tag="$date.$attempt"
+          done
+
+          # Semver forbids the leading zeros CalVer wants, and the MSI product
+          # version caps its first field at 255, so the bundles carry trimmed
+          # forms of the same date.
+          {
+            echo "tag=$tag"
+            echo "version=$(date -u +%Y.%-m.%-d)"
+            echo "wix=$(date -u +%y.%-m.%-d)"
+          } >> "$GITHUB_OUTPUT"
+
+          git tag "$tag" "$GITHUB_SHA"
+          git push origin "$tag"
+          gh release create "$tag" \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --generate-notes \
+            --prerelease \
+            --draft
+
+  package:
+    needs: plan
+    if: needs.plan.outputs.tag != ''
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            os: ubuntu-latest
+            bundles: deb,rpm
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            bundles: deb,rpm
+          - name: macos-amd64
+            os: macos-15-intel
+            bundles: dmg
+          - name: macos-arm64
+            os: macos-15
+            bundles: dmg
+          - name: windows-amd64
+            os: windows-latest
+            bundles: msi
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Install Linux bundle dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev rpm
+      - name: Point openssl-sys at the runner's OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          echo "OPENSSL_DIR=C:/Program Files/OpenSSL/" >> $env:GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=C:/Program Files/OpenSSL/lib/VC/x64/MD" >> $env:GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=C:/Program Files/OpenSSL/include" >> $env:GITHUB_ENV
+      - run: bun install --cwd ui --frozen-lockfile
+      - run: bun run --cwd ui build
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked
+      - name: Build native installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '{"version":"%s","bundle":{"windows":{"wix":{"version":"%s"}}}}' \
+            "${{ needs.plan.outputs.version }}" "${{ needs.plan.outputs.wix }}" \
+            > "$GITHUB_WORKSPACE/nightly-version.json"
+          cargo tauri build --bundles ${{ matrix.bundles }} \
+            --config "$GITHUB_WORKSPACE/nightly-version.json"
+      - name: Attach the installers to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          find target/release/bundle -type f \
+            \( -name '*.deb' -o -name '*.rpm' -o -name '*.dmg' -o -name '*.msi' \) \
+            -print0 | xargs -0 gh release upload "${{ needs.plan.outputs.tag }}" --clobber
+
+  publish:
+    needs: [plan, package]
+    if: needs.plan.outputs.tag != ''
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - name: Publish the nightly pre-release
+        run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+      - name: Keep only the seven most recent nightlies
+        run: |
+          set -euo pipefail
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+            --json tagName,isPrerelease \
+            --jq '[.[] | select(.isPrerelease) | .tagName
+                  | select(test("^[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}"))] | .[7:] | .[]' \
+            | xargs -r -I {} gh release delete {} \
+                --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+
+  # A half-packaged night leaves a tag that would otherwise convince the next
+  # run that main had already been released.
+  abandon:
+    needs: [plan, package]
+    if: always() && needs.plan.outputs.tag != '' && needs.package.result != 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "${{ needs.plan.outputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
