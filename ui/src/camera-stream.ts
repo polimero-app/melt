@@ -67,8 +67,9 @@ export function h264AvcAccessUnit(frame: H264Chunk): {
   data: Uint8Array<ArrayBuffer>
   description?: Uint8Array<ArrayBuffer>
 } {
-  const data = frame.data.slice()
-  const view = new DataView(data.buffer)
+  // ponytail: rewrites frame.data in place; the parser already handed us a private copy.
+  const data = frame.data
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
   const starts: number[] = []
   // Rust normalizes every NAL to a four-byte Annex-B start code.
   for (let i = 0; i + 3 < data.length; i++) {

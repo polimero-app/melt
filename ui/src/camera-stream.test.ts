@@ -76,16 +76,16 @@ const avcDescription = new Uint8Array([
 ])
 
 describe('h264AvcAccessUnit', () => {
-  it('replaces start codes with NAL lengths and builds an AVC configuration without altering input', () => {
+  it('replaces start codes with NAL lengths in place and builds an AVC configuration', () => {
     const data = new Uint8Array(keyframe)
     const result = h264AvcAccessUnit({ data, timestamp: 42, keyframe: true })
-    expect(result.data).toEqual(new Uint8Array([
+    expect(result.data).toBe(data)
+    expect(data).toEqual(new Uint8Array([
       0, 0, 0, sps.length, ...sps,
       0, 0, 0, pps.length, ...pps,
       0, 0, 0, idr.length, ...idr,
     ]))
     expect(result.description).toEqual(avcDescription)
-    expect(data).toEqual(new Uint8Array(keyframe))
   })
 
   it('converts delta frames without requiring parameter sets', () => {
