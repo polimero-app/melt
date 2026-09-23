@@ -22,10 +22,10 @@ jobs:
             os: ubuntu-24.04-arm
             bundles: deb,rpm
           - name: macos-amd64
-            os: macos-13
+            os: macos-15-intel
             bundles: dmg
           - name: macos-arm64
-            os: macos-14
+            os: macos-15
             bundles: dmg
           - name: windows-amd64
             os: windows-latest
@@ -44,6 +44,13 @@ jobs:
           sudo apt-get install --yes \
             libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
             librsvg2-dev rpm
+      - name: Point openssl-sys at the runner's OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          echo "OPENSSL_DIR=C:/Program Files/OpenSSL/" >> $env:GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=C:/Program Files/OpenSSL/lib/VC/x64/MD" >> $env:GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=C:/Program Files/OpenSSL/include" >> $env:GITHUB_ENV
       - name: Verify automated release qualification
         if: runner.os == 'Linux'
         run: make release-qualification
