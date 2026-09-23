@@ -107,6 +107,11 @@ State-changing commands require explicit confirmation. In non-interactive CLI
 use, pass `--yes` only after independently validating the target printer and
 operation.
 
+## Screenshots
+
+See [`docs/screenshots.md`](docs/screenshots.md) for a tour of the desktop
+application's main views.
+
 ## Project layout
 
 - `crates/melt-core` contains UI-independent drivers, profiles, protocol
