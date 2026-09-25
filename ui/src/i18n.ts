@@ -164,6 +164,7 @@ export type MessageKey =
   | "control.timeUnavailable"
   | "control.layer"
   | "control.plateOf"
+  | "control.plate"
   | "control.cancelRequested"
   | "control.jobPaused"
   | "control.jobResumed"
@@ -713,6 +714,7 @@ const messages: Record<Locale, Messages> = {
     "control.timeUnavailable": "Time estimate unavailable",
     "control.layer": "Layer {current} / {total}",
     "control.plateOf": "plate {index} of {total}",
+    "control.plate": "plate {index}",
     "control.cancelRequested": "Cancel requested. Printer is finishing the current move.",
     "control.jobPaused": "Job paused",
     "control.jobResumed": "Job resumed",
@@ -1259,6 +1261,7 @@ const messages: Record<Locale, Messages> = {
     "control.timeUnavailable": "Estimativa de tempo indisponível",
     "control.layer": "Camada {current} / {total}",
     "control.plateOf": "placa {index} de {total}",
+    "control.plate": "placa {index}",
     "control.cancelRequested": "Cancelamento solicitado. A impressora está concluindo o movimento atual.",
     "control.jobPaused": "Trabalho pausado",
     "control.jobResumed": "Trabalho retomado",

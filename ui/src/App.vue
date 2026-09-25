@@ -9,7 +9,7 @@ import { clampTarget, formatDuration, remainingTimePresentation } from './format
 import { dryingBounds, dryingDefaults, dryingFault, dryingRequestValid, dryingStoppable, dryingTargetShown, type AmsDrying, type DryingStatus } from './drying'
 import { printTargetState } from './printing'
 import { printStageLabel } from './stages'
-import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
+import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { hmsGuideUrl, hmsSeverity, type HmsSeverity } from './hms'
 import { startH264Playback, supportsH264WebCodecs, type H264Playback } from './camera-stream'
@@ -2761,7 +2761,7 @@ onUnmounted(() => {
                       {{ t(printerStateMessageKey(selectedStatus?.state)) }}
                       <span v-if="currentStageLabel"> · {{ currentStageLabel }}</span>
                       <span v-if="selectedStatus?.printMeta?.plateIndex !== undefined">
-                        · {{ t('control.plateOf', { index: selectedStatus.printMeta.plateIndex, total: selectedStatus.printMeta.plateCount ?? '—' }) }}
+                        · {{ t(plateLabel(selectedStatus.printMeta.plateIndex, selectedStatus.printMeta.plateCount).key, plateLabel(selectedStatus.printMeta.plateIndex, selectedStatus.printMeta.plateCount).values) }}
                       </span>
                     </p>
                   </div>

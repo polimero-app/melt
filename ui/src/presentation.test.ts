@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { awaitsFirstSample, badgeDotClasses, badgeFillClasses, badgeSurfaceClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
+import { awaitsFirstSample, badgeDotClasses, badgeFillClasses, badgeSurfaceClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import type { PrinterBadge } from './monitoring'
 
 const allBadges: PrinterBadge[] = ['idle', 'busy', 'error', 'connecting', 'synchronizing', 'reconnecting', 'offline', 'unknown']
@@ -104,6 +104,18 @@ describe('filamentColor', () => {
     expect(filamentColor('00000000')).toBe('#9CA3AF')
     expect(filamentColor('not-a-color')).toBe('#9CA3AF')
     expect(filamentColor(undefined)).toBe('#9CA3AF')
+  })
+})
+
+describe('plateLabel', () => {
+  it('shows a fraction only when the total can contain the index', () => {
+    expect(plateLabel(2, 3)).toEqual({ key: 'control.plateOf', values: { index: 2, total: 3 } })
+    expect(plateLabel(1, 1)).toEqual({ key: 'control.plateOf', values: { index: 1, total: 1 } })
+  })
+
+  it('drops a missing or contradictory total instead of inventing one', () => {
+    expect(plateLabel(2, 1)).toEqual({ key: 'control.plate', values: { index: 2 } })
+    expect(plateLabel(2, undefined)).toEqual({ key: 'control.plate', values: { index: 2 } })
   })
 })
 

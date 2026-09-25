@@ -106,3 +106,11 @@ export function filamentFillPercent(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value) || value < 0) return 100
   return Math.min(value, 100)
 }
+
+// Bambu reports the project plate number alongside the job's own plate
+// count, so "plate 2 of 1" is real data — just not a meaningful fraction.
+export function plateLabel(index: number, total: number | undefined): { key: MessageKey; values: Record<string, number> } {
+  return total !== undefined && total >= index
+    ? { key: 'control.plateOf', values: { index, total } }
+    : { key: 'control.plate', values: { index } }
+}
