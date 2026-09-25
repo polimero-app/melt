@@ -68,7 +68,6 @@ import {
   PhEye,
   PhEyeSlash,
   PhFan,
-  PhFile,
   PhFolder,
   PhFolderOpen,
   PhBellRinging,
@@ -3007,7 +3006,7 @@ onUnmounted(() => {
                       :key="file.devicePath"
                       class="hover:bg-gray-50 dark:hover:bg-white/5"
                     >
-                      <td class="max-w-0 truncate px-4 py-4 font-mono text-sm font-medium text-gray-900 sm:px-6 dark:text-white" :title="file.name" translate="no">{{ file.name }}</td>
+                      <td class="max-w-0 px-4 py-4 font-mono text-sm font-medium text-gray-900 sm:px-6 dark:text-white" :title="file.name" translate="no"><span class="line-clamp-2 break-all">{{ file.name }}</span></td>
                       <td class="px-2 py-4 text-sm whitespace-nowrap">
                         <span class="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 dark:bg-gray-400/10 dark:text-gray-400">{{ fileTypeLabel(file) }}</span>
                       </td>
@@ -3772,9 +3771,8 @@ onUnmounted(() => {
               <span class="absolute right-3 bottom-2.5 text-[10px] font-bold text-gray-500 uppercase dark:text-slate-300/45">.{{ fileTypeLabel(file).toLowerCase() }}</span>
             </component>
             <div class="flex items-start gap-3 px-4 py-5 sm:p-6">
-              <PhFile class="mt-0.5 size-4 shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
               <div class="min-w-0 flex-1">
-                <h3 class="truncate text-sm font-medium text-gray-900 dark:text-white" :title="file.name" translate="no">{{ file.name }}</h3>
+                <h3 class="line-clamp-2 break-all text-sm font-medium text-gray-900 dark:text-white" :title="file.name" translate="no">{{ file.name }}</h3>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ formatSize(file.sizeBytes) }} · {{ formatDate(file.modifiedAt) }}</p>
               </div>
               <ActionMenu v-if="fileActionItems(file).length" class="-mt-2 -mr-2" :label="t('filesView.moreActions')" :items="fileActionItems(file)" />
