@@ -318,7 +318,6 @@ export type MessageKey =
   | "printersView.emptyDescription"
   | "printersView.scan"
   | "printersView.removePrinter"
-  | "printersView.removeNamed"
   | "printersView.serialHidden"
   | "printersView.showSerialNamed"
   | "printersView.hideSerialNamed"
@@ -871,7 +870,6 @@ const messages: Record<Locale, Messages> = {
     "printersView.emptyDescription": "Discover a printer on your local network to start monitoring jobs and materials.",
     "printersView.scan": "Scan local network",
     "printersView.removePrinter": "Remove printer",
-    "printersView.removeNamed": "Remove {name}",
     "printersView.serialHidden": "Serial number hidden",
     "printersView.showSerialNamed": "Show serial number for {name}",
     "printersView.hideSerialNamed": "Hide serial number for {name}",
@@ -1421,7 +1419,6 @@ const messages: Record<Locale, Messages> = {
     "printersView.emptyDescription": "Descubra uma impressora na sua rede local para começar a monitorar trabalhos e materiais.",
     "printersView.scan": "Buscar na rede local",
     "printersView.removePrinter": "Remover impressora",
-    "printersView.removeNamed": "Remover {name}",
     "printersView.serialHidden": "Número de série oculto",
     "printersView.showSerialNamed": "Mostrar número de série de {name}",
     "printersView.hideSerialNamed": "Ocultar número de série de {name}",

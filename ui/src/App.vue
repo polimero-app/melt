@@ -1477,6 +1477,7 @@ function printerActionItems(printer: Printer): ActionMenuItem[] {
       disabled: tlsRefreshing.value,
       onSelect: () => void openTlsRefresh(printer.name),
     },
+    { label: t('printersView.removePrinter'), icon: PhTrash, danger: true, onSelect: () => removePrinter(printer.name) },
   ]
 }
 
@@ -3289,7 +3290,6 @@ onUnmounted(() => {
                   <PhEyeSlash v-if="serialIsRevealed(printer.name)" class="size-4" aria-hidden="true" />
                   <PhEye v-else class="size-4" aria-hidden="true" />
                 </IconButton>
-                <IconButton class="hover:text-red-600 dark:hover:text-red-400" :title="t('printersView.removePrinter')" :aria-label="t('printersView.removeNamed', { name: printer.name })" @click="removePrinter(printer.name)"><PhTrash class="size-4" aria-hidden="true" /></IconButton>
               </div>
             </div>
             <div class="mt-6 flex items-center justify-between border-y border-gray-200 py-3 dark:border-white/10">
@@ -3341,13 +3341,13 @@ onUnmounted(() => {
                 <dd :class="printer.insecure ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-300'">{{ printer.insecure ? t('printersView.tlsDisabled') : t('printersView.tlsVerified') }}</dd>
               </div>
             </dl>
-            <Button variant="secondary" class="mt-5 w-full" @click="openFirmwareManagement(printer)">
-              <PhInfo class="size-4" aria-hidden="true" /> {{ t('firmware.title') }}
-            </Button>
-            <div class="mt-2 flex items-center gap-2">
+            <div class="mt-5 flex items-center gap-2">
               <Button class="min-w-0 flex-1" @click="selectPrinter(printer.name)"><PhCards class="size-4" aria-hidden="true" /> {{ t('printersView.openControl') }}</Button>
               <ActionMenu :label="t('control.printerActions')" :items="printerActionItems(printer)" />
             </div>
+            <Button variant="secondary" class="mt-2 w-full" @click="openFirmwareManagement(printer)">
+              <PhInfo class="size-4" aria-hidden="true" /> {{ t('firmware.title') }}
+            </Button>
           </Card>
           <button
             type="button"
