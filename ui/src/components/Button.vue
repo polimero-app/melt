@@ -6,7 +6,7 @@ withDefaults(defineProps<{ variant?: 'primary' | 'secondary' | 'danger'; type?: 
 
 const variantClasses: Record<string, string> = {
   primary:
-    'bg-cyan-600 text-white shadow-xs hover:bg-cyan-500 dark:bg-cyan-500 dark:shadow-none dark:hover:bg-cyan-400',
+    'bg-cyan-700 text-white shadow-xs hover:bg-cyan-800 dark:bg-cyan-500 dark:text-gray-950 dark:shadow-none dark:hover:bg-cyan-400',
   secondary:
     'bg-white text-gray-900 shadow-xs inset-ring inset-ring-gray-300 hover:bg-gray-50 dark:bg-white/10 dark:text-white dark:shadow-none dark:inset-ring-white/5 dark:hover:bg-white/20',
   danger:
