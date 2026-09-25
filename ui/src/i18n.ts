@@ -193,6 +193,7 @@ export type MessageKey =
   | "control.nozzleLeft"
   | "control.nozzleRight"
   | "control.telemetryOnly"
+  | "control.availableWhenIdle"
   | "control.stepSize"
   | "control.feedRate"
   | "control.homingStarted"
@@ -745,6 +746,7 @@ const messages: Record<Locale, Messages> = {
     "control.nozzleLeft": "Left nozzle",
     "control.nozzleRight": "Right nozzle",
     "control.telemetryOnly": "Telemetry only",
+    "control.availableWhenIdle": "Available when idle",
     "control.stepSize": "Step size",
     "control.feedRate": "Feed rate",
     "control.homingStarted": "Axes homing started",
@@ -1294,6 +1296,7 @@ const messages: Record<Locale, Messages> = {
     "control.nozzleLeft": "Bico esquerdo",
     "control.nozzleRight": "Bico direito",
     "control.telemetryOnly": "Somente telemetria",
+    "control.availableWhenIdle": "Disponível com a impressora ociosa",
     "control.stepSize": "Tamanho do passo",
     "control.feedRate": "Velocidade de avanço",
     "control.homingStarted": "Referenciamento dos eixos iniciado",

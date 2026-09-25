@@ -2834,7 +2834,9 @@ onUnmounted(() => {
 
           <section class="mt-5 grid gap-5 lg:grid-cols-2 min-[1180px]:grid-cols-4">
             <Card v-if="temperatureRows.length">
-              <CardHeader :title="t('dashboard.temperature')" :icon="PhThermometerSimple" />
+              <CardHeader :title="t('dashboard.temperature')" :icon="PhThermometerSimple">
+                <span v-if="capabilities?.temperatureWrite && selectedStatus?.state !== 'idle'" class="text-xs text-gray-500 dark:text-gray-400">{{ t('control.availableWhenIdle') }}</span>
+              </CardHeader>
               <div class="font-light space-y-4 px-4 py-5 sm:p-6">
                 <div v-for="row in temperatureRows" :key="row.key" class="flex items-center justify-between gap-3">
                   <div class="min-w-0">
@@ -2912,7 +2914,9 @@ onUnmounted(() => {
             </Card>
 
             <Card v-if="capabilities?.motionControl">
-              <CardHeader :title="t('dashboard.motion')" :icon="PhArrowsOutCardinal" />
+              <CardHeader :title="t('dashboard.motion')" :icon="PhArrowsOutCardinal">
+                <span v-if="selectedStatus?.state !== 'idle'" class="text-xs text-gray-500 dark:text-gray-400">{{ t('control.availableWhenIdle') }}</span>
+              </CardHeader>
               <div class="font-light px-4 py-5 sm:p-6">
                 <div class="mb-4 flex min-h-27 items-center justify-center gap-8">
                   <div class="grid grid-cols-3 grid-rows-3 gap-1">
