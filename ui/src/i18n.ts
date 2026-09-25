@@ -32,6 +32,7 @@ export type MessageKey =
   | "profiles.loading"
   | "profiles.error"
   | "common.retry"
+  | "common.refreshFailed"
   | "common.close"
   | "common.cancel"
   | "common.removing"
@@ -582,6 +583,7 @@ const messages: Record<Locale, Messages> = {
     "profiles.loading": "Loading local printer profiles…",
     "profiles.error": "We could not load your printer profiles.",
     "common.retry": "Retry",
+    "common.refreshFailed": "Couldn't refresh: {reason}",
     "common.close": "Close",
     "common.cancel": "Cancel",
     "common.removing": "Removing…",
@@ -1129,6 +1131,7 @@ const messages: Record<Locale, Messages> = {
     "profiles.loading": "Carregando perfis de impressora locais…",
     "profiles.error": "Não foi possível carregar seus perfis de impressora.",
     "common.retry": "Tentar novamente",
+    "common.refreshFailed": "Não foi possível atualizar: {reason}",
     "common.close": "Fechar",
     "common.cancel": "Cancelar",
     "common.removing": "Removendo…",

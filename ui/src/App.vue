@@ -2961,6 +2961,10 @@ onUnmounted(() => {
               <CardHeader :title="t('dashboard.files')" :icon="PhFolder">
                 <IconButton :title="t('dashboard.loadFiles')" :aria-label="t('dashboard.loadFiles')" :disabled="filesLoading" @click="loadFiles"><PhArrowsClockwise class="size-4" :class="filesLoading && 'animate-spin'" aria-hidden="true" /></IconButton>
               </CardHeader>
+              <div v-if="filesError && printerFiles.length" class="flex items-center justify-between gap-3 border-b border-amber-300/70 bg-amber-50 px-4 py-2 text-xs text-amber-900 sm:px-6 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200" role="alert">
+                <span class="min-w-0">{{ t('common.refreshFailed', { reason: filesError }) }}</span>
+                <Button :disabled="filesLoading" @click="loadFiles">{{ t('common.retry') }}</Button>
+              </div>
               <div
                 class="max-h-80 overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:focus-visible:outline-cyan-400"
                 role="region"
@@ -3704,6 +3708,11 @@ onUnmounted(() => {
               @click="searchTerm = ''"
             ><PhX class="size-3.5" aria-hidden="true" /></button>
           </span>
+        </div>
+
+        <div v-if="libraryFilesError && libraryFiles.length" class="mb-5 flex items-center justify-between gap-3 rounded-md border border-amber-300/70 bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200" role="alert">
+          <span class="min-w-0">{{ t('common.refreshFailed', { reason: libraryFilesError }) }}</span>
+          <Button :disabled="libraryFilesLoading" @click="loadLibraryFiles(libraryPath)">{{ t('common.retry') }}</Button>
         </div>
 
         <div v-if="visibleDirectories.length" class="mb-5 grid gap-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
