@@ -430,17 +430,12 @@ export type MessageKey =
   | "filesView.actions"
   | "filesView.emptyTitle"
   | "filesView.emptyDescription"
-  | "filesView.uploadDescription"
-  | "filesView.uploadFile"
   | "filesView.dragDrop"
-  | "filesView.uploadHint"
   | "filesView.printer"
   | "filesView.displayName"
   | "filesView.plate"
   | "filesView.noPrinters"
   | "filesView.printerOffline"
-  | "filesView.uploadingTo"
-  | "filesView.uploadConfirm"
   | "filesView.uploadedTo"
   | "filesView.uploadedToPrinter"
   | "filesView.notSupported"
@@ -958,7 +953,7 @@ const messages: Record<Locale, Messages> = {
     "settingsView.monitorValue": "{workers} workers / {seconds}s",
     "filesView.title": "File library",
     "filesView.description": "Browse models and directories ready to organize, slice, or print.",
-    "filesView.upload": "Upload files",
+    "filesView.upload": "Add file",
     "filesView.up": "Up one level",
     "filesView.changeFolder": "Change folder",
     "filesView.breadcrumb": "Breadcrumb",
@@ -999,18 +994,13 @@ const messages: Record<Locale, Messages> = {
     "filesView.actions": "Actions",
     "filesView.emptyTitle": "Nothing here",
     "filesView.emptyDescription": "This directory is empty.",
-    "filesView.uploadDescription": "Add new models to your local file library.",
-    "filesView.uploadFile": "Upload a file",
     "filesView.dragDrop": "or drag and drop",
-    "filesView.uploadHint": "3MF, STL, OBJ up to 200 MB",
     "filesView.printer": "Printer",
     "filesView.displayName": "Job name",
     "filesView.plate": "Plate",
     "filesView.noPrinters": "No printers available",
     "filesView.printerOffline": "{name} — offline",
-    "filesView.uploadingTo": "Uploading to {directory}",
-    "filesView.uploadConfirm": "Upload",
-    "filesView.uploadedTo": "Files uploaded to {directory}",
+    "filesView.uploadedTo": "File added to {directory}",
     "filesView.uploadedToPrinter": "Files uploaded to {name} · {directory}",
     "filesView.notSupported": "File browsing is not supported by this printer.",
     "common.delete": "Delete",
@@ -1507,7 +1497,7 @@ const messages: Record<Locale, Messages> = {
     "settingsView.monitorValue": "{workers} workers / {seconds}s",
     "filesView.title": "Biblioteca de arquivos",
     "filesView.description": "Navegue por modelos e diretórios prontos para organizar, fatiar ou imprimir.",
-    "filesView.upload": "Enviar arquivos",
+    "filesView.upload": "Adicionar arquivo",
     "filesView.up": "Subir um nível",
     "filesView.changeFolder": "Trocar pasta",
     "filesView.breadcrumb": "Trilha de navegação",
@@ -1548,18 +1538,13 @@ const messages: Record<Locale, Messages> = {
     "filesView.actions": "Ações",
     "filesView.emptyTitle": "Nada por aqui",
     "filesView.emptyDescription": "Este diretório está vazio.",
-    "filesView.uploadDescription": "Adicione novos modelos à sua biblioteca de arquivos local.",
-    "filesView.uploadFile": "Enviar um arquivo",
     "filesView.dragDrop": "ou arraste e solte",
-    "filesView.uploadHint": "3MF, STL, OBJ de até 200 MB",
     "filesView.printer": "Impressora",
     "filesView.displayName": "Nome do trabalho",
     "filesView.plate": "Mesa",
     "filesView.noPrinters": "Nenhuma impressora disponível",
     "filesView.printerOffline": "{name} — offline",
-    "filesView.uploadingTo": "Enviando para {directory}",
-    "filesView.uploadConfirm": "Enviar",
-    "filesView.uploadedTo": "Arquivos enviados para {directory}",
+    "filesView.uploadedTo": "Arquivo adicionado a {directory}",
     "filesView.uploadedToPrinter": "Arquivos enviados para {name} · {directory}",
     "filesView.notSupported": "A navegação de arquivos não é suportada por esta impressora.",
     "common.delete": "Excluir",
