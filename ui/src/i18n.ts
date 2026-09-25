@@ -395,6 +395,7 @@ export type MessageKey =
   | "filesView.breadcrumb"
   | "filesView.search"
   | "filesView.previewUnavailable"
+  | "filesView.previewLoading"
   | "filesView.openPreview"
   | "filesView.filteredBy"
   | "filesView.clearSearch"
@@ -963,6 +964,7 @@ const messages: Record<Locale, Messages> = {
     "filesView.breadcrumb": "Breadcrumb",
     "filesView.search": "Search files",
     "filesView.previewUnavailable": "3D preview unavailable",
+    "filesView.previewLoading": "Loading preview…",
     "filesView.openPreview": "Preview {name}",
     "filesView.filteredBy": "Filtered by \u201c{term}\u201d · {count} shown",
     "filesView.clearSearch": "Clear search",
@@ -1511,6 +1513,7 @@ const messages: Record<Locale, Messages> = {
     "filesView.breadcrumb": "Trilha de navegação",
     "filesView.search": "Buscar arquivos",
     "filesView.previewUnavailable": "Pré-visualização 3D indisponível",
+    "filesView.previewLoading": "Carregando pré-visualização…",
     "filesView.openPreview": "Visualizar {name}",
     "filesView.filteredBy": "Filtrado por \u201c{term}\u201d · {count} exibidos",
     "filesView.clearSearch": "Limpar busca",

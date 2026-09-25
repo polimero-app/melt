@@ -13,12 +13,14 @@ const props = defineProps<{
   items: ActionMenuItem[]
   closeLabel: string
   unavailableLabel: string
+  loadingLabel: string
 }>()
 
 const emit = defineEmits<{ close: [] }>()
 
 const source = ref('')
 const failed = ref(false)
+const loading = ref(false)
 
 function pngUrl(data: string) {
   return `data:image/png;base64,${data}`
@@ -31,6 +33,7 @@ watch(
   async (file, _previous, onCleanup) => {
     source.value = ''
     failed.value = false
+    loading.value = false
     if (!file) return
     const request = { path: file.devicePath, sizeBytes: file.sizeBytes, modifiedAt: file.modifiedAt }
     // The card that was just clicked already rendered the grid thumbnail, so
@@ -41,6 +44,7 @@ watch(
     // it's still queued, and a slower one must not replace what's shown now.
     const controller = new AbortController()
     onCleanup(() => controller.abort())
+    loading.value = true
     try {
       // The user is looking at this one, so it goes ahead of grid thumbnails.
       const large = await loadPreview({ ...request, large: true }, { signal: controller.signal, priority: 'high' })
@@ -48,6 +52,8 @@ watch(
     } catch {
       // A failed large render still leaves the thumbnail worth looking at.
       if (!controller.signal.aborted) failed.value = !source.value
+    } finally {
+      if (!controller.signal.aborted) loading.value = false
     }
   },
   { immediate: true },
@@ -99,6 +105,7 @@ function select(item: ActionMenuItem) {
                   :alt="file?.name"
                   class="max-h-[70vh] max-w-full object-contain transition-opacity"
                 />
+                <p v-else-if="loading" class="px-4 py-16 text-sm text-cyan-900/60 dark:text-cyan-100/60">{{ loadingLabel }}</p>
                 <p v-else class="px-4 py-16 text-sm text-cyan-900/60 dark:text-cyan-100/60">{{ failed ? unavailableLabel : '' }}</p>
               </div>
 

@@ -3909,6 +3909,7 @@ onUnmounted(() => {
       :items="previewFile ? fileActionItems(previewFile) : []"
       :close-label="t('common.close')"
       :unavailable-label="t('filesView.previewUnavailable')"
+      :loading-label="t('filesView.previewLoading')"
       @close="previewFile = undefined"
     />
 
