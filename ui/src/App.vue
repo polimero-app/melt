@@ -3371,7 +3371,7 @@ onUnmounted(() => {
             <p class="mt-2 max-w-4xl text-sm text-gray-500 dark:text-gray-400">{{ t('settingsView.description') }}</p>
           </div>
         </div>
-        <div class="grid max-w-[1500px] gap-5 lg:grid-cols-2 xl:grid-cols-3">
+        <div class="grid max-w-[1500px] items-start gap-5 lg:grid-cols-2 xl:grid-cols-3">
           <Card as="section" class="overflow-hidden">
             <CardHeader :title="t('settingsView.notifications')" :icon="PhBellRinging" />
             <div class="divide-y divide-gray-200 dark:divide-white/10">
