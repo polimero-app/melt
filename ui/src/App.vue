@@ -2699,7 +2699,7 @@ onUnmounted(() => {
               </div>
             </div>
           </section>
-          <section class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,3fr)_minmax(18rem,1fr)]">
+          <section class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
             <Card class="overflow-hidden">
               <CardHeader :title="t('camera.title')" :icon="PhVideoCamera">
                 <template #suffix>
@@ -2734,7 +2734,7 @@ onUnmounted(() => {
 
             <Card>
               <CardHeader :title="t('control.currentJob')" :icon="PhCheckSquareOffset">
-                <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ t('control.complete', { percent: progressPercent }) }}</span>
+                <span v-if="hasActiveJob" class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ t('control.complete', { percent: progressPercent }) }}</span>
               </CardHeader>
               <div class="px-4 py-5 sm:p-6">
                 <div class="flex items-start gap-3">
@@ -2753,7 +2753,7 @@ onUnmounted(() => {
                   </div>
                   <div class="min-w-0">
                     <p
-                      class="truncate font-mono text-sm font-semibold text-gray-900 dark:text-white"
+                      class="line-clamp-2 break-all font-mono text-sm font-semibold text-gray-900 dark:text-white"
                       :title="selectedStatus?.job?.name"
                       translate="no"
                     >{{ selectedStatus?.job?.name ?? t('dashboard.noJob') }}</p>
@@ -2766,10 +2766,10 @@ onUnmounted(() => {
                     </p>
                   </div>
                 </div>
-                <div class="mt-6">
+                <div v-if="hasActiveJob" class="mt-6">
                   <div class="mb-2 flex justify-between text-xs text-gray-500 dark:text-gray-400">
                     <span>{{ t('control.layer', { current: selectedStatus?.progress?.currentLayer ?? '—', total: selectedStatus?.progress?.totalLayers ?? '—' }) }}</span>
-                    <span v-if="remainingTimeLabel" class="font-mono">
+                    <span v-if="remainingTimeLabel" class="font-mono text-sm font-semibold text-gray-900 dark:text-white">
                       {{ remainingTimeLabel }}
                     </span>
                   </div>
@@ -2790,7 +2790,7 @@ onUnmounted(() => {
                   </div>
                   <p v-if="preparingPercent !== undefined" class="mt-2 text-xs text-amber-700 dark:text-amber-300">{{ t('control.preparing') }}</p>
                 </div>
-                <div class="mt-6 flex gap-2">
+                <div v-if="hasActiveJob" class="mt-6 flex gap-2">
                   <Button
                     v-if="selectedStatus?.state === 'paused'"
                     class="flex-1"
