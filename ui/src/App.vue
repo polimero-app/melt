@@ -3168,17 +3168,24 @@ onUnmounted(() => {
                 <div class="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 dark:border-white/10 dark:bg-white/5">
                   <span class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ t('firmware.assessment') }}</span>
                   <span class="rounded-full bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800 dark:bg-cyan-400/10 dark:text-cyan-300">{{ firmwareAssessmentLabel(selectedFirmwareUpdate.report.assessment) }}</span>
-                  <span class="ml-auto font-mono text-xs text-gray-500 dark:text-gray-400">{{ selectedFirmwareUpdate.report.components.length }} {{ t('firmware.modules') }} · {{ firmwareComparableCount(selectedFirmwareUpdate) }} {{ t('firmware.comparable') }}</span>
-                  <span v-for="role in firmwareEvidenceRoles" v-show="selectedFirmwareUpdate.report.components.some((component) => componentHasEvidence(component, role))" :key="role" class="rounded-full border border-gray-300 px-2 py-0.5 text-xs text-gray-600 dark:border-white/15 dark:text-gray-300">
-                    {{ firmwareEvidenceLabel(role) }}
-                  </span>
                 </div>
-                <div v-if="selectedFirmwareUpdate.sources?.length" class="mb-4 flex flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
-                  <span v-for="source in selectedFirmwareUpdate.sources" :key="source.source" class="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 dark:border-white/10">
-                    <span class="font-medium text-gray-700 dark:text-gray-300">{{ firmwareSourceName(source.source) }}</span>
-                    <span>· {{ firmwareSourceOutcomeLabel(source.outcome) }}</span>
-                  </span>
-                </div>
+                <ul v-if="selectedFirmwareUpdate.report.issues.length" class="mb-4 space-y-1 text-sm text-gray-700 dark:text-gray-300">
+                  <li v-for="issue in selectedFirmwareUpdate.report.issues" :key="issue.code">{{ issue.message }}</li>
+                </ul>
+                <details class="mb-4 text-xs text-gray-500 dark:text-gray-400">
+                  <summary class="cursor-pointer select-none">{{ t('firmware.evidence') }} · {{ selectedFirmwareUpdate.report.components.length }} {{ t('firmware.modules') }} · {{ firmwareComparableCount(selectedFirmwareUpdate) }} {{ t('firmware.comparable') }}</summary>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <span v-for="role in firmwareEvidenceRoles" v-show="selectedFirmwareUpdate.report.components.some((component) => componentHasEvidence(component, role))" :key="role" class="rounded-full border border-gray-300 px-2 py-0.5 text-xs text-gray-600 dark:border-white/15 dark:text-gray-300">
+                      {{ firmwareEvidenceLabel(role) }}
+                    </span>
+                  </div>
+                  <div v-if="selectedFirmwareUpdate.sources?.length" class="mt-2 flex flex-wrap gap-2">
+                    <span v-for="source in selectedFirmwareUpdate.sources" :key="source.source" class="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 dark:border-white/10">
+                      <span class="font-medium text-gray-700 dark:text-gray-300">{{ firmwareSourceName(source.source) }}</span>
+                      <span>· {{ firmwareSourceOutcomeLabel(source.outcome) }}</span>
+                    </span>
+                  </div>
+                </details>
                 <div class="divide-y divide-gray-200 dark:divide-white/10">
                   <div
                     v-for="component in selectedFirmwareUpdate.report.components"
@@ -3221,9 +3228,6 @@ onUnmounted(() => {
                   <span v-if="selectedFirmwareUpdate.stale" class="font-medium text-amber-700 dark:text-amber-300">{{ t('firmware.stale') }}</span>
                 </div>
                 <p v-if="selectedFirmwareUpdate.error" class="mt-3 text-xs text-amber-700 dark:text-amber-300">{{ message(selectedFirmwareUpdate.error) }}</p>
-                <ul v-if="selectedFirmwareUpdate.report.issues.length" class="mt-3 space-y-1 text-xs text-gray-500 dark:text-gray-400">
-                  <li v-for="issue in selectedFirmwareUpdate.report.issues" :key="issue.code">{{ issue.message }}</li>
-                </ul>
               </template>
             </div>
           </Card>

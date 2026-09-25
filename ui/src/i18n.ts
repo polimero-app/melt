@@ -248,6 +248,7 @@ export type MessageKey =
   | "firmware.deviceCatalogue"
   | "firmware.publicStable"
   | "firmware.modules"
+  | "firmware.evidence"
   | "firmware.comparable"
   | "firmware.noComparable"
   | "firmware.sourceSuccess"
@@ -795,6 +796,7 @@ const messages: Record<Locale, Messages> = {
     "firmware.deviceCatalogue": "Device catalogue",
     "firmware.publicStable": "Public stable",
     "firmware.modules": "modules",
+    "firmware.evidence": "Evidence",
     "firmware.comparable": "with evidence",
     "firmware.noComparable": "No comparable release from checked sources",
     "firmware.sourceSuccess": "checked",
@@ -1339,6 +1341,7 @@ const messages: Record<Locale, Messages> = {
     "firmware.deviceCatalogue": "Catálogo do dispositivo",
     "firmware.publicStable": "Versão pública estável",
     "firmware.modules": "módulos",
+    "firmware.evidence": "Evidências",
     "firmware.comparable": "com evidência",
     "firmware.noComparable": "Nenhuma versão comparável nas fontes consultadas",
     "firmware.sourceSuccess": "verificada",
