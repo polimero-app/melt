@@ -1025,7 +1025,7 @@ git commit -m "fix(bambu): tear down RTSP streams without blocking the dropping 
 
 ### Task 7: Collapse two redundant guards
 
-**Problem:** Two small pieces of dead logic. `next_sequence` (`transport.rs:2154`) repeats its wrap-around arithmetic in both the `fetch_update` closure and the `map` that follows, so a future edit has to change it in two places to stay correct. `tunnel::Connection::list` (`tunnel.rs:135`) guards with `path != "/" || !valid_wire_path(path)`, whose second half is unreachable — `valid_wire_path("/")` is always true, and the only path that reaches the second operand is `"/"`.
+**Problem:** Two small pieces of dead logic. `next_sequence` (`transport.rs:2154`) repeats its wrap-around arithmetic in both the atomic update closure and the `map` that follows, so a future edit has to change it in two places to stay correct. `tunnel::Connection::list` (`tunnel.rs:135`) guards with `path != "/" || !valid_wire_path(path)`, whose second half is unreachable — `valid_wire_path("/")` is always true, and the only path that reaches the second operand is `"/"`.
 
 **Files:**
 - Modify: `crates/melt-core/src/bambu/transport.rs:2150-2172`
@@ -1078,7 +1078,7 @@ fn wrap_sequence(previous: u64) -> u64 {
 
 fn next_sequence() -> u64 {
     SEQUENCE
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |previous| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |previous| {
             Some(wrap_sequence(previous))
         })
         .map_or(1, wrap_sequence)

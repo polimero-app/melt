@@ -2491,7 +2491,7 @@ fn wrap_sequence(previous: u64) -> u64 {
 
 fn next_sequence() -> u64 {
     SEQUENCE
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |previous| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |previous| {
             Some(wrap_sequence(previous))
         })
         .map_or(1, wrap_sequence)
