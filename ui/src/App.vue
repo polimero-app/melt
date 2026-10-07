@@ -578,6 +578,7 @@ const defaultSlicers: SlicerSetting[] = []
 const notifications = ref<NotificationSetting[]>(defaultNotifications)
 const slicers = ref<SlicerSetting[]>(defaultSlicers)
 const publicFirmwareCatalogue = ref(false)
+const slicerAdditionOpen = ref(false)
 const slicerDraft = ref({ name: '', path: '' })
 const slicerBusy = ref(false)
 const slicerError = ref<string>()
@@ -1090,6 +1091,19 @@ async function updateSlicerEnabled(name: string, enabled: boolean) {
   }
 }
 
+function openSlicerAddition() {
+  slicerDraft.value = { name: '', path: '' }
+  slicerError.value = undefined
+  slicerNameError.value = undefined
+  slicerPathError.value = undefined
+  slicerAdditionOpen.value = true
+}
+
+function closeSlicerAddition() {
+  if (slicerBusy.value) return
+  slicerAdditionOpen.value = false
+}
+
 async function browseSlicerPath() {
   const selected = await openFileDialog({ multiple: false })
   if (!selected || Array.isArray(selected)) return
@@ -1113,6 +1127,7 @@ async function addSlicer() {
     slicers.value = await invoke<SlicerSetting[]>('save_slicer', {
       request: { name: slicerDraft.value.name.trim(), path: slicerDraft.value.path.trim(), enabled: true },
     })
+    slicerAdditionOpen.value = false
     slicerDraft.value = { name: '', path: '' }
     slicerNameError.value = undefined
     slicerPathError.value = undefined
@@ -1640,9 +1655,16 @@ function applyPreset(preset?: TemperaturePreset) {
   showToast(preset ? t('control.presetApplied', { name: preset.name }) : t('control.presetCooling'))
 }
 
+const presetAdditionOpen = ref(false)
 const presetDraft = ref({ name: '', nozzleCelsius: '', bedCelsius: '' })
 const presetErrors = ref<{ name?: string; nozzle?: string; bed?: string }>({})
 const presetNameInput = ref<HTMLInputElement>()
+
+function openPresetAddition() {
+  presetDraft.value = { name: '', nozzleCelsius: '', bedCelsius: '' }
+  presetErrors.value = {}
+  presetAdditionOpen.value = true
+}
 
 function addPreset() {
   const validation = validatePresetDraft(presetDraft.value)
@@ -1668,6 +1690,7 @@ function addPreset() {
       bedCelsius: Number(presetDraft.value.bedCelsius),
     },
   ]
+  presetAdditionOpen.value = false
   presetDraft.value = { name: '', nozzleCelsius: '', bedCelsius: '' }
   presetErrors.value = {}
 }
@@ -3414,46 +3437,9 @@ onUnmounted(() => {
               </div>
               <p v-if="!slicers.length" class="px-4 py-5 text-sm text-gray-500 sm:px-6 dark:text-gray-400">{{ t('settingsView.noSlicers') }}</p>
             </div>
-            <form autocomplete="off" class="grid gap-3 border-t border-gray-200 px-4 py-4 sm:px-6 dark:border-white/10" @submit.prevent="addSlicer">
-              <div class="min-w-0">
-                <label for="slicer-name" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.slicerName') }}</label>
-                <input
-                  ref="slicerNameInput"
-                  id="slicer-name"
-                  name="slicer-name"
-                  v-model="slicerDraft.name"
-                  type="text"
-                  autocomplete="off"
-                  :aria-invalid="Boolean(slicerNameError)"
-                  :aria-describedby="[slicerNameError && 'slicer-name-error', slicerError && 'slicer-error'].filter(Boolean).join(' ') || undefined"
-                  class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
-                  @input="slicerNameError = undefined"
-                />
-                <p v-if="slicerNameError" id="slicer-name-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ slicerNameError }}</p>
-              </div>
-              <div class="min-w-0">
-                <label for="slicer-path" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.slicerPath') }}</label>
-                <div class="mt-1 flex gap-2">
-                  <input
-                    ref="slicerPathInput"
-                    id="slicer-path"
-                    name="slicer-path"
-                    :value="slicerDraft.path"
-                    type="text"
-                    readonly
-                    autocomplete="off"
-                    :placeholder="t('settingsView.slicerPathPlaceholder')"
-                    :aria-invalid="Boolean(slicerPathError)"
-                    :aria-describedby="[slicerPathError && 'slicer-path-error', slicerError && 'slicer-error'].filter(Boolean).join(' ') || undefined"
-                    class="block w-full min-w-0 rounded-md bg-white px-3 py-1.5 font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:font-sans placeholder:text-gray-400 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:placeholder:text-gray-500"
-                  />
-                  <Button class="shrink-0" :disabled="slicerBusy" @click="browseSlicerPath">{{ t('settingsView.browse') }}</Button>
-                </div>
-                <p v-if="slicerPathError" id="slicer-path-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ slicerPathError }}</p>
-              </div>
-              <Button type="submit" class="w-full" :disabled="slicerBusy">{{ t('settingsView.addSlicer') }}</Button>
-            </form>
-            <p v-if="slicerError" id="slicer-error" class="px-4 pb-4 text-xs text-red-600 sm:px-6 dark:text-red-400" role="alert">{{ slicerError }}</p>
+            <div class="border-t border-gray-200 px-4 py-4 sm:px-6 dark:border-white/10">
+              <Button class="w-full" @click="openSlicerAddition"><PhPlus class="size-4" aria-hidden="true" /> {{ t('settingsView.addSlicer') }}</Button>
+            </div>
           </Card>
           <Card as="section" class="overflow-hidden">
             <CardHeader :title="t('settingsView.presets')" :icon="PhThermometerSimple">
@@ -3479,61 +3465,9 @@ onUnmounted(() => {
               </div>
               <p v-if="!temperaturePresets.length" class="px-4 py-5 text-sm text-gray-500 sm:px-6 dark:text-gray-400">{{ t('settingsView.noPresets') }}</p>
             </div>
-            <form autocomplete="off" class="grid gap-3 border-t border-gray-200 px-4 py-4 sm:px-6 dark:border-white/10" @submit.prevent="addPreset">
-              <div class="min-w-0">
-                <label for="preset-name" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.presetName') }}</label>
-                <input
-                  ref="presetNameInput"
-                  id="preset-name"
-                  name="preset-name"
-                  v-model="presetDraft.name"
-                  type="text"
-                  autocomplete="off"
-                  :maxlength="PRESET_NAME_MAX_LENGTH"
-                  :aria-invalid="Boolean(presetErrors.name)"
-                  :aria-describedby="presetErrors.name ? 'preset-name-error' : undefined"
-                  class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
-                />
-                <p v-if="presetErrors.name" id="preset-name-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ presetErrors.name }}</p>
-              </div>
-              <div class="grid grid-cols-2 gap-3">
-                <div class="min-w-0">
-                  <label for="preset-nozzle" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.presetNozzle') }}</label>
-                  <input
-                    id="preset-nozzle"
-                    name="preset-nozzle"
-                    v-model="presetDraft.nozzleCelsius"
-                    type="number"
-                    inputmode="numeric"
-                    min="0"
-                    :max="temperatureMaximums.nozzle"
-                    autocomplete="off"
-                    :aria-invalid="Boolean(presetErrors.nozzle)"
-                    :aria-describedby="presetErrors.nozzle ? 'preset-nozzle-error' : undefined"
-                    class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
-                  />
-                  <p v-if="presetErrors.nozzle" id="preset-nozzle-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ presetErrors.nozzle }}</p>
-                </div>
-                <div class="min-w-0">
-                  <label for="preset-bed" class="block text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('settingsView.presetBed') }}</label>
-                  <input
-                    id="preset-bed"
-                    name="preset-bed"
-                    v-model="presetDraft.bedCelsius"
-                    type="number"
-                    inputmode="numeric"
-                    min="0"
-                    :max="temperatureMaximums.bed"
-                    autocomplete="off"
-                    :aria-invalid="Boolean(presetErrors.bed)"
-                    :aria-describedby="presetErrors.bed ? 'preset-bed-error' : undefined"
-                    class="mt-1 block w-full rounded-md bg-white px-3 py-1.5 font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
-                  />
-                  <p v-if="presetErrors.bed" id="preset-bed-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ presetErrors.bed }}</p>
-                </div>
-              </div>
-              <Button type="submit" class="w-full">{{ t('settingsView.addPreset') }}</Button>
-            </form>
+            <div class="border-t border-gray-200 px-4 py-4 sm:px-6 dark:border-white/10">
+              <Button class="w-full" @click="openPresetAddition"><PhPlus class="size-4" aria-hidden="true" /> {{ t('settingsView.addPreset') }}</Button>
+            </div>
           </Card>
           <Card as="section">
             <CardHeader :title="t('settingsView.appearance')" :icon="PhSun" />
@@ -3790,6 +3724,120 @@ onUnmounted(() => {
         </div>
       </template>
     </main>
+
+    <SlideOver :open="slicerAdditionOpen" :title="t('settingsView.addSlicer')" :close-label="t('common.closePanel')" @close="closeSlicerAddition">
+      <form id="add-slicer-form" autocomplete="off" class="space-y-4" @submit.prevent="addSlicer">
+        <div class="min-w-0">
+          <label for="slicer-name" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('settingsView.slicerName') }}</label>
+          <input
+            ref="slicerNameInput"
+            id="slicer-name"
+            name="slicer-name"
+            v-model="slicerDraft.name"
+            type="text"
+            autocomplete="off"
+            :disabled="slicerBusy"
+            :aria-invalid="Boolean(slicerNameError)"
+            :aria-describedby="[slicerNameError && 'slicer-name-error', slicerError && 'slicer-error'].filter(Boolean).join(' ') || undefined"
+            class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+            @input="slicerNameError = undefined"
+          />
+          <p v-if="slicerNameError" id="slicer-name-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ slicerNameError }}</p>
+        </div>
+        <div class="min-w-0">
+          <label for="slicer-path" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('settingsView.slicerPath') }}</label>
+          <div class="mt-2 flex gap-2">
+            <input
+              ref="slicerPathInput"
+              id="slicer-path"
+              name="slicer-path"
+              :value="slicerDraft.path"
+              type="text"
+              readonly
+              autocomplete="off"
+              :placeholder="t('settingsView.slicerPathPlaceholder')"
+              :aria-invalid="Boolean(slicerPathError)"
+              :aria-describedby="[slicerPathError && 'slicer-path-error', slicerError && 'slicer-error'].filter(Boolean).join(' ') || undefined"
+              class="block w-full min-w-0 rounded-md bg-white px-3 py-1.5 font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:font-sans placeholder:text-gray-400 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:placeholder:text-gray-500"
+            />
+            <Button class="shrink-0" :disabled="slicerBusy" @click="browseSlicerPath">{{ t('settingsView.browse') }}</Button>
+          </div>
+          <p v-if="slicerPathError" id="slicer-path-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ slicerPathError }}</p>
+        </div>
+        <p v-if="slicerError" id="slicer-error" class="text-sm text-red-600 dark:text-red-400" role="alert">{{ slicerError }}</p>
+      </form>
+      <template #footer>
+        <Button :disabled="slicerBusy" @click="closeSlicerAddition">{{ t('common.cancel') }}</Button>
+        <Button variant="primary" type="submit" form="add-slicer-form" :disabled="slicerBusy">{{ slicerBusy ? t('common.adding') : t('settingsView.addSlicer') }}</Button>
+      </template>
+    </SlideOver>
+
+    <SlideOver
+      :open="presetAdditionOpen"
+      :title="t('settingsView.addPreset')"
+      :description="t('settingsView.presetsDescription', { nozzle: temperatureMaximums.nozzle, bed: temperatureMaximums.bed })"
+      :close-label="t('common.closePanel')"
+      @close="presetAdditionOpen = false"
+    >
+      <form id="add-preset-form" autocomplete="off" class="space-y-4" @submit.prevent="addPreset">
+        <div class="min-w-0">
+          <label for="preset-name" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('settingsView.presetName') }}</label>
+          <input
+            ref="presetNameInput"
+            id="preset-name"
+            name="preset-name"
+            v-model="presetDraft.name"
+            type="text"
+            autocomplete="off"
+            :maxlength="PRESET_NAME_MAX_LENGTH"
+            :aria-invalid="Boolean(presetErrors.name)"
+            :aria-describedby="presetErrors.name ? 'preset-name-error' : undefined"
+            class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+          />
+          <p v-if="presetErrors.name" id="preset-name-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ presetErrors.name }}</p>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="min-w-0">
+            <label for="preset-nozzle" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('settingsView.presetNozzle') }}</label>
+            <input
+              id="preset-nozzle"
+              name="preset-nozzle"
+              v-model="presetDraft.nozzleCelsius"
+              type="number"
+              inputmode="numeric"
+              min="0"
+              :max="temperatureMaximums.nozzle"
+              autocomplete="off"
+              :aria-invalid="Boolean(presetErrors.nozzle)"
+              :aria-describedby="presetErrors.nozzle ? 'preset-nozzle-error' : undefined"
+              class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+            />
+            <p v-if="presetErrors.nozzle" id="preset-nozzle-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ presetErrors.nozzle }}</p>
+          </div>
+          <div class="min-w-0">
+            <label for="preset-bed" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('settingsView.presetBed') }}</label>
+            <input
+              id="preset-bed"
+              name="preset-bed"
+              v-model="presetDraft.bedCelsius"
+              type="number"
+              inputmode="numeric"
+              min="0"
+              :max="temperatureMaximums.bed"
+              autocomplete="off"
+              :aria-invalid="Boolean(presetErrors.bed)"
+              :aria-describedby="presetErrors.bed ? 'preset-bed-error' : undefined"
+              class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 font-mono text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10"
+            />
+            <p v-if="presetErrors.bed" id="preset-bed-error" class="mt-1 text-xs text-red-600 dark:text-red-400">{{ presetErrors.bed }}</p>
+          </div>
+        </div>
+      </form>
+      <template #footer>
+        <Button @click="presetAdditionOpen = false">{{ t('common.cancel') }}</Button>
+        <Button variant="primary" type="submit" form="add-preset-form">{{ t('settingsView.addPreset') }}</Button>
+      </template>
+    </SlideOver>
 
     <SlideOver :open="additionOpen" :title="editingPrinter ? t('printersView.editPrinter') : t('addition.title')" :description="t('addition.description')" :close-label="t('common.closePanel')" @close="closeAddition">
       <form id="add-printer-form" @submit.prevent="addPrinter">
