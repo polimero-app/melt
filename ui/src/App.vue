@@ -3302,7 +3302,7 @@ onUnmounted(() => {
                 <span class="grid size-10 place-items-center rounded-lg bg-gray-100 text-cyan-600 dark:bg-white/10 dark:text-cyan-400"><PhPrinter class="size-5" aria-hidden="true" /></span>
                 <div>
                   <h3 class="font-semibold text-gray-900 dark:text-white">{{ printer.name }}</h3>
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ printer.driver }}</p>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ printer.detectedModel || printer.presence?.model || '—' }}</p>
                 </div>
               </div>
               <div class="flex shrink-0 items-center gap-1">
@@ -3331,8 +3331,8 @@ onUnmounted(() => {
             <!-- Description list -->
             <dl class="mt-2 divide-y divide-gray-200 text-xs dark:divide-white/10">
               <div class="flex items-center justify-between py-2">
-                <dt class="text-gray-500 dark:text-gray-400">{{ t('printersView.modelName') }}</dt>
-                <dd class="text-gray-900 dark:text-gray-300">{{ printer.detectedModel || printer.presence?.model || '—' }}</dd>
+                <dt class="text-gray-500 dark:text-gray-400">{{ t('addition.driver') }}</dt>
+                <dd class="text-gray-900 dark:text-gray-300">{{ printer.driver }}</dd>
               </div>
               <div class="flex items-center justify-between py-2">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t('addition.serial') }}</dt>
