@@ -30,6 +30,8 @@ use melt_core::{
 use serde::Serialize;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
+mod cameras;
+
 #[derive(Clone, Copy)]
 enum OutputFormat {
     Human,
@@ -63,6 +65,42 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
         flags: "  -h, --help                    help for stop\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
     },
     LeafCommand {
+        path: &["camera", "add"],
+        short: "Add an IP camera profile",
+        args: "<camera> [flags]",
+        flags: "      --driver string          camera driver (tapo)\n  -h, --help                   help for add\n      --host string            camera IP address or hostname\n      --password-file string   file containing the camera account password\n      --rtsp-port int          RTSP port (default 554)\n      --timeout string         connection timeout (default \"10s\")\n      --username string        camera account username",
+    },
+    LeafCommand {
+        path: &["camera", "edit"],
+        short: "Edit an IP camera profile",
+        args: "<camera> [flags]",
+        flags: "  -h, --help                   help for edit\n      --host string            camera IP address or hostname\n      --name string            rename the camera\n      --password-file string   file containing a new camera account password\n      --rtsp-port int          RTSP port\n      --timeout string         connection timeout\n      --username string        camera account username",
+    },
+    LeafCommand {
+        path: &["camera", "link"],
+        short: "Link an IP camera to a printer",
+        args: "<camera> [flags]",
+        flags: "  -h, --help             help for link\n      --printer string   printer profile to link\n      --select           show this camera by default for the printer",
+    },
+    LeafCommand {
+        path: &["camera", "list"],
+        short: "List IP camera profiles and their printer links",
+        args: "[flags]",
+        flags: "  -h, --help   help for list",
+    },
+    LeafCommand {
+        path: &["camera", "remove"],
+        short: "Remove an IP camera profile",
+        args: "<camera> [flags]",
+        flags: "  -h, --help   help for remove\n      --yes    skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["camera", "select"],
+        short: "Choose the camera a printer shows by default",
+        args: "[flags]",
+        flags: "      --builtin          show the printer's built-in camera\n      --camera string    show this linked IP camera\n  -h, --help             help for select\n      --printer string   printer profile",
+    },
+    LeafCommand {
         path: &["camera", "snapshot"],
         short: "Capture one still image from a printer camera",
         args: "<name> [flags]",
@@ -73,6 +111,12 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
         short: "Stream camera feed from a printer via a local HTTP server",
         args: "<name> [flags]",
         flags: "      --format string           output format for stream: mjpeg (transcode H.264 to MJPEG for browser viewing)\n  -h, --help                    help for stream\n      --insecure                skip TLS fingerprint verification for this invocation\n      --port int                local HTTP server port (default 8080)\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          auto-stop after this duration (e.g. 30m)",
+    },
+    LeafCommand {
+        path: &["camera", "unlink"],
+        short: "Unlink an IP camera from a printer",
+        args: "<camera> [flags]",
+        flags: "  -h, --help             help for unlink\n      --printer string   printer profile to unlink",
     },
     LeafCommand {
         path: &["emergency-stop"],
@@ -280,11 +324,18 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
         path: &["camera"],
         short: "Camera operations on a named printer",
         commands: &[
+            ("add", "Add an IP camera profile"),
+            ("edit", "Edit an IP camera profile"),
+            ("link", "Link an IP camera to a printer"),
+            ("list", "List IP camera profiles and their printer links"),
+            ("remove", "Remove an IP camera profile"),
+            ("select", "Choose the camera a printer shows by default"),
             ("snapshot", "Capture one still image from a printer camera"),
             (
                 "stream",
                 "Stream camera feed from a printer via a local HTTP server",
             ),
+            ("unlink", "Unlink an IP camera from a printer"),
         ],
     },
     CommandGroup {
@@ -608,6 +659,15 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             files_download(invocation.format, rest, out, err)
         }
         [camera, action, rest @ ..]
+            if camera.as_str() == "camera"
+                && matches!(
+                    action.as_str(),
+                    "add" | "edit" | "link" | "list" | "remove" | "select" | "unlink"
+                ) =>
+        {
+            cameras::run_profile_command(invocation.format, action, rest, out, err)
+        }
+        [camera, action, rest @ ..]
             if camera.as_str() == "camera" && matches!(action.as_str(), "snapshot" | "stream") =>
         {
             match action.as_str() {
@@ -846,7 +906,7 @@ fn parse_add_request(name: &str, flags: &[&String]) -> Result<profiles::CreateRe
                     "--model" => request.model = (*value).clone(),
                     "--timeout" => request.timeout = (*value).clone(),
                     "--access-code-file" => {
-                        request.access_code = read_access_code_file(value)?;
+                        request.access_code = read_secret_file("--access-code-file", value)?;
                     }
                     _ => unreachable!("recognized flags are exhaustive"),
                 }
@@ -865,25 +925,28 @@ fn parse_add_request(name: &str, flags: &[&String]) -> Result<profiles::CreateRe
     Ok(request)
 }
 
-fn read_access_code_file(path: &str) -> Result<String, String> {
-    let metadata = std::fs::symlink_metadata(path)
-        .map_err(|error| format!("cannot read --access-code-file: {error}"))?;
+/// Reads a one-line secret from a regular, user-only file of at most 4 KiB.
+fn read_secret_file(flag: &str, path: &str) -> Result<String, String> {
+    let metadata =
+        std::fs::symlink_metadata(path).map_err(|error| format!("cannot read {flag}: {error}"))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > 4096 {
-        return Err("--access-code-file must be a regular file no larger than 4 KiB".into());
+        return Err(format!(
+            "{flag} must be a regular file no larger than 4 KiB"
+        ));
     }
     #[cfg(unix)]
     if std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()) & 0o077 != 0 {
-        return Err("--access-code-file must not grant group or other access".into());
+        return Err(format!("{flag} must not grant group or other access"));
     }
-    let mut code = std::fs::read_to_string(path)
-        .map_err(|error| format!("cannot read --access-code-file: {error}"))?;
-    if let Some(stripped) = code
+    let mut secret =
+        std::fs::read_to_string(path).map_err(|error| format!("cannot read {flag}: {error}"))?;
+    if let Some(stripped) = secret
         .strip_suffix("\r\n")
-        .or_else(|| code.strip_suffix('\n'))
+        .or_else(|| secret.strip_suffix('\n'))
     {
-        code = stripped.into();
+        secret = stripped.into();
     }
-    Ok(code)
+    Ok(secret)
 }
 
 fn printer_status(
@@ -5140,6 +5203,10 @@ fn config_error(error: ConfigError) -> AppError {
             AppError::usage("unsupported config schema version")
         }
         ConfigError::Malformed(_) => AppError::usage("config file is malformed"),
+        ConfigError::InvalidCameras(message) => {
+            AppError::usage(format!("invalid camera configuration: {message}"))
+        }
+
         _ => AppError {
             exit_code: 1,
             code: "internal_error",
@@ -5735,8 +5802,15 @@ mod tests {
                 "Camera operations on a named printer\n\n",
                 "Usage:\n  melt camera [command]\n\n",
                 "Available Commands:\n",
+                "  add         Add an IP camera profile\n",
+                "  edit        Edit an IP camera profile\n",
+                "  link        Link an IP camera to a printer\n",
+                "  list        List IP camera profiles and their printer links\n",
+                "  remove      Remove an IP camera profile\n",
+                "  select      Choose the camera a printer shows by default\n",
                 "  snapshot    Capture one still image from a printer camera\n",
-                "  stream      Stream camera feed from a printer via a local HTTP server\n\n",
+                "  stream      Stream camera feed from a printer via a local HTTP server\n",
+                "  unlink      Unlink an IP camera from a printer\n\n",
                 "Flags:\n  -h, --help   help for camera\n\n",
                 "Global Flags:\n",
                 "      --output string   output format: human or json (default \"human\")\n",

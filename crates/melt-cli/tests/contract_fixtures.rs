@@ -61,7 +61,7 @@ fn contract_fixtures_match_the_cli_envelope_and_exit_contract() {
 
     let manifest: Manifest = serde_json::from_value(read_json("manifest.json")).expect("manifest");
     assert_eq!(manifest.schema_version, 1);
-    assert_eq!(manifest.fixtures.len(), 9);
+    assert_eq!(manifest.fixtures.len(), 11);
     let mut fixture_ids = HashSet::new();
 
     for fixture in manifest.fixtures {

@@ -1,0 +1,12 @@
+{
+  "ok": false,
+  "data": null,
+  "error": {
+    "code": "config_error",
+    "message": "camera select requires exactly one of --camera or --builtin",
+    "details": {}
+  },
+  "meta": {
+    "command": "camera select"
+  }
+}

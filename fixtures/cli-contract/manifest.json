@@ -81,6 +81,24 @@
       "stdout": "golden/firmware-check-profile-not-found.json",
       "stderr": "",
       "ignoreJsonPointers": []
+    },
+    {
+      "id": "camera-list-empty-json",
+      "command": "camera list",
+      "args": ["camera", "list", "--output", "json"],
+      "exitCode": 0,
+      "stdout": "golden/camera-list-empty.json",
+      "stderr": "",
+      "ignoreJsonPointers": ["/meta/durationMs"]
+    },
+    {
+      "id": "camera-select-missing-source-json",
+      "command": "camera select",
+      "args": ["camera", "select", "--printer", "garage", "--output", "json"],
+      "exitCode": 2,
+      "stdout": "golden/camera-select-missing-source.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
     }
   ]
 }
