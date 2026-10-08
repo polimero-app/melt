@@ -52,8 +52,9 @@ export function awaitsFirstSample(badge: PrinterBadge): boolean {
 
 export type CameraViewState = 'live' | 'snapshot' | 'loading' | 'offline'
 
-export function shouldRunCamera(activeView: string, documentVisible: boolean, supported: boolean): boolean {
-  return activeView === 'control' && documentVisible && supported
+/** A viewer streams only while its own view is shown and the window is visible. */
+export function shouldRunCamera(activeView: string, viewerView: string, documentVisible: boolean, supported: boolean): boolean {
+  return activeView === viewerView && documentVisible && supported
 }
 
 export function cameraViewState(input: {

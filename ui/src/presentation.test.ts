@@ -44,11 +44,13 @@ describe('cameraViewState', () => {
 })
 
 describe('shouldRunCamera', () => {
-  it('requires a supported camera on the visible control view', () => {
-    expect(shouldRunCamera('control', true, true)).toBe(true)
-    expect(shouldRunCamera('files', true, true)).toBe(false)
-    expect(shouldRunCamera('control', false, true)).toBe(false)
-    expect(shouldRunCamera('control', true, false)).toBe(false)
+  it('requires a supported camera on its own visible view', () => {
+    expect(shouldRunCamera('control', 'control', true, true)).toBe(true)
+    expect(shouldRunCamera('cameras', 'cameras', true, true)).toBe(true)
+    expect(shouldRunCamera('files', 'control', true, true)).toBe(false)
+    expect(shouldRunCamera('cameras', 'control', true, true)).toBe(false)
+    expect(shouldRunCamera('control', 'control', false, true)).toBe(false)
+    expect(shouldRunCamera('control', 'control', true, false)).toBe(false)
   })
 })
 

@@ -952,7 +952,7 @@ const cameraStateClasses = computed(() => ({
   offline: 'bg-gray-100 fill-gray-400 text-gray-600 dark:bg-white/10 dark:fill-gray-500 dark:text-gray-400',
 }[cameraState.value]))
 const cameraSupported = computed(() => Boolean(capabilities.value?.cameraStream || capabilities.value?.cameraSnapshot))
-const cameraMayRun = computed(() => shouldRunCamera(activeView.value, documentVisible.value, cameraSupported.value))
+const cameraMayRun = computed(() => shouldRunCamera(activeView.value, 'control', documentVisible.value, cameraSupported.value))
 
 watch(cameraMayRun, (shouldRun) => {
   if (shouldRun) {
