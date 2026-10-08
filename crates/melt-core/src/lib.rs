@@ -1,6 +1,7 @@
 //! UI-agnostic Melt domain types.
 
 pub mod bambu;
+pub mod cameras;
 pub mod config;
 pub mod diagnostics;
 pub mod drivers;

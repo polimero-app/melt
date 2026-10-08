@@ -607,7 +607,6 @@ enum MjpegSource {
 
 impl MjpegStream {
     /// Wraps a decoding H.264 stream from any RTSP camera as MJPEG.
-    #[allow(dead_code)]
     pub(crate) fn from_h264(stream: H264Stream) -> Self {
         Self {
             source: MjpegSource::H264(Box::new(stream)),
