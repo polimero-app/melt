@@ -79,8 +79,8 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
     LeafCommand {
         path: &["camera", "link"],
         short: "Link an IP camera to a printer",
-        args: "<camera> --printer <printer> [flags]",
-        flags: "  -h, --help             help for link\n      --printer string   printer profile to link (required)\n      --select           show this camera by default for the printer",
+        args: "<camera> <printer> [flags]",
+        flags: "  -h, --help     help for link\n      --select   show this camera by default for the printer",
     },
     LeafCommand {
         path: &["camera", "list"],
@@ -97,8 +97,8 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
     LeafCommand {
         path: &["camera", "select"],
         short: "Choose the camera a printer shows by default",
-        args: "--printer <printer> (--camera <camera> | --builtin) [flags]",
-        flags: "      --builtin          show the printer's built-in camera\n      --camera string    show this linked IP camera\n  -h, --help             help for select\n      --printer string   printer profile (required)",
+        args: "<printer> (<camera> | --builtin) [flags]",
+        flags: "      --builtin   show the printer's built-in camera\n  -h, --help      help for select",
     },
     LeafCommand {
         path: &["camera", "snapshot"],
@@ -115,8 +115,8 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
     LeafCommand {
         path: &["camera", "unlink"],
         short: "Unlink an IP camera from a printer",
-        args: "<camera> --printer <printer> [flags]",
-        flags: "  -h, --help             help for unlink\n      --printer string   printer profile to unlink (required)",
+        args: "<camera> <printer> [flags]",
+        flags: "  -h, --help   help for unlink",
     },
     LeafCommand {
         path: &["emergency-stop"],

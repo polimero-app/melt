@@ -94,7 +94,7 @@
     {
       "id": "camera-select-missing-source-json",
       "command": "camera select",
-      "args": ["camera", "select", "--printer", "garage", "--output", "json"],
+      "args": ["camera", "select", "garage", "--output", "json"],
       "exitCode": 2,
       "stdout": "golden/camera-select-missing-source.json",
       "stderr": "",

@@ -295,42 +295,48 @@ fn remove(args: &[&String], err: &mut dyn Write) -> Result<cameras::CameraRemove
 }
 
 fn link(args: &[&String]) -> Result<CameraSummary, AppError> {
-    let (positionals, options) =
-        parse_options(args, &["select"], &["printer"]).map_err(AppError::usage)?;
-    let camera = one_camera("camera link", &positionals)?;
-    let printer = required(&options, "printer")?;
+    let (positionals, options) = parse_options(args, &["select"], &[]).map_err(AppError::usage)?;
+    let (camera, printer) = camera_and_printer("camera link", &positionals)?;
     let dir = config_dir().map_err(config_error)?;
-    cameras::link(dir, &printer, camera, options.enabled("select")).map_err(camera_error)
+    cameras::link(dir, printer, camera, options.enabled("select")).map_err(camera_error)
 }
 
 fn unlink(args: &[&String]) -> Result<CameraSummary, AppError> {
-    let (positionals, options) = parse_options(args, &[], &["printer"]).map_err(AppError::usage)?;
-    let camera = one_camera("camera unlink", &positionals)?;
-    let printer = required(&options, "printer")?;
+    let (positionals, _) = parse_options(args, &[], &[]).map_err(AppError::usage)?;
+    let (camera, printer) = camera_and_printer("camera unlink", &positionals)?;
     let dir = config_dir().map_err(config_error)?;
-    cameras::unlink(dir, &printer, camera).map_err(camera_error)
+    cameras::unlink(dir, printer, camera).map_err(camera_error)
 }
 
 fn select(args: &[&String]) -> Result<cameras::SelectedFeed, AppError> {
-    let (positionals, options) =
-        parse_options(args, &["builtin"], &["printer", "camera"]).map_err(AppError::usage)?;
-    if !positionals.is_empty() {
-        return Err(AppError::usage(
-            "camera select takes --printer and a source, not names",
-        ));
-    }
-    let camera = match (options.value("camera"), options.enabled("builtin")) {
-        (Some(camera), false) => Some(camera),
-        (None, true) => None,
-        _ => {
-            return Err(AppError::usage(
-                "camera select requires exactly one of --camera or --builtin",
-            ));
-        }
-    };
-    let printer = required(&options, "printer")?;
+    let (positionals, options) = parse_options(args, &["builtin"], &[]).map_err(AppError::usage)?;
+    let (printer, camera) = select_target(&positionals, options.enabled("builtin"))?;
     let dir = config_dir().map_err(config_error)?;
-    cameras::select(dir, &printer, camera).map_err(camera_error)
+    cameras::select(dir, printer, camera).map_err(camera_error)
+}
+
+/// `<camera> <printer>`, in that order, for `camera link` and `camera unlink`.
+fn camera_and_printer<'a>(
+    command: &str,
+    positionals: &'a [String],
+) -> Result<(&'a str, &'a str), AppError> {
+    match positionals {
+        [camera, printer] => Ok((camera, printer)),
+        _ => Err(AppError::usage(format!(
+            "{command} expects a camera name and a printer name"
+        ))),
+    }
+}
+
+/// `<printer> <camera>` or `<printer> --builtin` for `camera select`.
+fn select_target(positionals: &[String], builtin: bool) -> Result<(&str, Option<&str>), AppError> {
+    match (positionals, builtin) {
+        ([printer, camera], false) => Ok((printer, Some(camera))),
+        ([printer], true) => Ok((printer, None)),
+        _ => Err(AppError::usage(
+            "camera select expects a printer name and either a camera name or --builtin",
+        )),
+    }
 }
 
 fn one_camera<'a>(command: &str, positionals: &'a [String]) -> Result<&'a str, AppError> {
@@ -554,6 +560,48 @@ mod tests {
         let refs: Vec<&String> = args.iter().collect();
         let error = edit(&refs).unwrap_err();
         assert_eq!(error.message, "--password-file must not be empty");
+    }
+
+    fn names(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn link_commands_take_the_camera_then_the_printer() {
+        let positionals = names(&["porch", "workshop"]);
+        assert_eq!(
+            camera_and_printer("camera link", &positionals).unwrap(),
+            ("porch", "workshop")
+        );
+        for invalid in [&[][..], &["porch"][..], &["porch", "workshop", "attic"][..]] {
+            let error = camera_and_printer("camera link", &names(invalid)).unwrap_err();
+            assert_eq!(error.exit_code, 2, "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn select_takes_a_printer_and_exactly_one_source() {
+        type Target<'a> = Option<(&'a str, Option<&'a str>)>;
+        let cases: [(&[&str], bool, Target); 6] = [
+            (
+                &["workshop", "porch"],
+                false,
+                Some(("workshop", Some("porch"))),
+            ),
+            (&["workshop"], true, Some(("workshop", None))),
+            (&["workshop"], false, None),
+            (&["workshop", "porch"], true, None),
+            (&[], true, None),
+            (&["workshop", "porch", "attic"], false, None),
+        ];
+        for (positionals, builtin, expected) in cases {
+            let positionals = names(positionals);
+            assert_eq!(
+                select_target(&positionals, builtin).ok(),
+                expected,
+                "{positionals:?} builtin={builtin}"
+            );
+        }
     }
 
     #[test]

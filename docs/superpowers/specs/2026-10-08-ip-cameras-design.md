@@ -97,8 +97,9 @@ before saving, and never move the camera.
 
 ## CLI contract
 
-New commands. In these, a positional argument is always a camera name and a
-printer is always `--printer`:
+New commands. Positional arguments name the objects a command acts on;
+flags are options. A command that changes a printer's feed names the printer
+first:
 
 ```text
 melt camera add <camera> --driver tapo --host <host> --username <user>
@@ -107,9 +108,9 @@ melt camera edit <camera> [--name <new>] [--host <host>] [--username <user>]
     [--password-file <path>] [--rtsp-port <port>] [--timeout <duration>]
 melt camera list
 melt camera remove <camera> [--yes]
-melt camera link <camera> --printer <printer> [--select]
-melt camera unlink <camera> --printer <printer>
-melt camera select --printer <printer> (--camera <camera> | --builtin)
+melt camera link <camera> <printer> [--select]
+melt camera unlink <camera> <printer>
+melt camera select <printer> (<camera> | --builtin)
 ```
 
 Existing media commands gain an external selector. The positional printer

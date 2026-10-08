@@ -3,7 +3,7 @@
   "data": null,
   "error": {
     "code": "config_error",
-    "message": "camera select requires exactly one of --camera or --builtin",
+    "message": "camera select expects a printer name and either a camera name or --builtin",
     "details": {}
   },
   "meta": {

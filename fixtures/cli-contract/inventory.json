@@ -11,11 +11,11 @@
     {"path": "firmware check", "arguments": "<printer>", "flags": ["--refresh", "--insecure", "--protocol-trace <path>", "--timeout <duration>"], "implementation": "implemented"},
     {"path": "camera add", "arguments": "<camera>", "flags": ["--driver <driver>", "--host <host>", "--username <user>", "--password-file <path>", "--rtsp-port <port>", "--timeout <duration>"], "implementation": "implemented"},
     {"path": "camera edit", "arguments": "<camera>", "flags": ["--name <name>", "--host <host>", "--username <user>", "--password-file <path>", "--rtsp-port <port>", "--timeout <duration>"], "implementation": "implemented"},
-    {"path": "camera link", "arguments": "<camera>", "flags": ["--printer <printer>", "--select"], "implementation": "implemented"},
+    {"path": "camera link", "arguments": "<camera> <printer>", "flags": ["--select"], "implementation": "implemented"},
     {"path": "camera list", "arguments": "", "flags": [], "implementation": "implemented"},
     {"path": "camera remove", "arguments": "<camera>", "flags": ["--yes"], "implementation": "implemented"},
-    {"path": "camera select", "arguments": "", "flags": ["--printer <printer>", "--camera <camera>", "--builtin"], "implementation": "implemented"},
-    {"path": "camera unlink", "arguments": "<camera>", "flags": ["--printer <printer>"], "implementation": "implemented"}
+    {"path": "camera select", "arguments": "<printer> [<camera>]", "flags": ["--builtin"], "implementation": "implemented"},
+    {"path": "camera unlink", "arguments": "<camera> <printer>", "flags": [], "implementation": "implemented"}
   ],
   "commands": [
     {"path": "melt", "arguments": "", "flags": [], "implementation": "implemented"},
