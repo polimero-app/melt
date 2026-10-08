@@ -395,8 +395,8 @@ export function sourceKey(source: CameraSource, quality: Quality): string // res
 
 Pan/tilt and ONVIF (Phase 3), discovery (Phase 4), audio, thumbnails, polling, persisted quality, multiple simultaneous viewers on one screen.
 
-## Open questions
+## Decided
 
-1. **Control-view quality.** The plan uses `high` (2304×1296) everywhere. Should the control card use `low` (640×360) to save bandwidth and decode? It's a one-line change.
-2. **Feed picker scope.** The plan lists only cameras already linked to the printer, and linking happens in the camera form. An alternative lists every camera and links it when selected, which saves a step but blurs link versus select.
-3. **Phase 1 Task 7 leftovers** (Third-Party Compatibility state, the stream limit number, CLI add/edit/remove and wrong-password checks) are separate from this plan. Steps 2.1 and 2.10 above partly cover them through the desktop.
+1. **Control-view quality:** `high`, same as the Cameras view (confirmed 2026-10-08).
+2. **Feed picker scope:** only cameras linked to the printer; linking happens in the camera form (confirmed 2026-10-08).
+3. **Phase 1 Task 7 leftovers** (Third-Party Compatibility state, the stream limit number, CLI add/edit/remove and wrong-password checks) stay separate. Task 6 checks 1 and 10 above partly cover them through the desktop.
