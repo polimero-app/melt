@@ -345,6 +345,7 @@ type CameraSnapshot = {
 }
 
 type CameraStream = {
+  viewerId: string
   url: string
 }
 
@@ -353,6 +354,7 @@ type CameraH264Stream = CameraStream & {
 }
 
 type CameraWebRtcAnswer = {
+  viewerId: string
   type: 'answer'
   sdp: string
 }
@@ -1982,11 +1984,11 @@ async function refreshCamera() {
         const offer = await peer.createOffer()
         await peer.setLocalDescription(offer)
         await waitForIceGathering(peer)
-        const answer = await invoke<CameraWebRtcAnswer>('printer_camera_webrtc_offer', {
-          name: printerName,
+        const answer = await invoke<CameraWebRtcAnswer>('camera_webrtc_offer', {
+          source: { printer: printerName },
           offer: peer.localDescription?.sdp ?? offer.sdp,
         })
-        await peer.setRemoteDescription(answer)
+        await peer.setRemoteDescription({ type: answer.type, sdp: answer.sdp })
         const mediaStream = await waitForPeerReady(peer, track)
         if (request !== cameraRequest || activePrinter.value?.name !== printerName) {
           peer.close()
@@ -2007,7 +2009,7 @@ async function refreshCamera() {
         }
       }
     } else if (capabilities.value?.cameraSnapshot) {
-      const snapshot = await invoke<CameraSnapshot>('printer_camera_snapshot', { name: printerName })
+      const snapshot = await invoke<CameraSnapshot>('camera_snapshot', { source: { printer: printerName } })
       if (request === cameraRequest) cameraUrl.value = snapshot.dataUrl
     }
   } catch (reason) {
@@ -2051,7 +2053,7 @@ async function fallbackCamera(printerName: string, request: number, reason: stri
   cameraMediaStream.value = undefined
   await stopCameraSession()
   try {
-    const stream = await invoke<CameraH264Stream>('printer_camera_h264_stream', { name: printerName })
+    const stream = await invoke<CameraH264Stream>('camera_h264_stream', { source: { printer: printerName } })
     if (request !== cameraRequest || activePrinter.value?.name !== printerName) {
       await stopCameraSession()
       return
@@ -2106,7 +2108,7 @@ async function fallbackMjpegCamera(printerName: string, request: number, reason:
   cameraH264Playback = undefined
   cameraCanvasActive.value = false
   cameraCanvasLive.value = false
-  const stream = await invoke<CameraStream>('printer_camera_stream', { name: printerName })
+  const stream = await invoke<CameraStream>('camera_mjpeg_stream', { source: { printer: printerName } })
   if (request !== cameraRequest || activePrinter.value?.name !== printerName) {
     await stopCameraSession()
     return
@@ -2160,10 +2162,7 @@ async function stopCamera() {
 }
 
 async function stopCameraSession() {
-  await Promise.allSettled([
-    invoke('printer_camera_webrtc_stop'),
-    invoke('printer_camera_stream_stop'),
-  ])
+  await invoke('camera_viewer_stop').catch(() => undefined)
 }
 
 async function saveSnapshot() {
@@ -2177,7 +2176,7 @@ async function saveSnapshot() {
   cameraLoading.value = true
   cameraError.value = undefined
   try {
-    cameraUrl.value = (await invoke<CameraSnapshot>('printer_camera_snapshot', { name: activePrinter.value.name, destination })).dataUrl
+    cameraUrl.value = (await invoke<CameraSnapshot>('camera_snapshot', { source: { printer: activePrinter.value.name }, destination })).dataUrl
     showToast(t('camera.snapshotSaved'))
   } catch (reason) {
     cameraError.value = message(reason)

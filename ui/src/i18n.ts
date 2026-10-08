@@ -486,6 +486,19 @@ export type MessageKey =
   | "errors.cameraAccessCodeUnavailable"
   | "errors.cameraTlsFailed"
   | "errors.cameraPreviewUnavailable"
+  | "errors.cameraInvalidUsername"
+  | "errors.cameraInvalidPassword"
+  | "errors.cameraInvalidPort"
+  | "errors.cameraInvalidTimeout"
+  | "errors.cameraNotFound"
+  | "errors.cameraExists"
+  | "errors.cameraNotLinked"
+  | "errors.cameraAuthFailed"
+  | "errors.cameraDigestRequired"
+  | "errors.cameraUnreachable"
+  | "errors.cameraTimeout"
+  | "errors.cameraUnsupportedCodec"
+  | "errors.cameraPasswordUnavailable"
   | "errors.preferencesUnreadable"
   | "errors.preferencesUnwritable"
   | "errors.slicerNameMissing"
@@ -1051,6 +1064,19 @@ const messages: Record<Locale, Messages> = {
     "errors.cameraAccessCodeUnavailable": "Camera authentication is unavailable.",
     "errors.cameraTlsFailed": "Camera TLS verification failed.",
     "errors.cameraPreviewUnavailable": "Camera preview is unavailable.",
+    "errors.cameraInvalidUsername": "Camera username must be 1–64 characters without quotes, backslashes, or control characters.",
+    "errors.cameraInvalidPassword": "Camera password must not be empty or contain control characters.",
+    "errors.cameraInvalidPort": "RTSP port must be between 1 and 65535.",
+    "errors.cameraInvalidTimeout": "Camera timeout is invalid. Use a duration like 10s.",
+    "errors.cameraNotFound": "Camera not found.",
+    "errors.cameraExists": "A camera with this name already exists.",
+    "errors.cameraNotLinked": "This camera is not linked to the printer.",
+    "errors.cameraAuthFailed": "Camera rejected the username or password. Use the Camera Account from the Tapo app.",
+    "errors.cameraDigestRequired": "Camera offered only Basic authentication, which would send the password in clear text.",
+    "errors.cameraUnreachable": "Cannot reach the camera. Check that it is on, privacy mode is off, and its stream limit is not reached.",
+    "errors.cameraTimeout": "The camera did not respond in time.",
+    "errors.cameraUnsupportedCodec": "Camera video is not H.264.",
+    "errors.cameraPasswordUnavailable": "The stored camera password is unavailable. Edit the camera and enter it again.",
     "errors.preferencesUnreadable": "Unable to read application preferences.",
     "errors.preferencesUnwritable": "Unable to save application preferences.",
     "errors.slicerNameMissing": "Enter a slicer name.",
@@ -1596,6 +1622,19 @@ const messages: Record<Locale, Messages> = {
     "errors.cameraAccessCodeUnavailable": "A autenticação da câmera está indisponível.",
     "errors.cameraTlsFailed": "A verificação TLS da câmera falhou.",
     "errors.cameraPreviewUnavailable": "A pré-visualização da câmera está indisponível.",
+    "errors.cameraInvalidUsername": "O usuário da câmera deve ter de 1 a 64 caracteres, sem aspas, barras invertidas ou caracteres de controle.",
+    "errors.cameraInvalidPassword": "A senha da câmera não pode estar vazia nem conter caracteres de controle.",
+    "errors.cameraInvalidPort": "A porta RTSP deve estar entre 1 e 65535.",
+    "errors.cameraInvalidTimeout": "O tempo limite da câmera é inválido. Use uma duração como 10s.",
+    "errors.cameraNotFound": "Câmera não encontrada.",
+    "errors.cameraExists": "Já existe uma câmera com esse nome.",
+    "errors.cameraNotLinked": "Esta câmera não está vinculada à impressora.",
+    "errors.cameraAuthFailed": "A câmera recusou o usuário ou a senha. Use a Conta da Câmera do app Tapo.",
+    "errors.cameraDigestRequired": "A câmera ofereceu apenas autenticação Basic, que enviaria a senha em texto puro.",
+    "errors.cameraUnreachable": "Não foi possível acessar a câmera. Verifique se ela está ligada, se o modo de privacidade está desativado e se o limite de transmissões não foi atingido.",
+    "errors.cameraTimeout": "A câmera não respondeu a tempo.",
+    "errors.cameraUnsupportedCodec": "O vídeo da câmera não é H.264.",
+    "errors.cameraPasswordUnavailable": "A senha salva da câmera não está disponível. Edite a câmera e informe-a novamente.",
     "errors.preferencesUnreadable": "Não foi possível ler as preferências do aplicativo.",
     "errors.preferencesUnwritable": "Não foi possível salvar as preferências do aplicativo.",
     "errors.slicerNameMissing": "Informe o nome do fatiador.",

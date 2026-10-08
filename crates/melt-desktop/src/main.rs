@@ -4,7 +4,7 @@ use std::{
     net::{TcpListener, TcpStream},
     sync::{
         Arc, Condvar, LazyLock, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -14,6 +14,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use melt_core::{
     AppInfo,
     bambu::{CameraFrame, CameraFrameKind, CameraManager, CameraSubscription, PresenceCache},
+    cameras::{self, StreamQuality},
     config::{Config, ConfigError, Profile, config_dir},
     diagnostics,
     drivers::{self, Capabilities, DriverError, Operation},
@@ -311,12 +312,14 @@ struct CameraSnapshot {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CameraStream {
+    viewer_id: String,
     url: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CameraH264Stream {
+    viewer_id: String,
     url: String,
     codec: String,
 }
@@ -423,39 +426,75 @@ struct FirmwareUpdateState {
     pool: Arc<ConnectionPool>,
 }
 
-#[derive(Default)]
-struct WebRtcSessions {
-    generations: HashMap<String, u64>,
-    active: HashMap<String, webrtc_camera::Session>,
-    profile_keys: HashMap<String, String>,
-}
-
-#[derive(Default)]
-struct CameraWebRtcState {
-    generation: AtomicU64,
-    sessions: Mutex<WebRtcSessions>,
-}
-
-struct CameraProxy {
-    generation: u64,
-    stop: Arc<AtomicBool>,
-}
-
 #[derive(Clone, Copy)]
 enum CameraProxyFormat {
     Mjpeg,
     H264,
 }
 
+/// One live camera viewer. Dropping it stops its stream.
+enum Viewer {
+    // Held only for its Drop, which stops and joins the session.
+    #[allow(dead_code)]
+    WebRtc(webrtc_camera::Session),
+    Proxy(Arc<AtomicBool>),
+}
+
+impl Drop for Viewer {
+    fn drop(&mut self) {
+        if let Self::Proxy(stop) = self {
+            stop.store(true, Ordering::Release);
+        }
+    }
+}
+
+/// Live viewers by backend-issued id, so stopping one never touches another.
+/// The shared upstream closes when its last viewer is gone.
 #[derive(Clone, Default)]
-struct CameraStreamState {
-    generation: Arc<AtomicU64>,
-    active: Arc<Mutex<HashMap<String, CameraProxy>>>,
+struct CameraViewers(Arc<Mutex<HashMap<String, Viewer>>>);
+
+impl CameraViewers {
+    fn insert(&self, viewer: Viewer) -> Result<String, CommandError> {
+        let mut token = [0_u8; 16];
+        rand_bytes(&mut token).map_err(|_| CommandError::new("cameraPreviewUnavailable"))?;
+        let id = hex(&token);
+        self.lock().insert(id.clone(), viewer);
+        Ok(id)
+    }
+
+    /// Stops one viewer, or every viewer with `None`. Viewers drop after
+    /// unlocking because a WebRTC session joins its thread.
+    fn stop(&self, id: Option<&str>) {
+        let stopped: Vec<Viewer> = {
+            let mut viewers = self.lock();
+            match id {
+                Some(id) => viewers.remove(id).into_iter().collect(),
+                None => viewers.drain().map(|(_, viewer)| viewer).collect(),
+            }
+        };
+        drop(stopped);
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Viewer>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// `{"printer": name}` is always the printer's built-in feed;
+/// `{"camera": name}` is an external camera profile.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum CameraSource {
+    Printer(String),
+    Camera(String),
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CameraWebRtcAnswer {
+    viewer_id: String,
     #[serde(rename = "type")]
     kind: &'static str,
     sdp: String,
@@ -3243,15 +3282,16 @@ fn printer_emergency_stop(
 }
 
 #[tauri::command(async)]
-fn printer_camera_snapshot(
-    name: String,
+fn camera_snapshot(
+    source: CameraSource,
+    quality: Option<StreamQuality>,
     destination: Option<String>,
     manager: tauri::State<'_, CameraManager>,
 ) -> Result<CameraSnapshot, CommandError> {
-    let printer = desktop_printer(&name, Operation::CameraSnapshot)?;
-    let subscription = subscribe_camera(
+    let subscription = subscribe_source(
         &manager,
-        &printer,
+        &source,
+        quality,
         CameraFrameKind::Jpeg,
         Operation::CameraSnapshot,
     )?;
@@ -3280,39 +3320,34 @@ fn printer_camera_snapshot(
 }
 
 #[tauri::command(async)]
-fn printer_camera_stream(
-    name: String,
-    state: tauri::State<'_, CameraStreamState>,
+fn camera_mjpeg_stream(
+    source: CameraSource,
+    quality: Option<StreamQuality>,
+    viewers: tauri::State<'_, CameraViewers>,
     manager: tauri::State<'_, CameraManager>,
 ) -> Result<CameraStream, CommandError> {
-    let printer = desktop_printer(&name, Operation::CameraStream)?;
-    let owner_key = printer.driver.physical_printer_key(&printer.name);
-    let subscription = subscribe_camera(
+    let subscription = subscribe_source(
         &manager,
-        &printer,
+        &source,
+        quality,
         CameraFrameKind::Jpeg,
         Operation::CameraStream,
     )?;
-    start_camera_server(
-        subscription,
-        owner_key,
-        state.inner().clone(),
-        CameraProxyFormat::Mjpeg,
-    )
-    .map(|url| CameraStream { url })
+    start_camera_server(subscription, &viewers, CameraProxyFormat::Mjpeg)
+        .map(|(viewer_id, url)| CameraStream { viewer_id, url })
 }
 
 #[tauri::command(async)]
-fn printer_camera_h264_stream(
-    name: String,
-    state: tauri::State<'_, CameraStreamState>,
+fn camera_h264_stream(
+    source: CameraSource,
+    quality: Option<StreamQuality>,
+    viewers: tauri::State<'_, CameraViewers>,
     manager: tauri::State<'_, CameraManager>,
 ) -> Result<CameraH264Stream, CommandError> {
-    let printer = desktop_printer(&name, Operation::CameraStream)?;
-    let owner_key = printer.driver.physical_printer_key(&printer.name);
-    let subscription = subscribe_camera(
+    let subscription = subscribe_source(
         &manager,
-        &printer,
+        &source,
+        quality,
         CameraFrameKind::H264,
         Operation::CameraStream,
     )?;
@@ -3323,105 +3358,162 @@ fn printer_camera_h264_stream(
             CommandError::new("cameraPreviewUnavailable")
                 .with_detail("camera SDP has no usable H.264 codec parameters")
         })?;
-    start_camera_server(
-        subscription,
-        owner_key,
-        state.inner().clone(),
-        CameraProxyFormat::H264,
-    )
-    .map(|url| CameraH264Stream { url, codec })
+    start_camera_server(subscription, &viewers, CameraProxyFormat::H264).map(|(viewer_id, url)| {
+        CameraH264Stream {
+            viewer_id,
+            url,
+            codec,
+        }
+    })
 }
 
 #[tauri::command(async)]
-fn printer_camera_stream_stop(
-    state: tauri::State<'_, CameraStreamState>,
-) -> Result<(), CommandError> {
-    let mut active = state
-        .active
-        .lock()
-        .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?;
-    for proxy in active.values() {
-        proxy.stop.store(true, Ordering::Release);
-    }
-    active.clear();
-    Ok(())
-}
-
-#[tauri::command(async)]
-fn printer_camera_webrtc_offer(
-    name: String,
+fn camera_webrtc_offer(
+    source: CameraSource,
+    quality: Option<StreamQuality>,
     offer: String,
-    state: tauri::State<'_, CameraWebRtcState>,
+    viewers: tauri::State<'_, CameraViewers>,
     manager: tauri::State<'_, CameraManager>,
 ) -> Result<CameraWebRtcAnswer, CommandError> {
-    let printer = desktop_printer(&name, Operation::CameraStream)?;
-    let profile_name = name.to_ascii_lowercase();
-    let name = printer.driver.physical_printer_key(&printer.name);
-    let generation = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
-    {
-        let mut sessions = state
-            .sessions
-            .lock()
-            .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?;
-        sessions.generations.insert(name.clone(), generation);
-        sessions.profile_keys.insert(profile_name, name.clone());
-        sessions.active.remove(&name);
-    }
-    let subscription = subscribe_camera(
+    let subscription = subscribe_source(
         &manager,
-        &printer,
+        &source,
+        quality,
         CameraFrameKind::H264,
         Operation::CameraStream,
     )?;
     let (sdp, session) = webrtc_camera::start(subscription, offer)
         .map_err(|error| CommandError::new("cameraPreviewUnavailable").with_detail(error))?;
-    let mut sessions = state
-        .sessions
-        .lock()
-        .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?;
-    if sessions.generations.get(&name) != Some(&generation) {
-        return Err(CommandError::new("cameraPreviewUnavailable")
-            .with_detail("WebRTC request was superseded"));
-    }
-    sessions.active.insert(name, session);
+    let viewer_id = viewers.insert(Viewer::WebRtc(session))?;
     Ok(CameraWebRtcAnswer {
+        viewer_id,
         kind: "answer",
         sdp,
     })
 }
 
+/// Stops one viewer, or all of them when `viewer_id` is absent (used once
+/// at start-up to clear sessions orphaned by a webview reload).
 #[tauri::command(async)]
-fn printer_camera_webrtc_stop(
-    name: Option<String>,
-    state: tauri::State<'_, CameraWebRtcState>,
-) -> Result<(), CommandError> {
-    let generation = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
-    let mut sessions = state
-        .sessions
-        .lock()
-        .map_err(|_| CommandError::new("cameraPreviewUnavailable"))?;
-    if let Some(name) = name {
-        let profile_name = name.to_ascii_lowercase();
-        let name = sessions
-            .profile_keys
-            .remove(&profile_name)
-            .unwrap_or(profile_name);
-        sessions.generations.insert(name.clone(), generation);
-        sessions.active.remove(&name);
-    } else {
-        sessions.generations.clear();
-        sessions.active.clear();
-        sessions.profile_keys.clear();
-    }
-    Ok(())
+fn camera_viewer_stop(viewer_id: Option<String>, viewers: tauri::State<'_, CameraViewers>) {
+    viewers.stop(viewer_id.as_deref());
 }
 
+#[tauri::command(async)]
+fn camera_list() -> Result<Vec<cameras::CameraSummary>, CommandError> {
+    let dir = config_dir().map_err(|_| unreadable_config())?;
+    cameras::list(dir).map_err(|_| unreadable_config())
+}
+
+/// Saves only after decoding one live frame with the given credentials.
+#[tauri::command(async)]
+fn camera_add(request: cameras::CameraRequest) -> Result<cameras::CameraSummary, CommandError> {
+    let dir = config_dir().map_err(|_| unreadable_config())?;
+    cameras::create(dir, &SystemKeychain, request, cameras::verify).map_err(camera_error)
+}
+
+/// An empty password keeps the stored one. Verifies only when the
+/// connection details change.
+#[tauri::command(async)]
+fn camera_edit(
+    name: String,
+    request: cameras::CameraRequest,
+) -> Result<cameras::CameraSummary, CommandError> {
+    let dir = config_dir().map_err(|_| unreadable_config())?;
+    cameras::update(dir, &SystemKeychain, &name, request, cameras::verify).map_err(camera_error)
+}
+
+#[tauri::command(async)]
+fn camera_remove(name: String) -> Result<cameras::CameraRemoveResult, CommandError> {
+    let dir = config_dir().map_err(|_| unreadable_config())?;
+    cameras::remove(dir, &SystemKeychain, &name).map_err(camera_error)
+}
+
+#[tauri::command(async)]
+fn camera_link(
+    camera: String,
+    printer: String,
+    select: bool,
+) -> Result<cameras::CameraSummary, CommandError> {
+    let dir = config_dir().map_err(|_| unreadable_config())?;
+    cameras::link(dir, &printer, &camera, select).map_err(camera_error)
+}
+
+#[tauri::command(async)]
+fn camera_unlink(camera: String, printer: String) -> Result<cameras::CameraSummary, CommandError> {
+    let dir = config_dir().map_err(|_| unreadable_config())?;
+    cameras::unlink(dir, &printer, &camera).map_err(camera_error)
+}
+
+/// `camera: None` selects the printer's built-in feed.
+#[tauri::command(async)]
+fn camera_select(
+    printer: String,
+    camera: Option<String>,
+) -> Result<cameras::SelectedFeed, CommandError> {
+    let dir = config_dir().map_err(|_| unreadable_config())?;
+    cameras::select(dir, &printer, camera.as_deref()).map_err(camera_error)
+}
+
+fn camera_error(error: cameras::CameraError) -> CommandError {
+    use cameras::CameraError as E;
+    let code = match &error {
+        E::MissingName => "profileMissingName",
+        E::InvalidName => "profileInvalidName",
+        E::InvalidHost => "profileInvalidHost",
+        E::UnknownDriver(_) | E::InvalidQuality => "profileInvalid",
+        E::InvalidUsername => "cameraInvalidUsername",
+        E::InvalidPassword => "cameraInvalidPassword",
+        E::InvalidPort => "cameraInvalidPort",
+        E::InvalidTimeout => "cameraInvalidTimeout",
+        E::NotFound(_) => "cameraNotFound",
+        E::AlreadyExists(_) => "cameraExists",
+        E::PrinterNotFound(_) => "profileNotFound",
+        E::NotLinked { .. } => "cameraNotLinked",
+        E::Authentication => "cameraAuthFailed",
+        E::DigestRequired => "cameraDigestRequired",
+        E::Connect(_) | E::Stream(_) => {
+            // Neither carries credentials: I/O errors and RTSP status lines.
+            return CommandError::new("cameraUnreachable").with_detail(error.to_string());
+        }
+        E::Timeout => "cameraTimeout",
+        E::UnsupportedCodec => "cameraUnsupportedCodec",
+        E::MissingSecret => "cameraPasswordUnavailable",
+        E::Secret(_) | E::RollbackFailed => "keychainFailed",
+        E::Config(_) => "configUnwritable",
+    };
+    CommandError::new(code)
+}
+
+fn subscribe_source(
+    manager: &CameraManager,
+    source: &CameraSource,
+    quality: Option<StreamQuality>,
+    kind: CameraFrameKind,
+    operation: Operation,
+) -> Result<CameraSubscription, CommandError> {
+    match source {
+        CameraSource::Printer(name) => {
+            let printer = desktop_printer(name, operation)?;
+            subscribe_camera(manager, &printer, kind, operation)
+        }
+        CameraSource::Camera(name) => {
+            let dir = config_dir().map_err(|_| unreadable_config())?;
+            let camera = cameras::resolve(dir, &SystemKeychain, name).map_err(camera_error)?;
+            manager
+                .subscribe_external(camera, quality.unwrap_or_default(), kind)
+                .map_err(camera_error)
+        }
+    }
+}
+
+/// Serves one subscription on a loopback URL with an unguessable path and
+/// registers it as a viewer. Returns `(viewer_id, url)`.
 fn start_camera_server(
     subscription: CameraSubscription,
-    name: String,
-    state: CameraStreamState,
+    viewers: &CameraViewers,
     format: CameraProxyFormat,
-) -> Result<String, CommandError> {
+) -> Result<(String, String), CommandError> {
     let unavailable = || CommandError::new("cameraPreviewUnavailable");
     let mut token = [0_u8; 16];
     rand_bytes(&mut token).map_err(|_| unavailable())?;
@@ -3431,17 +3523,10 @@ fn start_camera_server(
     let address = listener.local_addr().map_err(|_| unavailable())?;
     listener.set_nonblocking(true).map_err(|_| unavailable())?;
     let stop = Arc::new(AtomicBool::new(false));
-    let generation = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
-    if let Some(previous) = state.active.lock().map_err(|_| unavailable())?.insert(
-        name.clone(),
-        CameraProxy {
-            generation,
-            stop: Arc::clone(&stop),
-        },
-    ) {
-        previous.stop.store(true, Ordering::Release);
-    }
+    let viewer_id = viewers.insert(Viewer::Proxy(Arc::clone(&stop)))?;
     let expected = path.clone();
+    let viewers = viewers.clone();
+    let id = viewer_id.clone();
     thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(30);
         while Instant::now() < deadline && !stop.load(Ordering::Acquire) {
@@ -3463,15 +3548,12 @@ fn start_camera_server(
                 Err(_) => break,
             }
         }
-        if let Ok(mut active) = state.active.lock()
-            && active
-                .get(&name)
-                .is_some_and(|proxy| proxy.generation == generation)
-        {
-            active.remove(&name);
-        }
+        viewers.stop(Some(&id));
     });
-    Ok(format!("http://127.0.0.1:{}{path}", address.port()))
+    Ok((
+        viewer_id,
+        format!("http://127.0.0.1:{}{path}", address.port()),
+    ))
 }
 
 fn h264_codec(sps: &[u8]) -> Option<String> {
@@ -3979,8 +4061,7 @@ fn main() {
         .manage(firmware_update_state)
         .manage(PresenceState::default())
         .manage(CameraManager::default())
-        .manage(CameraStreamState::default())
-        .manage(CameraWebRtcState::default())
+        .manage(CameraViewers::default())
         .manage(PreviewState::default())
         .manage(LibraryWatchState::default())
         .manage(TransferState::default())
@@ -4044,12 +4125,18 @@ fn main() {
             list_slicer_processes,
             stop_slicer_process,
             printer_emergency_stop,
-            printer_camera_snapshot,
-            printer_camera_stream,
-            printer_camera_h264_stream,
-            printer_camera_stream_stop,
-            printer_camera_webrtc_offer,
-            printer_camera_webrtc_stop,
+            camera_snapshot,
+            camera_mjpeg_stream,
+            camera_h264_stream,
+            camera_webrtc_offer,
+            camera_viewer_stop,
+            camera_list,
+            camera_add,
+            camera_edit,
+            camera_remove,
+            camera_link,
+            camera_unlink,
+            camera_select,
             diagnostics_report,
             remove_configured_printer
         ])
@@ -4085,26 +4172,32 @@ mod tests {
     use std::{
         io::{BufRead, BufReader, Write},
         net::TcpListener,
-        sync::{Arc, Mutex, mpsc},
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+            mpsc,
+        },
         thread,
         time::{Duration, Instant},
     };
 
     use melt_core::{
+        cameras::CameraError,
         drivers::{self, Operation},
         firmware_updates::{FirmwareUpdateReport, FirmwareUpdateSource},
         moonraker,
     };
 
     use super::{
-        CachedFirmwareUpdate, CachedMonitor, DesktopPrinter, FIRMWARE_UPDATE_STALE_AFTER,
-        FirmwareUpdateEntry, FirmwareUpdateState, MonitorConnectionState, MonitorEntry,
-        MonitorState, PresenceCache, PresenceState, Profile, STATUS_CACHE_HEARTBEAT,
-        StatusCacheThrottle, cached_monitor_entry_at, cached_ui_monitor_entry,
-        camera_preview_request, current_firmware_entry, ensure_state, extract_3mf_thumbnail,
-        h264_codec, h264_frame_header, invalidate_firmware_updates, load_status_cache_from,
-        monitor_connection_state, operation_error, profile_with_observed_model,
-        retain_firmware_update_failure, save_status_cache_to, store_firmware_update,
+        CachedFirmwareUpdate, CachedMonitor, CameraViewers, DesktopPrinter,
+        FIRMWARE_UPDATE_STALE_AFTER, FirmwareUpdateEntry, FirmwareUpdateState,
+        MonitorConnectionState, MonitorEntry, MonitorState, PresenceCache, PresenceState, Profile,
+        STATUS_CACHE_HEARTBEAT, StatusCacheThrottle, Viewer, cached_monitor_entry_at,
+        cached_ui_monitor_entry, camera_error, camera_preview_request, current_firmware_entry,
+        ensure_state, extract_3mf_thumbnail, h264_codec, h264_frame_header,
+        invalidate_firmware_updates, load_status_cache_from, monitor_connection_state,
+        operation_error, profile_with_observed_model, retain_firmware_update_failure,
+        save_status_cache_to, store_firmware_update,
     };
 
     const TOKEN: &str = "/stream/0123456789abcdef0123456789abcdef";
@@ -4584,10 +4677,78 @@ mod tests {
     }
 
     #[test]
+    fn stopping_one_viewer_leaves_the_others() {
+        let viewers = CameraViewers::default();
+        let (a, b) = (
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let first = viewers.insert(Viewer::Proxy(Arc::clone(&a))).unwrap();
+        let second = viewers.insert(Viewer::Proxy(Arc::clone(&b))).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(first.len(), 32);
+        viewers.stop(Some(&first));
+        assert!(a.load(Ordering::Acquire));
+        assert!(!b.load(Ordering::Acquire));
+        viewers.stop(Some(&first));
+        viewers.stop(None);
+        assert!(b.load(Ordering::Acquire));
+        assert!(viewers.lock().is_empty());
+    }
+
+    #[test]
+    fn camera_errors_map_to_stable_codes() {
+        let cases = [
+            (CameraError::MissingName, "profileMissingName"),
+            (CameraError::InvalidName, "profileInvalidName"),
+            (CameraError::InvalidHost, "profileInvalidHost"),
+            (CameraError::UnknownDriver("x".into()), "profileInvalid"),
+            (CameraError::InvalidQuality, "profileInvalid"),
+            (CameraError::InvalidUsername, "cameraInvalidUsername"),
+            (CameraError::InvalidPassword, "cameraInvalidPassword"),
+            (CameraError::InvalidPort, "cameraInvalidPort"),
+            (CameraError::InvalidTimeout, "cameraInvalidTimeout"),
+            (CameraError::NotFound("c".into()), "cameraNotFound"),
+            (CameraError::AlreadyExists("c".into()), "cameraExists"),
+            (CameraError::PrinterNotFound("p".into()), "profileNotFound"),
+            (
+                CameraError::NotLinked {
+                    printer: "p".into(),
+                    camera: "c".into(),
+                },
+                "cameraNotLinked",
+            ),
+            (CameraError::Authentication, "cameraAuthFailed"),
+            (CameraError::DigestRequired, "cameraDigestRequired"),
+            (
+                CameraError::Connect(std::io::ErrorKind::ConnectionRefused.into()),
+                "cameraUnreachable",
+            ),
+            (CameraError::Stream("busy".into()), "cameraUnreachable"),
+            (CameraError::Timeout, "cameraTimeout"),
+            (CameraError::UnsupportedCodec, "cameraUnsupportedCodec"),
+            (CameraError::MissingSecret, "cameraPasswordUnavailable"),
+            (CameraError::RollbackFailed, "keychainFailed"),
+        ];
+        for (error, code) in cases {
+            assert_eq!(camera_error(error).code, code);
+        }
+        assert_eq!(
+            camera_error(CameraError::Stream("RTSP DESCRIBE failed".into())).detail,
+            Some("camera stream failed: RTSP DESCRIBE failed".into())
+        );
+    }
+
+    #[test]
     fn h264_codec_comes_from_the_sps_profile_and_level() {
         assert_eq!(
             h264_codec(&[0x67, 0x64, 0x0c, 0x1f]),
             Some("avc1.640c1f".to_owned())
+        );
+        // Tapo C510W stream1 (fixtures/tapo): Main profile, level 5.2.
+        assert_eq!(
+            h264_codec(&[0x27, 0x4d, 0x00, 0x34]),
+            Some("avc1.4d0034".to_owned())
         );
         assert_eq!(h264_codec(&[0x68, 0x64, 0x0c, 0x1f]), None);
         assert_eq!(h264_codec(&[0x67, 0x64]), None);
