@@ -36,7 +36,7 @@ the Camera Account exists. It is not evidence of a firmware incompatibility.
 | Phase | Delivers | Plan |
 |---|---|---|
 | 1 | Shared RTSP client, config schema, camera profiles + links, Tapo video and snapshots, CLI | `plans/2026-10-08-ip-cameras.md` |
-| 2 | Desktop: Cameras view, printer feed selection, shared viewer, per-viewer sessions | Written after Phase 1 |
+| 2 | Desktop: Cameras view, printer feed selection, shared viewer, per-viewer sessions | `plans/2026-10-08-ip-cameras-desktop.md` |
 | 3 | ONVIF client, pan/tilt in CLI and desktop | Written after Phase 2 and ONVIF qualification |
 | 4 | WS-Discovery (optional) | Only if manual entry proves painful |
 
