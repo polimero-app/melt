@@ -485,7 +485,7 @@ pub fn remove(
     })
 }
 
-fn normalize_name(name: &str) -> Result<String, ProfileError> {
+pub(crate) fn normalize_name(name: &str) -> Result<String, ProfileError> {
     let name = name.to_ascii_lowercase();
     if name.is_empty() {
         return Err(ProfileError::MissingName);
@@ -546,14 +546,14 @@ pub fn validate_host(host: &str) -> Result<(), ProfileError> {
     Ok(())
 }
 
-struct StoredSecret {
-    account: String,
-    value: Option<String>,
-    deleted: bool,
+pub(crate) struct StoredSecret {
+    pub(crate) account: String,
+    pub(crate) value: Option<String>,
+    pub(crate) deleted: bool,
 }
 
 impl StoredSecret {
-    fn replace(
+    pub(crate) fn replace(
         store: &dyn SecretStore,
         account: String,
         value: &str,
@@ -566,7 +566,7 @@ impl StoredSecret {
         Ok(secret)
     }
 
-    fn load(store: &dyn SecretStore, account: String) -> Result<Self, ProfileError> {
+    pub(crate) fn load(store: &dyn SecretStore, account: String) -> Result<Self, ProfileError> {
         match store.get(SERVICE, &account) {
             Ok(value) => Ok(Self {
                 account,
@@ -610,7 +610,10 @@ impl StoredSecret {
     }
 }
 
-fn restore(store: &dyn SecretStore, secrets: &mut [StoredSecret]) -> Result<(), ProfileError> {
+pub(crate) fn restore(
+    store: &dyn SecretStore,
+    secrets: &mut [StoredSecret],
+) -> Result<(), ProfileError> {
     for secret in secrets {
         secret.restore(store).map_err(ProfileError::Secret)?;
     }
@@ -619,37 +622,9 @@ fn restore(store: &dyn SecretStore, secrets: &mut [StoredSecret]) -> Result<(), 
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::Mutex};
-
-    use crate::config::Profile;
+    use crate::{config::Profile, keychain::test_support::MemoryStore};
 
     use super::*;
-
-    #[derive(Default)]
-    struct MemoryStore(Mutex<BTreeMap<String, String>>);
-
-    impl SecretStore for MemoryStore {
-        fn get(&self, _: &str, account: &str) -> Result<String, SecretError> {
-            self.0
-                .lock()
-                .unwrap()
-                .get(account)
-                .cloned()
-                .ok_or(SecretError::NotFound)
-        }
-        fn set(&self, _: &str, account: &str, secret: &str) -> Result<(), SecretError> {
-            self.0.lock().unwrap().insert(account.into(), secret.into());
-            Ok(())
-        }
-        fn delete(&self, _: &str, account: &str) -> Result<(), SecretError> {
-            self.0
-                .lock()
-                .unwrap()
-                .remove(account)
-                .map(|_| ())
-                .ok_or(SecretError::NotFound)
-        }
-    }
 
     struct UnavailableStore;
 

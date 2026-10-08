@@ -96,3 +96,36 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::{collections::BTreeMap, sync::Mutex};
+
+    use super::{SecretError, SecretStore};
+
+    #[derive(Default)]
+    pub(crate) struct MemoryStore(pub(crate) Mutex<BTreeMap<String, String>>);
+
+    impl SecretStore for MemoryStore {
+        fn get(&self, _: &str, account: &str) -> Result<String, SecretError> {
+            self.0
+                .lock()
+                .unwrap()
+                .get(account)
+                .cloned()
+                .ok_or(SecretError::NotFound)
+        }
+        fn set(&self, _: &str, account: &str, secret: &str) -> Result<(), SecretError> {
+            self.0.lock().unwrap().insert(account.into(), secret.into());
+            Ok(())
+        }
+        fn delete(&self, _: &str, account: &str) -> Result<(), SecretError> {
+            self.0
+                .lock()
+                .unwrap()
+                .remove(account)
+                .map(|_| ())
+                .ok_or(SecretError::NotFound)
+        }
+    }
+}

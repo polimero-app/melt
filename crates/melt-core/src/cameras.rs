@@ -1,7 +1,13 @@
 //! External IP cameras: profiles, printer links, and media. Drivers form a
 //! closed set, like printer drivers; `tapo` is the only one today.
 
+mod profiles;
 mod tapo;
+
+pub use profiles::{
+    CameraRemoveResult, CameraRequest, CameraSummary, SelectedFeed, create, link, list, profile,
+    remove, resolve, select, unlink, update,
+};
 
 use std::{
     io,
