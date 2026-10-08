@@ -5281,7 +5281,6 @@ fn config_error(error: ConfigError) -> AppError {
         ConfigError::InvalidCameras(message) => {
             AppError::usage(format!("invalid camera configuration: {message}"))
         }
-
         _ => AppError {
             exit_code: 1,
             code: "internal_error",
