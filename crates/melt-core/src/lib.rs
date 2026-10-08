@@ -11,6 +11,7 @@ pub mod moonraker;
 pub mod pool;
 pub mod preferences;
 pub mod profiles;
+mod rtsp;
 pub mod trace;
 
 use serde::Serialize;

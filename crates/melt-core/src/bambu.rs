@@ -33,6 +33,7 @@ mod transport;
 mod tunnel;
 mod workflow;
 
+pub use crate::rtsp::{H264AccessUnit, H264Stream};
 pub use authorization::{
     AuthorizationEvidenceKind, AuthorizationObservation, AuthorizationResolution,
     resolve_authorization,
@@ -68,7 +69,6 @@ pub use quirks::{
     applicable as applicable_quirks, matching as matching_quirks, registry as quirk_registry,
     validate_registry as validate_quirk_registry,
 };
-pub use rtsp::{H264AccessUnit, H264Stream};
 pub use transport::{Client, Error as TransportError, JobStartOptions};
 pub use workflow::{PrintPreflight, PrintStage, PrintStageEvent, preflight_print_package};
 
@@ -602,10 +602,19 @@ pub struct MjpegStream {
 
 enum MjpegSource {
     Classic(SslStream<TcpStream>),
-    H264(Box<rtsp::H264Stream>),
+    H264(Box<H264Stream>),
 }
 
 impl MjpegStream {
+    /// Wraps a decoding H.264 stream from any RTSP camera as MJPEG.
+    #[allow(dead_code)]
+    pub(crate) fn from_h264(stream: H264Stream) -> Self {
+        Self {
+            source: MjpegSource::H264(Box::new(stream)),
+            pending: Vec::new(),
+        }
+    }
+
     /// Returns a socket handle that can interrupt a blocked stream read.
     pub fn shutdown_handle(&self) -> io::Result<TcpStream> {
         match &self.source {
