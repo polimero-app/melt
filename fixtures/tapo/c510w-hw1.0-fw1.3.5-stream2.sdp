@@ -1,0 +1,14 @@
+v=0
+o=- 14665860 31787219 1 IN IP4 192.0.2.20
+s=Session streamed by "TP-Link RTSP Server"
+t=0 0
+m=video 0 RTP/AVP 96
+c=IN IP4 0.0.0.0
+b=AS:4096
+a=range:npt=0-
+a=control:track1
+a=rtpmap:96 H264/90000
+a=fmtp:96 packetization-mode=1; profile-level-id=4D001F; sprop-parameter-sets=J00AH+dAUBf8s1AQEB8AAAMABwAAAwDINXA+gF3f/8Cg,KO48gA==
+m=audio 0 RTP/AVP 8
+a=rtpmap:8 PCMA/8000
+a=control:track2

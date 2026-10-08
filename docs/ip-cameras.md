@@ -8,7 +8,7 @@ number of printers, and each printer picks one default feed.
 
 | Driver | Model | Qualified hardware / firmware | Video | Snapshots | Pan/tilt |
 |---|---|---|---|---|---|
-| `tapo` | TP-Link Tapo C510W | Pending (target: 1.0 / 1.3.5) | H.264 over RTSP | Decoded from video | Planned |
+| `tapo` | TP-Link Tapo C510W | 1.0 / 1.3.5 (2026-10-08) | H.264 over RTSP | Decoded from video | Planned |
 
 Other models and firmware are unqualified until exercised on hardware.
 

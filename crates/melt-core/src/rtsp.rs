@@ -1046,4 +1046,15 @@ mod tests {
             Err(RtspError::Protocol(_))
         ));
     }
+
+    #[test]
+    fn qualified_tapo_sdps_yield_h264_video_tracks() {
+        for sdp in [
+            include_str!("../../../fixtures/tapo/c510w-hw1.0-fw1.3.5-stream1.sdp"),
+            include_str!("../../../fixtures/tapo/c510w-hw1.0-fw1.3.5-stream2.sdp"),
+        ] {
+            let track = parse_sdp(sdp).unwrap();
+            assert!(!track.control.is_empty());
+        }
+    }
 }

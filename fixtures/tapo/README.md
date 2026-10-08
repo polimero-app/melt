@@ -1,0 +1,2 @@
+- `c510w-hw1.0-fw1.3.5-stream1.sdp`: Tapo C510W, hardware 1.0, firmware 1.3.5, captured 2026-10-08 from `/stream1`, address replaced with 192.0.2.20.
+- `c510w-hw1.0-fw1.3.5-stream2.sdp`: Tapo C510W, hardware 1.0, firmware 1.3.5, captured 2026-10-08 from `/stream2`, address replaced with 192.0.2.20.
