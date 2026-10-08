@@ -92,7 +92,7 @@ pub enum CameraError {
     Authentication,
     #[error("camera offered only Basic authentication; Melt requires Digest over plain RTSP")]
     DigestRequired,
-    #[error("camera connection failed")]
+    #[error("camera connection failed: {0}")]
     Connect(#[source] io::Error),
     #[error("camera connection timed out")]
     Timeout,
@@ -175,5 +175,16 @@ fn rtsp_error(error: RtspError) -> CameraError {
         RtspError::UnsupportedCodec => CameraError::UnsupportedCodec,
         RtspError::Io(error) => stream_io_error(error),
         RtspError::Protocol(message) => CameraError::Stream(message),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connect_error_names_the_cause() {
+        let error = CameraError::Connect(io::Error::from(io::ErrorKind::ConnectionRefused));
+        assert!(error.to_string().contains("refused"), "{error}");
     }
 }
