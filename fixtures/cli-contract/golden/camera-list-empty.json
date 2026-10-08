@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "data": {
+    "cameras": []
+  },
+  "error": null,
+  "meta": {
+    "command": "camera list"
+  }
+}

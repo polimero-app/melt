@@ -364,9 +364,7 @@ pub fn update(
     let config_change = if name == current_name {
         config.set_profile(&name, profile.clone())
     } else {
-        config
-            .remove_profile(&current_name)
-            .and_then(|_| config.add_profile(&name, profile.clone()))
+        config.rename_profile(&current_name, &name, profile.clone())
     };
     if let Err(error) = config_change.and_then(|_| config.save(dir)) {
         if restore(store, &mut changed_secrets).is_err() {
@@ -487,7 +485,7 @@ pub fn remove(
     })
 }
 
-fn normalize_name(name: &str) -> Result<String, ProfileError> {
+pub(crate) fn normalize_name(name: &str) -> Result<String, ProfileError> {
     let name = name.to_ascii_lowercase();
     if name.is_empty() {
         return Err(ProfileError::MissingName);
@@ -548,14 +546,14 @@ pub fn validate_host(host: &str) -> Result<(), ProfileError> {
     Ok(())
 }
 
-struct StoredSecret {
-    account: String,
-    value: Option<String>,
-    deleted: bool,
+pub(crate) struct StoredSecret {
+    pub(crate) account: String,
+    pub(crate) value: Option<String>,
+    pub(crate) deleted: bool,
 }
 
 impl StoredSecret {
-    fn replace(
+    pub(crate) fn replace(
         store: &dyn SecretStore,
         account: String,
         value: &str,
@@ -568,7 +566,7 @@ impl StoredSecret {
         Ok(secret)
     }
 
-    fn load(store: &dyn SecretStore, account: String) -> Result<Self, ProfileError> {
+    pub(crate) fn load(store: &dyn SecretStore, account: String) -> Result<Self, ProfileError> {
         match store.get(SERVICE, &account) {
             Ok(value) => Ok(Self {
                 account,
@@ -612,7 +610,10 @@ impl StoredSecret {
     }
 }
 
-fn restore(store: &dyn SecretStore, secrets: &mut [StoredSecret]) -> Result<(), ProfileError> {
+pub(crate) fn restore(
+    store: &dyn SecretStore,
+    secrets: &mut [StoredSecret],
+) -> Result<(), ProfileError> {
     for secret in secrets {
         secret.restore(store).map_err(ProfileError::Secret)?;
     }
@@ -621,37 +622,9 @@ fn restore(store: &dyn SecretStore, secrets: &mut [StoredSecret]) -> Result<(), 
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::Mutex};
-
-    use crate::config::Profile;
+    use crate::{config::Profile, keychain::test_support::MemoryStore};
 
     use super::*;
-
-    #[derive(Default)]
-    struct MemoryStore(Mutex<BTreeMap<String, String>>);
-
-    impl SecretStore for MemoryStore {
-        fn get(&self, _: &str, account: &str) -> Result<String, SecretError> {
-            self.0
-                .lock()
-                .unwrap()
-                .get(account)
-                .cloned()
-                .ok_or(SecretError::NotFound)
-        }
-        fn set(&self, _: &str, account: &str, secret: &str) -> Result<(), SecretError> {
-            self.0.lock().unwrap().insert(account.into(), secret.into());
-            Ok(())
-        }
-        fn delete(&self, _: &str, account: &str) -> Result<(), SecretError> {
-            self.0
-                .lock()
-                .unwrap()
-                .remove(account)
-                .map(|_| ())
-                .ok_or(SecretError::NotFound)
-        }
-    }
 
     struct UnavailableStore;
 
@@ -975,6 +948,75 @@ mod tests {
                 .unwrap()
                 .get_profile("garage")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn renaming_a_printer_keeps_its_camera_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::open(dir.path()).unwrap();
+        config
+            .add_profile(
+                "garage",
+                Profile {
+                    driver: "moonraker".into(),
+                    host: "old-printer.local".into(),
+                    serial: String::new(),
+                    model: String::new(),
+                    timeout: "10s".into(),
+                    insecure: false,
+                    created: "2026-08-01T12:00:00Z".into(),
+                    updated: "2026-08-01T12:00:00Z".into(),
+                },
+            )
+            .unwrap();
+        config
+            .add_camera(
+                "porch",
+                crate::config::CameraProfile {
+                    id: "0123456789abcdef0123456789abcdef".into(),
+                    driver: "tapo".into(),
+                    host: "192.0.2.20".into(),
+                    username: "melt".into(),
+                    rtsp_port: None,
+                    timeout: "10s".into(),
+                    created: "2026-10-08T12:00:00Z".into(),
+                    updated: "2026-10-08T12:00:00Z".into(),
+                },
+            )
+            .unwrap();
+        config.link_camera("garage", "porch", true).unwrap();
+        config.save(dir.path()).unwrap();
+        let store = MemoryStore::default();
+        let (host, server) = moonraker_server(None);
+
+        update(
+            dir.path(),
+            &store,
+            "garage",
+            CreateRequest {
+                name: "workshop".into(),
+                driver: "moonraker".into(),
+                host,
+                serial: String::new(),
+                model: String::new(),
+                timeout: "10s".into(),
+                insecure: false,
+                access_code: String::new(),
+            },
+        )
+        .unwrap();
+        server.join().unwrap();
+
+        let saved = Config::open(dir.path()).unwrap();
+        assert!(saved.printer_cameras("garage").is_none());
+        assert_eq!(
+            saved
+                .printer_cameras("workshop")
+                .unwrap()
+                .selected
+                .as_deref(),
+            Some("0123456789abcdef0123456789abcdef")
         );
     }
 

@@ -1,0 +1,12 @@
+{
+  "ok": false,
+  "data": null,
+  "error": {
+    "code": "config_error",
+    "message": "camera \"porch\" not found",
+    "details": {}
+  },
+  "meta": {
+    "command": "camera snapshot"
+  }
+}

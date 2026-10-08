@@ -31,3 +31,11 @@ MELT_CONFIG_DIR="$PWD/fixtures/cli-contract/config/empty" \
 The Rust contract test executes every fixture against `melt-cli`, compares
 the exit code, stderr, and JSON envelope, and removes only the documented
 host-dependent JSON pointers before comparison.
+
+## Melt-native camera commands
+
+`camera add|edit|link|list|remove|select|unlink` are listed in
+`meltNativeCommands`. `camera snapshot` and `camera stream` also accept the
+Melt-native `--camera` and `--quality` flags; like `printer add --model`, these
+are not added to the frozen Go-baseline rows, whose positional printer
+behavior is unchanged.

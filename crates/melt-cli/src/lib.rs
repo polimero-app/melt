@@ -30,6 +30,8 @@ use melt_core::{
 use serde::Serialize;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
+mod cameras;
+
 #[derive(Clone, Copy)]
 enum OutputFormat {
     Human,
@@ -63,16 +65,58 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
         flags: "  -h, --help                    help for stop\n      --insecure                skip TLS fingerprint verification for this invocation\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --yes                     skip interactive confirmation",
     },
     LeafCommand {
+        path: &["camera", "add"],
+        short: "Add an IP camera profile",
+        args: "<camera> [flags]",
+        flags: "      --driver string          camera driver (tapo)\n  -h, --help                   help for add\n      --host string            camera IP address or hostname\n      --password-file string   file containing the camera account password\n      --rtsp-port int          RTSP port (default 554)\n      --timeout string         connection timeout (default \"10s\")\n      --username string        camera account username",
+    },
+    LeafCommand {
+        path: &["camera", "edit"],
+        short: "Edit an IP camera profile",
+        args: "<camera> [flags]",
+        flags: "  -h, --help                   help for edit\n      --host string            camera IP address or hostname\n      --name string            rename the camera\n      --password-file string   file containing a new camera account password\n      --rtsp-port int          RTSP port\n      --timeout string         connection timeout\n      --username string        camera account username",
+    },
+    LeafCommand {
+        path: &["camera", "link"],
+        short: "Link an IP camera to a printer",
+        args: "<camera> [flags]",
+        flags: "  -h, --help             help for link\n      --printer string   printer profile to link\n      --select           show this camera by default for the printer",
+    },
+    LeafCommand {
+        path: &["camera", "list"],
+        short: "List IP camera profiles and their printer links",
+        args: "[flags]",
+        flags: "  -h, --help   help for list",
+    },
+    LeafCommand {
+        path: &["camera", "remove"],
+        short: "Remove an IP camera profile",
+        args: "<camera> [flags]",
+        flags: "  -h, --help   help for remove\n      --yes    skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["camera", "select"],
+        short: "Choose the camera a printer shows by default",
+        args: "[flags]",
+        flags: "      --builtin          show the printer's built-in camera\n      --camera string    show this linked IP camera\n  -h, --help             help for select\n      --printer string   printer profile",
+    },
+    LeafCommand {
         path: &["camera", "snapshot"],
         short: "Capture one still image from a printer camera",
-        args: "<name> [flags]",
-        flags: "  -h, --help                    help for snapshot\n      --insecure                skip TLS fingerprint verification for this invocation\n      --overwrite               replace an existing destination file\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --to string               destination file path or directory",
+        args: "(<name> | --camera <camera>) [flags]",
+        flags: "      --camera string           IP camera profile to use instead of a printer\n  -h, --help                    help for snapshot\n      --insecure                skip TLS fingerprint verification for this invocation\n      --overwrite               replace an existing destination file\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --quality string          IP camera stream quality: high or low (default \"high\")\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --to string               destination file path or directory",
     },
     LeafCommand {
         path: &["camera", "stream"],
         short: "Stream camera feed from a printer via a local HTTP server",
-        args: "<name> [flags]",
-        flags: "      --format string           output format for stream: mjpeg (transcode H.264 to MJPEG for browser viewing)\n  -h, --help                    help for stream\n      --insecure                skip TLS fingerprint verification for this invocation\n      --port int                local HTTP server port (default 8080)\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          auto-stop after this duration (e.g. 30m)",
+        args: "(<name> | --camera <camera>) [flags]",
+        flags: "      --camera string           IP camera profile to use instead of a printer\n      --format string           output format for stream: mjpeg (transcode H.264 to MJPEG for browser viewing)\n  -h, --help                    help for stream\n      --insecure                skip TLS fingerprint verification for this invocation\n      --port int                local HTTP server port (default 8080)\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --quality string          IP camera stream quality: high or low (default \"high\")\n      --timeout string          auto-stop after this duration (e.g. 30m)",
+    },
+    LeafCommand {
+        path: &["camera", "unlink"],
+        short: "Unlink an IP camera from a printer",
+        args: "<camera> [flags]",
+        flags: "  -h, --help             help for unlink\n      --printer string   printer profile to unlink",
     },
     LeafCommand {
         path: &["emergency-stop"],
@@ -280,11 +324,18 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
         path: &["camera"],
         short: "Camera operations on a named printer",
         commands: &[
+            ("add", "Add an IP camera profile"),
+            ("edit", "Edit an IP camera profile"),
+            ("link", "Link an IP camera to a printer"),
+            ("list", "List IP camera profiles and their printer links"),
+            ("remove", "Remove an IP camera profile"),
+            ("select", "Choose the camera a printer shows by default"),
             ("snapshot", "Capture one still image from a printer camera"),
             (
                 "stream",
                 "Stream camera feed from a printer via a local HTTP server",
             ),
+            ("unlink", "Unlink an IP camera from a printer"),
         ],
     },
     CommandGroup {
@@ -487,6 +538,8 @@ struct VersionData {
 }
 
 pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    // Each in-process invocation is a fresh command; drop timing from earlier runs.
+    NETWORK_CALL_START.with(|start| start.set(None));
     if let Some(exit_code) = run_bare_group(args, out, err) {
         return exit_code;
     }
@@ -606,6 +659,15 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             if files.as_str() == "files" && download.as_str() == "download" =>
         {
             files_download(invocation.format, rest, out, err)
+        }
+        [camera, action, rest @ ..]
+            if camera.as_str() == "camera"
+                && matches!(
+                    action.as_str(),
+                    "add" | "edit" | "link" | "list" | "remove" | "select" | "unlink"
+                ) =>
+        {
+            cameras::run_profile_command(invocation.format, action, rest, out, err)
         }
         [camera, action, rest @ ..]
             if camera.as_str() == "camera" && matches!(action.as_str(), "snapshot" | "stream") =>
@@ -846,7 +908,7 @@ fn parse_add_request(name: &str, flags: &[&String]) -> Result<profiles::CreateRe
                     "--model" => request.model = (*value).clone(),
                     "--timeout" => request.timeout = (*value).clone(),
                     "--access-code-file" => {
-                        request.access_code = read_access_code_file(value)?;
+                        request.access_code = read_secret_file("--access-code-file", value)?;
                     }
                     _ => unreachable!("recognized flags are exhaustive"),
                 }
@@ -865,25 +927,28 @@ fn parse_add_request(name: &str, flags: &[&String]) -> Result<profiles::CreateRe
     Ok(request)
 }
 
-fn read_access_code_file(path: &str) -> Result<String, String> {
-    let metadata = std::fs::symlink_metadata(path)
-        .map_err(|error| format!("cannot read --access-code-file: {error}"))?;
+/// Reads a one-line secret from a regular, user-only file of at most 4 KiB.
+fn read_secret_file(flag: &str, path: &str) -> Result<String, String> {
+    let metadata =
+        std::fs::symlink_metadata(path).map_err(|error| format!("cannot read {flag}: {error}"))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > 4096 {
-        return Err("--access-code-file must be a regular file no larger than 4 KiB".into());
+        return Err(format!(
+            "{flag} must be a regular file no larger than 4 KiB"
+        ));
     }
     #[cfg(unix)]
     if std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()) & 0o077 != 0 {
-        return Err("--access-code-file must not grant group or other access".into());
+        return Err(format!("{flag} must not grant group or other access"));
     }
-    let mut code = std::fs::read_to_string(path)
-        .map_err(|error| format!("cannot read --access-code-file: {error}"))?;
-    if let Some(stripped) = code
+    let mut secret =
+        std::fs::read_to_string(path).map_err(|error| format!("cannot read {flag}: {error}"))?;
+    if let Some(stripped) = secret
         .strip_suffix("\r\n")
-        .or_else(|| code.strip_suffix('\n'))
+        .or_else(|| secret.strip_suffix('\n'))
     {
-        code = stripped.into();
+        secret = stripped.into();
     }
-    Ok(code)
+    Ok(secret)
 }
 
 fn printer_status(
@@ -1832,13 +1897,25 @@ fn camera_snapshot(
     let (positionals, options) = match parse_options(
         args,
         &["insecure", "overwrite"],
-        &["to", "timeout", "protocol-trace"],
+        &["to", "timeout", "protocol-trace", "camera", "quality"],
     ) {
         Ok(value) => value,
         Err(error) => {
             return write_error("camera snapshot", format, AppError::usage(error), out, err);
         }
     };
+    if let Some(camera) = options.value("camera") {
+        return cameras::snapshot(format, camera, &positionals, &options, out, err);
+    }
+    if options.value("quality").is_some() {
+        return write_error(
+            "camera snapshot",
+            format,
+            AppError::usage("--quality applies only with --camera"),
+            out,
+            err,
+        );
+    }
     let name = match one_positional("camera snapshot", &positionals) {
         Ok(name) => name,
         Err(error) => return write_error("camera snapshot", format, error, out, err),
@@ -1911,7 +1988,7 @@ fn snapshot_destination(requested: Option<&str>, profile: &str) -> Result<PathBu
 }
 
 fn validate_snapshot_destination(destination: &Path, overwrite: bool) -> Result<(), AppError> {
-    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let parent = parent_dir(destination);
     match fs::metadata(parent) {
         Ok(metadata) if metadata.is_dir() => {}
         Ok(_) => {
@@ -1958,7 +2035,7 @@ fn write_snapshot_file(destination: &Path, image: &[u8], overwrite: bool) -> Res
         });
     }
     validate_snapshot_destination(destination, overwrite)?;
-    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let parent = parent_dir(destination);
     let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|_| AppError {
         exit_code: 1,
         code: "internal_error",
@@ -2006,16 +2083,20 @@ fn camera_stream(
     let (positionals, options) = match parse_options(
         args,
         &["insecure"],
-        &["port", "duration", "format", "timeout", "protocol-trace"],
+        &[
+            "port",
+            "duration",
+            "format",
+            "timeout",
+            "protocol-trace",
+            "camera",
+            "quality",
+        ],
     ) {
         Ok(value) => value,
         Err(error) => {
             return write_error("camera stream", format, AppError::usage(error), out, err);
         }
-    };
-    let name = match one_positional("camera stream", &positionals) {
-        Ok(name) => name,
-        Err(error) => return write_error("camera stream", format, error, out, err),
     };
     let port = match options.value("port").unwrap_or("8080").parse::<u16>() {
         Ok(port) if port != 0 => port,
@@ -2055,6 +2136,31 @@ fn camera_stream(
             err,
         );
     }
+    if let Some(camera) = options.value("camera") {
+        return cameras::stream(
+            format,
+            camera,
+            &positionals,
+            &options,
+            port,
+            duration,
+            out,
+            err,
+        );
+    }
+    if options.value("quality").is_some() {
+        return write_error(
+            "camera stream",
+            format,
+            AppError::usage("--quality applies only with --camera"),
+            out,
+            err,
+        );
+    }
+    let name = match one_positional("camera stream", &positionals) {
+        Ok(name) => name,
+        Err(error) => return write_error("camera stream", format, error, out, err),
+    };
     let connection = match connection_options(&options) {
         Ok(connection) => connection,
         Err(error) => return write_error("camera stream", format, error, out, err),
@@ -2072,6 +2178,37 @@ fn camera_stream(
         Ok(stream) => stream,
         Err(error) => return write_error("camera stream", format, driver_error(error), out, err),
     };
+    let profile = printer.name.clone();
+    serve_mjpeg_stream(
+        format,
+        stream,
+        port,
+        duration,
+        &profile,
+        |url| CameraStreamData {
+            profile: profile.clone(),
+            url,
+            format: "mjpeg",
+            port,
+        },
+        out,
+        err,
+    )
+}
+
+/// Serves an MJPEG stream on a loopback port until the duration elapses or
+/// the process is interrupted. Shared by printer and IP camera streams.
+#[allow(clippy::too_many_arguments)]
+fn serve_mjpeg_stream<T: Serialize>(
+    format: OutputFormat,
+    stream: melt_core::bambu::MjpegStream,
+    port: u16,
+    duration: Option<Duration>,
+    source: &str,
+    data: impl FnOnce(String) -> T,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
     let upstream_shutdown = if duration.is_some() {
         match stream.shutdown_handle() {
             Ok(socket) => Some(socket),
@@ -2118,18 +2255,12 @@ fn camera_stream(
         );
     }
     let url = format!("http://127.0.0.1:{port}/stream");
-    let profile = printer.name.clone();
     let result = write_success(
         "camera stream",
         format,
-        CameraStreamData {
-            profile: profile.clone(),
-            url: url.clone(),
-            format: "mjpeg",
-            port,
-        },
+        data(url.clone()),
         |out| {
-            writeln!(out, "Streaming camera from {profile}")?;
+            writeln!(out, "Streaming camera from {source}")?;
             writeln!(out, "Format: MJPEG (open in browser)")?;
             writeln!(out, "URL: {url}\n")?;
             writeln!(out, "Press Ctrl+C to stop.")
@@ -3560,13 +3691,20 @@ fn download_destinations(
     Ok(destinations)
 }
 
+/// Directory holding `path`; a bare file name lives in the current directory.
+fn parent_dir(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
 fn download_destination(destination: &str, device_path: &str) -> Result<PathBuf, AppError> {
     let name = download_file_name(device_path)?;
     let destination = PathBuf::from(destination);
     if destination.is_dir() {
         return Ok(destination.join(name));
     }
-    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let parent = parent_dir(&destination);
     match fs::metadata(parent) {
         Ok(metadata) if metadata.is_dir() => Ok(destination),
         _ => Err(AppError::usage(format!(
@@ -5140,6 +5278,9 @@ fn config_error(error: ConfigError) -> AppError {
             AppError::usage("unsupported config schema version")
         }
         ConfigError::Malformed(_) => AppError::usage("config file is malformed"),
+        ConfigError::InvalidCameras(message) => {
+            AppError::usage(format!("invalid camera configuration: {message}"))
+        }
         _ => AppError {
             exit_code: 1,
             code: "internal_error",
@@ -5184,6 +5325,18 @@ fn write_json<T: Serialize>(out: &mut dyn Write, value: &T) -> serde_json::Resul
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bare_filename_destinations_use_the_current_directory() {
+        let name = "melt-bare-destination-does-not-exist.jpg";
+        assert_eq!(parent_dir(Path::new(name)), Path::new("."));
+        assert_eq!(parent_dir(Path::new("dir/a.jpg")), Path::new("dir"));
+        assert!(validate_snapshot_destination(Path::new(name), false).is_ok());
+        assert_eq!(
+            download_destination(name, "/gcodes/part.gcode").unwrap(),
+            PathBuf::from(name)
+        );
+    }
+
     fn sample_status() -> moonraker::Status {
         moonraker::Status {
             state: moonraker::PrinterState::Printing,
@@ -5735,8 +5888,15 @@ mod tests {
                 "Camera operations on a named printer\n\n",
                 "Usage:\n  melt camera [command]\n\n",
                 "Available Commands:\n",
+                "  add         Add an IP camera profile\n",
+                "  edit        Edit an IP camera profile\n",
+                "  link        Link an IP camera to a printer\n",
+                "  list        List IP camera profiles and their printer links\n",
+                "  remove      Remove an IP camera profile\n",
+                "  select      Choose the camera a printer shows by default\n",
                 "  snapshot    Capture one still image from a printer camera\n",
-                "  stream      Stream camera feed from a printer via a local HTTP server\n\n",
+                "  stream      Stream camera feed from a printer via a local HTTP server\n",
+                "  unlink      Unlink an IP camera from a printer\n\n",
                 "Flags:\n  -h, --help   help for camera\n\n",
                 "Global Flags:\n",
                 "      --output string   output format: human or json (default \"human\")\n",

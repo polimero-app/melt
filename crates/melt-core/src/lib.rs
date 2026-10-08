@@ -1,6 +1,7 @@
 //! UI-agnostic Melt domain types.
 
 pub mod bambu;
+pub mod cameras;
 pub mod config;
 pub mod diagnostics;
 pub mod drivers;
@@ -11,6 +12,7 @@ pub mod moonraker;
 pub mod pool;
 pub mod preferences;
 pub mod profiles;
+mod rtsp;
 pub mod trace;
 
 use serde::Serialize;

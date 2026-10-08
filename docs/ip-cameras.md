@@ -1,0 +1,82 @@
+# IP cameras
+
+Melt can show IP cameras next to, or instead of, a printer's built-in camera.
+Camera profiles are independent of printers; a camera can be linked to any
+number of printers, and each printer picks one default feed.
+
+## Supported cameras
+
+| Driver | Model | Qualified hardware / firmware | Video | Snapshots | Pan/tilt |
+|---|---|---|---|---|---|
+| `tapo` | TP-Link Tapo C510W | Pending (target: 1.0 / 1.3.5) | H.264 over RTSP | Decoded from video | Planned |
+
+Other models and firmware are unqualified until exercised on hardware.
+
+## Tapo setup
+
+1. In the Tapo app, open the camera → **Settings → Advanced Settings →
+   Camera Account** and create a local username and password. This account is
+   separate from your TP-Link cloud login; Melt never asks for the cloud
+   password. If your firmware shows a **Third-Party Compatibility** option,
+   turn it on, and make sure privacy mode is off.
+2. Save the password to a file only you can read:
+
+   ```sh
+   (umask 077; printf '%s\n' 'camera-account-password' > ~/.config/melt/porch.pw)
+   ```
+
+   To keep the password out of your shell history, write the file in an
+   editor instead (and `chmod 600` it).
+
+3. Add the camera. Melt connects, authenticates, and decodes one frame before
+   saving; it never moves the camera during setup.
+
+   ```sh
+   melt camera add porch --driver tapo --host 192.0.2.20 \
+     --username melt --password-file ~/.config/melt/porch.pw
+   ```
+
+The password is stored in the OS keychain; `melt.yaml` holds only the
+username, host, and port.
+
+## Everyday use
+
+```sh
+melt camera list
+melt camera snapshot --camera porch --quality low --to ./porch.jpg
+melt camera stream --camera porch            # open http://127.0.0.1:8080/stream
+melt camera link porch --printer workshop --select
+melt camera select --printer workshop --builtin
+melt camera edit porch --host 192.0.2.21     # re-verifies the connection
+melt camera edit porch --name front-door     # rename only: no connection needed
+melt camera remove porch --yes
+```
+
+`high` uses the camera's main stream (`/stream1`), `low` its sub-stream
+(`/stream2`). `camera snapshot <printer>` and `camera stream <printer>` keep
+their meaning: a positional name is always a printer.
+
+## Security
+
+Video uses plain RTSP on your LAN; it is not encrypted end to end. Melt only
+accepts Digest authentication, so the password is never sent in clear; a
+camera that offers only Basic authentication is refused. Credentials are only
+sent to the configured host.
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| `connection_failed`, connection refused on 554 | Camera Account not created yet, Third-Party Compatibility is off (on firmware that has it), or privacy mode is on (it disables RTSP and ONVIF). |
+| `connection_failed`, `RTSP DESCRIBE failed: Service Unavailable` | The camera's simultaneous-stream limit is reached; close other viewers (NVRs, apps). |
+| `authentication_failed` | Wrong Camera Account username or password (not the cloud login). |
+| `authentication_failed` mentioning Basic | The camera offered no Digest challenge; Melt will not send the password. |
+| `timeout` | Wrong host, or the camera is busy: Tapo cameras limit simultaneous streams; close other viewers (NVRs, apps). |
+| `capability_unsupported` | The stream is not H.264 (H.265 is not supported). |
+
+## Downgrading Melt
+
+Adding a camera writes `melt.yaml` as schema version 2, which older Melt
+releases refuse to read. To downgrade, remove the `cameras:` and
+`printer_cameras:` sections from `melt.yaml` and set `version: 1`, then
+delete the `camera:<id>:password` keychain entries if you no longer need them.

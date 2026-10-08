@@ -71,7 +71,7 @@ The command groups cover:
 - `printer add|list|remove|drivers|discover|capabilities|tls refresh`;
 - `status`;
 - `firmware check`;
-- `camera snapshot|stream`;
+- `camera add|edit|list|remove|link|unlink|select|snapshot|stream` (IP cameras: see [docs/ip-cameras.md](docs/ip-cameras.md));
 - `files roots|list|download|upload`;
 - `jobs preflight|start|pause|resume|cancel`;
 - `temperature set`, `motion home|jog`, `fans set`, `lights set`,
@@ -102,6 +102,7 @@ melt jobs preflight ./part.gcode.3mf --output json
 
 On Unix, credential files supplied to `--access-code-file` must be regular
 files with user-only permissions (for example, mode `0600`).
+The same rules apply to `--password-file` for IP cameras.
 
 State-changing commands require explicit confirmation. In non-interactive CLI
 use, pass `--yes` only after independently validating the target printer and
@@ -141,6 +142,8 @@ fingerprints are stored separately through the OS keychain. Secure Bambu first
 contact binds the certificate identity to the configured physical printer
 serial before retaining its pin; a mismatch never silently rewrites the
 profile or falls back to insecure transport.
+
+IP camera profiles and printer links live in the same configuration file; camera passwords are stored in the OS keychain under the camera's immutable ID. Camera video uses plain RTSP with Digest authentication on the LAN.
 
 Continuous desktop discovery is advisory. It keys presence by normalized
 physical serial and may show a newly advertised address as a suggestion, but it
