@@ -1,0 +1,12 @@
+{
+  "ok": false,
+  "data": null,
+  "error": {
+    "code": "config_error",
+    "message": "use either a printer name or --camera, not both",
+    "details": {}
+  },
+  "meta": {
+    "command": "camera snapshot"
+  }
+}

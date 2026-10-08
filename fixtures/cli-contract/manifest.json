@@ -99,6 +99,24 @@
       "stdout": "golden/camera-select-missing-source.json",
       "stderr": "",
       "ignoreJsonPointers": []
+    },
+    {
+      "id": "camera-snapshot-printer-and-camera-json",
+      "command": "camera snapshot",
+      "args": ["camera", "snapshot", "garage", "--camera", "porch", "--output", "json"],
+      "exitCode": 2,
+      "stdout": "golden/camera-snapshot-printer-and-camera.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
+    },
+    {
+      "id": "camera-snapshot-unknown-camera-json",
+      "command": "camera snapshot",
+      "args": ["camera", "snapshot", "--camera", "porch", "--output", "json"],
+      "exitCode": 2,
+      "stdout": "golden/camera-snapshot-unknown-camera.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
     }
   ]
 }

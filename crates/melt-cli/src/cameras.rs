@@ -2,19 +2,24 @@
 //! commands added here a positional argument is always a camera name and a
 //! printer is always `--printer`.
 
-use std::io::{IsTerminal, Write};
+use std::{
+    io::{IsTerminal, Write},
+    time::Duration,
+};
 
 use melt_core::{
     AppError,
-    cameras::{self, CameraError, CameraRequest, CameraSummary},
+    cameras::{self, CameraError, CameraRequest, CameraSummary, StreamQuality},
     config::config_dir,
+    drivers,
     keychain::SystemKeychain,
 };
 use serde::Serialize;
 
 use super::{
-    OutputFormat, ParsedOptions, config_error, parse_options, read_secret_file, write_error,
-    write_success,
+    OutputFormat, ParsedOptions, config_error, mark_network_call, parse_options, read_secret_file,
+    serve_mjpeg_stream, snapshot_destination, validate_snapshot_destination, write_error,
+    write_snapshot_file, write_success,
 };
 
 pub(crate) fn run_profile_command(
@@ -369,6 +374,151 @@ pub(crate) fn camera_error(error: CameraError) -> AppError {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExternalSnapshotData {
+    camera: String,
+    camera_id: String,
+    driver: String,
+    quality: StreamQuality,
+    path: String,
+    size_bytes: u64,
+    protocol: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExternalStreamData {
+    camera: String,
+    camera_id: String,
+    driver: String,
+    quality: StreamQuality,
+    url: String,
+    format: &'static str,
+    port: u16,
+}
+
+pub(crate) fn snapshot(
+    format: OutputFormat,
+    camera: &str,
+    positionals: &[String],
+    options: &ParsedOptions,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    respond(
+        "camera snapshot",
+        format,
+        take_snapshot(camera, positionals, options),
+        |data: &ExternalSnapshotData, out| {
+            writeln!(
+                out,
+                "Snapshot saved to {} ({} bytes).",
+                data.path, data.size_bytes
+            )
+        },
+        out,
+        err,
+    )
+}
+
+fn take_snapshot(
+    camera: &str,
+    positionals: &[String],
+    options: &ParsedOptions,
+) -> Result<ExternalSnapshotData, AppError> {
+    let quality = external_options(positionals, options)?;
+    let overwrite = options.enabled("overwrite");
+    let destination = snapshot_destination(options.value("to"), &camera.to_ascii_lowercase())?;
+    validate_snapshot_destination(&destination, overwrite)?;
+    let resolved = resolve(camera, options)?;
+    mark_network_call();
+    let image = cameras::snapshot(&resolved, quality).map_err(camera_error)?;
+    let size_bytes = write_snapshot_file(&destination, &image, overwrite)?;
+    Ok(ExternalSnapshotData {
+        camera: resolved.name,
+        camera_id: resolved.profile.id,
+        driver: resolved.profile.driver,
+        quality,
+        path: destination.display().to_string(),
+        size_bytes,
+        protocol: "rtsp",
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn stream(
+    format: OutputFormat,
+    camera: &str,
+    positionals: &[String],
+    options: &ParsedOptions,
+    port: u16,
+    duration: Option<Duration>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let opened = external_options(positionals, options).and_then(|quality| {
+        let resolved = resolve(camera, options)?;
+        mark_network_call();
+        let stream = cameras::mjpeg_stream(&resolved, quality).map_err(camera_error)?;
+        Ok((resolved, quality, stream))
+    });
+    let (resolved, quality, stream) = match opened {
+        Ok(opened) => opened,
+        Err(error) => return write_error("camera stream", format, error, out, err),
+    };
+    let name = resolved.name.clone();
+    serve_mjpeg_stream(
+        format,
+        stream,
+        port,
+        duration,
+        &name,
+        |url| ExternalStreamData {
+            camera: resolved.name,
+            camera_id: resolved.profile.id,
+            driver: resolved.profile.driver,
+            quality,
+            url,
+            format: "mjpeg",
+            port,
+        },
+        out,
+        err,
+    )
+}
+
+/// Rejects printer-only inputs and returns the requested stream quality.
+fn external_options(
+    positionals: &[String],
+    options: &ParsedOptions,
+) -> Result<StreamQuality, AppError> {
+    if !positionals.is_empty() {
+        return Err(AppError::usage(
+            "use either a printer name or --camera, not both",
+        ));
+    }
+    if options.enabled("insecure") || options.value("protocol-trace").is_some() {
+        return Err(AppError::usage(
+            "--insecure and --protocol-trace apply only to printer cameras",
+        ));
+    }
+    options
+        .value("quality")
+        .map_or(Ok(StreamQuality::High), str::parse)
+        .map_err(camera_error)
+}
+
+fn resolve(camera: &str, options: &ParsedOptions) -> Result<cameras::ResolvedCamera, AppError> {
+    let dir = config_dir().map_err(config_error)?;
+    let mut resolved = cameras::resolve(dir, &SystemKeychain, camera).map_err(camera_error)?;
+    if let Some(timeout) = options.value("timeout") {
+        resolved.timeout = drivers::parse_timeout(timeout)
+            .map_err(|_| AppError::usage("--timeout must be a duration such as 10s or 1500ms"))?;
+    }
+    Ok(resolved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,6 +544,45 @@ mod tests {
             let name = format!("{error:?}");
             let mapped = camera_error(error);
             assert_eq!((mapped.exit_code, mapped.code), (exit_code, code), "{name}");
+        }
+    }
+
+    #[test]
+    fn external_options_reject_printer_only_inputs() {
+        let cases: [(&[&str], Result<StreamQuality, &str>); 5] = [
+            (&["garage", "--camera", "porch"], Err("not both")),
+            (
+                &["--camera", "porch", "--insecure"],
+                Err("only to printer cameras"),
+            ),
+            (
+                &["--camera", "porch", "--protocol-trace", "t.jsonl"],
+                Err("only to printer cameras"),
+            ),
+            (&["--camera", "porch", "--quality", "ultra"], Err("")),
+            (
+                &["--camera", "porch", "--quality", "low"],
+                Ok(StreamQuality::Low),
+            ),
+        ];
+        for (args, expected) in cases {
+            let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+            let refs: Vec<&String> = args.iter().collect();
+            let (positionals, options) = parse_options(
+                &refs,
+                &["insecure"],
+                &["camera", "quality", "protocol-trace"],
+            )
+            .unwrap();
+            let got = external_options(&positionals, &options);
+            match expected {
+                Ok(quality) => assert_eq!(got.unwrap(), quality, "{args:?}"),
+                Err(text) => {
+                    let error = got.unwrap_err();
+                    assert_eq!(error.exit_code, 2, "{args:?}");
+                    assert!(error.message.contains(text), "{args:?}: {}", error.message);
+                }
+            }
         }
     }
 }

@@ -103,14 +103,14 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
     LeafCommand {
         path: &["camera", "snapshot"],
         short: "Capture one still image from a printer camera",
-        args: "<name> [flags]",
-        flags: "  -h, --help                    help for snapshot\n      --insecure                skip TLS fingerprint verification for this invocation\n      --overwrite               replace an existing destination file\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --to string               destination file path or directory",
+        args: "(<name> | --camera <camera>) [flags]",
+        flags: "      --camera string           IP camera profile to use instead of a printer\n  -h, --help                    help for snapshot\n      --insecure                skip TLS fingerprint verification for this invocation\n      --overwrite               replace an existing destination file\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --quality string          IP camera stream quality: high or low (default \"high\")\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --to string               destination file path or directory",
     },
     LeafCommand {
         path: &["camera", "stream"],
         short: "Stream camera feed from a printer via a local HTTP server",
-        args: "<name> [flags]",
-        flags: "      --format string           output format for stream: mjpeg (transcode H.264 to MJPEG for browser viewing)\n  -h, --help                    help for stream\n      --insecure                skip TLS fingerprint verification for this invocation\n      --port int                local HTTP server port (default 8080)\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --timeout string          auto-stop after this duration (e.g. 30m)",
+        args: "(<name> | --camera <camera>) [flags]",
+        flags: "      --camera string           IP camera profile to use instead of a printer\n      --format string           output format for stream: mjpeg (transcode H.264 to MJPEG for browser viewing)\n  -h, --help                    help for stream\n      --insecure                skip TLS fingerprint verification for this invocation\n      --port int                local HTTP server port (default 8080)\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --quality string          IP camera stream quality: high or low (default \"high\")\n      --timeout string          auto-stop after this duration (e.g. 30m)",
     },
     LeafCommand {
         path: &["camera", "unlink"],
@@ -1897,13 +1897,25 @@ fn camera_snapshot(
     let (positionals, options) = match parse_options(
         args,
         &["insecure", "overwrite"],
-        &["to", "timeout", "protocol-trace"],
+        &["to", "timeout", "protocol-trace", "camera", "quality"],
     ) {
         Ok(value) => value,
         Err(error) => {
             return write_error("camera snapshot", format, AppError::usage(error), out, err);
         }
     };
+    if let Some(camera) = options.value("camera") {
+        return cameras::snapshot(format, camera, &positionals, &options, out, err);
+    }
+    if options.value("quality").is_some() {
+        return write_error(
+            "camera snapshot",
+            format,
+            AppError::usage("--quality applies only with --camera"),
+            out,
+            err,
+        );
+    }
     let name = match one_positional("camera snapshot", &positionals) {
         Ok(name) => name,
         Err(error) => return write_error("camera snapshot", format, error, out, err),
@@ -2071,16 +2083,20 @@ fn camera_stream(
     let (positionals, options) = match parse_options(
         args,
         &["insecure"],
-        &["port", "duration", "format", "timeout", "protocol-trace"],
+        &[
+            "port",
+            "duration",
+            "format",
+            "timeout",
+            "protocol-trace",
+            "camera",
+            "quality",
+        ],
     ) {
         Ok(value) => value,
         Err(error) => {
             return write_error("camera stream", format, AppError::usage(error), out, err);
         }
-    };
-    let name = match one_positional("camera stream", &positionals) {
-        Ok(name) => name,
-        Err(error) => return write_error("camera stream", format, error, out, err),
     };
     let port = match options.value("port").unwrap_or("8080").parse::<u16>() {
         Ok(port) if port != 0 => port,
@@ -2120,6 +2136,31 @@ fn camera_stream(
             err,
         );
     }
+    if let Some(camera) = options.value("camera") {
+        return cameras::stream(
+            format,
+            camera,
+            &positionals,
+            &options,
+            port,
+            duration,
+            out,
+            err,
+        );
+    }
+    if options.value("quality").is_some() {
+        return write_error(
+            "camera stream",
+            format,
+            AppError::usage("--quality applies only with --camera"),
+            out,
+            err,
+        );
+    }
+    let name = match one_positional("camera stream", &positionals) {
+        Ok(name) => name,
+        Err(error) => return write_error("camera stream", format, error, out, err),
+    };
     let connection = match connection_options(&options) {
         Ok(connection) => connection,
         Err(error) => return write_error("camera stream", format, error, out, err),
@@ -2137,6 +2178,37 @@ fn camera_stream(
         Ok(stream) => stream,
         Err(error) => return write_error("camera stream", format, driver_error(error), out, err),
     };
+    let profile = printer.name.clone();
+    serve_mjpeg_stream(
+        format,
+        stream,
+        port,
+        duration,
+        &profile,
+        |url| CameraStreamData {
+            profile: profile.clone(),
+            url,
+            format: "mjpeg",
+            port,
+        },
+        out,
+        err,
+    )
+}
+
+/// Serves an MJPEG stream on a loopback port until the duration elapses or
+/// the process is interrupted. Shared by printer and IP camera streams.
+#[allow(clippy::too_many_arguments)]
+fn serve_mjpeg_stream<T: Serialize>(
+    format: OutputFormat,
+    stream: melt_core::bambu::MjpegStream,
+    port: u16,
+    duration: Option<Duration>,
+    source: &str,
+    data: impl FnOnce(String) -> T,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
     let upstream_shutdown = if duration.is_some() {
         match stream.shutdown_handle() {
             Ok(socket) => Some(socket),
@@ -2183,18 +2255,12 @@ fn camera_stream(
         );
     }
     let url = format!("http://127.0.0.1:{port}/stream");
-    let profile = printer.name.clone();
     let result = write_success(
         "camera stream",
         format,
-        CameraStreamData {
-            profile: profile.clone(),
-            url: url.clone(),
-            format: "mjpeg",
-            port,
-        },
+        data(url.clone()),
         |out| {
-            writeln!(out, "Streaming camera from {profile}")?;
+            writeln!(out, "Streaming camera from {source}")?;
             writeln!(out, "Format: MJPEG (open in browser)")?;
             writeln!(out, "URL: {url}\n")?;
             writeln!(out, "Press Ctrl+C to stop.")
