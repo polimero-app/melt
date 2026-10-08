@@ -4151,6 +4151,12 @@ rm /tmp/porch.pw
 
 Expected: every command succeeds, both JPEGs open and show the scene, and the stream plays for 60 s. Check one negative case too: `camera add` with a wrong password exits 3 and `camera list` stays empty.
 
+Also check, and record in the report:
+
+- Run `camera stream --camera porch --duration 90s` once for the default quality and once with `--quality low`; playback must survive past the 25 s keepalive.
+- Record the raw `WWW-Authenticate` header lines from Step 2 (scheme case, single or multiple headers, whether Basic is offered), without the nonce.
+- Open more simultaneous streams than the camera allows and record the error Melt reports.
+
 - [ ] **Step 6: Record the result.** In `docs/ip-cameras.md`, change the qualified column to `1.0 / 1.3.5 (2026-MM-DD)` and add any limitation you observed: the maximum number of concurrent streams, and whether Third-Party Compatibility must be on.
 
 - [ ] **Step 7: Commit**

@@ -22,8 +22,11 @@ Other models and firmware are unqualified until exercised on hardware.
 2. Save the password to a file only you can read:
 
    ```sh
-   umask 077 && printf '%s\n' 'camera-account-password' > ~/.config/melt/porch.pw
+   (umask 077; printf '%s\n' 'camera-account-password' > ~/.config/melt/porch.pw)
    ```
+
+   To keep the password out of your shell history, write the file in an
+   editor instead (and `chmod 600` it).
 
 3. Add the camera. Melt connects, authenticates, and decodes one frame before
    saving; it never moves the camera during setup.
@@ -65,6 +68,7 @@ sent to the configured host.
 | Symptom | Likely cause |
 |---|---|
 | `connection_failed`, connection refused on 554 | Camera Account not created yet, Third-Party Compatibility is off (on firmware that has it), or privacy mode is on (it disables RTSP and ONVIF). |
+| `connection_failed`, `RTSP DESCRIBE failed: Service Unavailable` | The camera's simultaneous-stream limit is reached; close other viewers (NVRs, apps). |
 | `authentication_failed` | Wrong Camera Account username or password (not the cloud login). |
 | `authentication_failed` mentioning Basic | The camera offered no Digest challenge; Melt will not send the password. |
 | `timeout` | Wrong host, or the camera is busy: Tapo cameras limit simultaneous streams; close other viewers (NVRs, apps). |
