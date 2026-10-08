@@ -475,12 +475,7 @@ fn authorized_request(
     if response.status() != rtsp_types::StatusCode::Unauthorized {
         return Ok(response);
     }
-    // ponytail: reads one WWW-Authenticate value; parse every header if a
-    // camera sends Basic and Digest as separate headers with Basic first.
-    let challenge = response
-        .header(&rtsp_types::headers::WWW_AUTHENTICATE)
-        .and_then(|value| DigestChallenge::parse(value.as_str()))
-        .ok_or(RtspError::DigestRequired)?;
+    let challenge = digest_challenge(&response).ok_or(RtspError::DigestRequired)?;
     let method_name: &str = (&method).into();
     let authorization = digest_header(
         credentials,
@@ -552,6 +547,16 @@ fn send_request(
 ) -> Result<rtsp_types::Response<Vec<u8>>, RtspError> {
     write_request(connection, method, uri, cseq, extra_headers, authorization)?;
     connection.next_response()
+}
+
+/// The first MD5 Digest challenge among a 401's `WWW-Authenticate` values.
+/// Cameras may send Basic and Digest as separate headers in either order
+/// (Tapo sends Basic first).
+fn digest_challenge(response: &rtsp_types::Response<Vec<u8>>) -> Option<DigestChallenge> {
+    response
+        .headers()
+        .filter(|(name, _)| **name == rtsp_types::headers::WWW_AUTHENTICATE)
+        .find_map(|(_, value)| DigestChallenge::parse(value.as_str()))
 }
 
 struct DigestChallenge {
@@ -952,6 +957,21 @@ mod tests {
                 "Digest username=\"melt\", realm=\"TP-Link IP-Camera\", nonce=\"abc\", uri=\"rtsp://192.0.2.20:554/stream1\", response=\"{response}\", qop=auth, nc=00000001, cnonce=\"c0ffee\", opaque=\"op\""
             )
         );
+    }
+
+    /// Tapo C510W (hw 1.0, fw 1.3.5) sends Basic and Digest as separate
+    /// headers, Basic first; captured 2026-10-08.
+    #[test]
+    fn digest_is_found_when_basic_is_sent_as_a_separate_earlier_header() {
+        let raw = b"RTSP/1.0 401 Unauthorized\r\nCSeq: 2\r\nWWW-Authenticate: Basic realm=\"TP-Link IP-Camera\"\r\nWWW-Authenticate: Digest realm=\"TP-Link IP-Camera\", nonce=\"n0nce\"\r\n\r\n";
+        let (message, _) = rtsp_types::Message::<Vec<u8>>::parse(raw).unwrap();
+        let rtsp_types::Message::Response(response) = message else {
+            panic!("expected a response");
+        };
+        let challenge = digest_challenge(&response).expect("Digest challenge");
+        assert_eq!(challenge.realm, "TP-Link IP-Camera");
+        assert_eq!(challenge.nonce, "n0nce");
+        assert!(!challenge.qop_auth);
     }
 
     #[test]
