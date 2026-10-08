@@ -223,6 +223,18 @@ fn edit(args: &[&String]) -> Result<CameraSummary, AppError> {
             "camera edit requires at least one option to change",
         ));
     }
+    // The core reads an empty password as "keep the stored one", so an empty
+    // file would silently do nothing.
+    let password = match options.value("password-file") {
+        Some(path) => {
+            let password = read_secret_file("--password-file", path).map_err(AppError::usage)?;
+            if password.is_empty() {
+                return Err(AppError::usage("--password-file must not be empty"));
+            }
+            password
+        }
+        None => String::new(),
+    };
     let dir = config_dir().map_err(config_error)?;
     let existing = cameras::profile(&dir, current).map_err(camera_error)?;
     let request = CameraRequest {
@@ -232,10 +244,7 @@ fn edit(args: &[&String]) -> Result<CameraSummary, AppError> {
         username: options
             .value("username")
             .map_or(existing.username, str::to_owned),
-        password: match options.value("password-file") {
-            Some(path) => read_secret_file("--password-file", path).map_err(AppError::usage)?,
-            None => String::new(),
-        },
+        password,
         rtsp_port: match options.value("rtsp-port") {
             Some(_) => rtsp_port(&options)?,
             None => existing.rtsp_port,
@@ -522,6 +531,22 @@ fn resolve(camera: &str, options: &ParsedOptions) -> Result<cameras::ResolvedCam
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn edit_rejects_an_empty_password_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::set_permissions(file.path(), std::fs::Permissions::from_mode(0o600)).unwrap();
+        let args = [
+            "porch".to_owned(),
+            "--password-file".to_owned(),
+            file.path().to_string_lossy().into_owned(),
+        ];
+        let refs: Vec<&String> = args.iter().collect();
+        let error = edit(&refs).unwrap_err();
+        assert_eq!(error.message, "--password-file must not be empty");
+    }
 
     #[test]
     fn camera_errors_follow_the_exit_contract() {
