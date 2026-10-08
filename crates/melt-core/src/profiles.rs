@@ -364,9 +364,7 @@ pub fn update(
     let config_change = if name == current_name {
         config.set_profile(&name, profile.clone())
     } else {
-        config
-            .remove_profile(&current_name)
-            .and_then(|_| config.add_profile(&name, profile.clone()))
+        config.rename_profile(&current_name, &name, profile.clone())
     };
     if let Err(error) = config_change.and_then(|_| config.save(dir)) {
         if restore(store, &mut changed_secrets).is_err() {
@@ -975,6 +973,75 @@ mod tests {
                 .unwrap()
                 .get_profile("garage")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn renaming_a_printer_keeps_its_camera_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::open(dir.path()).unwrap();
+        config
+            .add_profile(
+                "garage",
+                Profile {
+                    driver: "moonraker".into(),
+                    host: "old-printer.local".into(),
+                    serial: String::new(),
+                    model: String::new(),
+                    timeout: "10s".into(),
+                    insecure: false,
+                    created: "2026-08-01T12:00:00Z".into(),
+                    updated: "2026-08-01T12:00:00Z".into(),
+                },
+            )
+            .unwrap();
+        config
+            .add_camera(
+                "porch",
+                crate::config::CameraProfile {
+                    id: "0123456789abcdef0123456789abcdef".into(),
+                    driver: "tapo".into(),
+                    host: "192.0.2.20".into(),
+                    username: "melt".into(),
+                    rtsp_port: None,
+                    timeout: "10s".into(),
+                    created: "2026-10-08T12:00:00Z".into(),
+                    updated: "2026-10-08T12:00:00Z".into(),
+                },
+            )
+            .unwrap();
+        config.link_camera("garage", "porch", true).unwrap();
+        config.save(dir.path()).unwrap();
+        let store = MemoryStore::default();
+        let (host, server) = moonraker_server(None);
+
+        update(
+            dir.path(),
+            &store,
+            "garage",
+            CreateRequest {
+                name: "workshop".into(),
+                driver: "moonraker".into(),
+                host,
+                serial: String::new(),
+                model: String::new(),
+                timeout: "10s".into(),
+                insecure: false,
+                access_code: String::new(),
+            },
+        )
+        .unwrap();
+        server.join().unwrap();
+
+        let saved = Config::open(dir.path()).unwrap();
+        assert!(saved.printer_cameras("garage").is_none());
+        assert_eq!(
+            saved
+                .printer_cameras("workshop")
+                .unwrap()
+                .selected
+                .as_deref(),
+            Some("0123456789abcdef0123456789abcdef")
         );
     }
 
