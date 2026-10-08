@@ -48,6 +48,13 @@ fn camera(port: u16, password: &str, timeout: Duration) -> ResolvedCamera {
 
 /// Serves one RTSP connection and returns every request it received.
 fn spawn_camera(challenge: &'static str) -> (u16, JoinHandle<Vec<Vec<String>>>) {
+    spawn_camera_with(challenge, send_picture)
+}
+
+fn spawn_camera_with(
+    challenge: &'static str,
+    play: fn(&mut TcpStream),
+) -> (u16, JoinHandle<Vec<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let handle = thread::spawn(move || {
@@ -55,12 +62,12 @@ fn spawn_camera(challenge: &'static str) -> (u16, JoinHandle<Vec<Vec<String>>>) 
         socket
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
-        serve(socket, challenge)
+        serve(socket, challenge, play)
     });
     (port, handle)
 }
 
-fn serve(socket: TcpStream, challenge: &str) -> Vec<Vec<String>> {
+fn serve(socket: TcpStream, challenge: &str, play: fn(&mut TcpStream)) -> Vec<Vec<String>> {
     let mut writer = socket.try_clone().unwrap();
     let mut reader = BufReader::new(socket);
     let mut seen = Vec::new();
@@ -95,7 +102,7 @@ fn serve(socket: TcpStream, challenge: &str) -> Vec<Vec<String>> {
             .unwrap(),
             "PLAY" => {
                 write!(writer, "RTSP/1.0 200 OK\r\nCSeq: {cseq}\r\nSession: 7A3F\r\n\r\n").unwrap();
-                send_picture(&mut writer);
+                play(&mut writer);
             }
             _ => write!(writer, "RTSP/1.0 200 OK\r\nCSeq: {cseq}\r\n\r\n").unwrap(),
         }
@@ -180,6 +187,34 @@ fn send_picture(writer: &mut TcpStream) {
             packet.extend_from_slice(nal);
             interleaved(writer, 2, &packet);
         }
+    }
+}
+
+/// Streams RTP packets with the marker bit clear until the client goes away.
+fn send_markerless(writer: &mut TcpStream) {
+    for sequence in 0..u16::MAX {
+        let mut packet = vec![
+            0x80,
+            96,
+            (sequence >> 8) as u8,
+            sequence as u8,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+        ];
+        packet.extend_from_slice(&[0x41, 0x9a, 0x00, 0x00]);
+        let mut frame = vec![b'$', 2];
+        frame.extend_from_slice(&(packet.len() as u16).to_be_bytes());
+        frame.extend_from_slice(&packet);
+        if writer.write_all(&frame).is_err() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -292,4 +327,17 @@ fn silent_camera_times_out() {
     assert!(matches!(result, Err(CameraError::Timeout)), "{result:?}");
     assert!(started.elapsed() < Duration::from_secs(2));
     holder.join().unwrap();
+}
+
+#[test]
+fn markerless_stream_cannot_outlive_the_deadline() {
+    let (port, server) = spawn_camera_with(DIGEST, send_markerless);
+    let started = Instant::now();
+    let result = cameras::snapshot(
+        &camera(port, "secret", Duration::from_secs(1)),
+        StreamQuality::High,
+    );
+    assert!(result.is_err());
+    assert!(started.elapsed() < Duration::from_secs(3));
+    drop(server);
 }

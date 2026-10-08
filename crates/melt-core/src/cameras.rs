@@ -116,14 +116,22 @@ pub fn open_stream(
     }
 }
 
-/// Decodes one frame from a new connection, within the camera timeout.
+/// Decodes one frame from a new connection. The wait for a frame is bounded
+/// by the camera timeout from the start of the call; connect and the RTSP
+/// handshake are bounded per read.
 pub fn snapshot(camera: &ResolvedCamera, quality: StreamQuality) -> Result<Vec<u8>, CameraError> {
     let deadline = Instant::now() + camera.timeout;
     let mut stream = open_stream(camera, quality, true)?;
+    stream.set_deadline(Some(deadline));
+    let socket = stream.shutdown_handle().map_err(CameraError::Connect)?;
     loop {
-        if Instant::now() >= deadline {
-            return Err(CameraError::Timeout);
-        }
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or(CameraError::Timeout)?;
+        socket
+            .set_read_timeout(Some(remaining))
+            .map_err(CameraError::Connect)?;
         let unit = stream.next_access_unit().map_err(stream_io_error)?;
         if let Some(jpeg) = unit.jpeg {
             return Ok(jpeg);

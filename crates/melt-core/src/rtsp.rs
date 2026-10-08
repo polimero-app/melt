@@ -17,6 +17,8 @@ use thiserror::Error;
 /// real RTSP responses and RTP frames are a few hundred bytes to a few KB, so
 /// anything past this is a protocol confusion, not a slow network.
 const MAX_BUFFERED: usize = 1 << 20;
+/// Upper bound on one access unit's RTP bytes; far above any real frame.
+const MAX_ACCESS_UNIT_BYTES: usize = 8 << 20;
 // ponytail: fixed 25 s keepalive; derive it from the Session timeout if a
 // camera advertises less than 30 s.
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(25);
@@ -155,6 +157,7 @@ pub struct H264Stream {
     started: bool,
     access_unit: Vec<Vec<u8>>,
     fu_buffer: Option<Vec<u8>>,
+    deadline: Option<Instant>,
 }
 
 /// One complete H.264 picture as received from the camera. RTP packet bytes
@@ -174,6 +177,12 @@ pub struct H264AccessUnit {
 impl H264Stream {
     pub fn shutdown_handle(&self) -> io::Result<TcpStream> {
         self.shutdown.try_clone()
+    }
+
+    /// Makes `next_access_unit` fail with `TimedOut` once `deadline` passes,
+    /// even while packets keep arriving.
+    pub fn set_deadline(&mut self, deadline: Option<Instant>) {
+        self.deadline = deadline;
     }
 
     pub fn parameter_sets(&self) -> (&[u8], &[u8]) {
@@ -209,11 +218,27 @@ impl H264Stream {
 
     pub fn next_access_unit(&mut self) -> io::Result<H264AccessUnit> {
         let mut rtp_packets = Vec::new();
+        let mut total = 0usize;
         loop {
+            if self
+                .deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
+            {
+                return Err(io::ErrorKind::TimedOut.into());
+            }
             let packet = self.next_rtp_packet()?;
             let Some((marker, payload)) = parse_rtp(&packet) else {
                 continue;
             };
+            total += packet.len();
+            if total > MAX_ACCESS_UNIT_BYTES {
+                self.access_unit.clear();
+                self.fu_buffer = None;
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "H.264 access unit exceeded the size limit",
+                ));
+            }
             self.depacketize(payload);
             rtp_packets.push(packet);
             if !marker {
@@ -384,6 +409,7 @@ pub(crate) fn open_h264(
         started: false,
         access_unit: Vec::new(),
         fu_buffer: None,
+        deadline: None,
     })
 }
 
