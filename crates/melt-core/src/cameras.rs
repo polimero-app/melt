@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use crate::{bambu::MjpegStream, rtsp::H264Stream};
@@ -29,7 +29,7 @@ pub const TAPO: &str = "tapo";
 pub const DRIVERS: &[&str] = &[TAPO];
 pub const TAPO_RTSP_PORT: u16 = 554;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StreamQuality {
     #[default]

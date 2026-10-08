@@ -3255,7 +3255,7 @@ fn printer_camera_snapshot(
         CameraFrameKind::Jpeg,
         Operation::CameraSnapshot,
     )?;
-    let image = if let Some(image) = subscription.latest_jpeg() {
+    let image = if let Some(image) = subscription.fresh_jpeg(Duration::from_secs(2)) {
         image
     } else {
         loop {

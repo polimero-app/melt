@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     net::{Shutdown, TcpStream},
     sync::{
-        Arc, Condvar, Mutex, Weak,
+        Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak,
         atomic::{AtomicU32, Ordering},
         mpsc,
     },
@@ -18,6 +18,7 @@ use super::{
     H264Stream, MjpegStream, Profile, QuirkEffect, RuntimeCapabilities, applicable_quirks,
     open_classic_mjpeg_stream, open_h264_stream, select_camera_transport,
 };
+use crate::cameras::{self, ResolvedCamera, StreamQuality};
 
 #[derive(Clone, Debug)]
 pub enum CameraFrame {
@@ -42,6 +43,8 @@ pub struct H264Parameters {
 pub enum CameraOwnerTransport {
     MjpegTls,
     RtspsH264,
+    /// Plain RTSP from an external camera.
+    RtspH264,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -74,7 +77,7 @@ impl Source {
 struct OwnerState {
     next_subscriber: u64,
     subscribers: BTreeMap<u64, (CameraFrameKind, Arc<FrameMailbox>)>,
-    latest_jpeg: Option<Arc<[u8]>>,
+    latest_jpeg: Option<(Arc<[u8]>, Instant)>,
     stopped: bool,
 }
 
@@ -168,7 +171,7 @@ impl Owner {
         let frame = Arc::new(frame);
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if let CameraFrame::Jpeg(jpeg) = frame.as_ref() {
-            state.latest_jpeg = Some(Arc::clone(jpeg));
+            state.latest_jpeg = Some((Arc::clone(jpeg), Instant::now()));
         }
         let kind = match frame.as_ref() {
             CameraFrame::Jpeg(_) => CameraFrameKind::Jpeg,
@@ -272,13 +275,17 @@ impl CameraSubscription {
     ) -> Result<Arc<CameraFrame>, mpsc::RecvTimeoutError> {
         self.receiver.recv_timeout(timeout)
     }
-    pub fn latest_jpeg(&self) -> Option<Arc<[u8]>> {
+    /// The latest decoded frame if it is at most `max_age` old. Frames are
+    /// dropped when the upstream fails, so one never outlives its connection.
+    pub fn fresh_jpeg(&self, max_age: Duration) -> Option<Arc<[u8]>> {
         self.owner
             .state
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .latest_jpeg
-            .clone()
+            .as_ref()
+            .filter(|(_, at)| at.elapsed() <= max_age)
+            .map(|(jpeg, _)| Arc::clone(jpeg))
     }
     pub fn repair_rtp_timestamps(&self) -> bool {
         self.owner.repair_rtp_timestamps
@@ -295,11 +302,29 @@ impl Drop for CameraSubscription {
 struct ManagerState {
     generation: u64,
     owners: BTreeMap<String, Weak<Owner>>,
+    /// Serializes startups per source so a slow upstream blocks only its
+    /// own callers. ponytail: never pruned; bounded by printers + cameras × 2.
+    startups: BTreeMap<String, Arc<Mutex<()>>>,
 }
 
 #[derive(Clone, Default)]
 pub struct CameraManager {
     state: Arc<Mutex<ManagerState>>,
+}
+
+enum Reopen {
+    Retry,
+    Fatal,
+}
+
+type Reopener = Box<dyn FnMut() -> Result<Source, Reopen> + Send>;
+
+struct Opened {
+    source: Source,
+    selection: CameraSelection,
+    transport: CameraOwnerTransport,
+    repair_rtp_timestamps: bool,
+    reopen: Reopener,
 }
 
 impl CameraManager {
@@ -327,42 +352,156 @@ impl CameraManager {
                 .iter()
                 .any(|entry| entry.effect == QuirkEffect::RepairRtpTimestampsFromArrivalTime);
         let revision = camera_revision(profile, access_code, fingerprint, capabilities, &selection);
-        let mut manager = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        if let Some(owner) = manager.owners.get(&printer_key).and_then(Weak::upgrade) {
-            if owner.revision == revision {
-                if kind == CameraFrameKind::H264
-                    && owner.transport != CameraOwnerTransport::RtspsH264
-                {
-                    return Err(CameraError::UnsupportedMedia);
-                }
-                if let Some(subscription) = owner.try_subscribe(kind) {
-                    return Ok(subscription);
-                }
-            }
-            owner.stop();
+        let open = || {
+            let (source, selection) =
+                open_source(profile, access_code, fingerprint, timeout, selection)?;
+            let (transport, owner_transport) = match &source {
+                Source::Mjpeg(_) => (CameraTransport::MjpegTls, CameraOwnerTransport::MjpegTls),
+                Source::H264(_) => (CameraTransport::RtspsH264, CameraOwnerTransport::RtspsH264),
+            };
+            let profile = profile.clone();
+            let access_code = access_code.map(str::to_owned);
+            let fingerprint = fingerprint.map(str::to_owned);
+            let reopen: Reopener = Box::new(move || {
+                let deadline = Instant::now().checked_add(timeout).ok_or(Reopen::Fatal)?;
+                open_transport(
+                    &profile,
+                    access_code.as_deref(),
+                    fingerprint.as_deref(),
+                    deadline,
+                    transport,
+                )
+                .map_err(|error| match error {
+                    CameraError::Pin(_) | CameraError::Identity => Reopen::Fatal,
+                    _ => Reopen::Retry,
+                })
+            });
+            Ok(Opened {
+                source,
+                selection,
+                transport: owner_transport,
+                repair_rtp_timestamps,
+                reopen,
+            })
+        };
+        self.subscribe_with(
+            printer_key,
+            revision,
+            kind,
+            open,
+            || CameraError::UnsupportedMedia,
+            CameraError::Stream,
+        )
+    }
+
+    /// Shares one upstream per camera and quality, like printer feeds.
+    pub fn subscribe_external(
+        &self,
+        camera: ResolvedCamera,
+        quality: StreamQuality,
+        kind: CameraFrameKind,
+    ) -> Result<CameraSubscription, cameras::CameraError> {
+        let quality_name = match quality {
+            StreamQuality::High => "high",
+            StreamQuality::Low => "low",
+        };
+        let key = format!("camera:{}:{quality_name}", camera.profile.id);
+        let port = camera
+            .profile
+            .rtsp_port
+            .unwrap_or(cameras::TAPO_RTSP_PORT)
+            .to_be_bytes();
+        let mut digest = Sha256::new();
+        for part in [
+            camera.profile.driver.as_bytes(),
+            camera.profile.host.as_bytes(),
+            &port,
+            camera.profile.username.as_bytes(),
+            camera.password.as_bytes(),
+            quality_name.as_bytes(),
+        ] {
+            digest.update(part);
+            digest.update([0]);
         }
-        let (source, selection) =
-            open_source(profile, access_code, fingerprint, timeout, selection)?;
-        let shutdown = source.shutdown_handle().map_err(CameraError::Stream)?;
-        manager.generation = manager.generation.wrapping_add(1);
-        let (transport, parameters) = match &source {
-            Source::Mjpeg(_) => (CameraOwnerTransport::MjpegTls, None),
+        let open = move || {
+            let source = open_external(&camera, quality)?;
+            let reopen: Reopener = Box::new(move || {
+                open_external(&camera, quality).map_err(|error| match error {
+                    cameras::CameraError::Authentication
+                    | cameras::CameraError::DigestRequired
+                    | cameras::CameraError::UnsupportedCodec
+                    | cameras::CameraError::UnknownDriver(_) => Reopen::Fatal,
+                    _ => Reopen::Retry,
+                })
+            });
+            Ok(Opened {
+                source,
+                selection: CameraSelection {
+                    preferred: CameraTransport::Unknown,
+                    source: CameraSelectionSource::Unknown,
+                    rejected_advertisement: None,
+                    quirk_ids: Vec::new(),
+                },
+                transport: CameraOwnerTransport::RtspH264,
+                repair_rtp_timestamps: false,
+                reopen,
+            })
+        };
+        self.subscribe_with(
+            key,
+            digest.finalize().into(),
+            kind,
+            open,
+            || cameras::CameraError::UnsupportedCodec,
+            cameras::CameraError::Connect,
+        )
+    }
+
+    fn subscribe_with<E>(
+        &self,
+        key: String,
+        revision: [u8; 32],
+        kind: CameraFrameKind,
+        open: impl FnOnce() -> Result<Opened, E>,
+        unsupported: impl Fn() -> E,
+        stream_error: impl FnOnce(std::io::Error) -> E,
+    ) -> Result<CameraSubscription, E> {
+        let startup = {
+            let mut manager = self.lock();
+            if let Some(subscription) = reuse(&mut manager, &key, revision, kind, &unsupported)? {
+                return Ok(subscription);
+            }
+            Arc::clone(manager.startups.entry(key.clone()).or_default())
+        };
+        let _startup = startup.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(subscription) = reuse(&mut self.lock(), &key, revision, kind, &unsupported)? {
+            return Ok(subscription);
+        }
+        let Opened {
+            source,
+            selection,
+            transport,
+            repair_rtp_timestamps,
+            reopen,
+        } = open()?;
+        let shutdown = source.shutdown_handle().map_err(stream_error)?;
+        let parameters = match &source {
+            Source::Mjpeg(_) => None,
             Source::H264(stream) => {
                 let (sps, pps) = stream.parameter_sets();
-                (
-                    CameraOwnerTransport::RtspsH264,
-                    Some(H264Parameters {
-                        sps: Arc::from(sps),
-                        pps: Arc::from(pps),
-                    }),
-                )
+                Some(H264Parameters {
+                    sps: Arc::from(sps),
+                    pps: Arc::from(pps),
+                })
             }
         };
-        if kind == CameraFrameKind::H264 && transport != CameraOwnerTransport::RtspsH264 {
-            return Err(CameraError::UnsupportedMedia);
+        if kind == CameraFrameKind::H264 && transport == CameraOwnerTransport::MjpegTls {
+            return Err(unsupported());
         }
+        let mut manager = self.lock();
+        manager.generation = manager.generation.wrapping_add(1);
         let owner = Arc::new(Owner {
-            printer_key: printer_key.clone(),
+            printer_key: key.clone(),
             revision,
             generation: manager.generation,
             transport,
@@ -379,16 +518,14 @@ impl CameraManager {
             }),
         });
         let subscription = owner.subscribe(kind);
-        manager.owners.insert(printer_key, Arc::downgrade(&owner));
-        let source_config = SourceConfig {
-            profile: profile.clone(),
-            access_code: access_code.map(str::to_owned),
-            fingerprint: fingerprint.map(str::to_owned),
-            timeout,
-            transport,
-        };
-        thread::spawn(move || run_owner(owner, source, source_config));
+        manager.owners.insert(key, Arc::downgrade(&owner));
+        drop(manager);
+        thread::spawn(move || run_owner(owner, source, reopen));
         Ok(subscription)
+    }
+
+    fn lock(&self) -> MutexGuard<'_, ManagerState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub fn statuses(&self) -> Vec<CameraOwnerStatus> {
@@ -414,6 +551,38 @@ impl CameraManager {
             owner.stop();
         }
     }
+}
+
+/// Joins a live owner with the same revision. A stale owner is stopped and
+/// forgotten so the caller can start a replacement.
+fn reuse<E>(
+    manager: &mut ManagerState,
+    key: &str,
+    revision: [u8; 32],
+    kind: CameraFrameKind,
+    unsupported: &impl Fn() -> E,
+) -> Result<Option<CameraSubscription>, E> {
+    let Some(owner) = manager.owners.get(key).and_then(Weak::upgrade) else {
+        return Ok(None);
+    };
+    if owner.revision == revision {
+        if kind == CameraFrameKind::H264 && owner.transport == CameraOwnerTransport::MjpegTls {
+            return Err(unsupported());
+        }
+        if let Some(subscription) = owner.try_subscribe(kind) {
+            return Ok(Some(subscription));
+        }
+    }
+    owner.stop();
+    manager.owners.remove(key);
+    Ok(None)
+}
+
+fn open_external(
+    camera: &ResolvedCamera,
+    quality: StreamQuality,
+) -> Result<Source, cameras::CameraError> {
+    cameras::open_stream(camera, quality, false).map(|stream| Source::H264(Box::new(stream)))
 }
 
 fn open_source(
@@ -496,15 +665,7 @@ fn camera_revision(
     digest.finalize().into()
 }
 
-struct SourceConfig {
-    profile: Profile,
-    access_code: Option<String>,
-    fingerprint: Option<String>,
-    timeout: Duration,
-    transport: CameraOwnerTransport,
-}
-
-fn run_owner(owner: Arc<Owner>, mut source: Source, config: SourceConfig) {
+fn run_owner(owner: Arc<Owner>, mut source: Source, mut reopen: Reopener) {
     let mut consecutive_failures = 0_u32;
     loop {
         let result = match &mut source {
@@ -525,13 +686,15 @@ fn run_owner(owner: Arc<Owner>, mut source: Source, config: SourceConfig) {
             consecutive_failures = 0;
             continue;
         }
-        if !owner.has_subscribers()
-            || owner
+        let stopped = {
+            let mut state = owner
                 .state
                 .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .stopped
-        {
+                .unwrap_or_else(|error| error.into_inner());
+            state.latest_jpeg = None;
+            state.stopped
+        };
+        if stopped || !owner.has_subscribers() {
             break;
         }
         consecutive_failures = consecutive_failures.saturating_add(1);
@@ -539,25 +702,10 @@ fn run_owner(owner: Arc<Owner>, mut source: Source, config: SourceConfig) {
         if !wait_for_reconnect(&owner, reconnect_delay(consecutive_failures)) {
             break;
         }
-        let deadline = match Instant::now().checked_add(config.timeout) {
-            Some(deadline) => deadline,
-            None => break,
-        };
-        let transport = match config.transport {
-            CameraOwnerTransport::MjpegTls => CameraTransport::MjpegTls,
-            CameraOwnerTransport::RtspsH264 => CameraTransport::RtspsH264,
-        };
-        let replacement = open_transport(
-            &config.profile,
-            config.access_code.as_deref(),
-            config.fingerprint.as_deref(),
-            deadline,
-            transport,
-        );
-        let replacement = match replacement {
+        let replacement = match reopen() {
             Ok(replacement) => replacement,
-            Err(CameraError::Pin(_) | CameraError::Identity) => break,
-            Err(_) => continue,
+            Err(Reopen::Fatal) => break,
+            Err(Reopen::Retry) => continue,
         };
         if !same_h264_parameters(&owner, &replacement) {
             break;
@@ -647,7 +795,10 @@ mod tests {
         for value in 0..10 {
             owner.publish(CameraFrame::Jpeg(Arc::from(vec![value])));
         }
-        assert_eq!(fast.latest_jpeg().unwrap().as_ref(), &[9]);
+        assert_eq!(
+            fast.fresh_jpeg(Duration::from_secs(2)).unwrap().as_ref(),
+            &[9]
+        );
         let fast_frame = fast.recv_timeout(Duration::from_millis(1)).unwrap();
         let CameraFrame::Jpeg(fast_frame) = fast_frame.as_ref() else {
             panic!("expected JPEG frame");
@@ -718,6 +869,71 @@ mod tests {
         drop(jpeg);
         assert!(!owner.has_subscribers_for(CameraFrameKind::Jpeg));
         drop(h264);
+    }
+
+    fn external(id: &str, port: u16) -> ResolvedCamera {
+        ResolvedCamera {
+            name: id.into(),
+            profile: crate::config::CameraProfile {
+                id: id.into(),
+                driver: cameras::TAPO.into(),
+                host: "127.0.0.1".into(),
+                username: "melt".into(),
+                rtsp_port: Some(port),
+                timeout: "3s".into(),
+                created: String::new(),
+                updated: String::new(),
+            },
+            password: "secret".into(),
+            timeout: Duration::from_secs(3),
+        }
+    }
+
+    #[test]
+    fn an_unreachable_camera_does_not_stall_another() {
+        // The backlog completes connect; DESCRIBE then waits out the read timeout.
+        let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let silent_port = silent.local_addr().unwrap().port();
+        let refused = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let manager = CameraManager::default();
+        let stalled = {
+            let manager = manager.clone();
+            thread::spawn(move || {
+                manager
+                    .subscribe_external(
+                        external("a", silent_port),
+                        StreamQuality::High,
+                        CameraFrameKind::H264,
+                    )
+                    .is_err()
+            })
+        };
+        thread::sleep(Duration::from_millis(200));
+        let started = Instant::now();
+        assert!(
+            manager
+                .subscribe_external(
+                    external("b", refused),
+                    StreamQuality::High,
+                    CameraFrameKind::H264
+                )
+                .is_err()
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(stalled.join().unwrap());
+    }
+
+    #[test]
+    fn fresh_jpeg_rejects_old_frames() {
+        let owner = owner();
+        let subscription = owner.subscribe(CameraFrameKind::Jpeg);
+        owner.publish(CameraFrame::Jpeg(Arc::from(&b"jpeg"[..])));
+        assert!(subscription.fresh_jpeg(Duration::from_secs(2)).is_some());
+        assert!(subscription.fresh_jpeg(Duration::ZERO).is_none());
     }
 
     #[test]

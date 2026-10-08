@@ -3,7 +3,7 @@
 
 use std::{net::IpAddr, path::Path};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use super::{CameraError, DRIVERS, ResolvedCamera, TAPO_RTSP_PORT};
@@ -16,6 +16,8 @@ use crate::{
 
 /// Add or edit input. Deliberately not `Debug`: it holds a password. An
 /// empty `password` on update keeps the stored one.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CameraRequest {
     pub name: String,
     pub driver: String,
