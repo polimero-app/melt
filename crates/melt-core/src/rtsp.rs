@@ -289,12 +289,19 @@ impl H264Stream {
             &[(rtsp_types::headers::SESSION, self.session.clone())],
         )
         .map_err(into_io)?;
-        if response.status() != rtsp_types::StatusCode::Ok {
-            return Err(io::Error::other("RTSP keepalive was rejected"));
+        if keepalive_lost_session(response.status()) {
+            return Err(io::Error::other("RTSP session expired"));
         }
         self.next_keepalive = Instant::now() + KEEPALIVE_INTERVAL;
         Ok(())
     }
+}
+
+/// Any request carrying the session refreshes it (RFC 2326), so only
+/// `454 Session Not Found` means the session is gone; cameras that do not
+/// implement GET_PARAMETER answer 405/501 and are still alive.
+fn keepalive_lost_session(status: rtsp_types::StatusCode) -> bool {
+    status == rtsp_types::StatusCode::SessionNotFound
 }
 
 impl Drop for H264Stream {
@@ -857,6 +864,19 @@ fn encode_jpeg(yuv: &openh264::decoder::DecodedYUV) -> io::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keepalive_only_454_loses_the_session() {
+        for (status, lost) in [
+            (rtsp_types::StatusCode::Ok, false),
+            (rtsp_types::StatusCode::MethodNotAllowed, false),
+            (rtsp_types::StatusCode::NotImplemented, false),
+            (rtsp_types::StatusCode::MethodNotValidInThisState, false),
+            (rtsp_types::StatusCode::SessionNotFound, true),
+        ] {
+            assert_eq!(keepalive_lost_session(status), lost, "{status:?}");
+        }
+    }
 
     fn bambu() -> Credentials {
         Credentials {
