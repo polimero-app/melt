@@ -164,8 +164,13 @@ fn stream_io_error(error: io::Error) -> CameraError {
         io::ErrorKind::InvalidData => {
             CameraError::Stream("camera sent an undecodable frame".into())
         }
-        _ => CameraError::Stream(error.to_string()),
+        _ => stream_error(&error.to_string()),
     }
+}
+
+/// Camera-supplied text (RTSP reason phrases) may carry terminal escapes.
+fn stream_error(message: &str) -> CameraError {
+    CameraError::Stream(message.chars().filter(|c| !c.is_control()).collect())
 }
 
 fn rtsp_error(error: RtspError) -> CameraError {
@@ -174,13 +179,21 @@ fn rtsp_error(error: RtspError) -> CameraError {
         RtspError::DigestRequired => CameraError::DigestRequired,
         RtspError::UnsupportedCodec => CameraError::UnsupportedCodec,
         RtspError::Io(error) => stream_io_error(error),
-        RtspError::Protocol(message) => CameraError::Stream(message),
+        RtspError::Protocol(message) => stream_error(&message),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn camera_reported_errors_lose_control_characters() {
+        let error = rtsp_error(RtspError::Protocol("bad\x1b[31m\r\nreply\u{7}".into()));
+        assert_eq!(error.to_string(), "camera stream failed: bad[31mreply");
+        let error = stream_io_error(io::Error::other("x\x1b]0;t\u{7}y"));
+        assert_eq!(error.to_string(), "camera stream failed: x]0;ty");
+    }
 
     #[test]
     fn connect_error_names_the_cause() {
