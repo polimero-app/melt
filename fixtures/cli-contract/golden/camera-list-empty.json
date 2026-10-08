@@ -5,7 +5,6 @@
   },
   "error": null,
   "meta": {
-    "command": "camera list",
-    "durationMs": 0
+    "command": "camera list"
   }
 }

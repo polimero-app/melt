@@ -89,7 +89,7 @@
       "exitCode": 0,
       "stdout": "golden/camera-list-empty.json",
       "stderr": "",
-      "ignoreJsonPointers": ["/meta/durationMs"]
+      "ignoreJsonPointers": []
     },
     {
       "id": "camera-select-missing-source-json",

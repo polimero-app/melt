@@ -538,6 +538,8 @@ struct VersionData {
 }
 
 pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    // Each in-process invocation is a fresh command; drop timing from earlier runs.
+    NETWORK_CALL_START.with(|start| start.set(None));
     if let Some(exit_code) = run_bare_group(args, out, err) {
         return exit_code;
     }
