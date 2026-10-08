@@ -35,6 +35,18 @@ Use `--include-history` to request the printer's read-only catalogue. Add
 model. The public option is HTTPS-only, has a bounded response body, refuses
 redirects, and never sends an access code, serial number, cookie, or token.
 
+Public checks try the official firmware download page first. If it cannot be
+fetched or has no usable version, A1 Mini and H2C checks also try their official
+Bambu Wiki release histories:
+
+- [A1 Mini firmware release history](https://wiki.bambulab.com/en/a1-mini/manual/a1-mini-firmware-release-history)
+- [H2C firmware release history](https://wiki.bambulab.com/en/h2c/manual/h2c-firmware-release-history)
+
+Wiki checks verify the model in the page title and read release headings,
+excluding beta releases and accessory or application versions in the notes.
+The evidence records the URL that supplied the version; the same request limits
+and cache policy apply to both sources.
+
 ## Desktop
 
 The Manage printers firmware screen shows installed, printer-advertised,

@@ -12,7 +12,7 @@ use thiserror::Error;
 use super::{CanonicalModel, ModelFamily};
 
 pub const MAX_PUBLIC_CATALOGUE_BYTES: usize = 2 << 20;
-const PUBLIC_CATALOGUE_HOSTS: [&str; 2] = ["bambulab.com", "www.bambulab.com"];
+const PUBLIC_CATALOGUE_HOSTS: [&str; 3] = ["bambulab.com", "www.bambulab.com", "wiki.bambulab.com"];
 /// Bambu ships at most one stable release per model per day and serves these
 /// pages behind Cloudflare, so a short TTL would buy nothing and risk being
 /// rate limited.
@@ -47,8 +47,8 @@ pub fn public_catalogue_url(model: CanonicalModel) -> Option<&'static str> {
     public_catalogue_urls(model).first().copied()
 }
 
-/// Returns the model-specific official page first, optionally followed by a
-/// shared family page that publishes a release history for that family.
+/// Returns the model-specific official download page first, optionally followed
+/// by the model's wiki release history or a shared family catalogue page.
 ///
 /// A fallback is only safe when the page is not another model's own page:
 /// Bambu ships distinct, non-interchangeable firmware per model, so reading
@@ -56,14 +56,17 @@ pub fn public_catalogue_url(model: CanonicalModel) -> Option<&'static str> {
 /// printer's public-stable release. `public_catalogue_family_pages_are_shared`
 /// locks that invariant in.
 ///
-/// Every slug here was confirmed to answer 200 to Melt's own user agent on
-/// 2026-09-20. bambulab.com blocks some tooling user agents, so this is not
-/// checkable from CI; a slug that rots degrades to
-/// `publicCatalogueUnavailable`, never to another model's firmware version.
+/// Download slugs answered 200 to Melt's user agent on 2026-09-20; wiki pages
+/// did so on 2026-10-08. Bambu blocks some tooling user agents, so this is not
+/// checkable from CI; a slug that rots degrades to `publicCatalogueUnavailable`,
+/// never to another model's firmware version.
 pub fn public_catalogue_urls(model: CanonicalModel) -> &'static [&'static str] {
     match model {
         CanonicalModel::A1 => &["https://bambulab.com/en-us/support/firmware-download/a1"],
-        CanonicalModel::A1Mini => &["https://bambulab.com/en-us/support/firmware-download/a1-mini"],
+        CanonicalModel::A1Mini => &[
+            "https://bambulab.com/en-us/support/firmware-download/a1-mini",
+            "https://wiki.bambulab.com/en/a1-mini/manual/a1-mini-firmware-release-history",
+        ],
         CanonicalModel::A2L => &["https://bambulab.com/en-us/support/firmware-download/a2l"],
         CanonicalModel::P1P => &[
             "https://bambulab.com/en-us/support/firmware-download/p1p",
@@ -81,7 +84,10 @@ pub fn public_catalogue_urls(model: CanonicalModel) -> &'static [&'static str] {
         CanonicalModel::H2D => &["https://bambulab.com/en-us/support/firmware-download/h2d"],
         CanonicalModel::H2DPro => &["https://bambulab.com/en-us/support/firmware-download/h2d-pro"],
         CanonicalModel::H2S => &["https://bambulab.com/en-us/support/firmware-download/h2s"],
-        CanonicalModel::H2C => &["https://bambulab.com/en-us/support/firmware-download/h2c"],
+        CanonicalModel::H2C => &[
+            "https://bambulab.com/en-us/support/firmware-download/h2c",
+            "https://wiki.bambulab.com/en/h2c/manual/h2c-firmware-release-history",
+        ],
         CanonicalModel::Unknown => &[],
     }
 }
@@ -216,6 +222,10 @@ const VERSION_SHAPE: &[u8] = b"dd.dd.dd.dd";
 /// therefore reports whichever product happens to carry the highest number --
 /// on the A1 mini page, an AMS 2 Pro's `04.00.21.87`. Only the entries
 /// published under this model's own code count.
+///
+/// Wiki histories instead publish releases in level-two headings. Those count
+/// only when the page title names the requested model, and versions mentioned
+/// elsewhere in the notes are ignored.
 pub fn parse_public_firmware_version(html: &str, model: CanonicalModel) -> Option<String> {
     let family = model_family(model)?;
     // Bambu ships one binary per family and does not publish every model
@@ -224,6 +234,85 @@ pub fn parse_public_firmware_version(html: &str, model: CanonicalModel) -> Optio
     // its own, so an A1 mini never picks up the A1's release.
     highest_published(html, |entry| entry.canonical == model)
         .or_else(|| highest_published(html, |entry| model_family(entry.canonical) == Some(family)))
+        .or_else(|| wiki_firmware_version(html, model))
+}
+
+fn wiki_firmware_version(html: &str, model: CanonicalModel) -> Option<String> {
+    let expected_title = match model {
+        CanonicalModel::A1Mini => "A1 mini Firmware Release History",
+        CanonicalModel::H2C => "H2C Firmware Release History",
+        _ => return None,
+    };
+    let title = html.split_once("<title>")?.1.split_once("</title>")?.0;
+    if title.split('|').next()?.trim() != expected_title {
+        return None;
+    }
+    html.split("<h2")
+        .skip(1)
+        .filter_map(|section| {
+            let (attributes, content) = section.split_once('>')?;
+            if !attributes.is_empty() && !attributes.starts_with(char::is_whitespace) {
+                return None;
+            }
+            wiki_heading_version(content.split_once("</h2>")?.0)
+        })
+        .max_by(|left, right| {
+            crate::bambu::FirmwareVersion::parse(left)
+                .numeric_cmp(&crate::bambu::FirmwareVersion::parse(right))
+        })
+}
+
+fn wiki_heading_version(html: &str) -> Option<String> {
+    // Strip the wiki's anchor and any inline formatting before reading text.
+    let mut in_tag = false;
+    let text: String = html
+        .chars()
+        .filter(|character| match character {
+            '<' => {
+                in_tag = true;
+                false
+            }
+            '>' => {
+                in_tag = false;
+                false
+            }
+            _ => !in_tag,
+        })
+        .collect();
+    let heading = text.trim().trim_start_matches('¶').trim_start();
+    // The older A1 mini releases spell this label "Verison".
+    let heading = heading
+        .strip_prefix("Version ")
+        .or_else(|| heading.strip_prefix("Verison "))
+        .unwrap_or(heading)
+        .trim_start();
+    let version = heading.get(..VERSION_SHAPE.len())?;
+    if !is_version(version) {
+        return None;
+    }
+    let suffix = heading[VERSION_SHAPE.len()..].trim();
+    // Accept a bare release or its parenthesized date, excluding annotations
+    // such as "Beta", "Preview", or "RC" from public-stable evidence.
+    if !suffix.is_empty() {
+        let date = suffix
+            .strip_prefix('(')
+            .and_then(|date| date.strip_suffix(')'))
+            .or_else(|| {
+                suffix
+                    .strip_prefix('（')
+                    .and_then(|date| date.strip_suffix('）'))
+            })?;
+        if !date.chars().any(|character| character.is_ascii_digit())
+            || !date.chars().all(|character| {
+                character.is_ascii_digit()
+                    || character.is_whitespace()
+                    || matches!(character, '.' | '/' | '-')
+            })
+        {
+            return None;
+        }
+    }
+    Some(version.to_owned())
 }
 
 /// `None` for a model with no family, the one case where widening the search
@@ -299,6 +388,95 @@ mod tests {
         assert!(
             public_catalogue_urls(CanonicalModel::P1S)
                 .contains(&"https://bambulab.com/en-us/support/firmware-download/p1")
+        );
+    }
+
+    #[test]
+    fn wiki_fallbacks_are_allowlisted_for_their_own_models() {
+        for (model, wiki) in [
+            (
+                CanonicalModel::A1Mini,
+                "https://wiki.bambulab.com/en/a1-mini/manual/a1-mini-firmware-release-history",
+            ),
+            (
+                CanonicalModel::H2C,
+                "https://wiki.bambulab.com/en/h2c/manual/h2c-firmware-release-history",
+            ),
+        ] {
+            assert_eq!(public_catalogue_urls(model).last(), Some(&wiki));
+            let url = reqwest::Url::parse(wiki).unwrap();
+            assert!(PUBLIC_CATALOGUE_HOSTS.contains(&url.host_str().unwrap()));
+        }
+    }
+
+    // Abbreviated from the wiki pages: A1 mini prefixes its release headings
+    // with "Version", while H2C uses a bare version. Notes quote other products.
+    const A1_MINI_WIKI: &str = r##"
+        <title>A1 mini Firmware Release History | Bambu Lab Wiki</title>
+        <template slot="contents"><div>
+        <h2 id="version-0108000020260414" class="toc-header"><a class="toc-anchor" href="#version-0108000020260414">¶</a> Version 01.08.00.00（20260414）</h2>
+        <p><strong>AMS 2 Pro:</strong> 04.00.21.87</p>
+        <p>Requires Bambu Studio 02.00.00.00 or above.</p>
+        <h2 id="version-0108010020260603" class="toc-header"><a class="toc-anchor" href="#version-0108010020260603">¶</a> Version <strong>01.08.01.00</strong>（20260603）</h2>
+        <h2>Verison 01.01.02.00（2023.11.02）</h2>
+        </div></template>
+    "##;
+
+    const H2C_WIKI: &str = r##"
+        <title>H2C Firmware Release History | Bambu Lab Wiki</title>
+        <template slot="contents"><div>
+        <h2 id="h-01020000-20260601" class="toc-header"><a class="toc-anchor" href="#h-01020000-20260601">¶</a> 01.02.00.00 (20260601)</h2>
+        <p>Requires Bambu Suite 01.02.02.00 or above.</p>
+        <h3>AMS 2 Pro 04.00.21.87</h3>
+        <h2 id="h-01010500-20260211" class="toc-header"><a class="toc-anchor" href="#h-01010500-20260211">¶</a> 01.01.05.00 (20260211)</h2>
+        <h2>01.01.00.00</h2>
+        </div></template>
+    "##;
+
+    #[test]
+    fn reads_wiki_release_headings_without_accessory_or_software_versions() {
+        assert_eq!(
+            parse_public_firmware_version(A1_MINI_WIKI, CanonicalModel::A1Mini).as_deref(),
+            Some("01.08.01.00")
+        );
+        assert_eq!(
+            parse_public_firmware_version(H2C_WIKI, CanonicalModel::H2C).as_deref(),
+            Some("01.02.00.00")
+        );
+    }
+
+    #[test]
+    fn wiki_release_history_must_match_the_requested_model() {
+        assert_eq!(
+            parse_public_firmware_version(A1_MINI_WIKI, CanonicalModel::H2C),
+            None
+        );
+        assert_eq!(
+            parse_public_firmware_version(H2C_WIKI, CanonicalModel::A1Mini),
+            None
+        );
+        assert_eq!(
+            parse_public_firmware_version(A1_MINI_WIKI, CanonicalModel::A1),
+            None
+        );
+    }
+
+    #[test]
+    fn ignores_wiki_beta_releases_and_malformed_versions() {
+        let html = format!(
+            "{H2C_WIKI}<h2>99.00.00.00 Beta</h2><h2>98.00.00.00 (Beta)</h2>\
+             <h2>97.00.00.00 (20261008) RC</h2><h2>096.00.00.00</h2>\
+             <h2>95.00.00.001</h2><h2>AMS 2 Pro 94.00.00.00</h2>"
+        );
+        assert_eq!(
+            parse_public_firmware_version(&html, CanonicalModel::H2C).as_deref(),
+            Some("01.02.00.00")
+        );
+        let without_releases = "<title>H2C Firmware Release History | Bambu Lab Wiki</title>\
+                                <p>Firmware 01.02.00.00</p><h2>99.00.00.00 Beta</h2>";
+        assert_eq!(
+            parse_public_firmware_version(without_releases, CanonicalModel::H2C),
+            None
         );
     }
 
