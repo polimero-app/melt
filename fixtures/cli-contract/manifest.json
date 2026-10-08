@@ -40,7 +40,7 @@
     {
       "id": "camera-stream-invalid-format-json",
       "command": "camera stream",
-      "args": ["camera", "stream", "garage", "--format", "h264", "--output", "json"],
+      "args": ["camera", "stream", "garage", "--format", "h265", "--output", "json"],
       "exitCode": 2,
       "stdout": "golden/camera-stream-invalid-format.json",
       "stderr": "",

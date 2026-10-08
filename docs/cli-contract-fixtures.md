@@ -39,3 +39,8 @@ host-dependent JSON pointers before comparison.
 Melt-native `--camera` and `--quality` flags; like `printer add --model`, these
 are not added to the frozen Go-baseline rows, whose positional printer
 behavior is unchanged.
+
+`camera stream --format` also accepts the Melt-native value `h264`. The
+`camera-stream-invalid-format-json` fixture therefore uses `h265` as its
+invalid value, and its golden message lists both accepted formats; the
+Go baseline only accepted `mjpeg`.

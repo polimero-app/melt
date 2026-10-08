@@ -17,9 +17,9 @@ use melt_core::{
 use serde::Serialize;
 
 use super::{
-    OutputFormat, ParsedOptions, config_error, mark_network_call, parse_options, read_secret_file,
-    serve_mjpeg_stream, snapshot_destination, validate_snapshot_destination, write_error,
-    write_snapshot_file, write_success,
+    OutputFormat, ParsedOptions, StreamFeed, StreamFormat, config_error, mark_network_call,
+    parse_options, read_secret_file, serve_camera_feed, snapshot_destination,
+    validate_snapshot_destination, write_error, write_snapshot_file, write_success,
 };
 
 pub(crate) fn run_profile_command(
@@ -463,13 +463,20 @@ pub(crate) fn stream(
     options: &ParsedOptions,
     port: u16,
     duration: Option<Duration>,
+    stream_format: StreamFormat,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
     let opened = external_options(positionals, options).and_then(|quality| {
         let resolved = resolve(camera, options)?;
         mark_network_call();
-        let stream = cameras::mjpeg_stream(&resolved, quality).map_err(camera_error)?;
+        let stream = match stream_format {
+            StreamFormat::Mjpeg => cameras::mjpeg_stream(&resolved, quality).map(StreamFeed::Mjpeg),
+            StreamFormat::H264 => {
+                cameras::open_stream(&resolved, quality, false).map(StreamFeed::h264)
+            }
+        }
+        .map_err(camera_error)?;
         Ok((resolved, quality, stream))
     });
     let (resolved, quality, stream) = match opened {
@@ -477,7 +484,8 @@ pub(crate) fn stream(
         Err(error) => return write_error("camera stream", format, error, out, err),
     };
     let name = resolved.name.clone();
-    serve_mjpeg_stream(
+    let stream_format = stream.format();
+    serve_camera_feed(
         format,
         stream,
         port,
@@ -489,7 +497,7 @@ pub(crate) fn stream(
             driver: resolved.profile.driver,
             quality,
             url,
-            format: "mjpeg",
+            format: stream_format,
             port,
         },
         out,

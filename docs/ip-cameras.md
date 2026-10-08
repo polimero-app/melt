@@ -45,6 +45,7 @@ username, host, and port.
 melt camera list
 melt camera snapshot --camera porch --quality low --to ./porch.jpg
 melt camera stream --camera porch            # open http://127.0.0.1:8080/stream
+melt camera stream --camera porch --format h264   # ffplay -f h264 http://127.0.0.1:8080/stream
 melt camera link porch --printer workshop --select
 melt camera select --printer workshop --builtin
 melt camera edit porch --host 192.0.2.21     # re-verifies the connection
@@ -55,6 +56,15 @@ melt camera remove porch --yes
 `high` uses the camera's main stream (`/stream1`), `low` its sub-stream
 (`/stream2`). `camera snapshot <printer>` and `camera stream <printer>` keep
 their meaning: a positional name is always a printer.
+
+`camera stream` serves MJPEG by default, transcoded from the camera's H.264
+so any browser can show it. `--format h264` instead forwards the camera's own
+H.264, without decoding or re-encoding, as an Annex-B byte stream that starts
+at a keyframe. Open it with `ffplay -f h264 <url>` or
+`vlc --demux h264 <url>`; browsers cannot play it. The same flag works for
+H/X-series Bambu printers (`melt camera stream <printer> --format h264`);
+printers whose camera serves only MJPEG reject it with
+`capability_unsupported`.
 
 ## Security
 

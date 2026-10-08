@@ -110,7 +110,7 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
         path: &["camera", "stream"],
         short: "Stream camera feed from a printer via a local HTTP server",
         args: "(<name> | --camera <camera>) [flags]",
-        flags: "      --camera string           IP camera profile to use instead of a printer\n      --format string           output format for stream: mjpeg (transcode H.264 to MJPEG for browser viewing)\n  -h, --help                    help for stream\n      --insecure                skip TLS fingerprint verification for this invocation\n      --port int                local HTTP server port (default 8080)\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --quality string          IP camera stream quality: high or low (default \"high\")\n      --timeout string          auto-stop after this duration (e.g. 30m)",
+        flags: "      --camera string           IP camera profile to use instead of a printer\n      --format string           output format for stream: mjpeg (transcode H.264 to MJPEG for browser viewing) or h264 (the camera's own H.264 for ffplay or VLC)\n  -h, --help                    help for stream\n      --insecure                skip TLS fingerprint verification for this invocation\n      --port int                local HTTP server port (default 8080)\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --quality string          IP camera stream quality: high or low (default \"high\")\n      --timeout string          auto-stop after this duration (e.g. 30m)",
     },
     LeafCommand {
         path: &["camera", "unlink"],
@@ -2125,17 +2125,10 @@ fn camera_stream(
         },
         None => None,
     };
-    if let Some(value) = options.value("format").filter(|value| *value != "mjpeg") {
-        return write_error(
-            "camera stream",
-            format,
-            AppError::usage(format!(
-                "invalid --format {value:?}: must be \"mjpeg\" or omitted"
-            )),
-            out,
-            err,
-        );
-    }
+    let stream_format = match stream_format(options.value("format")) {
+        Ok(stream_format) => stream_format,
+        Err(error) => return write_error("camera stream", format, error, out, err),
+    };
     if let Some(camera) = options.value("camera") {
         return cameras::stream(
             format,
@@ -2144,6 +2137,7 @@ fn camera_stream(
             &options,
             port,
             duration,
+            stream_format,
             out,
             err,
         );
@@ -2169,17 +2163,47 @@ fn camera_stream(
         Ok(printer) => printer,
         Err(error) => return write_error("camera stream", format, error, out, err),
     };
-    let stream = match drivers::camera_stream(
-        &printer.driver,
-        printer.access_code.as_deref(),
-        printer.tls_fingerprint.as_deref(),
-        printer.timeout,
-    ) {
+    let opened = match stream_format {
+        StreamFormat::Mjpeg => drivers::camera_stream(
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+            printer.timeout,
+        )
+        .map(StreamFeed::Mjpeg),
+        StreamFormat::H264 => {
+            if let drivers::Profile::Bambu(profile) = &printer.driver
+                && profile.default_capabilities().camera == bambu::CameraTransport::MjpegTls
+            {
+                return write_error(
+                    "camera stream",
+                    format,
+                    AppError {
+                        exit_code: 5,
+                        code: "capability_unsupported",
+                        message: "this printer's camera serves only MJPEG; use --format mjpeg"
+                            .into(),
+                    },
+                    out,
+                    err,
+                );
+            }
+            drivers::camera_h264_stream(
+                &printer.driver,
+                printer.access_code.as_deref(),
+                printer.tls_fingerprint.as_deref(),
+                printer.timeout,
+            )
+            .map(StreamFeed::h264)
+        }
+    };
+    let stream = match opened {
         Ok(stream) => stream,
         Err(error) => return write_error("camera stream", format, driver_error(error), out, err),
     };
     let profile = printer.name.clone();
-    serve_mjpeg_stream(
+    let stream_format = stream.format();
+    serve_camera_feed(
         format,
         stream,
         port,
@@ -2188,7 +2212,7 @@ fn camera_stream(
         |url| CameraStreamData {
             profile: profile.clone(),
             url,
-            format: "mjpeg",
+            format: stream_format,
             port,
         },
         out,
@@ -2196,12 +2220,127 @@ fn camera_stream(
     )
 }
 
-/// Serves an MJPEG stream on a loopback port until the duration elapses or
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StreamFormat {
+    Mjpeg,
+    H264,
+}
+
+fn stream_format(value: Option<&str>) -> Result<StreamFormat, AppError> {
+    match value {
+        None | Some("mjpeg") => Ok(StreamFormat::Mjpeg),
+        Some("h264") => Ok(StreamFormat::H264),
+        Some(value) => Err(AppError::usage(format!(
+            "invalid --format {value:?}: must be \"mjpeg\", \"h264\", or omitted"
+        ))),
+    }
+}
+
+/// What `camera stream` serves: MJPEG transcoded for browsers, or the
+/// camera's own H.264 as an Annex-B byte stream for ffplay or VLC.
+enum StreamFeed {
+    Mjpeg(bambu::MjpegStream),
+    H264 {
+        stream: Box<bambu::H264Stream>,
+        pending: Vec<u8>,
+        awaiting_keyframe: bool,
+    },
+}
+
+impl StreamFeed {
+    fn h264(stream: bambu::H264Stream) -> Self {
+        Self::H264 {
+            stream: Box::new(stream),
+            pending: Vec::new(),
+            awaiting_keyframe: true,
+        }
+    }
+
+    fn shutdown_handle(&self) -> std::io::Result<TcpStream> {
+        match self {
+            Self::Mjpeg(stream) => stream.shutdown_handle(),
+            Self::H264 { stream, .. } => stream.shutdown_handle(),
+        }
+    }
+
+    fn format(&self) -> &'static str {
+        match self {
+            Self::Mjpeg(_) => "mjpeg",
+            Self::H264 { .. } => "h264",
+        }
+    }
+
+    fn content_type(&self) -> &'static str {
+        match self {
+            Self::Mjpeg(_) => "multipart/x-mixed-replace; boundary=frame",
+            Self::H264 { .. } => "video/h264",
+        }
+    }
+
+    fn describe(&self) -> &'static str {
+        match self {
+            Self::Mjpeg(_) => "MJPEG (open in browser)",
+            Self::H264 { .. } => {
+                "H.264 Annex B (open with `ffplay -f h264 URL` or `vlc --demux h264 URL`)"
+            }
+        }
+    }
+
+    /// A newly attached client must start decoding at a keyframe.
+    fn attach(&mut self) {
+        if let Self::H264 {
+            pending,
+            awaiting_keyframe,
+            ..
+        } = self
+        {
+            pending.clear();
+            *awaiting_keyframe = true;
+        }
+    }
+}
+
+impl Read for StreamFeed {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Mjpeg(stream) => stream.read(buffer),
+            Self::H264 {
+                stream,
+                pending,
+                awaiting_keyframe,
+            } => {
+                while pending.is_empty() {
+                    if let Some(bytes) = next_annex_b(stream.next_access_unit()?, awaiting_keyframe)
+                    {
+                        *pending = bytes;
+                    }
+                }
+                let count = buffer.len().min(pending.len());
+                buffer[..count].copy_from_slice(&pending[..count]);
+                pending.drain(..count);
+                Ok(count)
+            }
+        }
+    }
+}
+
+/// Annex-B bytes to send for one access unit, holding back everything
+/// before the first keyframe so a player can start decoding.
+fn next_annex_b(unit: bambu::H264AccessUnit, awaiting_keyframe: &mut bool) -> Option<Vec<u8>> {
+    if *awaiting_keyframe && !unit.keyframe {
+        return None;
+    }
+    let bytes = unit.annex_b?;
+    *awaiting_keyframe = false;
+    Some(bytes)
+}
+
+/// Serves a camera feed on a loopback port until the duration elapses or
 /// the process is interrupted. Shared by printer and IP camera streams.
 #[allow(clippy::too_many_arguments)]
-fn serve_mjpeg_stream<T: Serialize>(
+fn serve_camera_feed<T: Serialize>(
     format: OutputFormat,
-    stream: melt_core::bambu::MjpegStream,
+    stream: StreamFeed,
     port: u16,
     duration: Option<Duration>,
     source: &str,
@@ -2255,13 +2394,14 @@ fn serve_mjpeg_stream<T: Serialize>(
         );
     }
     let url = format!("http://127.0.0.1:{port}/stream");
+    let description = stream.describe();
     let result = write_success(
         "camera stream",
         format,
         data(url.clone()),
         |out| {
             writeln!(out, "Streaming camera from {source}")?;
-            writeln!(out, "Format: MJPEG (open in browser)")?;
+            writeln!(out, "Format: {description}")?;
             writeln!(out, "URL: {url}\n")?;
             writeln!(out, "Press Ctrl+C to stop.")
         },
@@ -2288,7 +2428,7 @@ struct CameraStreamData {
 
 fn serve_camera_stream(
     listener: TcpListener,
-    stream: melt_core::bambu::MjpegStream,
+    stream: StreamFeed,
     duration: Option<Duration>,
     upstream_shutdown: Option<TcpStream>,
 ) {
@@ -2325,16 +2465,17 @@ fn serve_camera_stream(
                     active_socket = socket.try_clone().ok();
                     let sender = done_sender.clone();
                     worker = Some(thread::spawn(move || {
+                        let mut reader = reader;
+                        reader.attach();
                         let _ = write_http_response(
                             &mut socket,
                             "200 OK",
                             &[
-                                ("Content-Type", "multipart/x-mixed-replace; boundary=frame"),
+                                ("Content-Type", reader.content_type()),
                                 ("Cache-Control", "no-cache"),
                                 ("Connection", "close"),
                             ],
                         );
-                        let mut reader = reader;
                         let _ = std::io::copy(&mut reader, &mut socket);
                         let _ = sender.send(reader);
                     }));
@@ -6097,13 +6238,13 @@ mod tests {
     }
 
     #[test]
-    fn camera_stream_rejects_non_mjpeg_format_before_loading_a_profile() {
+    fn camera_stream_rejects_unknown_formats_before_loading_a_profile() {
         let args = [
             "camera".into(),
             "stream".into(),
             "garage".into(),
             "--format".into(),
-            "h264".into(),
+            "h265".into(),
             "--output".into(),
             "json".into(),
         ];
@@ -6112,7 +6253,49 @@ mod tests {
         assert_eq!(run(&args, &mut out, &mut Vec::new()), 2);
         let output = String::from_utf8(out).unwrap();
         assert!(output.contains(r#""command": "camera stream""#));
-        assert!(output.contains(r#"invalid --format \"h264\": must be \"mjpeg\" or omitted"#));
+        assert!(
+            output
+                .contains(r#"invalid --format \"h265\": must be \"mjpeg\", \"h264\", or omitted"#)
+        );
+    }
+
+    #[test]
+    fn stream_format_accepts_mjpeg_and_h264() {
+        let cases = [
+            (None, Some(StreamFormat::Mjpeg)),
+            (Some("mjpeg"), Some(StreamFormat::Mjpeg)),
+            (Some("h264"), Some(StreamFormat::H264)),
+            (Some("H264"), None),
+            (Some("h265"), None),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(stream_format(value).ok(), expected, "{value:?}");
+        }
+    }
+
+    #[test]
+    fn annex_b_output_starts_at_a_keyframe() {
+        fn unit(keyframe: bool, annex_b: Option<&[u8]>) -> bambu::H264AccessUnit {
+            bambu::H264AccessUnit {
+                rtp_packets: Vec::new(),
+                annex_b: annex_b.map(<[u8]>::to_vec),
+                keyframe,
+                jpeg: None,
+            }
+        }
+        let mut awaiting_keyframe = true;
+        let sent: Vec<Option<Vec<u8>>> = [
+            unit(false, Some(&[1])),
+            unit(false, None),
+            unit(true, Some(&[2])),
+            unit(false, Some(&[3])),
+        ]
+        .into_iter()
+        .map(|unit| next_annex_b(unit, &mut awaiting_keyframe))
+        .collect();
+
+        assert_eq!(sent, [None, None, Some(vec![2]), Some(vec![3])]);
+        assert!(!awaiting_keyframe);
     }
 
     #[test]

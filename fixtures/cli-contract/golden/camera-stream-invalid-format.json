@@ -3,7 +3,7 @@
   "data": null,
   "error": {
     "code": "config_error",
-    "message": "invalid --format \"h264\": must be \"mjpeg\" or omitted",
+    "message": "invalid --format \"h265\": must be \"mjpeg\", \"h264\", or omitted",
     "details": {}
   },
   "meta": {

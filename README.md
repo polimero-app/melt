@@ -98,6 +98,7 @@ melt firmware check workshop --include-history --output json
 melt firmware check workshop --include-history --include-public-catalogue --output json
 melt printer capabilities workshop --output json
 melt jobs preflight ./part.gcode.3mf --output json
+melt camera stream workshop --format h264   # native H.264 for ffplay/VLC
 ```
 
 On Unix, credential files supplied to `--access-code-file` must be regular

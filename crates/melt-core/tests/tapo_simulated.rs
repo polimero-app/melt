@@ -274,6 +274,27 @@ fn snapshot_decodes_a_fresh_frame_over_digest_rtsp() {
 }
 
 #[test]
+fn undecoded_stream_yields_native_annex_b_starting_at_a_keyframe() {
+    let (port, server) = spawn_camera(DIGEST);
+    let mut stream = cameras::open_stream(
+        &camera(port, "secret", Duration::from_secs(5)),
+        StreamQuality::High,
+        false,
+    )
+    .unwrap();
+    let unit = stream.next_access_unit().unwrap();
+    drop(stream);
+    server.join().unwrap();
+
+    assert!(unit.keyframe);
+    assert!(unit.jpeg.is_none(), "native passthrough must not decode");
+    let annex_b = unit.annex_b.unwrap();
+    // Annex-B start code, then the in-band SPS (NAL type 7) the camera sent.
+    assert_eq!(&annex_b[..4], &[0, 0, 0, 1]);
+    assert_eq!(annex_b[4] & 0x1f, 7);
+}
+
+#[test]
 fn low_quality_uses_the_second_stream() {
     let (port, server) = spawn_camera(DIGEST);
     cameras::snapshot(
