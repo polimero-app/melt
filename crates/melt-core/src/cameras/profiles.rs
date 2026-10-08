@@ -132,13 +132,22 @@ pub fn update(
 
     let password_changed = !request.password.is_empty();
     let account = password_account(&previous.id);
+    let reaches_camera_differently = password_changed
+        || request.driver != previous.driver
+        || request.host != previous.host
+        || request.username != previous.username
+        || request.rtsp_port != previous.rtsp_port;
+    // Only a verifying edit needs the stored password; a rename must work
+    // even when the keychain entry is gone.
     let password = if password_changed {
         request.password
-    } else {
+    } else if reaches_camera_differently {
         StoredSecret::load(store, account.clone())
             .map_err(secret_error)?
             .value
             .ok_or(CameraError::MissingSecret)?
+    } else {
+        String::new()
     };
     let camera = ResolvedCamera {
         name: name.clone(),
@@ -155,11 +164,6 @@ pub fn update(
         password,
         timeout,
     };
-    let reaches_camera_differently = password_changed
-        || camera.profile.driver != previous.driver
-        || camera.profile.host != previous.host
-        || camera.profile.username != previous.username
-        || camera.profile.rtsp_port != previous.rtsp_port;
     if reaches_camera_differently {
         verify(&camera)?;
     }
@@ -565,6 +569,25 @@ mod tests {
             resolve(dir.path(), &store, "front").unwrap().password,
             "s3cret"
         );
+    }
+
+    #[test]
+    fn rename_works_without_the_stored_password_but_reconnecting_does_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::default();
+        create(dir.path(), &store, request("porch", "s3cret"), accept).unwrap();
+        store.0.lock().unwrap().clear();
+
+        let mut moved = request("porch", "");
+        moved.host = "192.0.2.99".into();
+        let error = update(dir.path(), &store, "porch", moved, accept).unwrap_err();
+        assert!(matches!(error, CameraError::MissingSecret), "{error:?}");
+
+        update(dir.path(), &store, "porch", request("front", ""), |_| {
+            panic!("an offline rename must not contact the camera")
+        })
+        .unwrap();
+        assert!(profile(dir.path(), "front").is_ok());
     }
 
     #[test]
