@@ -1976,7 +1976,7 @@ fn snapshot_destination(requested: Option<&str>, profile: &str) -> Result<PathBu
 }
 
 fn validate_snapshot_destination(destination: &Path, overwrite: bool) -> Result<(), AppError> {
-    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let parent = parent_dir(destination);
     match fs::metadata(parent) {
         Ok(metadata) if metadata.is_dir() => {}
         Ok(_) => {
@@ -2023,7 +2023,7 @@ fn write_snapshot_file(destination: &Path, image: &[u8], overwrite: bool) -> Res
         });
     }
     validate_snapshot_destination(destination, overwrite)?;
-    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let parent = parent_dir(destination);
     let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|_| AppError {
         exit_code: 1,
         code: "internal_error",
@@ -3625,13 +3625,20 @@ fn download_destinations(
     Ok(destinations)
 }
 
+/// Directory holding `path`; a bare file name lives in the current directory.
+fn parent_dir(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
 fn download_destination(destination: &str, device_path: &str) -> Result<PathBuf, AppError> {
     let name = download_file_name(device_path)?;
     let destination = PathBuf::from(destination);
     if destination.is_dir() {
         return Ok(destination.join(name));
     }
-    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let parent = parent_dir(&destination);
     match fs::metadata(parent) {
         Ok(metadata) if metadata.is_dir() => Ok(destination),
         _ => Err(AppError::usage(format!(
@@ -5253,6 +5260,18 @@ fn write_json<T: Serialize>(out: &mut dyn Write, value: &T) -> serde_json::Resul
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bare_filename_destinations_use_the_current_directory() {
+        let name = "melt-bare-destination-does-not-exist.jpg";
+        assert_eq!(parent_dir(Path::new(name)), Path::new("."));
+        assert_eq!(parent_dir(Path::new("dir/a.jpg")), Path::new("dir"));
+        assert!(validate_snapshot_destination(Path::new(name), false).is_ok());
+        assert_eq!(
+            download_destination(name, "/gcodes/part.gcode").unwrap(),
+            PathBuf::from(name)
+        );
+    }
+
     fn sample_status() -> moonraker::Status {
         moonraker::Status {
             state: moonraker::PrinterState::Printing,
