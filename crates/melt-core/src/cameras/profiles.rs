@@ -477,7 +477,7 @@ mod tests {
     #[test]
     fn create_rejects_invalid_input_before_contacting_the_camera() {
         type Edit = fn(&mut CameraRequest);
-        let cases: [(&str, Edit); 8] = [
+        let cases: [(&str, Edit); 12] = [
             ("name", |request| request.name = "-porch".into()),
             ("driver", |request| request.driver = "onvif".into()),
             ("scheme host", |request| {
@@ -489,6 +489,16 @@ mod tests {
             ("quoted username", |request| {
                 request.username = "me\"lt".into()
             }),
+            ("backslash username", |request| {
+                request.username = "me\\lt".into()
+            }),
+            ("control username", |request| {
+                request.username = "me\u{7}lt".into()
+            }),
+            ("control password", |request| {
+                request.password = "se\u{7}cret".into()
+            }),
+            ("long username", |request| request.username = "u".repeat(65)),
             ("empty password", |request| request.password = String::new()),
             ("port zero", |request| request.rtsp_port = Some(0)),
             ("timeout", |request| request.timeout = "soon".into()),
@@ -624,5 +634,97 @@ mod tests {
             unlink(dir.path(), "garage", "porch"),
             Err(CameraError::NotLinked { .. })
         ));
+    }
+
+    struct DeleteFails(MemoryStore);
+
+    impl SecretStore for DeleteFails {
+        fn get(&self, service: &str, account: &str) -> Result<String, SecretError> {
+            self.0.get(service, account)
+        }
+        fn set(&self, service: &str, account: &str, secret: &str) -> Result<(), SecretError> {
+            self.0.set(service, account, secret)
+        }
+        fn delete(&self, _: &str, _: &str) -> Result<(), SecretError> {
+            Err(SecretError::Unavailable("locked".into()))
+        }
+    }
+
+    #[test]
+    fn remove_warns_when_the_password_cannot_be_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = DeleteFails(MemoryStore::default());
+        create(dir.path(), &store, request("porch", "s3cret"), accept).unwrap();
+
+        let removed = remove(dir.path(), &store, "porch").unwrap();
+
+        assert!(!removed.password_removed);
+        assert_eq!(removed.warnings.len(), 1);
+        assert_eq!(removed.warnings[0].code, "password_delete_failed");
+        assert!(
+            Config::open(dir.path())
+                .unwrap()
+                .get_camera("porch")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn concurrent_change_during_update_restores_the_old_password() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::default();
+        let created = create(dir.path(), &store, request("porch", "old"), accept).unwrap();
+
+        let result = update(dir.path(), &store, "porch", request("porch", "new"), |_| {
+            fs::write(dir.path().join("melt.yaml"), "version: 1\nprofiles: {}\n").unwrap();
+            Ok(())
+        });
+
+        assert!(matches!(
+            result,
+            Err(CameraError::Config(ConfigError::ConcurrentUpdate))
+        ));
+        assert_eq!(
+            store
+                .get(SERVICE, &format!("camera:{}:password", created.id))
+                .unwrap(),
+            "old"
+        );
+    }
+
+    #[test]
+    fn changing_the_connection_verifies_with_the_stored_password() {
+        type Edit = fn(&mut CameraRequest);
+        let cases: [(&str, Edit); 3] = [
+            ("host", |request| request.host = "192.0.2.21".into()),
+            ("username", |request| request.username = "other".into()),
+            ("port", |request| request.rtsp_port = Some(8554)),
+        ];
+        for (name, edit) in cases {
+            let dir = tempfile::tempdir().unwrap();
+            let store = MemoryStore::default();
+            create(dir.path(), &store, request("porch", "s3cret"), accept).unwrap();
+            let mut changed = request("porch", "");
+            edit(&mut changed);
+            let (host, username, port) = (
+                changed.host.clone(),
+                changed.username.clone(),
+                changed.rtsp_port,
+            );
+            let called = Cell::new(false);
+
+            update(dir.path(), &store, "porch", changed, |camera| {
+                called.set(
+                    camera.password == "s3cret"
+                        && camera.profile.host == host
+                        && camera.profile.username == username
+                        && camera.profile.rtsp_port == port,
+                );
+                Ok(())
+            })
+            .unwrap();
+
+            assert!(called.get(), "{name}");
+        }
     }
 }
