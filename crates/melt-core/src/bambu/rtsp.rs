@@ -554,20 +554,20 @@ fn parse_sdp(sdp: &str) -> Option<(String, Vec<u8>, Vec<u8>)> {
         let line = line.trim();
         if let Some(value) = line.strip_prefix("a=control:") {
             control = Some(value.trim().to_owned());
-        } else if let Some(value) = line.strip_prefix("a=fmtp:") {
-            if let Some(sets_start) = value.find("sprop-parameter-sets=") {
-                let sets = &value[sets_start + "sprop-parameter-sets=".len()..];
-                let sets = sets.split(';').next().unwrap_or(sets);
-                let mut parts = sets.split(',');
-                if let (Some(sps_b64), Some(pps_b64)) = (parts.next(), parts.next()) {
-                    use base64::Engine;
-                    sps = base64::engine::general_purpose::STANDARD
-                        .decode(sps_b64.trim())
-                        .unwrap_or_default();
-                    pps = base64::engine::general_purpose::STANDARD
-                        .decode(pps_b64.trim())
-                        .unwrap_or_default();
-                }
+        } else if let Some(value) = line.strip_prefix("a=fmtp:")
+            && let Some(sets_start) = value.find("sprop-parameter-sets=")
+        {
+            let sets = &value[sets_start + "sprop-parameter-sets=".len()..];
+            let sets = sets.split(';').next().unwrap_or(sets);
+            let mut parts = sets.split(',');
+            if let (Some(sps_b64), Some(pps_b64)) = (parts.next(), parts.next()) {
+                use base64::Engine;
+                sps = base64::engine::general_purpose::STANDARD
+                    .decode(sps_b64.trim())
+                    .unwrap_or_default();
+                pps = base64::engine::general_purpose::STANDARD
+                    .decode(pps_b64.trim())
+                    .unwrap_or_default();
             }
         }
     }
@@ -637,10 +637,8 @@ impl H264Stream {
                 } else if let Some(buffer) = &mut self.fu_buffer {
                     buffer.extend_from_slice(data);
                 }
-                if end {
-                    if let Some(buffer) = self.fu_buffer.take() {
-                        self.push_nal(buffer);
-                    }
+                if end && let Some(buffer) = self.fu_buffer.take() {
+                    self.push_nal(buffer);
                 }
             }
             _ => {}

@@ -187,10 +187,10 @@ async fn serve(
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             };
-            if let CameraFrame::H264(access_unit) = frame.as_ref() {
-                if access_unit_tx.send(Some(Arc::clone(access_unit))).is_err() {
-                    break;
-                }
+            if let CameraFrame::H264(access_unit) = frame.as_ref()
+                && access_unit_tx.send(Some(Arc::clone(access_unit))).is_err()
+            {
+                break;
             }
         }
     });

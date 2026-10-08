@@ -3242,10 +3242,10 @@ fn files_upload(
             );
         }
     };
-    if let Some(destination) = requested_destination {
-        if let Err(error) = validate_known_file_root(destination) {
-            return write_error("files upload", format, error, out, err);
-        }
+    if let Some(destination) = requested_destination
+        && let Err(error) = validate_known_file_root(destination)
+    {
+        return write_error("files upload", format, error, out, err);
     }
     let source_metadata = match fs::metadata(&source) {
         Ok(metadata) if metadata.is_file() => metadata,
@@ -3929,10 +3929,10 @@ fn job_action(
             );
         }
     };
-    if let Some(path) = requested_path {
-        if let Err(error) = validate_known_file_root(path) {
-            return write_error(&command, format, error, out, err);
-        }
+    if let Some(path) = requested_path
+        && let Err(error) = validate_known_file_root(path)
+    {
+        return write_error(&command, format, error, out, err);
     }
     let connection = match connection_options(&options) {
         Ok(connection) => connection,

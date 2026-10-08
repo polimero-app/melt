@@ -653,14 +653,12 @@ fn resolve_absolute_path(value: &str) -> Result<std::path::PathBuf, CommandError
 /// folder the user browsed (persisted in preferences), falling back to a
 /// `Melt` folder under the user's documents, created on first use.
 fn default_library_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, CommandError> {
-    if let Ok(preferences) = preferences::Preferences::load() {
-        if let Some(path) = preferences.library_path {
-            if let Ok(resolved) = resolve_absolute_path(&path) {
-                if resolved.is_dir() {
-                    return Ok(resolved);
-                }
-            }
-        }
+    if let Ok(preferences) = preferences::Preferences::load()
+        && let Some(path) = preferences.library_path
+        && let Ok(resolved) = resolve_absolute_path(&path)
+        && resolved.is_dir()
+    {
+        return Ok(resolved);
     }
     let base = app
         .path()
@@ -1812,13 +1810,13 @@ fn cached_monitor_entry_at(
         return None;
     }
     let now = Instant::now();
-    if let Ok(entries) = state.entries.lock() {
-        if let Some(cached) = entries.get(&name).filter(|cached| cached.next_poll > now) {
-            return state
-                .pool
-                .is_current_generation(generation)
-                .then(|| cached.entry.clone());
-        }
+    if let Ok(entries) = state.entries.lock()
+        && let Some(cached) = entries.get(&name).filter(|cached| cached.next_poll > now)
+    {
+        return state
+            .pool
+            .is_current_generation(generation)
+            .then(|| cached.entry.clone());
     }
 
     if let Ok(mut entries) = state.entries.lock() {
@@ -2902,18 +2900,17 @@ fn library_file_preview(
     // A local file is seekable, so a 3mf's embedded thumbnail (present on
     // nearly every slicer-exported file) can be read directly from disk
     // without loading the whole model into memory first.
-    if extension == "3mf" {
-        if let Some(thumbnail) = std::fs::File::open(&absolute)
+    if extension == "3mf"
+        && let Some(thumbnail) = std::fs::File::open(&absolute)
             .ok()
             .and_then(extract_3mf_thumbnail)
-        {
-            let preview = FilePreviewResponse {
-                kind: "png",
-                data: STANDARD.encode(thumbnail),
-            };
-            cache_preview(&state, &cache_key, &preview, size == preview::GRID_SIZE);
-            return Ok(preview);
-        }
+    {
+        let preview = FilePreviewResponse {
+            kind: "png",
+            data: STANDARD.encode(thumbnail),
+        };
+        cache_preview(&state, &cache_key, &preview, size == preview::GRID_SIZE);
+        return Ok(preview);
     }
     // Check the size before reading so an oversized model never lands in
     // memory; `take` also bounds a file that grows after the metadata check.
@@ -2977,10 +2974,10 @@ static RENDER_SEMAPHORE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore {
 /// Checks the in-memory cache, then falls back to the on-disk thumbnail
 /// cache (persisted across app restarts), populating memory on a disk hit.
 fn lookup_preview_cache(state: &PreviewState, cache_key: &str) -> Option<FilePreviewResponse> {
-    if let Ok(mut cache) = state.cache.lock() {
-        if let Some(preview) = cache.get(cache_key) {
-            return Some(preview);
-        }
+    if let Ok(mut cache) = state.cache.lock()
+        && let Some(preview) = cache.get(cache_key)
+    {
+        return Some(preview);
     }
     let preview = read_disk_preview_cache(cache_key)?;
     if let Ok(mut cache) = state.cache.lock() {

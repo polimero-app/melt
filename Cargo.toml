@@ -10,7 +10,7 @@ resolver = "2"
 edition = "2024"
 license = "AGPL-3.0-only"
 repository = "https://github.com/polimero-app/melt"
-rust-version = "1.85"
+rust-version = "1.95"
 version = "0.1.0"
 
 [workspace.dependencies]
