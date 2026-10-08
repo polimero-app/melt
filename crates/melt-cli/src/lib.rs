@@ -68,55 +68,55 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
         path: &["camera", "add"],
         short: "Add an IP camera profile",
         args: "<camera> [flags]",
-        flags: "      --driver string          camera driver (tapo)\n  -h, --help                   help for add\n      --host string            camera IP address or hostname\n      --password-file string   file containing the camera account password\n      --rtsp-port int          RTSP port (default 554)\n      --timeout string         connection timeout (default \"10s\")\n      --username string        camera account username",
+        flags: "      --driver string          camera driver: tapo (required)\n  -h, --help                   help for add\n      --host string            camera IP address or hostname (required)\n      --password-file string   file containing the Camera Account password (required)\n      --rtsp-port int          RTSP port (default 554)\n      --timeout string         connection timeout (default \"10s\")\n      --username string        Camera Account username (required)",
     },
     LeafCommand {
         path: &["camera", "edit"],
         short: "Edit an IP camera profile",
         args: "<camera> [flags]",
-        flags: "  -h, --help                   help for edit\n      --host string            camera IP address or hostname\n      --name string            rename the camera\n      --password-file string   file containing a new camera account password\n      --rtsp-port int          RTSP port\n      --timeout string         connection timeout\n      --username string        camera account username",
+        flags: "  -h, --help                   help for edit\n      --host string            camera IP address or hostname\n      --name string            rename the camera\n      --password-file string   file containing a new Camera Account password\n      --rtsp-port int          RTSP port\n      --timeout string         connection timeout (e.g. 10s)\n      --username string        Camera Account username",
     },
     LeafCommand {
         path: &["camera", "link"],
         short: "Link an IP camera to a printer",
-        args: "<camera> [flags]",
-        flags: "  -h, --help             help for link\n      --printer string   printer profile to link\n      --select           show this camera by default for the printer",
+        args: "<camera> --printer <printer> [flags]",
+        flags: "  -h, --help             help for link\n      --printer string   printer profile to link (required)\n      --select           show this camera by default for the printer",
     },
     LeafCommand {
         path: &["camera", "list"],
         short: "List IP camera profiles and their printer links",
         args: "[flags]",
-        flags: "  -h, --help   help for list",
+        flags: "  -h, --help help for list",
     },
     LeafCommand {
         path: &["camera", "remove"],
         short: "Remove an IP camera profile",
         args: "<camera> [flags]",
-        flags: "  -h, --help   help for remove\n      --yes    skip interactive confirmation",
+        flags: "  -h, --help help for remove\n      --yes  skip interactive confirmation",
     },
     LeafCommand {
         path: &["camera", "select"],
         short: "Choose the camera a printer shows by default",
-        args: "[flags]",
-        flags: "      --builtin          show the printer's built-in camera\n      --camera string    show this linked IP camera\n  -h, --help             help for select\n      --printer string   printer profile",
+        args: "--printer <printer> (--camera <camera> | --builtin) [flags]",
+        flags: "      --builtin          show the printer's built-in camera\n      --camera string    show this linked IP camera\n  -h, --help             help for select\n      --printer string   printer profile (required)",
     },
     LeafCommand {
         path: &["camera", "snapshot"],
-        short: "Capture one still image from a printer camera",
-        args: "(<name> | --camera <camera>) [flags]",
-        flags: "      --camera string           IP camera profile to use instead of a printer\n  -h, --help                    help for snapshot\n      --insecure                skip TLS fingerprint verification for this invocation\n      --overwrite               replace an existing destination file\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --quality string          IP camera stream quality: high or low (default \"high\")\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --to string               destination file path or directory",
+        short: "Capture one still image from a printer or IP camera",
+        args: "(<printer> | --camera <camera>) [flags]",
+        flags: "      --camera string           IP camera profile to capture instead of a printer\n  -h, --help                    help for snapshot\n      --insecure                skip TLS fingerprint verification for this invocation (printers only)\n      --overwrite               replace an existing destination file\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines; printers only)\n      --quality string          IP camera stream quality: high or low (default \"high\")\n      --timeout string          override the profile connection timeout (e.g. 10s)\n      --to string               destination file path or directory",
     },
     LeafCommand {
         path: &["camera", "stream"],
-        short: "Stream camera feed from a printer via a local HTTP server",
-        args: "(<name> | --camera <camera>) [flags]",
-        flags: "      --camera string           IP camera profile to use instead of a printer\n      --format string           output format for stream: mjpeg (transcode H.264 to MJPEG for browser viewing) or h264 (the camera's own H.264 for ffplay or VLC)\n  -h, --help                    help for stream\n      --insecure                skip TLS fingerprint verification for this invocation\n      --port int                local HTTP server port (default 8080)\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines)\n      --quality string          IP camera stream quality: high or low (default \"high\")\n      --timeout string          auto-stop after this duration (e.g. 30m)",
+        short: "Stream a printer or IP camera via a local HTTP server",
+        args: "(<printer> | --camera <camera>) [flags]",
+        flags: "      --camera string           IP camera profile to stream instead of a printer\n      --duration string         stop streaming after this duration (e.g. 30m)\n      --format string           mjpeg (transcoded, for browsers) or h264 (native, for ffplay or VLC) (default \"mjpeg\")\n  -h, --help                    help for stream\n      --insecure                skip TLS fingerprint verification for this invocation (printers only)\n      --port int                local HTTP server port (default 8080)\n      --protocol-trace string   write protocol diagnostics to this file (JSON Lines; printers only)\n      --quality string          IP camera stream quality: high or low (default \"high\")\n      --timeout string          override the profile connection timeout (e.g. 10s)",
     },
     LeafCommand {
         path: &["camera", "unlink"],
         short: "Unlink an IP camera from a printer",
-        args: "<camera> [flags]",
-        flags: "  -h, --help             help for unlink\n      --printer string   printer profile to unlink",
+        args: "<camera> --printer <printer> [flags]",
+        flags: "  -h, --help             help for unlink\n      --printer string   printer profile to unlink (required)",
     },
     LeafCommand {
         path: &["emergency-stop"],
@@ -282,7 +282,7 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
         short: "CLI for interacting with 3D printers",
         commands: &[
             ("ams", "AMS drying operations on a named printer"),
-            ("camera", "Camera operations on a named printer"),
+            ("camera", "Printer and IP camera operations"),
             (
                 "completion",
                 "Generate the autocompletion script for the specified shell",
@@ -322,7 +322,7 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
     },
     CommandGroup {
         path: &["camera"],
-        short: "Camera operations on a named printer",
+        short: "Printer and IP camera operations",
         commands: &[
             ("add", "Add an IP camera profile"),
             ("edit", "Edit an IP camera profile"),
@@ -330,10 +330,13 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
             ("list", "List IP camera profiles and their printer links"),
             ("remove", "Remove an IP camera profile"),
             ("select", "Choose the camera a printer shows by default"),
-            ("snapshot", "Capture one still image from a printer camera"),
+            (
+                "snapshot",
+                "Capture one still image from a printer or IP camera",
+            ),
             (
                 "stream",
-                "Stream camera feed from a printer via a local HTTP server",
+                "Stream a printer or IP camera via a local HTTP server",
             ),
             ("unlink", "Unlink an IP camera from a printer"),
         ],
@@ -6026,7 +6029,7 @@ mod tests {
         assert_eq!(
             String::from_utf8(out).unwrap(),
             concat!(
-                "Camera operations on a named printer\n\n",
+                "Printer and IP camera operations\n\n",
                 "Usage:\n  melt camera [command]\n\n",
                 "Available Commands:\n",
                 "  add         Add an IP camera profile\n",
@@ -6035,8 +6038,8 @@ mod tests {
                 "  list        List IP camera profiles and their printer links\n",
                 "  remove      Remove an IP camera profile\n",
                 "  select      Choose the camera a printer shows by default\n",
-                "  snapshot    Capture one still image from a printer camera\n",
-                "  stream      Stream camera feed from a printer via a local HTTP server\n",
+                "  snapshot    Capture one still image from a printer or IP camera\n",
+                "  stream      Stream a printer or IP camera via a local HTTP server\n",
                 "  unlink      Unlink an IP camera from a printer\n\n",
                 "Flags:\n  -h, --help   help for camera\n\n",
                 "Global Flags:\n",
@@ -6045,6 +6048,20 @@ mod tests {
                 "Use \"melt camera [command] --help\" for more information about a command.\n"
             )
         );
+    }
+
+    #[test]
+    fn camera_stream_help_separates_auto_stop_from_connection_timeout() {
+        let stream = LEAF_COMMANDS
+            .iter()
+            .find(|leaf| leaf.path == ["camera", "stream"])
+            .unwrap();
+        assert!(stream.flags.contains(
+            "      --duration string         stop streaming after this duration (e.g. 30m)\n"
+        ));
+        assert!(stream.flags.contains(
+            "      --timeout string          override the profile connection timeout (e.g. 10s)"
+        ));
     }
 
     #[test]
