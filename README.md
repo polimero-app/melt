@@ -38,7 +38,8 @@ Fyne GUI, and Go application implementations.
   emergency stop where the driver supports it.
 - **Diagnostics** — export redacted compatibility information covering model
   identity, module firmware, capability provenance, authorization, negotiated
-  transports, TLS-pin presence, camera-owner state, and active/inactive quirks.
+  transports, TLS-pin presence, camera-owner state, active/inactive quirks,
+  IP camera streams, and how the desktop app is playing each camera feed.
 - **Read-only update checks** — inspect Bambu firmware inventory, printer
   advertisements, optional `upgrade.get_history` catalogue evidence, and the
   opt-in official public stable catalogue alongside Moonraker software status;

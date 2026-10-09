@@ -294,6 +294,15 @@ export type MessageKey =
   | "camera.refreshFeed"
   | "camera.restored"
   | "camera.snapshotSaved"
+  | "camera.transport.webrtc"
+  | "camera.transport.webcodecs"
+  | "camera.transport.mjpeg"
+  | "settingsView.cameraPlayback"
+  | "settingsView.ipCamera"
+  | "settingsView.driver"
+  | "settingsView.linkedPrinters"
+  | "settingsView.cameraStreams"
+  | "settingsView.cameraStreamValue"
   | "materials.title"
   | "materials.externalSpool"
   | "materials.slotExternal"
@@ -881,6 +890,9 @@ const messages: Record<Locale, Messages> = {
     "camera.refreshFeed": "Refresh feed",
     "camera.restored": "Camera connection restored",
     "camera.snapshotSaved": "Snapshot saved",
+    "camera.transport.webrtc": "Playing the H.264 video over WebRTC.",
+    "camera.transport.webcodecs": "Playing the H.264 video using WebCodecs.",
+    "camera.transport.mjpeg": "Playing the video as a series of JPEG images.",
     "materials.title": "Filament Spools & Material Systems",
     "materials.externalSpool": "External spool",
     "materials.slotExternal": "EXT",
@@ -1009,6 +1021,12 @@ const messages: Record<Locale, Messages> = {
     "settingsView.model": "Model",
     "settingsView.authorization": "Authorization",
     "settingsView.cameraTransport": "Camera transport",
+    "settingsView.cameraPlayback": "Camera playback",
+    "settingsView.ipCamera": "IP camera",
+    "settingsView.driver": "Driver",
+    "settingsView.linkedPrinters": "Linked printers",
+    "settingsView.cameraStreams": "Camera streams",
+    "settingsView.cameraStreamValue": "{quality} {transport} (viewers: {viewers}, reconnects: {reconnects})",
     "settingsView.storageTransport": "Storage transport",
     "settingsView.firmwareModules": "Firmware modules",
     "settingsView.quirks": "Firmware quirks",
@@ -1465,6 +1483,9 @@ const messages: Record<Locale, Messages> = {
     "camera.refreshFeed": "Atualizar transmissão",
     "camera.restored": "Conexão da câmera restabelecida",
     "camera.snapshotSaved": "Captura salva",
+    "camera.transport.webrtc": "Reproduzindo o vídeo H.264 via WebRTC.",
+    "camera.transport.webcodecs": "Reproduzindo o vídeo H.264 usando WebCodecs.",
+    "camera.transport.mjpeg": "Reproduzindo o vídeo como uma sequência de imagens JPEG.",
     "materials.title": "Carretéis de filamento e sistemas de material",
     "materials.externalSpool": "Carretel externo",
     "materials.slotExternal": "EXT",
@@ -1593,6 +1614,12 @@ const messages: Record<Locale, Messages> = {
     "settingsView.model": "Modelo",
     "settingsView.authorization": "Autorização",
     "settingsView.cameraTransport": "Transporte da câmera",
+    "settingsView.cameraPlayback": "Reprodução da câmera",
+    "settingsView.ipCamera": "Câmera IP",
+    "settingsView.driver": "Driver",
+    "settingsView.linkedPrinters": "Impressoras vinculadas",
+    "settingsView.cameraStreams": "Transmissões da câmera",
+    "settingsView.cameraStreamValue": "{quality} {transport} (espectadores: {viewers}, reconexões: {reconnects})",
     "settingsView.storageTransport": "Transporte de armazenamento",
     "settingsView.firmwareModules": "Módulos de firmware",
     "settingsView.quirks": "Ajustes de firmware",

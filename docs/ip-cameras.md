@@ -89,6 +89,14 @@ printers whose camera serves only MJPEG reject it with
   more CPU, especially at High quality. See the
   [Wayland renderer notes](../README.md#running-on-linux-wayland) if an old
   renderer override is still set.
+- The camera badge names the playback in use (`LIVE · WebRTC`, `LIVE · H.264`
+  for WebCodecs, or an amber `LIVE · MJPEG`). **Configuration › About ›
+  Diagnostics** shows why a faster one was skipped, next to each camera's RTSP
+  streams (quality, viewers, reconnect attempts). Cameras appear there as
+  `camera-N`; names, hosts, usernames and IDs are masked in the reasons too.
+  If playback fails entirely, diagnostics shows **None** with the failure
+  reasons. Results remain available after closing the viewer; WebCodecs is
+  reported only after its first decoded frame.
 
 ## Security
 

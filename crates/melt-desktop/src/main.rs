@@ -3732,7 +3732,17 @@ fn diagnostics_report(
     monitor: tauri::State<'_, MonitorState>,
     firmware: tauri::State<'_, FirmwareUpdateState>,
     camera: tauri::State<'_, CameraManager>,
+    playback: diagnostics::PlaybackRequest,
 ) -> Result<diagnostics::Report, CommandError> {
+    // Profile names are normalized lowercase; match the webview's keys alike.
+    let lowercase = |entries: std::collections::BTreeMap<String, diagnostics::PlaybackReport>| {
+        entries
+            .into_iter()
+            .map(|(name, report)| (name.to_ascii_lowercase(), report))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let printer_playback = lowercase(playback.printers);
+    let camera_playback = lowercase(playback.cameras);
     let config = Config::load().map_err(|_| unreadable_config())?;
     let profiles = config.sorted_profiles();
     let base = diagnostics::report(profiles.iter().map(|profile| profile.profile.clone()));
@@ -3776,16 +3786,38 @@ fn diagnostics_report(
                 .get(&named.name)
                 .map(|cached| cached.entry.report.clone())
         });
-        bambu_reports.push(diagnostics::bambu_compatibility_report_with_updates(
+        let mut report = diagnostics::bambu_compatibility_report_with_updates(
             index + 1,
             &capabilities,
             &selection,
             fingerprint.is_some(),
             owner,
             update_report.as_ref(),
-        ));
+        );
+        report.camera.playback = printer_playback.get(&named.name).map(|playback| {
+            diagnostics::redact_playback(
+                playback,
+                &[&named.name, &named.profile.host, &named.profile.serial],
+            )
+        });
+        bambu_reports.push(report);
     }
-    Ok(diagnostics::with_bambu(base, bambu_reports))
+    let dir = config_dir().map_err(|_| unreadable_config())?;
+    let cameras = cameras::list(dir).map_err(|_| unreadable_config())?;
+    let mut report = diagnostics::with_bambu(base, bambu_reports);
+    report.cameras = cameras
+        .iter()
+        .enumerate()
+        .map(|(index, summary)| {
+            diagnostics::external_camera_report(
+                index + 1,
+                summary,
+                &owners,
+                camera_playback.get(&summary.name),
+            )
+        })
+        .collect();
+    Ok(report)
 }
 
 fn desktop_printer(name: &str, operation: Operation) -> Result<DesktopPrinter, CommandError> {

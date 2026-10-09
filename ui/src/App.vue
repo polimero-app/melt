@@ -11,7 +11,7 @@ import { printTargetState } from './printing'
 import { printStageLabel } from './stages'
 import { awaitsFirstSample, badgeDotClasses, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
-import { linkChanges, linkedCameras, printerSource, type CameraSummary, type Quality } from './cameras'
+import { cameraPlayback, cameraTransportLabels, linkChanges, linkedCameras, printerSource, type CameraPlayback, type CameraSummary, type Quality } from './cameras'
 import { hmsGuideUrl, hmsSeverity, type HmsSeverity } from './hms'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import {
@@ -326,6 +326,17 @@ type Diagnostics = {
   monitorIntervalSeconds: number
   protocolTracesIncluded: boolean
   bambu: BambuCompatibilityDiagnostic[]
+  cameras: CameraDiagnostic[]
+}
+
+type CameraOwnerDiagnostic = { transport: string; subscribers: number; reconnectAttempts: number }
+
+type CameraDiagnostic = {
+  camera: string
+  driver: string
+  linkedPrinters: number
+  streams: { quality: string; owner: CameraOwnerDiagnostic }[]
+  playback?: CameraPlayback
 }
 
 type BambuCompatibilityDiagnostic = {
@@ -335,7 +346,7 @@ type BambuCompatibilityDiagnostic = {
   modelFamily: string
   firmwareModules: { name: string; software: string; hardware?: string }[]
   authorization: { effective: string; conflict: boolean }
-  camera: { preferred: string; source: string; rejectedAdvertisement?: string; owner?: { transport: string; subscribers: number; reconnectAttempts: number } }
+  camera: { preferred: string; source: string; rejectedAdvertisement?: string; owner?: CameraOwnerDiagnostic; playback?: CameraPlayback }
   storageTransport: string
   quirks: { id: string; qualification: string; active: boolean }[]
   tlsPinned: boolean
@@ -2010,7 +2021,12 @@ async function runDiagnostics() {
   diagnostics.value = undefined
   diagnosticsError.value = undefined
   try {
-    diagnostics.value = await invoke<Diagnostics>('diagnostics_report')
+    diagnostics.value = await invoke<Diagnostics>('diagnostics_report', {
+      playback: {
+        printers: Object.fromEntries(cameraPlayback.printers),
+        cameras: Object.fromEntries(cameraPlayback.cameras),
+      },
+    })
   } catch (reason) {
     diagnosticsError.value = message(reason)
   } finally {
@@ -3413,6 +3429,11 @@ onUnmounted(() => {
                     <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.cameraTransport') }}:</dt>
                     <dd class="font-mono">{{ printer.camera.preferred }} · {{ printer.camera.source }}</dd>
                   </div>
+                  <div v-if="printer.camera.playback" class="flex flex-wrap gap-x-1">
+                    <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.cameraPlayback') }}:</dt>
+                    <dd class="font-mono">{{ printer.camera.playback.transport ? cameraTransportLabels[printer.camera.playback.transport] : t('settingsView.none') }}</dd>
+                    <dd v-if="printer.camera.playback.detail" class="basis-full text-amber-700 dark:text-amber-300">{{ printer.camera.playback.detail }}</dd>
+                  </div>
                   <div class="flex flex-wrap gap-x-1">
                     <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.storageTransport') }}:</dt>
                     <dd class="font-mono">{{ printer.storageTransport }}</dd>
@@ -3427,6 +3448,34 @@ onUnmounted(() => {
                   </div>
                 </dl>
                 <p v-if="printer.camera.rejectedAdvertisement" class="mt-1 text-xs text-amber-700 dark:text-amber-300">{{ printer.camera.rejectedAdvertisement }}</p>
+              </section>
+              <!-- IP cameras, redacted to camera-N like printers. Stream is the
+                   Melt↔camera connection; playback is Melt↔this window. -->
+              <section
+                v-for="camera in diagnostics?.cameras ?? []"
+                :key="camera.camera"
+                class="mt-4 border-t border-gray-200 pt-3 dark:border-white/10"
+              >
+                <h4 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('settingsView.ipCamera') }} · {{ camera.camera }}</h4>
+                <dl class="mt-2 space-y-1 text-xs text-gray-600 dark:text-gray-300">
+                  <div class="flex flex-wrap gap-x-1">
+                    <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.driver') }}:</dt>
+                    <dd class="font-mono">{{ camera.driver }}</dd>
+                  </div>
+                  <div class="flex flex-wrap gap-x-1">
+                    <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.linkedPrinters') }}:</dt>
+                    <dd class="font-mono">{{ camera.linkedPrinters }}</dd>
+                  </div>
+                  <div class="flex flex-wrap gap-x-1">
+                    <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.cameraStreams') }}:</dt>
+                    <dd class="font-mono">{{ camera.streams.length ? camera.streams.map((stream) => t('settingsView.cameraStreamValue', { quality: stream.quality, transport: stream.owner.transport, viewers: stream.owner.subscribers, reconnects: stream.owner.reconnectAttempts })).join(', ') : t('settingsView.none') }}</dd>
+                  </div>
+                  <div v-if="camera.playback" class="flex flex-wrap gap-x-1">
+                    <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.cameraPlayback') }}:</dt>
+                    <dd class="font-mono">{{ camera.playback.transport ? cameraTransportLabels[camera.playback.transport] : t('settingsView.none') }}</dd>
+                    <dd v-if="camera.playback.detail" class="basis-full text-amber-700 dark:text-amber-300">{{ camera.playback.detail }}</dd>
+                  </div>
+                </dl>
               </section>
               <p v-if="diagnosticsError" class="mt-3 text-xs text-red-600 dark:text-red-400" role="alert">{{ diagnosticsError }}</p>
               <Button class="mt-4 w-full" :disabled="diagnosticsLoading" @click="runDiagnostics"><PhDesktop class="size-4" aria-hidden="true" /> {{ diagnosticsLoading ? t('common.loading') : t('diagnostics.open') }}</Button>

@@ -3,11 +3,12 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     VERSION,
     bambu::{self, CameraOwnerStatus, CameraSelection, RuntimeCapabilities},
+    cameras::CameraSummary,
     config::Profile,
     firmware_updates::FirmwareUpdateReport,
     monitor,
@@ -25,6 +26,7 @@ pub struct Report {
     pub monitor_interval_seconds: u64,
     pub protocol_traces_included: bool,
     pub bambu: Vec<BambuCompatibilityReport>,
+    pub cameras: Vec<ExternalCameraReport>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -74,6 +76,8 @@ pub struct CameraReport {
     pub source: bambu::CameraSelectionSource,
     pub rejected_advertisement: Option<String>,
     pub owner: Option<CameraOwnerReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub playback: Option<PlaybackReport>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -84,6 +88,138 @@ pub struct CameraOwnerReport {
     pub generation: u64,
     pub has_jpeg: bool,
     pub reconnect_attempts: u32,
+}
+
+impl From<&CameraOwnerStatus> for CameraOwnerReport {
+    fn from(owner: &CameraOwnerStatus) -> Self {
+        Self {
+            transport: owner.transport,
+            subscribers: owner.subscribers,
+            generation: owner.generation,
+            has_jpeg: owner.has_jpeg,
+            reconnect_attempts: owner.reconnect_attempts,
+        }
+    }
+}
+
+/// Playback is negotiated in the webview, so it arrives with the
+/// diagnostics request instead of being observed here.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PlaybackTransport {
+    Webrtc,
+    Webcodecs,
+    Mjpeg,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackReport {
+    /// Absent when playback could not be established.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<PlaybackTransport>,
+    /// Negotiation failures. Free text from the webview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// Playback keyed by printer and by camera profile name.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackRequest {
+    #[serde(default)]
+    pub printers: BTreeMap<String, PlaybackReport>,
+    #[serde(default)]
+    pub cameras: BTreeMap<String, PlaybackReport>,
+}
+
+pub const MAX_PLAYBACK_DETAIL_CHARS: usize = 500;
+
+/// Bounds the webview's free text and masks every known identifier in it.
+pub fn redact_playback(playback: &PlaybackReport, identifiers: &[&str]) -> PlaybackReport {
+    let detail = playback.detail.as_ref().map(|detail| {
+        let mut redacted = String::new();
+        let mut redacted_until = 0;
+        let mut output_chars = 0;
+        // Match the original text, including overlaps, never replacement markers.
+        for (offset, character) in detail.char_indices() {
+            if output_chars >= MAX_PLAYBACK_DETAIL_CHARS {
+                break;
+            }
+            let match_end = identifiers
+                .iter()
+                .filter(|id| !id.is_empty() && detail[offset..].starts_with(**id))
+                .map(|id| offset + id.len())
+                .max()
+                .unwrap_or(0);
+            if offset >= redacted_until {
+                if match_end > offset {
+                    redacted.push_str("[redacted]");
+                    output_chars += "[redacted]".len();
+                } else {
+                    redacted.push(character);
+                    output_chars += 1;
+                }
+            }
+            redacted_until = redacted_until.max(match_end);
+        }
+        redacted.chars().take(MAX_PLAYBACK_DETAIL_CHARS).collect()
+    });
+    PlaybackReport {
+        transport: playback.transport,
+        detail,
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalCameraReport {
+    pub camera: String,
+    pub driver: String,
+    pub linked_printers: usize,
+    pub streams: Vec<ExternalStreamReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub playback: Option<PlaybackReport>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalStreamReport {
+    pub quality: String,
+    pub owner: CameraOwnerReport,
+}
+
+/// Identifies the camera only as report-local `camera-N`; its owners are
+/// keyed `camera:{id}:{quality}` by the camera manager.
+pub fn external_camera_report(
+    camera_index: usize,
+    camera: &CameraSummary,
+    owners: &[CameraOwnerStatus],
+    playback: Option<&PlaybackReport>,
+) -> ExternalCameraReport {
+    let prefix = format!("camera:{}:", camera.id);
+    let identifiers = [
+        camera.name.as_str(),
+        camera.id.as_str(),
+        camera.host.as_str(),
+        camera.username.as_str(),
+    ];
+    ExternalCameraReport {
+        camera: format!("camera-{camera_index}"),
+        driver: camera.driver.clone(),
+        linked_printers: camera.printers.len(),
+        streams: owners
+            .iter()
+            .filter_map(|owner| {
+                let quality = owner.printer_key.strip_prefix(&prefix)?;
+                Some(ExternalStreamReport {
+                    quality: quality.to_owned(),
+                    owner: owner.into(),
+                })
+            })
+            .collect(),
+        playback: playback.map(|playback| redact_playback(playback, &identifiers)),
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -112,6 +248,7 @@ pub fn report(profiles: impl IntoIterator<Item = Profile>) -> Report {
         monitor_interval_seconds: monitor::DEFAULT_INTERVAL.as_secs(),
         protocol_traces_included: false,
         bambu: Vec::new(),
+        cameras: Vec::new(),
     }
 }
 
@@ -217,13 +354,8 @@ pub fn bambu_compatibility_report_with_updates(
             preferred: selection.preferred,
             source: selection.source,
             rejected_advertisement: selection.rejected_advertisement.clone(),
-            owner: owner.map(|owner| CameraOwnerReport {
-                transport: owner.transport,
-                subscribers: owner.subscribers,
-                generation: owner.generation,
-                has_jpeg: owner.has_jpeg,
-                reconnect_attempts: owner.reconnect_attempts,
-            }),
+            owner: owner.map(CameraOwnerReport::from),
+            playback: None,
         },
         storage_transport: capabilities.storage_transport,
         quirks,
@@ -353,6 +485,140 @@ mod tests {
                     && observation.value_summary == "object-redacted")
         );
         assert!(json.contains("string-redacted") || json.contains("object-redacted"));
+    }
+
+    fn owner(key: &str, subscribers: usize) -> CameraOwnerStatus {
+        CameraOwnerStatus {
+            printer_key: key.into(),
+            transport: bambu::CameraOwnerTransport::RtspH264,
+            subscribers,
+            generation: 1,
+            has_jpeg: false,
+            reconnect_attempts: 2,
+            selection_source: bambu::CameraSelectionSource::Unknown,
+            rejected_advertisement: None,
+        }
+    }
+
+    #[test]
+    fn external_camera_report_keeps_only_its_own_streams_and_redacts_identifiers() {
+        let camera = CameraSummary {
+            name: "garage".into(),
+            id: "cam-abc".into(),
+            driver: "tapo".into(),
+            host: "192.0.2.50".into(),
+            username: "camuser".into(),
+            rtsp_port: 554,
+            timeout: "10s".into(),
+            printers: vec!["p1s".into(), "x1c".into()],
+            selected_by: vec!["p1s".into()],
+        };
+        let owners = [
+            owner("camera:cam-abc:low", 1),
+            owner("camera:cam-other:high", 3),
+            owner("bambu:SN001", 4),
+        ];
+        let playback = PlaybackReport {
+            transport: Some(PlaybackTransport::Mjpeg),
+            detail: Some("garage at 192.0.2.50 as camuser failed".into()),
+        };
+
+        let report = external_camera_report(2, &camera, &owners, Some(&playback));
+        let json = serde_json::to_string(&report).unwrap();
+
+        assert_eq!(report.camera, "camera-2");
+        assert_eq!(report.driver, "tapo");
+        assert_eq!(report.linked_printers, 2);
+        assert_eq!(report.streams.len(), 1);
+        assert_eq!(report.streams[0].quality, "low");
+        assert_eq!(report.streams[0].owner.subscribers, 1);
+        assert_eq!(
+            report.playback.as_ref().unwrap().transport,
+            Some(PlaybackTransport::Mjpeg)
+        );
+        for secret in ["garage", "192.0.2.50", "camuser", "cam-abc", "p1s"] {
+            assert!(!json.contains(secret), "{secret} leaked: {json}");
+        }
+    }
+
+    #[test]
+    fn playback_detail_is_redacted_and_bounded() {
+        let cases = [
+            ("no identifiers", vec![], "no identifiers"),
+            (
+                "p1s at host.local",
+                vec!["p1s", "host.local"],
+                "[redacted] at [redacted]",
+            ),
+            ("Kept", vec![""], "Kept"),
+            (
+                "garage.local garage-admin",
+                vec!["garage", "garage.local", "garage-admin"],
+                "[redacted] [redacted]",
+            ),
+            ("ababa", vec!["aba", "bab"], "[redacted]"),
+            ("aaaa", vec!["aaa"], "[redacted]"),
+            (
+                "camera user",
+                vec!["camera", "a", "user"],
+                "[redacted] [redacted]",
+            ),
+            ("ééé", vec!["éé"], "[redacted]"),
+        ];
+        for (detail, identifiers, want) in cases {
+            let playback = PlaybackReport {
+                transport: Some(PlaybackTransport::Webcodecs),
+                detail: Some(detail.into()),
+            };
+            assert_eq!(
+                redact_playback(&playback, &identifiers).detail.as_deref(),
+                Some(want)
+            );
+        }
+
+        let long = PlaybackReport {
+            transport: Some(PlaybackTransport::Webrtc),
+            detail: Some("é".repeat(MAX_PLAYBACK_DETAIL_CHARS + 10)),
+        };
+        let detail = redact_playback(&long, &[]).detail.unwrap();
+        assert_eq!(detail.chars().count(), MAX_PLAYBACK_DETAIL_CHARS);
+
+        let boundary = PlaybackReport {
+            transport: None,
+            detail: Some(format!("{}192.0.2.50", "x".repeat(494))),
+        };
+        let detail = redact_playback(&boundary, &["192.0.2.50"]).detail.unwrap();
+        assert!(!detail.contains("192.0."));
+        assert_eq!(detail.chars().count(), MAX_PLAYBACK_DETAIL_CHARS);
+
+        let expanding = PlaybackReport {
+            transport: None,
+            detail: Some("x".repeat(MAX_PLAYBACK_DETAIL_CHARS)),
+        };
+        let detail = redact_playback(&expanding, &["x"]).detail.unwrap();
+        assert_eq!(detail.chars().count(), MAX_PLAYBACK_DETAIL_CHARS);
+    }
+
+    #[test]
+    fn playback_transports_deserialize_from_the_webview_names() {
+        let request: PlaybackRequest = serde_json::from_str(
+            r#"{"printers":{"P1S":{"transport":"webcodecs","detail":"x"}},"cameras":{"garage":{"transport":"mjpeg"},"offline":{"detail":"connection failed"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            request.printers["P1S"].transport,
+            Some(PlaybackTransport::Webcodecs)
+        );
+        assert_eq!(request.cameras["garage"].detail, None);
+        assert_eq!(request.cameras["offline"].transport, None);
+        assert_eq!(
+            serde_json::to_value(&request.cameras["offline"]).unwrap(),
+            serde_json::json!({ "detail": "connection failed" })
+        );
+        assert!(
+            serde_json::from_str::<PlaybackRequest>(r#"{"cameras":{"a":{"transport":"hls"}}}"#)
+                .is_err()
+        );
     }
 
     /// The detection source names a channel, never the evidence that

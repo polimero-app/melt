@@ -7,7 +7,7 @@ import type { MessageKey } from '../i18n'
 import { commandDetail, commandMessage, type Translate } from '../errors'
 import { cameraViewState } from '../presentation'
 import { h264WebCodecsAvailable, startH264Playback, supportsH264WebCodecs, type H264Playback } from '../camera-stream'
-import { sourceKey, type CameraSource, type Quality } from '../cameras'
+import { cameraPlayback, cameraTransportLabels, sourceKey, sourceName, type CameraPlayback, type CameraSource, type CameraTransport, type Quality } from '../cameras'
 import Button from './Button.vue'
 import Card from './Card.vue'
 import CardHeader from './CardHeader.vue'
@@ -38,8 +38,7 @@ const canvas = ref<HTMLCanvasElement>()
 const stage = ref<HTMLElement>()
 const canvasActive = ref(false)
 const canvasLive = ref(false)
-const transport = ref<'webrtc' | 'webcodecs' | 'mjpeg'>()
-const transportDetail = ref<string>()
+const transport = ref<CameraTransport>()
 const loading = ref(false)
 const error = ref<string>()
 const viewerIds = new Set<string>()
@@ -61,7 +60,15 @@ const stateLabel = computed(() => props.t({
   loading: 'camera.loading',
   offline: 'status.offlineLabel',
 }[state.value] as MessageKey))
-const stateClasses = computed(() => ({
+// The badge names the transport while live; MJPEG turns amber since it is the
+// degraded path. Why a faster one failed lives in Configuration > About.
+const badgeLabel = computed(() => state.value === 'live' && transport.value
+  ? `${stateLabel.value} · ${cameraTransportLabels[transport.value]}`
+  : stateLabel.value)
+const badgeTitle = computed(() => transport.value && props.t(`camera.transport.${transport.value}`))
+const stateClasses = computed(() => state.value === 'live' && transport.value === 'mjpeg'
+  ? 'bg-yellow-100 fill-yellow-500 text-yellow-800 dark:bg-yellow-400/10 dark:fill-yellow-400 dark:text-yellow-500'
+  : ({
   live: 'bg-green-100 fill-green-500 text-green-700 dark:bg-green-400/10 dark:fill-green-400 dark:text-green-400',
   snapshot: 'bg-gray-100 fill-gray-400 text-gray-600 dark:bg-white/10 dark:fill-gray-500 dark:text-gray-400',
   loading: 'bg-yellow-100 fill-yellow-500 text-yellow-800 dark:bg-yellow-400/10 dark:fill-yellow-400 dark:text-yellow-500',
@@ -87,6 +94,12 @@ function message(reason: unknown) {
 
 function failureDetail(reason: unknown) {
   return commandDetail(reason) ?? (reason instanceof Error ? reason.message : message(reason))
+}
+
+function setPlayback(source: CameraSource, playback: CameraPlayback) {
+  transport.value = playback.transport
+  const feeds = 'camera' in source ? cameraPlayback.cameras : cameraPlayback.printers
+  feeds.set(sourceName(source), playback)
 }
 
 /** Keeps a viewer for the current request; a stale one is stopped at once. */
@@ -115,7 +128,6 @@ async function refresh() {
   const current = ++request
   loading.value = true
   error.value = undefined
-  transportDetail.value = undefined
   try {
     if (props.canStream) {
       let connection: RTCPeerConnection | undefined
@@ -146,11 +158,14 @@ async function refresh() {
         connection.onconnectionstatechange = () => {
           if (connection?.connectionState === 'failed' && peer.value === connection) {
             void fallback(source, quality, current, 'WebRTC connection failed')
+              .catch((fallbackError) => {
+                if (current === request) error.value = message(fallbackError)
+              })
           }
         }
         mediaStream.value = media
         peer.value = connection
-        transport.value = 'webrtc'
+        setPlayback(source, { transport: 'webrtc' })
       } catch (reason) {
         connection?.close()
         if (current === request) await fallback(source, quality, current, failureDetail(reason))
@@ -193,12 +208,13 @@ async function waitForPeerReady(connection: RTCPeerConnection, track: Promise<Me
 
 async function fallback(source: CameraSource, quality: Quality, current: number, reason: string) {
   if (current !== request) return
-  transportDetail.value = reason
+  setPlayback(source, { detail: reason })
   peer.value?.close()
   peer.value = undefined
   mediaStream.value?.getTracks().forEach((track) => track.stop())
   mediaStream.value = undefined
   await releaseViewers()
+  if (current !== request) return
   if (!h264WebCodecsAvailable()) {
     return fallbackMjpeg(source, quality, current, `${reason}; WebCodecs is unavailable in the embedded webview`)
   }
@@ -211,7 +227,6 @@ async function fallback(source: CameraSource, quality: Quality, current: number,
     if (current !== request) return
     canvasActive.value = true
     canvasLive.value = false
-    transport.value = 'webcodecs'
     await nextTick()
     if (!canvas.value) throw new Error('Camera canvas is unavailable')
     const playback = startH264Playback(canvas.value, stream.url)
@@ -235,6 +250,7 @@ async function fallback(source: CameraSource, quality: Quality, current: number,
     }
     ready = true
     canvasLive.value = true
+    setPlayback(source, { transport: 'webcodecs', detail: reason })
   } catch (webCodecsError) {
     if (current !== request) return
     await fallbackMjpeg(source, quality, current, `${reason}; WebCodecs: ${failureDetail(webCodecsError)}`)
@@ -242,16 +258,23 @@ async function fallback(source: CameraSource, quality: Quality, current: number,
 }
 
 async function fallbackMjpeg(source: CameraSource, quality: Quality, current: number, reason: string) {
-  transportDetail.value = reason
+  if (current !== request) return
+  setPlayback(source, { detail: reason })
   h264Playback?.stop()
   h264Playback = undefined
   canvasActive.value = false
   canvasLive.value = false
   await releaseViewers()
-  const stream = await invoke<Stream>('camera_mjpeg_stream', { source, quality })
-  if (!keep(stream.viewerId, current)) return
-  url.value = stream.url
-  transport.value = 'mjpeg'
+  if (current !== request) return
+  try {
+    const stream = await invoke<Stream>('camera_mjpeg_stream', { source, quality })
+    if (!keep(stream.viewerId, current)) return
+    url.value = stream.url
+    setPlayback(source, { transport: 'mjpeg', detail: reason })
+  } catch (mjpegError) {
+    if (current === request) setPlayback(source, { detail: `${reason}; MJPEG: ${failureDetail(mjpegError)}` })
+    throw mjpegError
+  }
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeout: number, reason: string) {
@@ -301,7 +324,7 @@ async function stop() {
 async function saveSnapshot() {
   const source = props.source
   if (!source || loading.value || !props.canSnapshot) return
-  const name = 'camera' in source ? source.camera : source.printer
+  const name = sourceName(source)
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
   const destination = await saveFileDialog({
     defaultPath: `${name.replace(/[^\w.-]+/g, '-')}-${stamp}.jpg`,
@@ -332,10 +355,10 @@ function toggleFullscreen() {
       <template #suffix>
         <span
           class="inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-xs font-medium"
-          :title="transportDetail"
+          :title="badgeTitle"
           :class="stateClasses"
         >
-          <svg class="size-1.5" viewBox="0 0 6 6" aria-hidden="true"><circle cx="3" cy="3" r="3" /></svg>{{ stateLabel }}
+          <svg class="size-1.5" viewBox="0 0 6 6" aria-hidden="true"><circle cx="3" cy="3" r="3" /></svg>{{ badgeLabel }}
         </span>
       </template>
       <slot name="controls" />
