@@ -66,6 +66,26 @@ H/X-series Bambu printers (`melt camera stream <printer> --format h264`);
 printers whose camera serves only MJPEG reject it with
 `capability_unsupported`.
 
+### Desktop
+
+- The **Cameras** tab lists your cameras. **Add camera** asks for the
+  same details as `melt camera add`, checks the connection (up to the
+  timeout) and saves nothing if that fails. When editing, leave the password
+  blank to keep the stored one.
+- Selecting a camera opens its live view. **Stream quality** switches between
+  High and Low for that view only; it is not saved.
+- Under **Linked printers**, tick the printers that may show the camera. Their
+  camera card then gets a **Camera feed** picker: **Built-in camera** or a
+  linked camera. The choice is saved as the printer's default feed (like
+  `melt camera select`), and a camera feed keeps working while the printer is
+  offline.
+- Views of the same camera at the same quality share one RTSP connection,
+  which Melt closes when the last view closes. This helps with the camera's
+  simultaneous-stream limit.
+- On Linux, Melt decodes the camera's H.264 and sends the view to the window
+  as MJPEG, because the system webview (WebKitGTK) cannot play H.264. Low
+  quality uses much less CPU.
+
 ## Security
 
 Video uses plain RTSP on your LAN; it is not encrypted end to end. Melt only

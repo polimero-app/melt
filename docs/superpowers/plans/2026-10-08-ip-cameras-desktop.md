@@ -364,8 +364,8 @@ The component owns its session. A separate `camera-session.ts` composable would 
 
 **Files:** `docs/ip-cameras.md`
 
-- [ ] **Step 1:** Add a "Desktop" subsection to "Everyday use" in `docs/ip-cameras.md`. It covers adding a camera (live verification), linking and the feed picker, the quality toggle, and how viewers share one camera connection. Troubleshooting already covers Third-Party Compatibility, privacy mode and the stream limit; add rows only for new desktop-specific failures.
-- [ ] **Step 2 (attended, C510W + `make run`):** record the result of each check below in the commit body.
+- [x] **Step 1:** Add a "Desktop" subsection to "Everyday use" in `docs/ip-cameras.md`. It covers adding a camera (live verification), linking and the feed picker, the quality toggle, and how viewers share one camera connection. Troubleshooting already covers Third-Party Compatibility, privacy mode and the stream limit; add rows only for new desktop-specific failures.
+- [ ] **Step 2 (attended, C510W + `make run`):** all done except check 8, which needs someone to unplug the camera. record the result of each check below in the commit body.
   1. **Wrong password** on add shows `cameraAuthFailed` and saves nothing (no YAML entry and no keychain entry).
   2. **Add** works with the right password.
   3. **Viewer:** the Cameras viewer goes live. On Linux the transport is `mjpeg` (Task 5 notes why).
@@ -376,7 +376,19 @@ The component owns its session. A separate `camera-session.ts` composable would 
   8. **Unplug the camera:** the viewer shows an error and the printer badge stays online. Plug it back in and refresh: it recovers.
   9. **Soak:** 5 min of live view without freezing (keepalive).
   10. **Closing** the view drops the camera's RTSP session (`ss -tn dst 10.15.15.123:554` is empty within a few seconds).
-- [ ] **Step 3:** Commit `docs: desktop IP camera usage`.
+
+  Results (2026-10-08, debug build, driven by a temporary uncommitted script, sockets sampled with `ss`):
+  1. Pass. The form showed the auth-failed message and stayed open; `melt.yaml` and the keychain were unchanged.
+  2. Pass. Saved in 0.37 s. Removing via the confirm dialog deleted the keychain entry.
+  3. Pass, over `mjpeg`. Refresh also works.
+  4. Pass.
+  5. Pass. Linked via the form; the picker appeared and switching to the camera worked.
+  6. Pass.
+  7. Pass through `camera_snapshot` with `{camera}` (2304x1296 JPEG), which both views send for a camera feed. The save dialog was not exercised.
+  8. **Pending:** needs someone to unplug the camera.
+  9. **Failed, then fixed.** About 25 s after connecting, the view froze. The keepalive waited for a reply that the C510W drops when the reader falls behind (debug decode of 2K at about 2 fps), discarding RTP meanwhile. Fixed in `fix(camera): send RTSP keepalives without waiting for the reply`. Re-verified with the CLI on the high stream: 309 s, frames steady throughout.
+  10. Pass. The camera socket closed within 5 s.
+- [x] **Step 3:** Commit `docs: desktop IP camera usage`.
 
 ## Out of scope
 
