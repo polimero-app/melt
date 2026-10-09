@@ -123,12 +123,18 @@ impl FramedConnection {
     }
 
     /// Reads messages until an RTP `Data` frame on the video channel arrives,
-    /// ignoring RTCP, other tracks, and late control `Response`s.
+    /// ignoring RTCP, other tracks, and late control `Response`s (keepalive
+    /// replies) unless they say the session is gone.
     fn next_rtp_packet(&mut self, channel: u8) -> Result<Vec<u8>, RtspError> {
         loop {
             match self.next_message()? {
                 rtsp_types::Message::Data(data) if data.channel_id() == channel => {
                     return Ok(data.into_body());
+                }
+                rtsp_types::Message::Response(response)
+                    if keepalive_lost_session(response.status()) =>
+                {
+                    return Err(protocol_error("RTSP session expired"));
                 }
                 rtsp_types::Message::Data(_) | rtsp_types::Message::Response(_) => continue,
                 rtsp_types::Message::Request(_) => {
@@ -150,6 +156,8 @@ pub struct H264Stream {
     shutdown: TcpStream,
     uri: rtsp_types::Url,
     credentials: Credentials,
+    /// The handshake's Digest challenge, reused to authorize keepalives.
+    challenge: Option<DigestChallenge>,
     session: String,
     channel: u8,
     cseq: u32,
@@ -276,22 +284,35 @@ impl H264Stream {
         }
     }
 
+    /// Fire-and-forget, like TEARDOWN: a camera whose send buffer is full
+    /// (the reader fell behind) may drop the reply, and waiting for it would
+    /// discard media forever. `FramedConnection::next_rtp_packet` skips the
+    /// late reply, or fails on 454.
+    // ponytail: a 401 reply (stale nonce) is skipped too; the session then
+    // expires and the stream reconnects.
     fn keepalive_if_due(&mut self) -> io::Result<()> {
         if Instant::now() < self.next_keepalive {
             return Ok(());
         }
-        let response = authorized_request(
+        let authorization = self.challenge.as_ref().map(|challenge| {
+            digest_header(
+                &self.credentials,
+                challenge,
+                "GET_PARAMETER",
+                self.uri.as_str(),
+                &cnonce(),
+            )
+        });
+        write_request(
             &mut self.connection,
             rtsp_types::Method::GetParameter,
             &self.uri,
-            &mut self.cseq,
-            &self.credentials,
+            self.cseq,
             &[(rtsp_types::headers::SESSION, self.session.clone())],
+            authorization.as_deref(),
         )
         .map_err(into_io)?;
-        if keepalive_lost_session(response.status()) {
-            return Err(io::Error::other("RTSP session expired"));
-        }
+        self.cseq += 1;
         self.next_keepalive = Instant::now() + KEEPALIVE_INTERVAL;
         Ok(())
     }
@@ -335,12 +356,14 @@ pub(crate) fn open_h264(
         buffer: Vec::new(),
     };
     let mut cseq = 1u32;
+    let mut challenge = None;
     let describe = authorized_request(
         &mut connection,
         rtsp_types::Method::Describe,
         &uri,
         &mut cseq,
         &credentials,
+        &mut challenge,
         &[(rtsp_types::headers::ACCEPT, "application/sdp".to_owned())],
     )?;
     expect_ok(&describe, "DESCRIBE")?;
@@ -357,6 +380,7 @@ pub(crate) fn open_h264(
         &setup_uri,
         &mut cseq,
         &credentials,
+        &mut challenge,
         &[(
             rtsp_types::headers::TRANSPORT,
             "RTP/AVP/TCP;unicast;interleaved=0-1".to_owned(),
@@ -386,6 +410,7 @@ pub(crate) fn open_h264(
         &uri,
         &mut cseq,
         &credentials,
+        &mut challenge,
         &[
             (rtsp_types::headers::SESSION, session.clone()),
             (rtsp_types::headers::RANGE, "npt=0.000-".to_owned()),
@@ -403,6 +428,7 @@ pub(crate) fn open_h264(
         shutdown,
         uri,
         credentials,
+        challenge,
         session,
         channel,
         cseq,
@@ -466,6 +492,7 @@ fn authorized_request(
     uri: &rtsp_types::Url,
     cseq: &mut u32,
     credentials: &Credentials,
+    challenge: &mut Option<DigestChallenge>,
     extra_headers: &[(rtsp_types::HeaderName, String)],
 ) -> Result<rtsp_types::Response<Vec<u8>>, RtspError> {
     let response = send_request(connection, method.clone(), uri, *cseq, extra_headers, None)?;
@@ -473,15 +500,10 @@ fn authorized_request(
     if response.status() != rtsp_types::StatusCode::Unauthorized {
         return Ok(response);
     }
-    let challenge = digest_challenge(&response).ok_or(RtspError::DigestRequired)?;
+    let latest = digest_challenge(&response).ok_or(RtspError::DigestRequired)?;
     let method_name: &str = (&method).into();
-    let authorization = digest_header(
-        credentials,
-        &challenge,
-        method_name,
-        uri.as_str(),
-        &cnonce(),
-    );
+    let authorization = digest_header(credentials, &latest, method_name, uri.as_str(), &cnonce());
+    *challenge = Some(latest);
     let response = send_request(
         connection,
         method,
@@ -888,6 +910,99 @@ mod tests {
         ] {
             assert_eq!(keepalive_lost_session(status), lost, "{status:?}");
         }
+    }
+
+    struct Wire {
+        input: io::Cursor<Vec<u8>>,
+        output: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    }
+
+    impl Read for Wire {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.input.read(buf)
+        }
+    }
+
+    impl Write for Wire {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.output.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A playing stream whose keepalive is due, reading `input`.
+    fn playing(input: Vec<u8>) -> (H264Stream, std::sync::Arc<std::sync::Mutex<Vec<u8>>>) {
+        let output = std::sync::Arc::default();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let shutdown = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let stream = H264Stream {
+            connection: FramedConnection {
+                connection: Box::new(Wire {
+                    input: io::Cursor::new(input),
+                    output: std::sync::Arc::clone(&output),
+                }),
+                buffer: Vec::new(),
+            },
+            shutdown,
+            uri: rtsp_types::Url::parse("rtsp://192.0.2.20:554/stream1").unwrap(),
+            credentials: Credentials {
+                username: "melt".into(),
+                password: "secret".into(),
+                realm: None,
+            },
+            challenge: DigestChallenge::parse(
+                "Digest realm=\"TP-Link IP-Camera\", nonce=\"n0nce\"",
+            ),
+            session: "s1".into(),
+            channel: 0,
+            cseq: 5,
+            next_keepalive: Instant::now(),
+            decoder: None,
+            decoder_started: false,
+            sps: Vec::new(),
+            pps: Vec::new(),
+            started: false,
+            access_unit: Vec::new(),
+            fu_buffer: None,
+            deadline: None,
+        };
+        (stream, output)
+    }
+
+    fn rtp_frame(payload: &[u8]) -> Vec<u8> {
+        let mut frame = vec![b'$', 0];
+        frame.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+        frame.extend_from_slice(payload);
+        frame
+    }
+
+    /// A camera that falls behind may drop the keepalive reply; waiting for
+    /// it used to discard media forever (Tapo C510W, high stream).
+    #[test]
+    fn keepalive_does_not_wait_for_its_reply() {
+        let (mut stream, output) = playing(rtp_frame(b"media"));
+        assert_eq!(stream.next_rtp_packet().unwrap(), b"media");
+        let sent = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+        assert!(sent.starts_with("GET_PARAMETER rtsp://192.0.2.20:554/stream1 RTSP/1.0"));
+        assert!(sent.contains("CSeq: 5"));
+        assert!(sent.contains("Session: s1"));
+        assert!(sent.contains("Authorization: Digest username=\"melt\""));
+        assert!(stream.next_keepalive > Instant::now());
+    }
+
+    #[test]
+    fn a_late_keepalive_reply_is_skipped_unless_the_session_is_gone() {
+        let mut input = b"RTSP/1.0 200 OK\r\nCSeq: 5\r\n\r\n".to_vec();
+        input.extend(rtp_frame(b"media"));
+        assert_eq!(playing(input).0.next_rtp_packet().unwrap(), b"media");
+
+        let mut input = b"RTSP/1.0 454 Session Not Found\r\nCSeq: 5\r\n\r\n".to_vec();
+        input.extend(rtp_frame(b"media"));
+        assert!(playing(input).0.next_rtp_packet().is_err());
     }
 
     fn bambu() -> Credentials {
