@@ -4,7 +4,7 @@
 
 **Goal:** In the desktop app, users can add, edit, remove and link IP cameras, watch any camera from a Cameras view, and pick a linked camera as a printer's feed in the control view. One camera upstream is shared by all viewers, and stopping one viewer never stops another.
 
-**Architecture:** `CameraManager` (`melt-core/src/bambu/camera_manager.rs`) gains `subscribe_external` next to the Bambu `subscribe`. Both go through one private startup path. That path locks per source key, never manager-wide, while connecting, and gives the owner thread a reopen closure instead of Bambu-only config. The desktop swaps its two camera states for one `CameraViewers` registry keyed by a backend-generated `viewerId`. The `printer_camera_*` commands become `camera_*` commands that take a `source` (`{printer}` or `{camera}`). The UI moves the camera lifecycle out of `App.vue` into `camera-session.ts` and `CameraViewer.vue`, then adds a Cameras view and a feed picker.
+**Architecture:** `CameraManager` (`melt-core/src/bambu/camera_manager.rs`) gains `subscribe_external` next to the Bambu `subscribe`. Both go through one private startup path. That path locks per source key, never manager-wide, while connecting, and gives the owner thread a reopen closure instead of Bambu-only config. The desktop swaps its two camera states for one `CameraViewers` registry keyed by a backend-generated `viewerId`. The `printer_camera_*` commands become `camera_*` commands that take a `source` (`{printer}` or `{camera}`). The UI moves the camera lifecycle out of `App.vue` into `CameraViewer.vue`, then adds a Cameras view and a feed picker.
 
 **Tech Stack:** Rust 2024, Tauri 2, Vue 3 + TypeScript, vitest. No new dependencies.
 
@@ -65,7 +65,7 @@ bun run --cwd ui build
 - Modify: `crates/melt-core/src/bambu/camera_manager.rs` (`subscribe` ~300–380, `open_source` ~395, `run_owner` ~505–575, tests ~605+)
 - Modify: `crates/melt-core/src/cameras.rs` (`StreamQuality` derives `Deserialize`), `crates/melt-core/src/cameras/profiles.rs` (`CameraRequest` derives `Deserialize`, `rename_all = "camelCase"`)
 
-- [ ] **Step 1: Shared startup path.** Split `subscribe` into Bambu-specific setup and a private generic helper. No behavior change yet; the helper still takes the manager-wide lock.
+- [x] **Step 1: Shared startup path.** Split `subscribe` into Bambu-specific setup and a private generic helper. No behavior change yet; the helper still takes the manager-wide lock.
 
 ```rust
 pub(crate) enum Reopen { Retry, Fatal }
@@ -91,7 +91,7 @@ fn subscribe_with<E>(
 
   Bambu's `open` runs `open_source` and builds its reopen closure from the transport that was actually opened. `Pin` and `Identity` map to `Reopen::Fatal`; everything else maps to `Retry`. `run_owner(owner, source, reopen)` calls `reopen()`: `Err(Fatal)` breaks the loop, `Err(Retry)` continues. The deadline and backoff logic stays as it is. Delete `SourceConfig`. Change the H.264 check to `owner.transport == CameraOwnerTransport::MjpegTls`.
 
-- [ ] **Step 2: `subscribe_external`.**
+- [x] **Step 2: `subscribe_external`.**
 
 ```rust
 pub fn subscribe_external(
@@ -110,7 +110,7 @@ pub fn subscribe_external(
   - Add the `CameraOwnerTransport::RtspH264` variant.
   - `unsupported` is unreachable for external cameras (always H.264); pass `|| CameraError::UnsupportedCodec`.
 
-- [ ] **Step 3: Failing stall test.** Add this test helper and test:
+- [x] **Step 3: Failing stall test.** Add this test helper and test:
 
 ```rust
 fn external(id: &str, port: u16) -> ResolvedCamera {
@@ -149,7 +149,7 @@ fn an_unreachable_camera_does_not_stall_another() {
 
   Run: `cargo test -p melt-core --locked an_unreachable_camera_does_not_stall_another`. Expected: FAIL; B waits about 3 s behind A's lock.
 
-- [ ] **Step 4: Per-key startup.** In `subscribe_with`:
+- [x] **Step 4: Per-key startup.** In `subscribe_with`:
   1. Lock the manager. Try reuse: the revision matches, and `try_subscribe` succeeds or returns the `unsupported` error. Otherwise clone or insert `startups[key]`, then unlock.
   2. Lock the startup mutex and try reuse again, because another caller may have finished meanwhile.
   3. Remove the stale owner from `owners` and `stop()` it.
@@ -160,7 +160,7 @@ fn an_unreachable_camera_does_not_stall_another() {
 
   Run the stall test (expected: PASS), then `cargo test -p melt-core --locked camera_manager` (expected: all existing Bambu tests pass unchanged).
 
-- [ ] **Step 5: Freshness.** Store `latest_jpeg: Option<(Arc<[u8]>, Instant)>`. Replace `CameraSubscription::latest_jpeg()` with `fresh_jpeg(max_age: Duration) -> Option<Arc<[u8]>>`. In `run_owner`, set `latest_jpeg = None` as soon as a read fails, before the reconnect wait. `has_jpeg` in `status()` keeps working. Test with the existing `owner()` helper:
+- [x] **Step 5: Freshness.** Store `latest_jpeg: Option<(Arc<[u8]>, Instant)>`. Replace `CameraSubscription::latest_jpeg()` with `fresh_jpeg(max_age: Duration) -> Option<Arc<[u8]>>`. In `run_owner`, set `latest_jpeg = None` as soon as a read fails, before the reconnect wait. `has_jpeg` in `status()` keeps working. Test with the existing `owner()` helper:
 
 ```rust
 #[test]
@@ -173,9 +173,9 @@ fn fresh_jpeg_rejects_old_frames() {
 }
 ```
 
-- [ ] **Step 6: Deserialize derives** on `StreamQuality` (lowercase) and `CameraRequest` (camelCase, so `rtspPort`). Update the desktop's one `latest_jpeg` call site (`main.rs` ~3258) to `fresh_jpeg(Duration::from_secs(2))`. Run all the Rust verification commands. Expected: PASS.
+- [x] **Step 6: Deserialize derives** on `StreamQuality` (lowercase) and `CameraRequest` (camelCase, so `rtspPort`). Update the desktop's one `latest_jpeg` call site (`main.rs` ~3258) to `fresh_jpeg(Duration::from_secs(2))`. Run all the Rust verification commands. Expected: PASS.
 
-- [ ] **Step 7: Commit** `feat(camera): start camera sources independently and share external camera streams`.
+- [x] **Step 7: Commit** `feat(camera): start camera sources independently and share external camera streams`.
 
 ### Task 2: Viewer registry and `camera_*` commands (melt-desktop)
 
@@ -183,7 +183,7 @@ fn fresh_jpeg_rejects_old_frames() {
 - Modify: `crates/melt-desktop/src/main.rs` (states ~427–455, camera commands ~3246–3416, `start_camera_server` ~3419, `subscribe_camera` ~3591, `.manage` ~3981, `generate_handler!` ~3998, tests)
 - Modify: `ui/src/App.vue` (call sites at ~1985, 2010, 2054, 2109, 2164–2165, 2180 only)
 
-- [ ] **Step 1: Failing registry test.**
+- [x] **Step 1: Failing registry test.**
 
 ```rust
 #[test]
@@ -199,7 +199,7 @@ fn stopping_one_viewer_leaves_the_others() {
 }
 ```
 
-- [ ] **Step 2: `CameraViewers`.**
+- [x] **Step 2: `CameraViewers`.**
 
 ```rust
 enum Viewer { WebRtc(webrtc_camera::Session), Proxy(Arc<AtomicBool>) }
@@ -215,7 +215,7 @@ struct CameraViewers(Arc<Mutex<HashMap<String, Viewer>>>);
 
   `start_camera_server(subscription, viewers, format) -> (viewer_id, url)` inserts `Viewer::Proxy(stop)` before spawning. The proxy thread calls `viewers.stop(Some(&id))` when it exits. Delete `CameraWebRtcState`, `WebRtcSessions`, `CameraStreamState` and `CameraProxy`.
 
-- [ ] **Step 3: Media commands.** Add:
+- [x] **Step 3: Media commands.** Add:
 
 ```rust
 #[derive(Deserialize)]
@@ -239,7 +239,7 @@ fn subscribe_source(manager, source, quality: Option<StreamQuality>, kind, opera
 
   Delete the six `printer_camera_*` commands and their handler entries. Add one assertion to the existing `h264_codec` test: `h264_codec(&[0x27, 0x4d, 0x00, 0x34]) == Some("avc1.4d0034")`. These bytes are the C510W stream1 SPS header from `fixtures/tapo/`.
 
-- [ ] **Step 4: Profile commands**, thin wrappers over `cameras::*` with `config_dir()` and `SystemKeychain`:
+- [x] **Step 4: Profile commands**, thin wrappers over `cameras::*` with `config_dir()` and `SystemKeychain`:
   - `camera_list`
   - `camera_add(request)`: `create(.., cameras::verify)`
   - `camera_edit(name, request)`: `update(.., cameras::verify)`
@@ -275,9 +275,9 @@ fn subscribe_source(manager, source, quality: Option<StreamQuality>, kind, opera
 
   Printer rename and remove already carry or drop links in core (`config.rs` `rename_profile`/`remove_profile`), so the desktop needs no change there.
 
-- [ ] **Step 5: Keep the UI working.** In `App.vue`, rename the invokes and pass `{ source: { printer: printerName } }`. `stopCameraSession` becomes `invoke('camera_viewer_stop')` with no id, which stops all, as today. Add the new error codes to `i18n.ts` (en + pt-BR) so `vue-tsc` passes.
+- [x] **Step 5: Keep the UI working.** In `App.vue`, rename the invokes and pass `{ source: { printer: printerName } }`. `stopCameraSession` becomes `invoke('camera_viewer_stop')` with no id, which stops all, as today. Add the new error codes to `i18n.ts` (en + pt-BR) so `vue-tsc` passes.
 
-- [ ] **Step 6:** Run all the verification commands. Expected: PASS. Commit `feat(desktop): viewer-scoped camera sessions and camera profile commands`.
+- [x] **Step 6:** Run all the verification commands. Expected: PASS. Commit `feat(desktop): viewer-scoped camera sessions and camera profile commands`.
 
 ### Task 3: Pure camera logic (UI)
 
@@ -285,7 +285,7 @@ fn subscribe_source(manager, source, quality: Option<StreamQuality>, kind, opera
 - Create: `ui/src/cameras.ts`, `ui/src/cameras.test.ts`
 - Modify: `ui/src/presentation.ts`, `ui/src/presentation.test.ts` (~33–51), `ui/src/App.vue` (`cameraMayRun` ~953)
 
-- [ ] **Step 1: Tests first**, then implement:
+- [x] **Step 1: Tests first**, then implement:
 
 ```ts
 export type Quality = 'high' | 'low'
@@ -307,45 +307,28 @@ export function sourceKey(source: CameraSource, quality: Quality): string // res
   - `linkChanges` with adds, removals and no-ops
   - `sourceKey` differs by kind, name and quality
 
-- [ ] **Step 2:** Change `shouldRunCamera(activeView, viewerView, visible, supported)` to `activeView === viewerView && …` and update its tests. The control view passes `'control'`.
-- [ ] **Step 3:** Run `bun run --cwd ui test` and `bun run --cwd ui build`. Commit `feat(ui): camera source helpers`.
+- [x] **Step 2:** Change `shouldRunCamera(activeView, viewerView, visible, supported)` to `activeView === viewerView && …` and update its tests. The control view passes `'control'`.
+- [x] **Step 3:** Run `bun run --cwd ui test` and `bun run --cwd ui build`. Commit `feat(ui): camera source helpers`.
 
-### Task 4: Extract `camera-session.ts` and `CameraViewer.vue` (no behavior change)
+### Task 4: Extract `CameraViewer.vue` (no behavior change)
 
 **Files:**
-- Create: `ui/src/camera-session.ts`, `ui/src/components/CameraViewer.vue`
-- Modify: `ui/src/App.vue` (refs ~477–499, computeds ~933–965, functions ~1964–2185, card ~2726–2756, `onUnmounted` ~2428)
+- Create: `ui/src/components/CameraViewer.vue`
+- Modify: `ui/src/App.vue`, `ui/src/errors.ts` (export `Translate`)
 
-- [ ] **Step 1: `useCameraSession(options)`** with these options:
+The component owns its session. A separate `camera-session.ts` composable would only add getter options for state that no caller outside the viewer reads.
 
-  ```ts
-  source: () => CameraSource | undefined
-  quality: () => Quality
-  mayRun: () => boolean
-  canStream: () => boolean
-  canSnapshot: () => boolean
-  canvas: () => HTMLCanvasElement | undefined
-  translate: Translate
-  ```
-
-  Move these from `App.vue`:
-  - `refreshCamera`, `waitForVideoTrack`, `waitForPeerReady`, `fallbackCamera`, `fallbackMjpegCamera`, `withTimeout`, `waitForIceGathering`, `stopCamera` and `saveSnapshot`'s invoke
-  - the request counter
-  - the refs, which the composable returns, with `cameraState`/`cameraHasMedia`
-
-  Track `viewerIds: Set<string>`:
-  - add each returned id
-  - `stopCamera` stops each id, not all
-  - when a stale request gets a result, stop that id at once
-
-  Watch `mayRun` and `sourceKey` to start or stop the viewer, and call `stopCamera` from `onScopeDispose`.
-
-- [ ] **Step 2: `CameraViewer.vue`** renders the card body exactly as in `App.vue`: header badge, refresh, snapshot and maximize buttons, `video`/`canvas`/`img`/unavailable states, and a `#controls` slot in the header.
-  - Props: `session` (the composable's return value), `title` and `t`.
-  - Emits `snapshot-saved`, which App shows as the toast.
-  - The fullscreen target is the viewer's own stage.
-- [ ] **Step 3:** In `App.vue`, call `invoke('camera_viewer_stop')` with no id once in `onMounted` to clear sessions orphaned by a webview reload. Replace the control card with `<CameraViewer>`, keeping the `source: { printer }` session.
-- [ ] **Step 4:** Run `bun run --cwd ui test` and `bun run --cwd ui build`. Then `make run` on a Bambu printer: the feed starts, refresh works, a snapshot saves, and the stream stops when you leave the view. If no Bambu printer is reachable, record that and rely on Task 6's checks. Commit `refactor(ui): extract the camera viewer`.
+- [x] **Step 1: `CameraViewer.vue`.**
+  - Props: `source`, `quality` (default `high`), `active` (from `shouldRunCamera`), `canStream`, `canSnapshot`, `title?` and `t`.
+  - It renders the card exactly as `App.vue` did, with a `#controls` slot in the header, and emits `snapshot-saved`. It exposes `refresh`.
+  - It moves the WebRTC → WebCodecs → MJPEG fallback, snapshot save and fullscreen code out of `App.vue` unchanged.
+  - It tracks `viewerIds`: stop releases only its own ids, and a stale request stops its id at once.
+  - A single watch on `active ? sourceKey(source, quality) : ''` starts or stops the feed; `onScopeDispose` stops it.
+- [x] **Step 2:** In `App.vue`:
+  - Call `invoke('camera_viewer_stop')` with no id once in `onMounted`.
+  - Replace the control card with `<CameraViewer>` fed by `controlCameraSource`.
+  - Drop the manual `stopCamera` calls from printer selection and unmount.
+- [x] **Step 3:** Ran `bun run --cwd ui test` and `bun run --cwd ui build`. Ran `make run` against an A1 mini (MJPEG fallback) with a temporary, uncommitted view and printer script, sampling sockets with `ss`. The feed started on the control view, stopped on leaving it, restarted on return and moved when the printer changed. Exactly one camera connection and loopback proxy were open at any time. Refresh and snapshot buttons are left to Task 6's attended check. Commit `refactor(ui): extract the camera viewer`.
 
 ### Task 5: Cameras view, feed picker, i18n
 

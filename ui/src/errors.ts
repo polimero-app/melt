@@ -7,7 +7,7 @@ export type CommandError = {
   detail?: string
 }
 
-type Translate = (key: MessageKey, values?: Record<string, string | number>) => string
+export type Translate = (key: MessageKey, values?: Record<string, string | number>) => string
 
 export function commandMessage(reason: unknown, translate: Translate): string {
   const error = reason as CommandError | null

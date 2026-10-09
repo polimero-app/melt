@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch, watchEffect, type Component } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch, watchEffect, type Component } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog'
@@ -9,10 +9,9 @@ import { clampTarget, formatDuration, remainingTimePresentation } from './format
 import { dryingBounds, dryingDefaults, dryingFault, dryingRequestValid, dryingStoppable, dryingTargetShown, type AmsDrying, type DryingStatus } from './drying'
 import { printTargetState } from './printing'
 import { printStageLabel } from './stages'
-import { awaitsFirstSample, badgeDotClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
-import { commandDetail, commandMessage, type CommandError } from './errors'
+import { awaitsFirstSample, badgeDotClasses, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
+import { commandMessage, type CommandError } from './errors'
 import { hmsGuideUrl, hmsSeverity, type HmsSeverity } from './hms'
-import { startH264Playback, supportsH264WebCodecs, type H264Playback } from './camera-stream'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import {
   hasAvailableUpdate,
@@ -46,6 +45,7 @@ import Card from './components/Card.vue'
 import CardHeader from './components/CardHeader.vue'
 import ModelThumbnail from './components/ModelThumbnail.vue'
 import FilePreviewDialog from './components/FilePreviewDialog.vue'
+import CameraViewer from './components/CameraViewer.vue'
 import {
   PhArrowsClockwise,
   PhArrowsOutCardinal,
@@ -340,27 +340,6 @@ type BambuCompatibilityDiagnostic = {
   tlsPinned: boolean
 }
 
-type CameraSnapshot = {
-  dataUrl: string
-}
-
-type CameraStream = {
-  viewerId: string
-  url: string
-}
-
-type CameraH264Stream = CameraStream & {
-  codec: string
-}
-
-type CameraWebRtcAnswer = {
-  viewerId: string
-  type: 'answer'
-  sdp: string
-}
-
-type CameraTransport = 'webrtc' | 'webcodecs' | 'mjpeg'
-
 interface MaterialSlot {
   slot: string
   type: string
@@ -476,17 +455,6 @@ const diagnosticsError = ref<string>()
 const diagnosticsLoading = ref(false)
 const pendingConfirm = ref<{ title: string; description: string; confirm: string; run: () => Promise<void> }>()
 const confirming = ref(false)
-const cameraUrl = ref<string>()
-const cameraPeer = shallowRef<RTCPeerConnection>()
-const cameraMediaStream = shallowRef<MediaStream>()
-const cameraVideo = ref<HTMLVideoElement>()
-const cameraCanvas = ref<HTMLCanvasElement>()
-const cameraCanvasActive = ref(false)
-const cameraCanvasLive = ref(false)
-const cameraTransport = ref<CameraTransport>()
-const cameraTransportDetail = ref<string>()
-const cameraLoading = ref(false)
-const cameraError = ref<string>()
 const documentVisible = ref(document.visibilityState === 'visible')
 let monitorUnlisten: UnlistenFn | undefined
 let firmwareUpdatesUnlisten: UnlistenFn | undefined
@@ -497,8 +465,6 @@ let printStageUnlisten: UnlistenFn | undefined
 let libraryChangeTimer: number | undefined
 let libraryChangeUnlisten: UnlistenFn | undefined
 let selectionRequest = 0
-let cameraRequest = 0
-let cameraH264Playback: H264Playback | undefined
 let fileRequest = 0
 let libraryRequest = 0
 let toastTimer: number | undefined
@@ -552,7 +518,6 @@ watchEffect(() => {
 function t(key: MessageKey, values?: Record<string, string | number>) {
   return translate(locale.value, key, values)
 }
-const cameraStage = ref<HTMLElement>()
 const errorToast = ref<string>()
 const successToast = ref<string>()
 const toasts = computed(() => [
@@ -932,39 +897,9 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
     })),
   }))
 })
-const cameraHasMedia = computed(() => Boolean(cameraPeer.value || cameraCanvasLive.value || cameraUrl.value))
-const cameraState = computed(() => cameraViewState({
-  loading: cameraLoading.value,
-  hasPeer: Boolean(cameraPeer.value),
-  hasMedia: Boolean(cameraCanvasLive.value || cameraUrl.value),
-  hasStreamTransport: cameraTransport.value !== undefined,
-}))
-const cameraStateLabel = computed(() => t({
-  live: 'camera.live',
-  snapshot: 'camera.snapshotLabel',
-  loading: 'camera.loading',
-  offline: 'status.offlineLabel',
-}[cameraState.value] as MessageKey))
-const cameraStateClasses = computed(() => ({
-  live: 'bg-green-100 fill-green-500 text-green-700 dark:bg-green-400/10 dark:fill-green-400 dark:text-green-400',
-  snapshot: 'bg-gray-100 fill-gray-400 text-gray-600 dark:bg-white/10 dark:fill-gray-500 dark:text-gray-400',
-  loading: 'bg-yellow-100 fill-yellow-500 text-yellow-800 dark:bg-yellow-400/10 dark:fill-yellow-400 dark:text-yellow-500',
-  offline: 'bg-gray-100 fill-gray-400 text-gray-600 dark:bg-white/10 dark:fill-gray-500 dark:text-gray-400',
-}[cameraState.value]))
 const cameraSupported = computed(() => Boolean(capabilities.value?.cameraStream || capabilities.value?.cameraSnapshot))
 const cameraMayRun = computed(() => shouldRunCamera(activeView.value, 'control', documentVisible.value, cameraSupported.value))
-
-watch(cameraMayRun, (shouldRun) => {
-  if (shouldRun) {
-    if (!cameraLoading.value && !cameraHasMedia.value) void refreshCamera()
-  } else if (cameraLoading.value || cameraHasMedia.value || cameraTransport.value) {
-    void stopCamera()
-  }
-})
-
-watchEffect(() => {
-  if (cameraVideo.value) cameraVideo.value.srcObject = cameraMediaStream.value ?? null
-})
+const controlCameraSource = computed(() => activePrinter.value ? { printer: activePrinter.value.name } : undefined)
 
 const fleetStats = computed(() => [
   { label: t('printersView.totalPrinters'), value: printers.value.length, tone: 'text-gray-900 dark:text-white' },
@@ -976,10 +911,6 @@ const fleetStats = computed(() => [
 // instead of leaking implementation details into user-facing surfaces.
 function message(reason: unknown) {
   return commandMessage(reason, t)
-}
-
-function cameraFailureDetail(reason: unknown) {
-  return commandDetail(reason) ?? (reason instanceof Error ? reason.message : message(reason))
 }
 
 function askConfirmation(
@@ -1189,13 +1120,10 @@ async function load() {
 }
 
 function clearSelection() {
-  void stopCamera()
   activePrinterId.value = ''
   capabilities.value = undefined
   monitoring.value = []
   files.value = []
-  cameraUrl.value = undefined
-  cameraError.value = undefined
   firmwareError.value = undefined
 }
 
@@ -1281,9 +1209,6 @@ async function selectPrinter(name: string, refresh = true, focus = refresh) {
   capabilities.value = undefined
   files.value = []
   filesError.value = undefined
-  cameraUrl.value = undefined
-  cameraError.value = undefined
-  await stopCamera()
   if (request !== selectionRequest || activePrinterId.value !== name) return
   try {
     const result = await invoke<{ capabilities: Capabilities }>('printer_capabilities', { name })
@@ -1963,233 +1888,6 @@ async function uploadFile() {
   }
 }
 
-async function refreshCamera() {
-  if (!activePrinter.value || !cameraMayRun.value) return
-  const printerName = activePrinter.value.name
-  await stopCamera()
-  if (!cameraMayRun.value || activePrinter.value?.name !== printerName) return
-  const request = ++cameraRequest
-  cameraLoading.value = true
-  cameraError.value = undefined
-  cameraTransportDetail.value = undefined
-  try {
-    if (capabilities.value?.cameraStream) {
-      let peer: RTCPeerConnection | undefined
-      try {
-        const PeerConnection = window.RTCPeerConnection
-        if (!PeerConnection) throw new Error('WebRTC is unavailable in the embedded webview')
-        peer = new PeerConnection({ iceServers: [] })
-        peer.addTransceiver('video', { direction: 'recvonly' })
-        const track = waitForVideoTrack(peer)
-        const offer = await peer.createOffer()
-        await peer.setLocalDescription(offer)
-        await waitForIceGathering(peer)
-        const answer = await invoke<CameraWebRtcAnswer>('camera_webrtc_offer', {
-          source: { printer: printerName },
-          offer: peer.localDescription?.sdp ?? offer.sdp,
-        })
-        await peer.setRemoteDescription({ type: answer.type, sdp: answer.sdp })
-        const mediaStream = await waitForPeerReady(peer, track)
-        if (request !== cameraRequest || activePrinter.value?.name !== printerName) {
-          peer.close()
-          return
-        }
-        peer.onconnectionstatechange = () => {
-          if (peer?.connectionState === 'failed' && cameraPeer.value === peer) {
-            void fallbackCamera(printerName, request, 'WebRTC connection failed')
-          }
-        }
-        cameraMediaStream.value = mediaStream
-        cameraPeer.value = peer
-        cameraTransport.value = 'webrtc'
-      } catch (reason) {
-        peer?.close()
-        if (request === cameraRequest) {
-          await fallbackCamera(printerName, request, cameraFailureDetail(reason))
-        }
-      }
-    } else if (capabilities.value?.cameraSnapshot) {
-      const snapshot = await invoke<CameraSnapshot>('camera_snapshot', { source: { printer: printerName } })
-      if (request === cameraRequest) cameraUrl.value = snapshot.dataUrl
-    }
-  } catch (reason) {
-    if (request === cameraRequest) {
-      cameraUrl.value = undefined
-      cameraError.value = message(reason)
-    }
-  } finally {
-    if (request === cameraRequest) cameraLoading.value = false
-  }
-}
-
-function waitForVideoTrack(peer: RTCPeerConnection) {
-  return new Promise<MediaStream>((resolve) => {
-    peer.ontrack = (event) => resolve(event.streams[0] ?? new MediaStream([event.track]))
-  })
-}
-
-async function waitForPeerReady(peer: RTCPeerConnection, track: Promise<MediaStream>) {
-  const connection = new Promise<void>((resolve, reject) => {
-    const finish = () => {
-      peer.removeEventListener('connectionstatechange', onStateChange)
-      if (peer.connectionState === 'connected') resolve()
-      else reject(new Error(`WebRTC connection ${peer.connectionState}`))
-    }
-    const onStateChange = () => {
-      if (peer.connectionState === 'connected' || peer.connectionState === 'failed' || peer.connectionState === 'closed') finish()
-    }
-    if (peer.connectionState === 'connected') resolve()
-    else peer.addEventListener('connectionstatechange', onStateChange)
-  })
-  return await withTimeout(Promise.all([connection, track]).then(([, stream]) => stream), 10_000, 'WebRTC media timed out')
-}
-
-async function fallbackCamera(printerName: string, request: number, reason: string) {
-  if (request !== cameraRequest || activePrinter.value?.name !== printerName) return
-  cameraTransportDetail.value = reason
-  cameraPeer.value?.close()
-  cameraPeer.value = undefined
-  cameraMediaStream.value?.getTracks().forEach((track) => track.stop())
-  cameraMediaStream.value = undefined
-  await stopCameraSession()
-  try {
-    const stream = await invoke<CameraH264Stream>('camera_h264_stream', { source: { printer: printerName } })
-    if (request !== cameraRequest || activePrinter.value?.name !== printerName) {
-      await stopCameraSession()
-      return
-    }
-    if (!await supportsH264WebCodecs(stream.codec)) {
-      throw new Error(`WebCodecs does not support ${stream.codec}`)
-    }
-    if (request !== cameraRequest || activePrinter.value?.name !== printerName) return
-    cameraCanvasActive.value = true
-    cameraCanvasLive.value = false
-    cameraTransport.value = 'webcodecs'
-    await nextTick()
-    const canvas = cameraCanvas.value
-    if (!canvas) throw new Error('Camera canvas is unavailable')
-    const playback = startH264Playback(canvas, stream.url)
-    cameraH264Playback = playback
-    let ready = false
-    void playback.done.catch((playbackError) => {
-      if (!ready || cameraH264Playback !== playback || request !== cameraRequest) return
-      cameraLoading.value = true
-      void fallbackMjpegCamera(
-        printerName,
-        request,
-        `${reason}; WebCodecs playback failed: ${cameraFailureDetail(playbackError)}`,
-      ).catch((fallbackError) => {
-        if (request === cameraRequest) cameraError.value = message(fallbackError)
-      }).finally(() => {
-        if (request === cameraRequest) cameraLoading.value = false
-      })
-    })
-    await withTimeout(playback.firstFrame, 10_000, 'WebCodecs media timed out')
-    if (request !== cameraRequest || activePrinter.value?.name !== printerName) {
-      playback.stop()
-      return
-    }
-    ready = true
-    cameraCanvasLive.value = true
-    return
-  } catch (webCodecsError) {
-    if (request !== cameraRequest || activePrinter.value?.name !== printerName) return
-    await fallbackMjpegCamera(
-      printerName,
-      request,
-      `${reason}; WebCodecs: ${cameraFailureDetail(webCodecsError)}`,
-    )
-  }
-}
-
-async function fallbackMjpegCamera(printerName: string, request: number, reason: string) {
-  cameraTransportDetail.value = reason
-  cameraH264Playback?.stop()
-  cameraH264Playback = undefined
-  cameraCanvasActive.value = false
-  cameraCanvasLive.value = false
-  const stream = await invoke<CameraStream>('camera_mjpeg_stream', { source: { printer: printerName } })
-  if (request !== cameraRequest || activePrinter.value?.name !== printerName) {
-    await stopCameraSession()
-    return
-  }
-  cameraUrl.value = stream.url
-  cameraTransport.value = 'mjpeg'
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeout: number, reason: string) {
-  let timer: number | undefined
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = window.setTimeout(() => reject(new Error(reason)), timeout)
-      }),
-    ])
-  } finally {
-    if (timer !== undefined) window.clearTimeout(timer)
-  }
-}
-
-async function waitForIceGathering(peer: RTCPeerConnection) {
-  if (peer.iceGatheringState === 'complete') return
-  await new Promise<void>((resolve) => {
-    const timer = window.setTimeout(resolve, 3000)
-    const onStateChange = () => {
-      if (peer.iceGatheringState !== 'complete') return
-      window.clearTimeout(timer)
-      peer.removeEventListener('icegatheringstatechange', onStateChange)
-      resolve()
-    }
-    peer.addEventListener('icegatheringstatechange', onStateChange)
-  })
-}
-
-async function stopCamera() {
-  cameraRequest += 1
-  cameraPeer.value?.close()
-  cameraPeer.value = undefined
-  cameraMediaStream.value?.getTracks().forEach((track) => track.stop())
-  cameraMediaStream.value = undefined
-  cameraH264Playback?.stop()
-  cameraH264Playback = undefined
-  cameraCanvasActive.value = false
-  cameraCanvasLive.value = false
-  cameraUrl.value = undefined
-  cameraTransport.value = undefined
-  cameraLoading.value = false
-  await stopCameraSession()
-}
-
-async function stopCameraSession() {
-  await invoke('camera_viewer_stop').catch(() => undefined)
-}
-
-async function saveSnapshot() {
-  if (!activePrinter.value || cameraLoading.value || !capabilities.value?.cameraSnapshot) return
-  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
-  const destination = await saveFileDialog({
-    defaultPath: `${activePrinter.value.name.replace(/[^\w.-]+/g, '-')}-${stamp}.jpg`,
-    filters: [{ name: 'JPEG', extensions: ['jpg', 'jpeg'] }],
-  })
-  if (!destination) return
-  cameraLoading.value = true
-  cameraError.value = undefined
-  try {
-    cameraUrl.value = (await invoke<CameraSnapshot>('camera_snapshot', { source: { printer: activePrinter.value.name }, destination })).dataUrl
-    showToast(t('camera.snapshotSaved'))
-  } catch (reason) {
-    cameraError.value = message(reason)
-  } finally {
-    cameraLoading.value = false
-  }
-}
-
-function toggleCameraFullscreen() {
-  if (document.fullscreenElement) document.exitFullscreen()
-  else cameraStage.value?.requestFullscreen()
-}
-
 async function runDiagnostics() {
   diagnosticsLoading.value = true
   diagnostics.value = undefined
@@ -2364,6 +2062,8 @@ async function printToPrinter(name: string) {
 }
 
 onMounted(() => {
+  // A webview reload leaves the previous page's viewers running.
+  void invoke('camera_viewer_stop').catch(() => undefined)
   window.addEventListener('beforeunload', warnBeforeUnload)
   document.addEventListener('visibilitychange', handleDocumentVisibility)
   systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
@@ -2427,7 +2127,6 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('beforeunload', warnBeforeUnload)
   document.removeEventListener('visibilitychange', handleDocumentVisibility)
-  void stopCamera()
   systemThemeQuery?.removeEventListener('change', handleSystemThemeChange)
   monitorUnlisten?.()
   firmwareUpdatesUnlisten?.()
@@ -2722,37 +2421,14 @@ onUnmounted(() => {
             </div>
           </section>
           <section class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-            <Card class="overflow-hidden">
-              <CardHeader :title="t('camera.title')" :icon="PhVideoCamera">
-                <template #suffix>
-                  <span
-                    class="inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-xs font-medium"
-                    :title="cameraTransportDetail"
-                    :class="cameraStateClasses"
-                  >
-                    <svg class="size-1.5" viewBox="0 0 6 6" aria-hidden="true"><circle cx="3" cy="3" r="3" /></svg>{{ cameraStateLabel }}
-                  </span>
-                </template>
-                <IconButton :title="t('camera.refresh')" :aria-label="t('camera.refresh')" :disabled="cameraLoading || !cameraSupported" @click="refreshCamera"><PhArrowsClockwise class="size-4" :class="cameraLoading && 'animate-spin'" aria-hidden="true" /></IconButton>
-                <IconButton :title="t('camera.snapshot')" :aria-label="t('camera.snapshot')" :disabled="cameraLoading || !capabilities?.cameraSnapshot" @click="saveSnapshot"><PhCamera class="size-4" aria-hidden="true" /></IconButton>
-                <IconButton :title="t('camera.maximize')" :aria-label="t('camera.maximize')" :disabled="!cameraHasMedia" @click="toggleCameraFullscreen"><PhCornersOut class="size-4" aria-hidden="true" /></IconButton>
-              </CardHeader>
-              <div
-                ref="cameraStage"
-                class="relative min-h-60 overflow-hidden sm:min-h-77.5"
-                :class="cameraHasMedia ? 'bg-black' : 'grid place-items-center bg-gray-100 dark:bg-gray-800'"
-              >
-                <video v-if="cameraPeer" ref="cameraVideo" :aria-label="t('camera.title')" class="absolute inset-0 size-full object-contain" autoplay muted playsinline />
-                <canvas v-else-if="cameraCanvasActive" ref="cameraCanvas" :aria-label="t('camera.title')" class="absolute inset-0 size-full object-contain" />
-                <img v-else-if="cameraUrl" :src="cameraUrl" :alt="t('camera.title')" width="1280" height="720" class="absolute inset-0 size-full object-contain" @error="cameraUrl = undefined" />
-                <div v-else class="relative z-10 text-center">
-                  <PhWarning class="mx-auto size-8 text-yellow-600 dark:text-yellow-400" aria-hidden="true" />
-                  <p class="mt-3 font-medium text-gray-900 dark:text-white">{{ t('camera.unavailable') }}</p>
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ cameraError ?? t('camera.checkConnection') }}</p>
-                  <Button v-if="cameraSupported" class="mt-4" :disabled="cameraLoading" @click="refreshCamera"><PhArrowsClockwise class="size-4" :class="cameraLoading && 'animate-spin'" aria-hidden="true" /> {{ t('camera.refreshFeed') }}</Button>
-                </div>
-              </div>
-            </Card>
+            <CameraViewer
+              :source="controlCameraSource"
+              :active="cameraMayRun"
+              :can-stream="Boolean(capabilities?.cameraStream)"
+              :can-snapshot="Boolean(capabilities?.cameraSnapshot)"
+              :t="t"
+              @snapshot-saved="showToast(t('camera.snapshotSaved'))"
+            />
 
             <Card>
               <CardHeader :title="t('control.currentJob')" :icon="PhCheckSquareOffset">
