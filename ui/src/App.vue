@@ -2277,7 +2277,7 @@ onUnmounted(() => {
               :aria-label="t('nav.ariaLabel')"
               class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-2 pr-9 pl-3 text-sm font-medium text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-gray-900 dark:text-white dark:outline-white/15 dark:*:bg-gray-800"
             >
-              <optgroup v-if="printers.length" :label="t('nav.groupPrinters')">
+              <optgroup v-if="printers.length" :label="t('nav.selectPrinter')">
                 <option v-for="printer in printers" :key="`compact-${printer.name}`" :value="`printer:${printer.name}`">
                   {{ printer.name }} · {{ statusLabel(badgeFor(printer.name)) }}
                 </option>

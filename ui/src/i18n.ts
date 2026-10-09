@@ -152,7 +152,6 @@ export type MessageKey =
   | "camerasView.feed"
   | "camerasView.builtInFeed"
   | "nav.selectPrinter"
-  | "nav.groupPrinters"
   | "nav.groupSections"
   | "status.idle"
   | "status.onlineIdle"
@@ -709,7 +708,7 @@ const messages: Record<Locale, Messages> = {
     "diagnostics.noReport": "No diagnostic report is available.",
     "diagnostics.open": "Diagnostics",
     "nav.ariaLabel": "Workspace navigation",
-    "nav.printers": "Manage printers",
+    "nav.printers": "Printers",
     "nav.settings": "Configuration",
     "nav.files": "Files",
     "nav.cameras": "Cameras",
@@ -739,7 +738,6 @@ const messages: Record<Locale, Messages> = {
     "camerasView.qualityLow": "Low",
     "camerasView.feed": "Camera feed",
     "camerasView.builtInFeed": "Built-in camera",
-    "nav.groupPrinters": "Printers",
     "nav.groupSections": "Sections",
     "nav.selectPrinter": "Select printer",
     "status.idle": "Idle",
@@ -1294,7 +1292,7 @@ const messages: Record<Locale, Messages> = {
     "diagnostics.noReport": "Nenhum relatório de diagnóstico está disponível.",
     "diagnostics.open": "Diagnóstico",
     "nav.ariaLabel": "Navegação do espaço de trabalho",
-    "nav.printers": "Gerenciar impressoras",
+    "nav.printers": "Impressoras",
     "nav.settings": "Configuração",
     "nav.files": "Arquivos",
     "nav.cameras": "Câmeras",
@@ -1324,7 +1322,6 @@ const messages: Record<Locale, Messages> = {
     "camerasView.qualityLow": "Baixa",
     "camerasView.feed": "Fonte da câmera",
     "camerasView.builtInFeed": "Câmera embutida",
-    "nav.groupPrinters": "Impressoras",
     "nav.groupSections": "Seções",
     "nav.selectPrinter": "Selecionar impressora",
     "status.idle": "Ociosa",
