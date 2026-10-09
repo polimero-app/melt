@@ -84,9 +84,11 @@ printers whose camera serves only MJPEG reject it with
 - Views of the same camera at the same quality share one RTSP connection,
   which Melt closes when the last view closes. This helps with the camera's
   simultaneous-stream limit.
-- On Linux, Melt decodes the camera's H.264 and sends the view to the window
-  as MJPEG, because the system webview (WebKitGTK) cannot play H.264. Low
-  quality uses much less CPU.
+- Playback tries WebRTC, then WebCodecs (including on Linux), then MJPEG.
+  Native H.264 playback avoids JPEG transcoding; the MJPEG fallback uses
+  more CPU, especially at High quality. See the
+  [Wayland renderer notes](../README.md#running-on-linux-wayland) if an old
+  renderer override is still set.
 
 ## Security
 

@@ -202,14 +202,13 @@ describe('startH264Playback', () => {
 describe('h264WebCodecsAvailable', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('needs VideoDecoder and refuses WebKitGTK, whose web process aborts on probing', () => {
-    const webKitGtk = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko)'
-    const webView2 = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0'
-    const macOs = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)'
-    expect(h264WebCodecsAvailable(webView2)).toBe(false)
+  it('uses VideoDecoder availability without excluding Linux WebKitGTK', () => {
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko)',
+    })
+    vi.stubGlobal('VideoDecoder', undefined)
+    expect(h264WebCodecsAvailable()).toBe(false)
     vi.stubGlobal('VideoDecoder', class {})
-    expect(h264WebCodecsAvailable(webView2)).toBe(true)
-    expect(h264WebCodecsAvailable(macOs)).toBe(true)
-    expect(h264WebCodecsAvailable(webKitGtk)).toBe(false)
+    expect(h264WebCodecsAvailable()).toBe(true)
   })
 })

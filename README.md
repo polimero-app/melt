@@ -229,12 +229,17 @@ contracts and evidence that these targets enforce.
 Use `make run` during development. It starts the Vue development server before
 the desktop process.
 
-On a Wayland session the desktop process disables WebKit's DMA-BUF renderer
-itself, before GTK loads, because with it enabled GTK aborts with `Error 71
-(Protocol error) dispatching to Wayland display` on some GPU drivers. Setting
-`WEBKIT_DISABLE_DMABUF_RENDERER` explicitly always wins, so a driver that
-handles it keeps hardware rendering with `WEBKIT_DISABLE_DMABUF_RENDERER=0`.
-X11 sessions are left alone; that failure is Wayland-specific.
+On Wayland, Melt defaults to shared-memory frame presentation with
+`WEBKIT_DMABUF_RENDERER_FORCE_SHM=1`. This avoids `Error 71 (Protocol error)
+dispatching to Wayland display` on affected GPU drivers without disabling
+the renderer or its shared GL display. Linux viewers can therefore try
+native H.264 WebCodecs playback instead of being forced to MJPEG.
+An explicit setting is respected: use `WEBKIT_DMABUF_RENDERER_FORCE_SHM=0`
+to try default GPU-buffer presentation. X11 sessions are left unchanged.
+
+Remove any old `WEBKIT_DISABLE_DMABUF_RENDERER=1` override before starting.
+On WebKitGTK 2.54.1, disabling the renderer leaves the shared GL display
+uninitialized, and H.264 WebCodecs probing aborts the web process.
 
 GTK otherwise uses the session's own backend. Forcing XWayland with
 `GDK_BACKEND=x11` still works but is not the default: under XWayland on GNOME
