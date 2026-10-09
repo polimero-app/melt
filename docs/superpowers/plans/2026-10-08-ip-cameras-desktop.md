@@ -335,8 +335,8 @@ The component owns its session. A separate `camera-session.ts` composable would 
 **Files:**
 - Modify: `ui/src/App.vue` (`View` ~105, `views` ~507, `sectionTabs` ~509, settings view ~3390 as the layout model, control card), `ui/src/i18n.ts`
 
-- [ ] **Step 1: Load cameras.** `cameras = ref<CameraSummary[]>([])`, loaded with `camera_list` next to `configured_printers` and reloaded after every camera mutation. Load failure is shown in the Cameras view only.
-- [ ] **Step 2: Cameras view** (`'cameras'` added to `View` and the nav).
+- [x] **Step 1: Load cameras.** `cameras = ref<CameraSummary[]>([])`, loaded with `camera_list` next to `configured_printers` and reloaded after every camera mutation. Load failure is shown in the Cameras view only.
+- [x] **Step 2: Cameras view** (`'cameras'` added to `View` and the nav).
   - **List** shows name, host and linked printers, plus add, edit and remove actions.
   - **Viewer:** selecting a camera opens one `CameraViewer` with `source: { camera }`. A `high | low` toggle in its `#controls` slot defaults to `high` and is not persisted.
   - **Add/edit `SlideOver`:**
@@ -345,16 +345,20 @@ The component owns its session. A separate `camera-session.ts` composable would 
     - Printer checkboxes are applied after save with `linkChanges` → `camera_link`/`camera_unlink`.
     - Saving runs a live verification (up to the timeout). Show it as busy, and show `commandMessage` plus `commandDetail` on failure.
     - After saving the open camera, restart its viewer.
-  - **Remove** asks with `ConfirmDialog`, stops the viewer first, then shows `warnings` from `CameraRemoveResult` as a toast.
-- [ ] **Step 3: Control-view feed picker.** Show a `select` in the camera card's `#controls` only when `linkedCameras(printer)` is non-empty. It lists "Built-in camera" first, then the linked cameras.
+  - **Remove** asks with `ConfirmDialog`, then shows `warnings` from `CameraRemoveResult` as a toast. There is no explicit viewer stop: the reloaded list changes the viewer's `sourceKey`, which stops it.
+- [x] **Step 3: Control-view feed picker.** Show a `select` in the camera card's `#controls` only when `linkedCameras(printer)` is non-empty. It lists "Built-in camera" first, then the linked cameras.
   - Changing it calls `camera_select(printer, camera?)` and reloads cameras; the session restarts through `sourceKey`.
   - Feed: `printerSource(printer, cameras)`. `canStream` is true for an external feed, else `capabilities.cameraStream`. `cameraSupported` gets the same external-or-capabilities rule.
   - An external feed runs while the printer is offline.
-- [ ] **Step 4: i18n** (en + pt-BR):
+- [x] **Step 4: i18n** (en + pt-BR):
   - `nav.cameras` and `camerasView.*`: title, empty state, add/edit/remove, field labels and hints, quality, built-in feed, linked printers, remove confirmation, saved/removed toasts
   - `errors.camera*` from Task 2, if not already added
   - a connection hint pointing to `docs/ip-cameras.md` troubleshooting (Camera Account, Third-Party Compatibility, privacy mode, stream limit)
-- [ ] **Step 5:** Run `bun run --cwd ui test` and `bun run --cwd ui build`. Commit `feat(ui): cameras view and printer feed selection`.
+- [x] **Step 5:** Run `bun run --cwd ui test` and `bun run --cwd ui build`. Commit `feat(ui): cameras view and printer feed selection`.
+  - A scripted `make run` (cameras view high → low, link and select → control view, built-in, printers view) found two bugs, each fixed in its own commit first:
+    - WebKitGTK 2.54.1 aborts the whole web process in `VideoDecoder.isConfigSupported` (SIGABRT, no JS error). WebKitGTK also has no `RTCPeerConnection`, so Linux now goes straight to the MJPEG proxy.
+    - The openh264 crate's default flush after every decode broke the C510W preview on the third P-frame of each GOP (`dsOutOfMemory`), so MJPEG showed about one frame per reconnect. The preview decoder no longer flushes.
+  - After the fixes, every step of the script started and stopped the right upstream, with one camera connection at a time.
 
 ### Task 6: Docs and attended desktop check
 
@@ -364,7 +368,7 @@ The component owns its session. A separate `camera-session.ts` composable would 
 - [ ] **Step 2 (attended, C510W + `make run`):** record the result of each check below in the commit body.
   1. **Wrong password** on add shows `cameraAuthFailed` and saves nothing (no YAML entry and no keychain entry).
   2. **Add** works with the right password.
-  3. **Viewer:** the Cameras viewer goes live. Note the transport from the badge tooltip (`webrtc`, `webcodecs` or `mjpeg`). This answers whether WebKitGTK's WebRTC offer matches the C510W's Main profile (`4D0034`/`4D001F`).
+  3. **Viewer:** the Cameras viewer goes live. On Linux the transport is `mjpeg` (Task 5 notes why).
   4. **Quality toggle** switches high and low.
   5. **Link and select** the camera for a printer: the control-view picker appears, switching between built-in and camera works, and only that viewer restarts.
   6. **Fast switching** between Control and Cameras on the same camera: the new viewer keeps playing.

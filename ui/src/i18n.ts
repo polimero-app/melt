@@ -124,6 +124,33 @@ export type MessageKey =
   | "nav.printers"
   | "nav.settings"
   | "nav.files"
+  | "nav.cameras"
+  | "camerasView.description"
+  | "camerasView.add"
+  | "camerasView.edit"
+  | "camerasView.actions"
+  | "camerasView.remove"
+  | "camerasView.empty"
+  | "camerasView.emptyHint"
+  | "camerasView.formDescription"
+  | "camerasView.username"
+  | "camerasView.password"
+  | "camerasView.passwordKeep"
+  | "camerasView.rtspPort"
+  | "camerasView.printers"
+  | "camerasView.printersHint"
+  | "camerasView.notLinked"
+  | "camerasView.connectionHint"
+  | "camerasView.saved"
+  | "camerasView.removed"
+  | "camerasView.passwordNotDeleted"
+  | "camerasView.removeTitle"
+  | "camerasView.removeDescription"
+  | "camerasView.quality"
+  | "camerasView.qualityHigh"
+  | "camerasView.qualityLow"
+  | "camerasView.feed"
+  | "camerasView.builtInFeed"
   | "nav.selectPrinter"
   | "nav.groupPrinters"
   | "nav.groupSections"
@@ -685,6 +712,33 @@ const messages: Record<Locale, Messages> = {
     "nav.printers": "Manage printers",
     "nav.settings": "Configuration",
     "nav.files": "Files",
+    "nav.cameras": "Cameras",
+    "camerasView.description": "IP cameras that printers can show instead of their built-in camera.",
+    "camerasView.add": "Add camera",
+    "camerasView.edit": "Edit camera",
+    "camerasView.actions": "Camera actions",
+    "camerasView.remove": "Remove camera",
+    "camerasView.empty": "No cameras yet",
+    "camerasView.emptyHint": "Add a Tapo camera to watch a printer from another angle.",
+    "camerasView.formDescription": "Melt connects to the camera to check these settings before saving.",
+    "camerasView.username": "Camera Account username",
+    "camerasView.password": "Camera Account password",
+    "camerasView.passwordKeep": "Camera Account password (leave blank to keep existing)",
+    "camerasView.rtspPort": "RTSP port",
+    "camerasView.printers": "Linked printers",
+    "camerasView.printersHint": "A linked printer can switch its camera card to this camera.",
+    "camerasView.notLinked": "Not linked",
+    "camerasView.connectionHint": "Use the Camera Account from the Tapo app, not your cloud login. Turn on Third-Party Compatibility if your firmware has it, turn privacy mode off, and close other viewers if the stream limit is reached. See docs/ip-cameras.md for more.",
+    "camerasView.saved": "Camera saved",
+    "camerasView.removed": "Camera removed",
+    "camerasView.passwordNotDeleted": "Camera removed, but its password could not be deleted from the keychain.",
+    "camerasView.removeTitle": "Remove {name}?",
+    "camerasView.removeDescription": "This removes the camera, its stored password, and its printer links. The camera itself is not changed.",
+    "camerasView.quality": "Stream quality",
+    "camerasView.qualityHigh": "High",
+    "camerasView.qualityLow": "Low",
+    "camerasView.feed": "Camera feed",
+    "camerasView.builtInFeed": "Built-in camera",
     "nav.groupPrinters": "Printers",
     "nav.groupSections": "Sections",
     "nav.selectPrinter": "Select printer",
@@ -1243,6 +1297,33 @@ const messages: Record<Locale, Messages> = {
     "nav.printers": "Gerenciar impressoras",
     "nav.settings": "Configuração",
     "nav.files": "Arquivos",
+    "nav.cameras": "Câmeras",
+    "camerasView.description": "Câmeras IP que as impressoras podem exibir no lugar da câmera embutida.",
+    "camerasView.add": "Adicionar câmera",
+    "camerasView.edit": "Editar câmera",
+    "camerasView.actions": "Ações da câmera",
+    "camerasView.remove": "Remover câmera",
+    "camerasView.empty": "Nenhuma câmera ainda",
+    "camerasView.emptyHint": "Adicione uma câmera Tapo para acompanhar uma impressora de outro ângulo.",
+    "camerasView.formDescription": "O Melt se conecta à câmera para verificar estas configurações antes de salvar.",
+    "camerasView.username": "Usuário da Conta da Câmera",
+    "camerasView.password": "Senha da Conta da Câmera",
+    "camerasView.passwordKeep": "Senha da Conta da Câmera (deixe em branco para manter a atual)",
+    "camerasView.rtspPort": "Porta RTSP",
+    "camerasView.printers": "Impressoras vinculadas",
+    "camerasView.printersHint": "Uma impressora vinculada pode trocar o cartão da câmera para esta câmera.",
+    "camerasView.notLinked": "Não vinculada",
+    "camerasView.connectionHint": "Use a Conta da Câmera do app Tapo, não o login da nuvem. Ative a Compatibilidade com Terceiros se o firmware tiver essa opção, desative o modo de privacidade e feche outros visualizadores se o limite de transmissões for atingido. Veja docs/ip-cameras.md para mais detalhes.",
+    "camerasView.saved": "Câmera salva",
+    "camerasView.removed": "Câmera removida",
+    "camerasView.passwordNotDeleted": "Câmera removida, mas a senha não pôde ser apagada do chaveiro.",
+    "camerasView.removeTitle": "Remover {name}?",
+    "camerasView.removeDescription": "Isso remove a câmera, a senha armazenada e os vínculos com impressoras. A câmera em si não é alterada.",
+    "camerasView.quality": "Qualidade da transmissão",
+    "camerasView.qualityHigh": "Alta",
+    "camerasView.qualityLow": "Baixa",
+    "camerasView.feed": "Fonte da câmera",
+    "camerasView.builtInFeed": "Câmera embutida",
     "nav.groupPrinters": "Impressoras",
     "nav.groupSections": "Seções",
     "nav.selectPrinter": "Selecionar impressora",
