@@ -10,7 +10,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use openh264::{decoder::Decoder, formats::YUVSource};
+use openh264::{
+    OpenH264API,
+    decoder::{Decoder, DecoderConfig, Flush},
+    formats::YUVSource,
+};
 use thiserror::Error;
 
 /// Bounds how large a buffered-but-unparsed chunk may grow before we give up:
@@ -197,11 +201,7 @@ impl H264Stream {
             return Ok(());
         }
         self.decoder = enabled
-            .then(|| {
-                Decoder::new().map_err(|error| {
-                    io::Error::other(format!("H.264 decoder init failed: {error}"))
-                })
-            })
+            .then(|| preview_decoder().map_err(io::Error::other))
             .transpose()?;
         self.decoder_started = false;
         self.access_unit.clear();
@@ -394,11 +394,9 @@ pub(crate) fn open_h264(
     expect_ok(&play, "PLAY")?;
 
     let decoder = decode
-        .then(|| {
-            Decoder::new()
-                .map_err(|error| protocol_error(format!("H.264 decoder init failed: {error}")))
-        })
-        .transpose()?;
+        .then(preview_decoder)
+        .transpose()
+        .map_err(protocol_error)?;
 
     Ok(H264Stream {
         connection,
@@ -845,6 +843,17 @@ fn parse_rtp(packet: &[u8]) -> Option<(bool, &[u8])> {
         }
     }
     Some((marker, payload))
+}
+
+/// The crate's default flush after every decode corrupts OpenH264 on
+/// streams whose output it buffers (Tapo C510W: `dsOutOfMemory` on the third
+/// P-frame of every GOP). Without it, a picture is at most one frame late.
+fn preview_decoder() -> Result<Decoder, String> {
+    Decoder::with_api_config(
+        OpenH264API::from_source(),
+        DecoderConfig::new().flush_after_decode(Flush::NoFlush),
+    )
+    .map_err(|error| format!("H.264 decoder init failed: {error}"))
 }
 
 fn encode_jpeg(yuv: &openh264::decoder::DecodedYUV) -> io::Result<Vec<u8>> {
