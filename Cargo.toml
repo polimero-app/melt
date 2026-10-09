@@ -31,3 +31,12 @@ zip = { version = "8", default-features = false, features = ["deflate"] }
 socket2 = "0.6"
 webrtc = "0.17.2"
 png = "0.18"
+
+# Desktop commands are sync `#[tauri::command(async)]` handlers, so their
+# blocking I/O runs on Tauri's tokio workers. reqwest::blocking panics there
+# only when built with debug assertions (release has no check), which broke
+# the firmware check and Moonraker commands in development builds.
+# ponytail: if blocked workers ever starve Tauri, run command bodies through
+# tokio::task::block_in_place instead.
+[profile.dev.package.reqwest]
+debug-assertions = false
