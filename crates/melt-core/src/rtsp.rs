@@ -164,6 +164,7 @@ pub struct H264Stream {
     next_keepalive: Instant,
     decoder: Option<Decoder>,
     decoder_started: bool,
+    pacing: PreviewPacing,
     sps: Vec<u8>,
     pps: Vec<u8>,
     started: bool,
@@ -175,7 +176,8 @@ pub struct H264Stream {
 /// One complete H.264 picture as received from the camera. RTP packet bytes
 /// are retained verbatim for WebRTC forwarding, while an Annex-B copy feeds
 /// browser decoders. JPEG output is present only while the bounded software
-/// preview decoder is enabled.
+/// preview decoder is enabled, and is skipped for pictures that arrive while
+/// the reader is catching up with the camera.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct H264AccessUnit {
     pub rtp_packets: Vec<Vec<u8>>,
@@ -238,6 +240,7 @@ impl H264Stream {
             let Some((marker, payload)) = parse_rtp(&packet) else {
                 continue;
             };
+            let timestamp = u32::from_be_bytes([packet[4], packet[5], packet[6], packet[7]]);
             total += packet.len();
             if total > MAX_ACCESS_UNIT_BYTES {
                 self.access_unit.clear();
@@ -259,9 +262,10 @@ impl H264Stream {
                 && (self.decoder_started || keyframe);
             let jpeg = match (access_unit.as_ref(), self.decoder.as_mut(), should_decode) {
                 (Some((access_unit, _)), Some(decoder), true) => {
+                    let encode = self.pacing.admit(Instant::now(), timestamp);
                     match decoder.decode(access_unit) {
-                        Ok(Some(yuv)) => Some(encode_jpeg(&yuv)?),
-                        Ok(None) => None,
+                        Ok(Some(yuv)) if encode => Some(encode_jpeg(&yuv)?),
+                        Ok(_) => None,
                         Err(error) => {
                             return Err(io::Error::new(
                                 io::ErrorKind::InvalidData,
@@ -435,6 +439,7 @@ pub(crate) fn open_h264(
         next_keepalive: Instant::now() + KEEPALIVE_INTERVAL,
         decoder,
         decoder_started: false,
+        pacing: PreviewPacing::default(),
         sps: track.sps,
         pps: track.pps,
         started: false,
@@ -878,6 +883,50 @@ fn preview_decoder() -> Result<Decoder, String> {
     .map_err(|error| format!("H.264 decoder init failed: {error}"))
 }
 
+/// Paces the JPEG preview to the camera using RTP timestamps. Encoding can
+/// outlast the frame interval (debug builds encode 2K frames at ~2 fps), and
+/// encoding every frame then puts the preview further behind each frame.
+/// Late pictures are still decoded, since later P-frames reference them, but
+/// they are not encoded until the reader catches up.
+#[derive(Default)]
+struct PreviewPacing {
+    /// When the last picture would have arrived had the reader never fallen
+    /// behind, and that picture's RTP timestamp.
+    on_time: Option<(Instant, u32)>,
+    last_jpeg: Option<Instant>,
+}
+
+impl PreviewPacing {
+    /// Above usual Wi-Fi jitter and the time to send a large keyframe.
+    const MAX_LATENESS: Duration = Duration::from_millis(250);
+    /// Keeps a preview alive if a camera's timestamps are broken.
+    const MAX_GAP: Duration = Duration::from_secs(1);
+
+    /// Records a picture's arrival; true if it should be encoded.
+    fn admit(&mut self, now: Instant, timestamp: u32) -> bool {
+        let on_time = match self.on_time {
+            Some((at, last)) => {
+                // H.264's RTP clock is 90 kHz. A backwards step (a reset, or
+                // B-frame reordering) counts as no time.
+                let ticks = u64::try_from(timestamp.wrapping_sub(last) as i32).unwrap_or(0);
+                let media = Duration::from_micros(ticks * 100 / 9);
+                // Allows the camera's clock to run up to 1 ms/s slow.
+                (at + media + media / 1000).min(now)
+            }
+            None => now,
+        };
+        self.on_time = Some((on_time, timestamp));
+        let encode = now - on_time <= Self::MAX_LATENESS
+            || self
+                .last_jpeg
+                .is_none_or(|last| now - last >= Self::MAX_GAP);
+        if encode {
+            self.last_jpeg = Some(now);
+        }
+        encode
+    }
+}
+
 fn encode_jpeg(yuv: &openh264::decoder::DecodedYUV) -> io::Result<Vec<u8>> {
     let (width, height) = yuv.dimensions();
     let mut rgb = vec![0u8; width * height * 3];
@@ -898,6 +947,52 @@ fn encode_jpeg(yuv: &openh264::decoder::DecodedYUV) -> io::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const FRAME: Duration = Duration::from_millis(100);
+    const FRAME_TICKS: u32 = 9_000;
+
+    /// Frames arrive every 100 ms and encoding one takes 400 ms: the reader
+    /// skips the pictures queued meanwhile instead of falling further behind.
+    #[test]
+    fn preview_skips_pictures_that_arrive_late() {
+        let start = Instant::now();
+        let mut pacing = PreviewPacing::default();
+        let mut now = start;
+        let mut encoded = Vec::new();
+        for frame in 0..20 {
+            now = now.max(start + FRAME * frame);
+            if pacing.admit(now, frame * FRAME_TICKS) {
+                encoded.push(frame);
+                now += Duration::from_millis(400);
+            } else {
+                now += Duration::from_millis(1);
+            }
+        }
+        assert_eq!(encoded, [0, 2, 6, 10, 14, 18]);
+        assert!(now - (start + FRAME * 19) < Duration::from_millis(650));
+    }
+
+    #[test]
+    fn preview_counts_timestamps_across_the_wrap() {
+        let start = Instant::now();
+        let mut pacing = PreviewPacing::default();
+        let mut timestamp = u32::MAX - FRAME_TICKS;
+        for frame in 0..20 {
+            assert!(pacing.admit(start + FRAME * frame, timestamp), "{frame}");
+            timestamp = timestamp.wrapping_add(FRAME_TICKS);
+        }
+    }
+
+    /// A camera whose timestamps never advance still gets a picture a second.
+    #[test]
+    fn preview_encodes_a_picture_a_second_while_late() {
+        let start = Instant::now();
+        let mut pacing = PreviewPacing::default();
+        let admitted: Vec<u32> = (0..30)
+            .filter(|&frame| pacing.admit(start + FRAME * frame, 0))
+            .collect();
+        assert_eq!(admitted, [0, 1, 2, 12, 22]);
+    }
 
     #[test]
     fn keepalive_only_454_loses_the_session() {
@@ -963,6 +1058,7 @@ mod tests {
             next_keepalive: Instant::now(),
             decoder: None,
             decoder_started: false,
+            pacing: PreviewPacing::default(),
             sps: Vec::new(),
             pps: Vec::new(),
             started: false,

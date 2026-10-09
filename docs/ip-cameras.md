@@ -58,7 +58,9 @@ melt camera remove porch --yes
 their meaning: a positional name is always a printer.
 
 `camera stream` serves MJPEG by default, transcoded from the camera's H.264
-so any browser can show it. `--format h264` instead forwards the camera's own
+so any browser can show it. If transcoding cannot keep up with the camera,
+Melt skips frames rather than falling behind. `--format h264` instead
+forwards the camera's own
 H.264, without decoding or re-encoding, as an Annex-B byte stream that starts
 at a keyframe. Open it with `ffplay -f h264 <url>` or
 `vlc --demux h264 <url>`; browsers cannot play it. The same flag works for
