@@ -6,7 +6,7 @@ import { PhArrowsClockwise, PhCamera, PhCornersOut, PhVideoCamera, PhWarning } f
 import type { MessageKey } from '../i18n'
 import { commandDetail, commandMessage, type Translate } from '../errors'
 import { cameraViewState } from '../presentation'
-import { startH264Playback, supportsH264WebCodecs, type H264Playback } from '../camera-stream'
+import { h264WebCodecsAvailable, startH264Playback, supportsH264WebCodecs, type H264Playback } from '../camera-stream'
 import { sourceKey, type CameraSource, type Quality } from '../cameras'
 import Button from './Button.vue'
 import Card from './Card.vue'
@@ -199,6 +199,9 @@ async function fallback(source: CameraSource, quality: Quality, current: number,
   mediaStream.value?.getTracks().forEach((track) => track.stop())
   mediaStream.value = undefined
   await releaseViewers()
+  if (!h264WebCodecsAvailable()) {
+    return fallbackMjpeg(source, quality, current, `${reason}; WebCodecs is unavailable in the embedded webview`)
+  }
   try {
     const stream = await invoke<H264Stream>('camera_h264_stream', { source, quality })
     if (!keep(stream.viewerId, current)) return

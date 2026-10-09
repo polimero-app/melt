@@ -108,6 +108,16 @@ export function h264AvcAccessUnit(frame: H264Chunk): {
   return { data, description }
 }
 
+/**
+ * WebKitGTK (seen on 2.54.1) aborts its whole web process inside
+ * `VideoDecoder.isConfigSupported` for H.264, which no try/catch survives,
+ * so Linux webviews go straight to the MJPEG proxy.
+ */
+export function h264WebCodecsAvailable(userAgent = globalThis.navigator?.userAgent ?? '') {
+  const webKitGtk = userAgent.includes('Linux') && !userAgent.includes('Chrome/')
+  return typeof VideoDecoder !== 'undefined' && !webKitGtk
+}
+
 export async function supportsH264WebCodecs(codec: string): Promise<boolean> {
   if (typeof VideoDecoder === 'undefined') return false
   try {
