@@ -502,9 +502,8 @@ Document this behavior and its evidence boundary in:
 - [ ] Add JSON serialization and the defined exit-code mapping.
 - [ ] Test terminal sanitization for component IDs, labels, and versions.
 - [ ] Add unit tests for human output across every availability state.
-- [ ] Add a no-network profile-not-found contract fixture. Do not add the new
-      command to the legacy Go migration inventory unless that inventory's
-      schema is first extended to distinguish Melt-native commands.
+- [ ] Add a no-network profile-not-found contract fixture and register the new
+      command in the inventory's `meltNativeCommands` array.
 - [ ] Verify `make contract`.
 
 ### Task 7: Add desktop cache, command, and event

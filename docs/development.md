@@ -138,11 +138,12 @@ WebRTC minor/major upgrades (API migration), vek minor/major upgrades (euc
 compatibility), and the TypeScript next major (vue-tsc compatibility).
 
 Keep driver behavior in the core and surface adapters thin. Add user-facing
-strings to both `en` and `pt-BR` catalogs. Preserve the public CLI contract and
-register native extensions separately from the frozen baseline. Changes to
-undocumented Bambu behavior need scoped evidence and qualification rather
-than broad model assumptions. Update the relevant current guide alongside a
-behavior change; historical plans should identify departures and point to it.
+strings to both `en` and `pt-BR` catalogs. Preserve the public CLI contract,
+register new paths in the command inventory, and cover accepted response
+changes with fixtures. Changes to undocumented Bambu behavior need scoped
+evidence and qualification rather than broad model assumptions. Update the
+relevant current guide alongside a behavior change; historical plans should
+identify departures and point to it.
 
 Use [the interface system](../.interface-design/system.md) for shared UI state
 rules and [Wayland notes](../README.md#running-on-linux-wayland) for native H.264

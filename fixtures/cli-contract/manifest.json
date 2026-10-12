@@ -8,7 +8,7 @@
       "exitCode": 0,
       "stdout": "golden/version.json",
       "stderr": "",
-      "ignoreJsonPointers": ["/data/version", "/data/commit", "/data/goVersion", "/data/platform"]
+      "ignoreJsonPointers": ["/data/version", "/data/commit", "/data/platform"]
     },
     {
       "id": "printer-drivers-json",

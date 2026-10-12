@@ -24,7 +24,7 @@ implementation decisions rather than the current command reference.
 | Guide | Contents |
 | --- | --- |
 | [Development](development.md) | Prerequisites, workspace architecture, build and test targets, CI |
-| [CLI fixtures](cli-contract-fixtures.md) | Frozen migration baseline and Melt-native extensions |
+| [CLI fixtures](cli-contract-fixtures.md) | Public command inventory, JSON goldens and response compatibility |
 | [Bambu compatibility](bambu-compatibility.md) | Runtime transport, authorization, controls, print workflow |
 | [Protocol evidence policy](bambu-protocol-evidence.md) | Evidence precedence, manifests and redaction |
 | [Physical qualification](bambu-physical-qualification.md) | Hardware capture and quirk promotion procedure |

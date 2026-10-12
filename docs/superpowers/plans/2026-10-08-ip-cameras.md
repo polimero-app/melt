@@ -28,7 +28,7 @@ desktop webviews.
 - **Digest (MD5) only.** A Basic-only challenge is refused before any credential is sent.
 - **Secrets stay out of YAML, fixtures, logs, error messages and `Debug` output.** `ResolvedCamera` and `CameraRequest` derive no `Debug`.
 - **Exit codes:** validation and not-found 2, authentication and keychain 3, connection and timeout 4, unsupported codec 5, internal 1. Only existing error codes are used.
-- **Frozen contract:** the Go-baseline inventory rows for `camera snapshot`/`camera stream` stay unchanged. New commands go in `meltNativeCommands`.
+- **CLI compatibility:** `camera snapshot`/`camera stream` retain their positional printer behavior. New command paths go in `meltNativeCommands`.
 - **Tests:** stdlib `#[test]`, table-driven where there are several cases, no assertion crates. Network tests bind `127.0.0.1:0` only.
 - **Commits:** conventional messages, one logical change each, every commit builds and passes `cargo test --workspace --locked`. End each message with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Addresses:** only documentation addresses (`192.0.2.0/24`) appear in fixtures and docs.
@@ -4055,12 +4055,12 @@ delete the `camera:<id>:password` keychain entries if you no longer need them.
 ````
 
 In `README.md`:
-- In the `## CLI` list, replace `- `camera snapshot|stream`;` with
-  `- `camera add|edit|list|remove|link|unlink|select|snapshot|stream` (IP cameras: see [docs/ip-cameras.md](docs/ip-cameras.md));`
+- In the `## CLI` list, replace ``- `camera snapshot|stream`;`` with
+  ``- `camera add|edit|list|remove|link|unlink|select|snapshot|stream` (IP cameras: see [docs/ip-cameras.md](docs/ip-cameras.md));``
 - In `## Configuration and security`, after the first paragraph, add:
   `IP camera profiles and printer links live in the same configuration file; camera passwords are stored in the OS keychain under the camera's immutable ID. Camera video uses plain RTSP with Digest authentication on the LAN.`
 - After the `--access-code-file` paragraph, add:
-  `The same rules apply to `--password-file` for IP cameras.`
+  ``The same rules apply to `--password-file` for IP cameras.``
 
 In `docs/cli-contract-fixtures.md`, append:
 
@@ -4069,9 +4069,10 @@ In `docs/cli-contract-fixtures.md`, append:
 
 `camera add|edit|link|list|remove|select|unlink` are listed in
 `meltNativeCommands`. `camera snapshot` and `camera stream` also accept the
-Melt-native `--camera` and `--quality` flags; like `printer add --model`, these
-are not added to the frozen Go-baseline rows, whose positional printer
-behavior is unchanged.
+optional `--camera` and `--quality` flags while preserving the positional
+printer form. Like `printer add --model`, these options supplement the
+inventory's recorded core flags. The CLI reference and command help describe
+the complete supported options.
 ```
 
 - [ ] **Step 6: Final gates**

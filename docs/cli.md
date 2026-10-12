@@ -96,10 +96,10 @@ group/other permissions on Unix (for example `chmod 600`). A trailing line
 ending is removed. Never put the secret in a command argument or YAML profile.
 See [configuration](configuration.md) and [firmware evidence](firmware-updates.md).
 
-Version JSON retains migration fields `goVersion: rust`, `commit: unknown`,
-and `modes: [gui, headless]`. The reported version comes from Cargo's package
-metadata; a nightly installer can have a date-based bundle version while this
-CLI still reports the checked-in Cargo version. See
+Version JSON includes `version`, `license`, `sourceUrl`, `commit: unknown`,
+`platform`, and `modes: [gui, headless]`. The reported version comes from Cargo's
+package metadata; a nightly installer can have a date-based bundle version
+while this CLI still reports the checked-in Cargo version. See
 [nightly packaging](release-qualification.md#nightly-prereleases).
 
 ## Storage and print jobs

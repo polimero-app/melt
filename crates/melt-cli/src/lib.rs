@@ -535,7 +535,6 @@ struct VersionData {
     license: &'static str,
     source_url: &'static str,
     commit: &'static str,
-    go_version: &'static str,
     platform: String,
     modes: [&'static str; 2],
 }
@@ -561,7 +560,6 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                 license: app_info().license,
                 source_url: app_info().source_url,
                 commit: "unknown",
-                go_version: "rust",
                 platform: format!("{}/{}", std::env::consts::OS, std::env::consts::ARCH),
                 modes: ["gui", "headless"],
             },

@@ -13,13 +13,10 @@ one executable:
 See the [documentation index](docs/README.md) for usage, configuration,
 development, compatibility, and release guides.
 
-The CLI, GUI, desktop application, and shared source are licensed under the GNU
+The CLI, desktop application, and shared source are licensed under the GNU
 Affero General Public License v3.0 only (`AGPL-3.0-only`). See
 [`LICENSE`](LICENSE). Corresponding source is available from
 <https://github.com/polimero-app/melt>.
-
-This Rust/Tauri workspace unifies and supersedes the legacy standalone CLI,
-Fyne GUI, and Go application implementations.
 
 ## Features
 
@@ -152,9 +149,8 @@ see the guide for its additional capture dependencies.
 - `docs` contains current usage/development guides, compatibility and
   qualification policy, release procedures, and dated design/plan records.
 
-Unlike the retired Fyne GUI, the desktop does not shell out to a separate CLI
-process for each action. Both surfaces call the same Rust core. The desktop
-also reuses one profile-aware connection session per printer: Moonraker shares
+The CLI and desktop call the same Rust core directly. The desktop reuses
+one profile-aware connection session per printer: Moonraker shares
 its HTTP connection pool, while Bambu serializes status and commands over one
 authenticated MQTT session. Endpoint, TLS, credential, or timeout changes
 replace the session immediately, and removing a profile evicts it. One-shot CLI
@@ -345,10 +341,8 @@ maintain immediate access to its physical safety controls. The software is
 provided without warranty under the AGPL-3.0-only license; use it at your own
 risk.
 
-Legacy implementations reported testing on Bambu Lab A1 Mini and H2C hardware.
-That historical statement does not qualify this implementation or any current
-model/firmware pair. Melt records physical qualification only through the
-evidence workflow linked above.
+Physical qualification applies to an exact model/firmware pair and is recorded
+through the evidence workflow linked above.
 
 ## License
 

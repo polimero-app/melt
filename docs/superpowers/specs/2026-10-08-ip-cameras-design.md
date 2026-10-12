@@ -145,9 +145,10 @@ melt camera stream   (<printer> | --camera <camera>) [--quality high|low] [exist
   `capability_unsupported`, `internal_error`).
 - Removal requires confirmation or `--yes`, like `printer remove`. Other
   profile and link commands save directly.
-- New commands are listed in `meltNativeCommands`. As with `printer add
-  --model`, the frozen Go-baseline entries for `camera snapshot` and
-  `camera stream` stay unchanged.
+- New commands are listed in `meltNativeCommands`. `camera snapshot` and
+  `camera stream` retain their positional printer behavior while accepting
+  an optional external-camera selector. `printer add --model` remains an
+  optional model hint.
 
 ## Implemented Phase 2 (desktop)
 

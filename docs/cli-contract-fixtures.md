@@ -2,29 +2,24 @@
 
 Last-updated: 2026-10-12
 
-`fixtures/cli-contract/inventory.json` is the migration inventory. It records
-every public command in the Go contract, its arguments and flags, and whether
-the Rust CLI implements it. Do not remove an inventory row when a command is
-implemented; change its `implementation` value and add a fixture.
-
-Schema version 2 keeps post-migration commands in `meltNativeCommands`. These
-commands participate in the same fixture and help coverage without being
-misrepresented as part of the frozen Go baseline.
+`fixtures/cli-contract/inventory.json` inventories Melt's public command paths,
+arguments, core flags and implementation status. Schema version 2 stores paths
+in two arrays, `commands` and `meltNativeCommands`; both participate in the
+same fixture and help coverage. Preserve implemented rows, add new paths to
+`meltNativeCommands`, and cover them with reproducible fixtures where feasible.
 
 `fixtures/cli-contract/manifest.json` maps a reproducible invocation to its
-exit code and JSON golden response. Original migration responses were captured from the Go
-working baseline at `6b67ff58b8b7a123f3e560f76c8c62a3a47e7a6d`. The accepted
-contract names `16f2a9570affdc0ab20ee41b20d273bc4743a68d`, but that object is
-not present in the clone used for the original captures. That provenance gap
-is retained in the inventory; do not claim the captures came from the accepted
-object or silently regenerate the frozen baseline. Melt-native additions and
-accepted extensions (firmware, camera management, H.264) have Rust responses.
+exit code and JSON golden response. Goldens define the accepted output for the
+current Melt contract. Review intended response changes before updating a
+golden; history and previous expectations remain available in Git.
 
-The inventory currently has 41 baseline paths and 9 Melt-native paths,
-including command groups. All are marked implemented. The manifest has 13
-hardware-independent JSON/error cases; it is representative fixture coverage,
-not a successful network fixture for every public operation. Unit/simulated
-network tests provide further behavior coverage.
+The inventory currently has 41 paths in `commands` and 9 in
+`meltNativeCommands`, including command groups. All are marked implemented.
+The inventory is not a complete command/option reference; see the
+[CLI reference](cli.md) and command help for current syntax. The manifest has
+13 hardware-independent JSON/error cases; it is representative fixture
+coverage, not a successful network fixture for every public operation.
+Unit/simulated network tests provide further behavior coverage.
 
 ## Running a fixture
 
@@ -55,29 +50,29 @@ printer/keychain.
 
 ## Adding or updating coverage
 
-Preserve Go-baseline rows and their original flags. Register a new public path
-under `meltNativeCommands`, and document extra flags on an existing path as
-extensions. Add a manifest case and golden for a deterministic success or
-validation failure when feasible. Record why any baseline response changes.
+Preserve existing command syntax and response semantics. Register a new
+public path under `meltNativeCommands`, and document extra flags on an existing
+path as extensions. Add a manifest case and golden for a deterministic success
+or validation failure when feasible. Record why an existing response changes.
 The harness currently asserts inventory/fixture counts; update those assertions
 deliberately when adding rows/cases. Run `make contract` and the relevant CLI
 unit tests. The [CLI reference](cli.md) describes current syntax and semantics.
 
-## Melt-native extensions
+## Additional commands and options
 
-`firmware` and `firmware check` are Melt-native paths. Firmware checks also
-accept `--include-history` and `--include-public-catalogue`; those flags are
-implemented extensions beyond the inventory's original native flag list.
-`printer capabilities`, `jobs preflight`, and AMS drying paths are already
-represented in the checked-in migration inventory.
+`firmware` and `firmware check` are listed in `meltNativeCommands`. Firmware
+checks also accept `--include-history` and `--include-public-catalogue`; those
+flags are implemented options beyond the inventory's recorded core flag list.
+AMS drying paths are listed in `commands`. `printer capabilities` and
+`jobs preflight` are implemented but currently absent from this inventory.
 
 `camera add|edit|link|list|remove|select|unlink` are listed in
 `meltNativeCommands`. `camera snapshot` and `camera stream` also accept the
-Melt-native `--camera` and `--quality` flags; like `printer add --model`, these
-are not added to the frozen Go-baseline rows, whose positional printer
-behavior is unchanged.
+optional `--camera` and `--quality` flags while preserving the positional
+printer form. Like `printer add --model`, these options supplement the
+inventory's recorded core flags. The [CLI reference](cli.md) and command help
+describe the complete supported options.
 
-`camera stream --format` also accepts the Melt-native value `h264`. The
-`camera-stream-invalid-format-json` fixture therefore uses `h265` as its
-invalid value, and its golden message lists both accepted formats; the
-Go baseline only accepted `mjpeg`.
+`camera stream --format` accepts `mjpeg` and `h264`. The
+`camera-stream-invalid-format-json` fixture uses `h265` as its invalid value,
+and its golden message lists both accepted formats.
