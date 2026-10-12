@@ -1,5 +1,15 @@
 # AMS Drying Display and Control Implementation Plan
 
+Last-updated: 2026-10-12
+
+**Status:** Historical implementation plan. Per-unit drying telemetry,
+capability-gated start/stop, CLI `ams dry`, desktop controls and tests are
+implemented. The current behavior includes cooling/fault stop handling and
+stale `already_drying` reason handling; see
+[the drying contract](../../bambu-compatibility.md#ams-drying). Capture anecdotes
+and original checkboxes below do not constitute a completed manifest-governed
+physical qualification row. Current MSRV is Rust 1.95.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Show every heater-equipped AMS unit's drying state (phase, time left, setting, blocking reasons) in CLI and desktop status, and let Melt start/stop a drying cycle on printers whose firmware advertises remote drying.

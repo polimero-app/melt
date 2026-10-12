@@ -1,6 +1,11 @@
 # IP Camera Support — Design
 
-**Status:** Accepted design for phased implementation. Melt has no ADR
+Last-updated: 2026-10-12
+
+**Status:** Phases 1 (core/CLI) and 2 (desktop) are implemented. Phase 3
+(ONVIF/pan/tilt) and optional phase 4 (discovery) remain planned. Current usage
+is documented in [IP cameras](../../ip-cameras.md) and
+[the desktop guide](../../desktop.md). Melt has no ADR
 directory; like earlier Melt features, this spec is the decision record. Each
 phase gets its own implementation plan, written once the previous phase has
 landed and its interfaces are real.
@@ -10,9 +15,12 @@ video, snapshots, and pan/tilt, in the CLI and desktop app. The first external
 driver is `tapo`, first qualified on the C510W.
 
 **Qualification unit:** a user-owned Tapo C510W, hardware 1.0, firmware 1.3.5,
-on the LAN. Its local Camera Account was not configured as of 2026-10-08, and
-RTSP (554) and ONVIF (2020) refused connections then. That is expected until
-the Camera Account exists. It is not evidence of a firmware incompatibility.
+on the LAN. Initial 2026-10-08 observations before Camera Account setup saw
+RTSP (554) and ONVIF (2020) refuse connections. Subsequent RTSP qualification
+captured both H.264 stream descriptions and the split Basic/Digest challenge
+behavior; see [fixtures](../../../fixtures/tapo/README.md). The initial refusal
+is historical setup evidence, not a current incompatibility. ONVIF/PTZ
+qualification has not been established by these RTSP fixtures.
 
 ## Decisions
 
@@ -20,8 +28,8 @@ the Camera Account exists. It is not evidence of a firmware incompatibility.
 |---|---|
 | Device model | Independent camera profiles, optionally linked to printers |
 | First driver | `tapo`, model-agnostic. The model is observed, never asserted. First qualified on the C510W, hardware 1.0 / firmware 1.3.5 |
-| Credentials | Tapo Camera Account only. It enables RTSP (video) and ONVIF on port 2020 (Profile S: device info, pan/tilt). Melt never asks for the TP-Link cloud login |
-| Features | Live video, JPEG snapshots, pan/tilt |
+| Credentials | Tapo Camera Account only; current video uses RTSP, planned ONVIF uses port 2020. Melt never asks for the TP-Link cloud login |
+| Features | Implemented: live H.264 video, JPEG snapshots, profiles/links and desktop feed selection. Planned: ONVIF pan/tilt |
 | Surfaces | CLI and desktop |
 | Excluded | Presets, zoom, audio, recording, timelapses, web interface, cloud login, camera firmware, motion tracking, H.265, transcoding services |
 | Links | Many-to-many between cameras and printers; one selected feed per printer |
@@ -29,16 +37,16 @@ the Camera Account exists. It is not evidence of a firmware incompatibility.
 | Quality | `high` (`/stream1`) or `low` (`/stream2`), chosen per viewer or per command, default `high`. Not stored in the profile |
 | Video transport | Plain RTSP over TCP-interleaved RTP, H.264 only, on the LAN. No claim of encryption, no cloud relay |
 | Discovery | Manual host entry. ONVIF WS-Discovery is Phase 4 and optional |
-| Dependencies | Phase 1–2 add none. Phase 3 adds `quick-xml` (new to `melt-core`; today it reaches only `melt-desktop` via `plist`) |
+| Dependencies | Phase 1–2 reused existing crates. A direct `quick-xml` dependency for a future ONVIF implementation remains proposed; it is absent from `melt-core` |
 
 ## Phases
 
-| Phase | Delivers | Plan |
+| Phase | Delivers | Current status / plan |
 |---|---|---|
-| 1 | Shared RTSP client, config schema, camera profiles + links, Tapo video and snapshots, CLI | `plans/2026-10-08-ip-cameras.md` |
-| 2 | Desktop: Cameras view, printer feed selection, shared viewer, per-viewer sessions | `plans/2026-10-08-ip-cameras-desktop.md` |
-| 3 | ONVIF client, pan/tilt in CLI and desktop | Written after Phase 2 and ONVIF qualification |
-| 4 | WS-Discovery (optional) | Only if manual entry proves painful |
+| 1 | Shared RTSP client, config schema, camera profiles + links, Tapo video and snapshots, CLI | Implemented; [plan](../plans/2026-10-08-ip-cameras.md) |
+| 2 | Desktop: Cameras view, printer feed selection, shared viewer, per-viewer sessions | Implemented; [plan](../plans/2026-10-08-ip-cameras-desktop.md) |
+| 3 | ONVIF client, pan/tilt in CLI and desktop | Planned, no implementation plan or qualified PTZ path yet |
+| 4 | WS-Discovery (optional) | Deferred until manual entry demonstrates a need |
 
 ## Architecture
 
@@ -55,8 +63,11 @@ header format and channel.
 **Camera domain (`melt-core/src/cameras.rs`, `cameras/`).** A closed driver
 enum like `drivers.rs`, not a trait. It holds profile workflows (create, update,
 remove, link, unlink, select), credential resolution, and the Tapo media
-operations. Phase 1 has no shared upstream manager: each CLI command opens its
-own stream, as `camera snapshot <printer>` does today.
+operations. Each CLI command opens its own stream. The implemented desktop
+uses `CameraManager::subscribe_external` keyed by camera ID plus quality and
+connection revision, alongside Bambu serial-keyed sources. Startup is
+coordinated per source, so an unreachable camera does not stall unrelated
+sources. Backend-generated viewer IDs make teardown local to one viewer.
 
 **Config (`melt.yaml`).**
 - `cameras`: map from normalized camera name to profile. A profile holds an
@@ -138,26 +149,29 @@ melt camera stream   (<printer> | --camera <camera>) [--quality high|low] [exist
   --model`, the frozen Go-baseline entries for `camera snapshot` and
   `camera stream` stay unchanged.
 
-## Requirements carried to Phase 2 (desktop)
+## Implemented Phase 2 (desktop)
 
-- **Manager lock.** `CameraManager::subscribe` currently opens the upstream
-  while holding the manager-wide lock (`bambu/camera_manager.rs`). Startup
-  must be coordinated per source, so an unreachable camera cannot stall the
-  others. Key upstreams by camera ID plus quality; Bambu keeps its serial key.
-- **Viewer-scoped sessions.** `printer_camera_stream_stop` stops every MJPEG
-  proxy, and WebRTC sessions are keyed by printer. Introduce viewer session
-  IDs: stopping one viewer leaves others running on the shared upstream, and
-  the last viewer releases it.
+- **Manager lock.** Startup is coordinated per source in
+  `bambu/camera_manager.rs`, not under one manager-wide network lock. External
+  upstreams use camera ID plus quality; Bambu keeps its serial key.
+- **Viewer-scoped sessions.** The desktop's `camera_*` media commands take a
+  printer/camera source. `camera_viewer_stop` takes a viewer ID and releases
+  only that subscription; last-viewer teardown releases the upstream.
 - **Snapshots** take a frame no older than 2 s from the active source, else
   wait for a new decodable frame within the timeout. A frame from a previous
   connection generation is never returned.
 - **Isolation.** Camera failures never mark a printer offline. An external
   feed works while its printer is offline. Changing feeds releases only that
   viewer's session.
-- **UI.** Extract `CameraViewer.vue`, a media-lifecycle composable and a pure
-  `cameras.ts`. Keep the WebRTC → WebCodecs → MJPEG fallback. Provide English
-  and pt-BR strings. No hidden thumbnail sessions and no periodic camera
-  polling; an open viewer's stream state is the status.
+- **UI.** `CameraViewer.vue` owns media lifecycle, and `cameras.ts` supplies
+  source/link/playback helpers. The Cameras view manages profiles and links;
+  Control picks the persisted default feed. WebRTC → WebCodecs → MJPEG
+  fallback and English/pt-BR strings are implemented. There is no separate
+  media-lifecycle composable, hidden thumbnail session or camera polling loop.
+- **Playback updates.** Native H.264 is enabled on Linux with the Wayland SHM
+  renderer default; the earlier WebKitGTK-specific WebCodecs skip was removed.
+  Badges name the active transport, and diagnostics include external streams
+  and retained, redacted playback/fallback results.
 
 ## Requirements carried to Phase 3 (pan/tilt)
 
@@ -188,6 +202,12 @@ melt camera stream   (<printer> | --camera <camera>) [--quality high|low] [exist
   consequence that warrants confirmation.
 
 ## Qualification
+
+The checked-in completed scope is RTSP SDP/authentication evidence for the
+C510W hardware/firmware pair. The following list records the intended physical
+qualification sequence; unchecked coverage must not be inferred from the SDP
+captures or loopback tests. Desktop OS/webview and phase-3 movement checks need
+their own observed results.
 
 **Phase 1.** On the qualification unit:
 - RTSP DESCRIBE challenge format (realm, qop, whether Basic is offered);

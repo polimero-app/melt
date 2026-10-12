@@ -1,5 +1,12 @@
 # File preview dialog
 
+Last-updated: 2026-10-12
+
+**Status:** Implemented, with later queue/cache/loading refinements. See
+[desktop library usage](../../desktop.md#file-library-and-slicers). The code
+reference below describes the current dialog; this spec is not an outstanding
+implementation task list.
+
 Clicking a model thumbnail in the library file browser opens a dialog holding a
 large version of that thumbnail, its metadata, and the same actions the card's
 overflow menu offers.
@@ -46,14 +53,14 @@ and supports. Replacing it with our flat-shaded rasterization to gain sharpness
 would be a downgrade, so we keep it at whatever size the slicer baked in and
 decline to upscale past 100%.
 
-The dialog opens immediately on the already-cached 640×360 preview and swaps to
-the large render when it arrives, so there is no perceived wait.
+The dialog opens immediately with the cached grid preview when available and
+swaps to the large render when it arrives. If no cached image exists, it shows
+a loading label instead of a blank panel.
 
 ## Rust
 
-`crates/melt-desktop/src/preview.rs` hardcodes `WIDTH`/`HEIGHT` module
-constants. They become parameters threaded through `rasterize`, `rasterize_3mf`,
-`render` and `encode_png`, with two exported sizes replacing them:
+`crates/melt-desktop/src/preview.rs` threads size through rasterization and
+PNG encoding and exports:
 
 ```rust
 pub const GRID_SIZE: (usize, usize) = (640, 360);
@@ -65,8 +72,8 @@ either size — no camera retuning. 1920×1080 is 2.1 MP, well inside the existi
 `MAX_PREVIEW_DIMENSION` (4096) and `MAX_PREVIEW_PIXELS` (16 M) guards that
 `validate_png` enforces.
 
-In `main.rs`, `LibraryPreviewRequest` gains `large: bool` (defaulting to false)
-and `render_preview` gains a size argument. `printer_file_preview` passes
+In `main.rs`, `LibraryPreviewRequest` has `large: bool` (defaulting to false)
+and `render_preview` takes a size argument. `printer_file_preview` passes
 `GRID_SIZE` unconditionally.
 
 Caching: the preview cache key gains a size tag. Large renders are held in the
@@ -75,24 +82,27 @@ cache — a 1920×1080 PNG is 1–3 MB against roughly 50 KB today, and the on-d
 cache has no eviction policy. Reopening a file within a session is instant;
 across restarts it re-renders.
 
-Large renders take a `RENDER_SEMAPHORE` permit like every other render, queueing
-behind in-flight grid thumbnails rather than pre-empting them.
+Large renders take a `RENDER_SEMAPHORE` permit like every other render. The
+frontend gives a dialog request priority ahead of queued grid requests but
+does not interrupt in-flight work.
 
 ## Frontend
 
-**`ui/src/preview.ts`** (new). `ModelThumbnail.vue` privately owns the preview
-cache, the two-slot concurrency gate and the base64 decoder. The dialog needs
-all three, so they move here behind `loadPreview(path, sizeBytes, modifiedAt,
-large)`. `ModelThumbnail.vue` imports it and loses roughly thirty lines;
-its behaviour is unchanged.
+**`ui/src/preview.ts`** owns the shared cache, two-slot concurrency gate and
+base64 decoder. `loadPreview(request, options)` takes path/size/modified/large
+fields plus optional abort signal and priority. Requests with the same cache
+key share work; queued requests without waiters are dropped. The frontend
+LRU is bounded to 48 MiB of base64 characters, with grid and large keys kept
+separate. `ModelThumbnail.vue` and the dialog both consume this module.
 
-**`ui/src/components/FilePreviewDialog.vue`** (new). Built on HeadlessUI
+**`ui/src/components/FilePreviewDialog.vue`** is built on HeadlessUI
 `Dialog`, matching `ConfirmDialog.vue` — Escape, backdrop dismissal, focus trap
 and focus restore all come from the library rather than a hand-rolled keydown
 listener.
 
-Props: `open`, the file's path/name/size/modified fields, a pre-formatted `meta`
-string, `items: ActionMenuItem[]`, and labels. `formatSize` and `formatDate` are
+Props: optional `file` (name/devicePath/size/modified), a pre-formatted `meta`
+string, `items: ActionMenuItem[]`, and close/unavailable/loading labels. A
+present file opens the dialog; no `open` prop is used. `formatSize` and `formatDate` are
 locale-aware locals in `App.vue`, so `App.vue` formats and passes the result
 down. `items` is the array `fileActionItems(file)` already builds for the card's
 `ActionMenu`, rendered here as a button row.
@@ -100,7 +110,7 @@ down. `items` is the array `fileActionItems(file)` already builds for the card's
 If the large render fails, the dialog silently keeps the low-resolution image.
 If both fail, it shows `filesView.previewUnavailable`.
 
-**`ui/src/App.vue`**. The card's preview `<div>` becomes a `<button
+**`ui/src/App.vue`**. The card's preview is a `<button
 type="button" class="group ...">` for model files — a real button, so keyboard
 and touch both reach it, since a hover overlay alone reaches neither. It carries
 the magnifier overlay and an `aria-label`. New `previewFile` ref drives the

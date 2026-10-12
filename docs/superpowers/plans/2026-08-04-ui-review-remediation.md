@@ -1,5 +1,16 @@
 # UI Review Remediation Implementation Plan
 
+Last-updated: 2026-10-12
+
+**Status:** Historical implementation plan. The monitoring/alert, freshness,
+job telemetry, scrollable files and emergency-control changes are implemented.
+Current monitoring additionally distinguishes connecting, synchronizing,
+reconnecting, printer error and offline states. Original checkboxes, test
+counts, line numbers and commit directives below are the execution record,
+not a current backlog. See [desktop usage](../../desktop.md) and
+[the interface system](../../../.interface-design/system.md) for current rules;
+manual hardware/visual checks are not attested by this status note.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Surface the printer state the backend already reports but the UI discards, and fix the controls and feedback that currently mislead the operator.
@@ -13,7 +24,7 @@
 - **No new dependencies.** There is no component-testing library and this plan does not add one. Testable logic goes in pure modules; template changes are verified manually.
 - **All user-facing strings go through i18n.** Add the key to the `MessageKey` union in `ui/src/i18n.ts` AND to both the `en` and `"pt-BR"` catalogs. `type Messages = Record<MessageKey, string>` (`i18n.ts:376`) makes a missing translation a compile error.
 - **Type-check every task** with `bun run --cwd ui build` (runs `vue-tsc --noEmit` first). Records keyed by `PrinterBadge` will fail to compile until every variant is handled — that is intentional and is the safety net for Task 1.
-- **Test command:** `bun test --cwd ui` (the `make ui-test` target).
+- **Test command:** `bun run --cwd ui test` (the `make ui-test` target, Vitest).
 - **Commit format:** conventional commits, ending with `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
 - **Do not touch** `--breakpoint-*` in `ui/src/style.css` or the window size in `tauri.conf.json`; those were settled on this branch.
 
@@ -75,7 +86,7 @@ In `ui/src/monitoring.test.ts`, replace the assertion on line 17:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `bun test --cwd ui`
+Run: `bun run --cwd ui test`
 Expected: FAIL — `expected 'offline' to be 'error'`
 
 - [ ] **Step 3: Add the variant and the branch**
@@ -97,7 +108,7 @@ The existing `connectionState === 'offline'` check on line 17 already runs first
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `bun test --cwd ui`
+Run: `bun run --cwd ui test`
 Expected: PASS (8 tests)
 
 - [ ] **Step 5: Handle the new variant everywhere the compiler demands**
@@ -169,7 +180,7 @@ const activeHasStatus = computed(() => isReachable(activeBadge.value) || activeB
 
 - [ ] **Step 9: Verify**
 
-Run: `bun test --cwd ui && bun run --cwd ui build`
+Run: `bun run --cwd ui test && bun run --cwd ui build`
 Expected: 8 tests pass, build succeeds with no type errors.
 
 - [ ] **Step 10: Commit**
@@ -340,7 +351,7 @@ describe('relative age', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `bun test --cwd ui`
+Run: `bun run --cwd ui test`
 Expected: FAIL — cannot resolve `./formatting`
 
 - [ ] **Step 3: Write the implementation**
@@ -368,7 +379,7 @@ export function relativeAge(observedAt: string | undefined, nowMs: number): Fres
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `bun test --cwd ui`
+Run: `bun run --cwd ui test`
 Expected: PASS (12 tests)
 
 - [ ] **Step 5: Wire it into the header**
@@ -435,7 +446,7 @@ In `ui/src/App.vue`, immediately after the `<StatusBadge …/>` on line 1677:
 
 - [ ] **Step 8: Verify**
 
-Run: `bun test --cwd ui && bun run --cwd ui build`
+Run: `bun run --cwd ui test && bun run --cwd ui build`
 Expected: 12 tests pass, build succeeds. Under `make run`, the counter ticks up and resets each time the monitor pushes.
 
 - [ ] **Step 9: Commit**
@@ -574,7 +585,7 @@ Add `PhWarningCircle` to the `@phosphor-icons/vue` import block at the top of th
 
 - [ ] **Step 6: Verify**
 
-Run: `bun test --cwd ui && bun run --cwd ui build`
+Run: `bun run --cwd ui test && bun run --cwd ui build`
 Expected: passes.
 
 Under `make run`: trigger a failure (pause a printer that is not printing) and confirm the toast is red, carries a warning icon, and stays until dismissed. Trigger a success and confirm it is still green and still auto-dismisses.
@@ -644,7 +655,7 @@ Update the existing import line at the top of the file to the combined one above
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `bun test --cwd ui`
+Run: `bun run --cwd ui test`
 Expected: FAIL — `formatDuration is not a function`
 
 - [ ] **Step 3: Write the implementation**
@@ -663,7 +674,7 @@ export function formatDuration(seconds: number): string {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `bun test --cwd ui`
+Run: `bun run --cwd ui test`
 Expected: PASS (16 tests)
 
 - [ ] **Step 5: Declare the field**
@@ -705,7 +716,7 @@ In `ui/src/App.vue`, replace the layer row (lines 1758-1761) so remaining time s
 
 - [ ] **Step 8: Verify**
 
-Run: `bun test --cwd ui && bun run --cwd ui build`
+Run: `bun run --cwd ui test && bun run --cwd ui build`
 Expected: passes. With a Bambu printer mid-print, the job card shows a countdown.
 
 - [ ] **Step 9: Commit**

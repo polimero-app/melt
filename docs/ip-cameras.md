@@ -1,5 +1,7 @@
 # IP cameras
 
+Last-updated: 2026-10-12
+
 Melt can show IP cameras next to, or instead of, a printer's built-in camera.
 Camera profiles are independent of printers; a camera can be linked to any
 number of printers, and each printer picks one default feed.
@@ -22,11 +24,16 @@ Other models and firmware are unqualified until exercised on hardware.
 2. Save the password to a file only you can read:
 
    ```sh
-   (umask 077; printf '%s\n' 'camera-account-password' > ~/.config/melt/porch.pw)
+   mkdir -p ~/.config/melt
+   chmod 700 ~/.config/melt
+   (umask 077; touch ~/.config/melt/porch.pw)
+   chmod 600 ~/.config/melt/porch.pw
    ```
 
-   To keep the password out of your shell history, write the file in an
-   editor instead (and `chmod 600` it).
+   Write the password into that file with an editor so it stays out of shell
+   history. Use one line; the file must be regular (not a symlink) and at most
+   4 KiB. This is a Unix example; use an appropriate private file on macOS or
+   Windows. These files are inputs to setup, not Melt's credential store.
 
 3. Add the camera. Melt connects, authenticates, and decodes one frame before
    saving; it never moves the camera during setup.
@@ -36,8 +43,10 @@ Other models and firmware are unqualified until exercised on hardware.
      --username melt --password-file ~/.config/melt/porch.pw
    ```
 
-The password is stored in the OS keychain; `melt.yaml` holds only the
-username, host, and port.
+The password is stored in the OS keychain; the profile in `melt.yaml` contains
+the immutable ID, driver, username, host, optional port, timeout and timestamps.
+It contains no password. After setup, remove the input password file if it is
+no longer needed. See [configuration](configuration.md) for locations and backups.
 
 ## Everyday use
 
@@ -55,7 +64,16 @@ melt camera remove porch --yes
 
 `high` uses the camera's main stream (`/stream1`), `low` its sub-stream
 (`/stream2`). `camera snapshot <printer>` and `camera stream <printer>` keep
-their meaning: a positional name is always a printer.
+their meaning: a positional name is always a printer's built-in camera,
+regardless of its selected desktop feed. Use `--camera` for an external camera;
+do not pass both selectors. Link/unlink take camera then printer, while select
+takes printer then camera. Selection requires an existing link.
+
+`--port` changes the loopback server's port; `--duration 30m` bounds its
+lifetime. The process stays running while it serves the stream. The default
+external quality is `high`. `--timeout` overrides that command's connection
+budget. `--insecure` and `--protocol-trace` apply only to printer cameras and
+are refused with `--camera`.
 
 `camera stream` serves MJPEG by default, transcoded from the camera's H.264
 so any browser can show it. If transcoding cannot keep up with the camera,
@@ -83,7 +101,10 @@ printers whose camera serves only MJPEG reject it with
   offline.
 - Views of the same camera at the same quality share one RTSP connection,
   which Melt closes when the last view closes. This helps with the camera's
-  simultaneous-stream limit.
+  simultaneous-stream limit. Different qualities open separate upstreams.
+  Leaving the view or hiding the window releases that viewer's subscription;
+  returning starts it again. CLI commands run in separate processes and do not
+  share the desktop's manager.
 - Playback tries WebRTC, then WebCodecs (including on Linux), then MJPEG.
   Native H.264 playback avoids JPEG transcoding; the MJPEG fallback uses
   more CPU, especially at High quality. See the
@@ -97,6 +118,12 @@ printers whose camera serves only MJPEG reject it with
   If playback fails entirely, diagnostics shows **None** with the failure
   reasons. Results remain available after closing the viewer; WebCodecs is
   reported only after its first decoded frame.
+
+The current desktop navigation calls the fleet tab **Printers**. See the
+[desktop guide](desktop.md) for the other views. Pan/tilt, ONVIF controls,
+WS-Discovery, audio and recording are not implemented; phase 3 and phase 4 in
+the [camera design](superpowers/specs/2026-10-08-ip-cameras-design.md) remain
+future work.
 
 ## Security
 
@@ -115,10 +142,18 @@ sent to the configured host.
 | `authentication_failed` mentioning Basic | The camera offered no Digest challenge; Melt will not send the password. |
 | `timeout` | Wrong host, or the camera is busy: Tapo cameras limit simultaneous streams; close other viewers (NVRs, apps). |
 | `capability_unsupported` | The stream is not H.264 (H.265 is not supported). |
+| `secret_not_found` / `secret_store_failed` | The Camera Account password is missing or the user's OS keychain is unavailable; restore/re-enter credentials or unlock the keychain. |
+| Amber `LIVE · MJPEG` badge | Native WebRTC/WebCodecs playback failed or is unavailable in this webview; inspect playback reasons in Diagnostics. |
+
+The scoped physical evidence is documented in [Tapo fixtures](../fixtures/tapo/README.md).
+Simulated RTSP tests cover authentication, channel selection, decoding and
+bounded failures; they do not qualify every Tapo model or desktop webview.
 
 ## Downgrading Melt
 
-Adding a camera writes `melt.yaml` as schema version 2, which older Melt
-releases refuse to read. To downgrade, remove the `cameras:` and
+Adding a camera writes `melt.yaml` as schema version 2, which version-1-only
+Melt builds refuse to read. Removing all cameras and links with the current
+Melt writes the remaining printer configuration as version 1. For a manual
+downgrade, close Melt and back up the file, then remove the `cameras:` and
 `printer_cameras:` sections from `melt.yaml` and set `version: 1`, then
 delete the `camera:<id>:password` keychain entries if you no longer need them.

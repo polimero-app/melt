@@ -1,12 +1,23 @@
 # IP Cameras Phase 1 Implementation Plan
 
+Last-updated: 2026-10-12
+
+**Status:** Historical implementation plan; phase 1 is implemented. Shared
+RTSP/Digest, schema v2, independent Tapo profiles/links and CLI snapshot/stream
+are present. Native `camera stream --format h264` was added afterward, and
+phase 2 desktop management/viewers have also landed. C510W hw 1.0 / fw 1.3.5
+RTSP evidence is in [fixtures](../../../fixtures/tapo/README.md). Current usage:
+[IP cameras](../../ip-cameras.md), [CLI](../../cli.md#cameras). Original task
+checkboxes and manual steps are historical and do not qualify ONVIF/PTZ or all
+desktop webviews.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Users can add a Tapo C510W as an independent camera profile, link it to printers, and take snapshots or stream it from the CLI.
 
 **Architecture:** The Bambu RTSP client moves to a vendor-neutral `melt-core/src/rtsp.rs`. Drivers hand it a connected socket, a URI and credentials. Bambu keeps its pinned TLS, fixed realm and quirks in a thin `bambu/rtsp.rs`. Camera profiles and printer links live in `melt.yaml`, which is written as schema version 2 only when camera data exists. Passwords live in the keychain under `camera:<id>:password`. A closed-set `cameras` domain resolves profiles and opens Tapo streams. The CLI adds `camera add|edit|list|remove|link|unlink|select` and a `--camera` selector on `camera snapshot|stream`.
 
-**Tech Stack:** Rust 2024 (MSRV 1.85), `rtsp-types`, `openh264`, `jpeg-encoder`, OpenSSL, `serde_yaml`. No new dependencies.
+**Tech Stack:** Rust 2024 (current MSRV 1.95), `rtsp-types`, `openh264`, `jpeg-encoder`, OpenSSL, `serde_yaml`. No new dependencies.
 
 **Spec:** `docs/superpowers/specs/2026-10-08-ip-cameras-design.md`
 

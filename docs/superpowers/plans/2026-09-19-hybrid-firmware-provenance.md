@@ -1,5 +1,15 @@
 # Hybrid Firmware Catalogue and Provenance Implementation Plan
 
+Last-updated: 2026-10-12
+
+**Status:** Historical implementation plan. Optional `upgrade.get_history`,
+opt-in public stable pages, per-component provenance, assessments and desktop
+source preferences are implemented. Successful public results now use a
+process-local 24-hour per-model cache, and A1 mini/H2C have official wiki
+fallbacks. See [firmware evidence](../../firmware-updates.md) for current
+source, cache and UI semantics. Original checkboxes are implementation history,
+not pending work or proof of physical no-update qualification.
+
 **Goal:** Extend Melt's read-only firmware checks so a Bambu printer that is
 not signed in to Bambu Cloud can still be compared with Bambu's public stable
 firmware catalogue, while also attempting the printer-local
@@ -579,7 +589,7 @@ Use the dedicated firmware screen under **Manage printers**.
 - [ ] Run `cargo fmt --all -- --check`.
 - [ ] Run `cargo clippy --workspace --all-targets --locked -- -D warnings`.
 - [ ] Run `cargo test --workspace --locked`.
-- [ ] Run `bun test --cwd ui` and `bun run --cwd ui build`.
+- [ ] Run `bun run --cwd ui test` and `bun run --cwd ui build`.
 - [ ] Run `make bambu-evidence-check`, `make contract`, and `make ci`.
 - [ ] Qualify `get_history` on a cloud-connected printer and a LAN-only printer.
 - [ ] Capture a sanitized empty history from the LAN-only printer in scope.

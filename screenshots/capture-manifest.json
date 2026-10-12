@@ -1,0 +1,117 @@
+{
+  "capturedAt": "2026-10-12T14:50:16+00:00",
+  "scenarioTime": "2026-10-12T12:00:00Z",
+  "sourceCommit": "d08df4764a897d3d1fc9570275db2bcee87b5c56",
+  "frontendSourceSha256": "6081da0ee83d760f68d4c4dbf5eea4f26261a766a92a79d9187de49aaba91720",
+  "fixtureSha256": "434d1719d9290c53a5ea861df4a7556419bfe311107980d49bafc3a380424542",
+  "viewport": {
+    "width": 1600,
+    "height": 1100,
+    "deviceScaleFactor": 2
+  },
+  "locale": "en-US",
+  "timezone": "UTC",
+  "theme": "dark",
+  "renderer": "Playwright Chromium",
+  "data": "Sanitized synthetic IPC and camera/model media; no live hardware or user configuration",
+  "captures": [
+    {
+      "file": "manage-printers.png",
+      "view": "fleet",
+      "size": [
+        3200,
+        2200
+      ],
+      "sha256": "7e53cf4edc2ae3b8b1bde12d63a75014ee56f40a7f3288289d38ce12925d2954",
+      "playback": []
+    },
+    {
+      "file": "configuration.png",
+      "view": "settings",
+      "size": [
+        3200,
+        2200
+      ],
+      "sha256": "2a76d745e889e04808ad3ec9daa60d69520cd0e9f9cc626f110f9233fc3a6b9b",
+      "playback": []
+    },
+    {
+      "file": "file-library.png",
+      "view": "library",
+      "size": [
+        3200,
+        2200
+      ],
+      "sha256": "4fd53372e293c575de663997c3336af1b03350c1d19cc612edc8d80c2c0d7f3d",
+      "playback": []
+    },
+    {
+      "file": "firmware-software.png",
+      "view": "firmware",
+      "size": [
+        3200,
+        2200
+      ],
+      "sha256": "1a3acee1c7c85e3e2e2900c719643f9352fd0403064143b2aaf2fdeb805ad42a",
+      "playback": []
+    },
+    {
+      "file": "printer-control-idle.png",
+      "view": "idle",
+      "size": [
+        3200,
+        2854
+      ],
+      "sha256": "32cc689e1978c882c1a3d4ef65787519d1247c95580b77ebb75f6e83a473ddf9",
+      "playback": [
+        "LIVE \u00b7 H.264"
+      ]
+    },
+    {
+      "file": "printer-control-printing.png",
+      "view": "printing",
+      "size": [
+        3200,
+        2854
+      ],
+      "sha256": "ac987ae230d0b1510bc041f4bee7680d50a940df53b64ce9c5330cadc3c2c16c",
+      "playback": [
+        "LIVE \u00b7 H.264"
+      ]
+    },
+    {
+      "file": "cameras.png",
+      "view": "cameras",
+      "size": [
+        3200,
+        2200
+      ],
+      "sha256": "0c8613faa5a3a894bf885ad3e62c33dc6366a0ea10d485462946b7fc6bfbbbe5",
+      "playback": [
+        "LIVE \u00b7 H.264"
+      ]
+    },
+    {
+      "file": "camera-settings.png",
+      "view": "camera-settings",
+      "size": [
+        3200,
+        2200
+      ],
+      "sha256": "7a8110f74658388bec40ea40f897b0b2db639c357020d5fb15f2c715fc82b5f0",
+      "playback": [
+        "LIVE \u00b7 H.264"
+      ]
+    },
+    {
+      "file": "file-preview.png",
+      "view": "preview",
+      "size": [
+        3200,
+        2200
+      ],
+      "sha256": "ebf085449d62068d1161fcb069d81c54dadc4cfd1039ed2b8996859a7ba17ca8",
+      "playback": []
+    }
+  ]
+}

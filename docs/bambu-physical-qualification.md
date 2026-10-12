@@ -1,8 +1,15 @@
 # Bambu physical-printer qualification
 
+Last-updated: 2026-10-12
+
 Physical qualification proves one exact marketed model, hardware configuration,
 and module-firmware inventory. It does not qualify a family, a later firmware,
 or a printer that merely reports a similar model string.
+
+No completed Bambu physical qualification row is currently checked in. The
+port-6000 fixture is executable-test evidence. This document is the procedure
+for adding hardware evidence, not a claim that every step has been performed.
+For independent Tapo camera evidence, see [the camera fixture notes](../fixtures/tapo/README.md).
 
 ## Preconditions and safety boundary
 
@@ -54,8 +61,11 @@ firmware contradiction can invalidate one fact without discarding the session.
 3. **Camera:** record live advertisement fields (redacted), negotiated transport,
    TLS identity result, codec parameters, timestamp behavior, reconnect with
    unchanged parameters, and behavior after changed SPS/PPS. Open concurrent
-   snapshot, MJPEG, and WebRTC viewers and verify only one upstream owner exists
-   for the serial; let one viewer stall and verify the others continue.
+   snapshot, MJPEG, WebRTC and WebCodecs viewers as applicable and verify only
+   one upstream owner exists for the serial; let one viewer stall and verify
+   the others continue. Record the OS/webview, negotiated playback badge and
+   redacted fallback reasons. Stop one viewer without disrupting another, then
+   hide/restore the view and close the last viewer to verify resource release.
 4. **Storage and port 6000:** list every root with capacity/writable metadata;
    upload a unique file, verify size/content, exercise collision handling,
    download, preview, and delete it. For tunnel operations retain sanitized
@@ -75,10 +85,20 @@ firmware contradiction can invalidate one fact without discarding the session.
 8. **Firmware availability:** capture `info.get_version` and the matching full
    `print.upgrade_state`, then capture a delta that advertises, changes, or
    clears a target. Cover printer and accessory modules plus forced updates.
-   Confirm passive and explicit-refresh checks send no upgrade command and do
-   not contact a cloud endpoint. A “current” qualification additionally needs
+   Confirm passive and explicit-refresh checks send no upgrade/install command.
+   Verify a default CLI/LAN-only desktop setup makes no public HTTPS request;
+   test history and public catalogue separately with their explicit source
+   configuration, ensuring version evidence never becomes a printer offer.
+   Confirm no cloud account credentials or download requests are used.
+   A “current” qualification additionally needs
    an exact no-update capture and repeatable proof that silence has that meaning
    for the scoped model and module versions.
+9. **AMS drying, when changed:** capture per-unit phase, remaining time,
+   settings and blocking reasons. Verify a telemetry-only unit never receives
+   a remote command, and a controllable unit's start/stop completes only on
+   an observed transition. Cover already-active, cooling, stopping and fault
+   states within the unit's safe temperature/duration bounds; mark absent
+   hardware explicitly not applicable.
 
 ## Evidence layout and sanitization
 

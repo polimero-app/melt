@@ -1,4 +1,4 @@
-.PHONY: build test lint ci contract bambu-evidence-check help license-check run install-desktop uninstall-desktop release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test
+.PHONY: build test lint ci contract bambu-evidence-check help license-check run install-desktop uninstall-desktop release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test screenshots
 .DEFAULT_GOAL := help
 
 build: cargo-build ui-build ## Build the Rust workspace and UI
@@ -112,6 +112,9 @@ ui-build: ## Build the UI
 
 ui-test: ## Run the UI test suite
 	bun run --cwd ui test
+
+screenshots: ui-build ## Capture current UI documentation with isolated sample data
+	python3 scripts/capture_screenshots.py
 
 help: ## Show this help
 	@printf "\033[37mUsage:\033[0m\n"

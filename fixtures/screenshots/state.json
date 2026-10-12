@@ -1,0 +1,82 @@
+{
+  "capturedAt": "2026-10-12T12:00:00Z",
+  "printers": [
+    {"name": "workshop", "driver": "bambu-lan", "host": "192.0.2.10", "serial": "SANITIZED_WORKSHOP", "model": "H2C", "detectedModel": "Bambu Lab H2C", "timeout": "10s", "insecure": false},
+    {"name": "studio", "driver": "bambu-lan", "host": "192.0.2.11", "serial": "SANITIZED_STUDIO", "model": "P1S", "detectedModel": "Bambu Lab P1S", "timeout": "10s", "insecure": false},
+    {"name": "klipper", "driver": "moonraker", "host": "192.0.2.30:7125", "serial": "", "model": "", "detectedModel": "Klipper / Moonraker", "timeout": "10s", "insecure": false}
+  ],
+  "drivers": [
+    {"name": "bambu-lan", "description": "Bambu Lab printers over LAN"},
+    {"name": "moonraker", "description": "Klipper printers via Moonraker"}
+  ],
+  "cameras": [
+    {"name": "workbench", "id": "0123456789abcdef0123456789abcdef", "driver": "tapo", "host": "192.0.2.20", "username": "camera-demo", "rtspPort": 554, "timeout": "10s", "printers": ["workshop", "studio"], "selectedBy": ["studio"]},
+    {"name": "enclosure", "id": "fedcba9876543210fedcba9876543210", "driver": "tapo", "host": "192.0.2.21", "username": "camera-demo", "rtspPort": 554, "timeout": "10s", "printers": ["klipper"], "selectedBy": ["klipper"]}
+  ],
+  "preferences": {
+    "notifications": {"completion": true, "failure": true, "disconnection": true},
+    "slicers": [
+      {"name": "Bambu Studio", "path": "/opt/slicers/bambu-studio", "enabled": true},
+      {"name": "OrcaSlicer", "path": "/opt/slicers/orca-slicer", "enabled": true}
+    ],
+    "publicFirmwareCatalogue": false
+  },
+  "idleStatus": {
+    "state": "idle",
+    "errors": [],
+    "warnings": [],
+    "wifi": {"signalDbm": -51},
+    "controls": {
+      "temperatures": {
+        "bed": {"kind": "bed", "currentCelsius": 25, "targetCelsius": 0, "maximumCelsius": 120, "controllable": true},
+        "chamber": {"kind": "chamber", "currentCelsius": 28, "targetCelsius": 0, "maximumCelsius": 65, "controllable": true},
+        "leftNozzle": {"kind": "nozzle", "position": "left", "currentCelsius": 26, "targetCelsius": 0, "maximumCelsius": 350, "controllable": true},
+        "rightNozzle": {"kind": "nozzle", "position": "right", "currentCelsius": 26, "targetCelsius": 0, "maximumCelsius": 350, "controllable": true}
+      },
+      "fans": {
+        "parts": {"kind": "parts", "speedPercent": 0, "mode": "manual", "controllable": true},
+        "auxiliary": {"kind": "auxiliary", "speedPercent": 0, "mode": "off", "controllable": true},
+        "exhaust": {"kind": "exhaust", "speedPercent": 0, "mode": "off", "controllable": true},
+        "heat": {"kind": "heat", "speedPercent": 0, "mode": "auto", "controllable": false}
+      },
+      "lights": {
+        "lamp": {"kind": "lamp", "mode": "on", "controllable": true},
+        "work_light": {"kind": "work", "mode": "off", "controllable": false}
+      }
+    },
+    "extensions": {
+      "bambu-lan": {
+        "ams": {
+          "units": [
+            {"id": 0, "kind": "AMS 2 Pro", "humidityLevel": "dry", "temperature": 26, "trays": [
+              {"slot": 0, "filamentType": "PLA", "color": "29B8D1FF", "remainingPercent": 82, "remainingGrams": 820},
+              {"slot": 1, "filamentType": "PLA", "color": "F3F4F6FF", "remainingPercent": 65, "remainingGrams": 650},
+              {"slot": 2, "filamentType": "PETG", "color": "F59E0BFF", "remainingPercent": 91, "remainingGrams": 910},
+              {"slot": 3, "filamentType": "PLA", "color": "222B38FF", "remainingPercent": 54, "remainingGrams": 540}
+            ], "drying": {"status": "off", "active": false, "controllable": true}},
+            {"id": 128, "kind": "AMS HT", "humidityLevel": "dry", "temperature": 65, "trays": [
+              {"slot": 0, "filamentType": "PETG", "color": "A9B5C6FF", "remainingPercent": 76, "remainingGrams": 760}
+            ], "drying": {"status": "drying", "active": true, "minutesRemaining": 142, "setting": {"filament": "PETG", "temperatureC": 65, "hours": 6}, "controllable": true}}
+          ]
+        }
+      }
+    }
+  },
+  "printerFiles": [
+    {"name": "cable-organizer.gcode.3mf", "root": "sdcard", "path": "/cable-organizer.gcode.3mf", "devicePath": "sdcard:/cable-organizer.gcode.3mf", "type": "file", "mediaType": "model", "sizeBytes": 17301504, "modifiedAt": "2026-10-12T10:30:00Z"},
+    {"name": "spool-holder.gcode.3mf", "root": "sdcard", "path": "/spool-holder.gcode.3mf", "devicePath": "sdcard:/spool-holder.gcode.3mf", "type": "file", "mediaType": "model", "sizeBytes": 8178893, "modifiedAt": "2026-10-11T14:12:00Z"},
+    {"name": "calibration-cube.gcode.3mf", "root": "sdcard", "path": "/calibration-cube.gcode.3mf", "devicePath": "sdcard:/calibration-cube.gcode.3mf", "type": "file", "mediaType": "model", "sizeBytes": 1323827, "modifiedAt": "2026-10-10T09:45:00Z"}
+  ],
+  "library": {
+    "path": "/samples/Models", "parent": "/samples", "breadcrumbs": [{"name": "Samples", "path": "/samples"}, {"name": "Models", "path": "/samples/Models"}],
+    "entries": [
+      {"name": "Calibration", "root": "local", "path": "/samples/Models/Calibration", "devicePath": "/samples/Models/Calibration", "type": "directory", "mediaType": "other"},
+      {"name": "cable-organizer.stl", "root": "local", "path": "/samples/Models/cable-organizer.stl", "devicePath": "/samples/Models/cable-organizer.stl", "type": "file", "mediaType": "model", "sizeBytes": 1782914, "modifiedAt": "2026-10-12T10:30:00Z"},
+      {"name": "calibration-cube.stl", "root": "local", "path": "/samples/Models/calibration-cube.stl", "devicePath": "/samples/Models/calibration-cube.stl", "type": "file", "mediaType": "model", "sizeBytes": 184932, "modifiedAt": "2026-10-10T09:45:00Z"},
+      {"name": "desk-tray.stl", "root": "local", "path": "/samples/Models/desk-tray.stl", "devicePath": "/samples/Models/desk-tray.stl", "type": "file", "mediaType": "model", "sizeBytes": 3576492, "modifiedAt": "2026-10-11T15:20:00Z"},
+      {"name": "mounting-bracket.stl", "root": "local", "path": "/samples/Models/mounting-bracket.stl", "devicePath": "/samples/Models/mounting-bracket.stl", "type": "file", "mediaType": "model", "sizeBytes": 872049, "modifiedAt": "2026-10-11T11:12:00Z"},
+      {"name": "planter.stl", "root": "local", "path": "/samples/Models/planter.stl", "devicePath": "/samples/Models/planter.stl", "type": "file", "mediaType": "model", "sizeBytes": 2173879, "modifiedAt": "2026-10-09T13:40:00Z"},
+      {"name": "spool-holder.stl", "root": "local", "path": "/samples/Models/spool-holder.stl", "devicePath": "/samples/Models/spool-holder.stl", "type": "file", "mediaType": "model", "sizeBytes": 937281, "modifiedAt": "2026-10-11T14:12:00Z"}
+    ]
+  }
+}

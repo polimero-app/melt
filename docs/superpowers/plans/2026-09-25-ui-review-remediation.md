@@ -1,5 +1,17 @@
 # UI Review Remediation (September) Implementation Plan
 
+Last-updated: 2026-10-12
+
+**Status:** Historical implementation plan. The reviewed contrast, plate
+labels, retained-file errors, preview loading, busy-control explanations,
+printer/file hierarchy and configuration side panels are implemented. Current
+navigation calls the fleet view **Printers** and includes **Cameras**.
+Original line references, screenshot findings, checkboxes and commit directives
+describe the review/execution phase. See [desktop usage](../../desktop.md),
+[the interface system](../../../.interface-design/system.md) and
+[screenshot coverage](../../screenshots.md); this note does not attest to every
+original manual visual check.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Fix the eleven findings from the 2026-09-25 UI review of `screenshots/`: one contrast failure, three misleading or missing states, and seven hierarchy or copy problems.

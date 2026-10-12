@@ -1,5 +1,16 @@
 # Bambu LAN Driver Review Fixes Implementation Plan
 
+Last-updated: 2026-10-12
+
+**Status:** Historical implementation plan. Fan acceptance against observed
+control inventory, explicit signing/authorization precedence, stream idle
+handling and bounded transport tests are implemented. The original baseline
+test count, line references and unchecked task instructions are historical;
+they do not mean these fixes remain pending. See
+[Bambu compatibility](../../bambu-compatibility.md) for current behavior and
+[physical qualification](../../bambu-physical-qualification.md) for hardware
+evidence requirements.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Fix four correctness defects and three cleanups found in a full review of the `bambu-lan` driver, so H2-class fan control works, the documented signing-required gate actually fires, and long-lived streams stop inheriting their connect budget as a permanent idle timeout.

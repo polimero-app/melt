@@ -1,5 +1,18 @@
 # IP Cameras Phase 2 (Desktop) Implementation Plan
 
+Last-updated: 2026-10-12
+
+**Status:** Historical implementation plan; phase 2 is implemented. Sources
+start independently, external upstreams are shared by ID/quality, backend
+viewer IDs isolate teardown, and `CameraViewer.vue`, Cameras management and
+printer feed selection are present. Later fixes restored native H.264 on
+Linux, added nonblocking RTSP keepalives/late-preview skipping, and added
+playback badges plus redacted external-camera diagnostics. See
+[IP cameras](../../ip-cameras.md) and [desktop cameras](../../desktop.md#cameras-and-feed-selection).
+Original checkboxes/line references describe execution history; live
+OS/webview qualification still needs separate evidence. ONVIF/pan/tilt is
+not part of the implemented phase.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** In the desktop app, users can add, edit, remove and link IP cameras, watch any camera from a Cameras view, and pick a linked camera as a printer's feed in the control view. One camera upstream is shared by all viewers, and stopping one viewer never stops another.

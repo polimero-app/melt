@@ -1,5 +1,7 @@
 # Melt Interface System
 
+Last-updated: 2026-10-12
+
 ## Direction and feel
 
 Melt is an operational workspace for people supervising physical printers. It should feel calm, precise, and trustworthy: telemetry remains stable while transports recover, and strong alarm language is reserved for states that require attention.
@@ -23,20 +25,32 @@ Use this state model anywhere printer connectivity appears: navigation dots, sta
 
 | State | Data contract | Presentation | Operational treatment |
 | --- | --- | --- | --- |
+| Connecting | `connectionState: connecting`; initial transport setup | Muted gray, “Connecting” | Await a usable sample |
+| Synchronizing | `connectionState: synchronizing`, or recovering without retained status | Muted gray, “Synchronizing” | Await authenticated status |
 | Live idle | Current usable status; no polling error | Green, “Online · idle” | Count as online |
 | Live busy | Current printing or paused status; no polling error | Yellow, “Online · busy” | Count as online |
-| Reconnecting | Retained usable status plus `stale`, or a current polling error | Amber, “Reconnecting” | Keep last telemetry visible; do not count as confirmed online |
-| Offline | No usable status with a polling error, or terminal error/unknown printer state | Red, “Offline” | Show recovery action and unavailable treatment |
+| Printer error | Usable status whose machine state is `error` | Red, “Error” | Preserve telemetry and show actionable printer alerts |
+| Reconnecting | Recovering with retained status, or nonterminal retained status plus `stale`/polling error | Amber, “Reconnecting” | Keep last telemetry visible; do not count as confirmed online |
+| Offline | Explicit offline connection, no usable status with a polling error, or machine state `unknown` | Red, “Offline” | Show recovery action and unavailable treatment |
 | Unknown | No monitor entry or no observation and no error | Muted gray, “Unknown” | Remain neutral while awaiting the first sample |
 
 Rules:
 
 - Check whether usable status exists before allowing a transport error to determine the badge.
+- Honor explicit connection-state precedence in `monitorBadge`: connecting, synchronizing, recovering and offline are resolved before machine-state fallback. A live printer error is distinct from an offline transport.
 - A stale sample must retain its original machine state and observation timestamp.
 - Never replace retained telemetry with an empty unavailable screen during a transient reconnect.
 - Use a compact amber status notice with a manual refresh action when the active printer is reconnecting.
 - Fleet “online” totals and destructive or dispatch eligibility require a confirmed live sample unless the backend independently revalidates connectivity.
 - Use red only when Melt has no usable printer state or receives a terminal printer state.
+
+## Camera state pattern
+
+- Section navigation labels are Printers, Cameras, Configuration and Files (the File library view); selecting a printer opens Control. The earlier “Manage printers” label remains only in historical plans.
+- Camera errors stay in the viewer and never change the printer's health. An external camera can remain live while its linked printer is offline.
+- The live badge reports the actual playback: `LIVE · WebRTC`, `LIVE · H.264` (WebCodecs), or amber `LIVE · MJPEG`. Amber describes the more expensive fallback, not a disconnected feed.
+- WebCodecs becomes successful only after a decoded frame. Keep bounded fallback reasons available to diagnostics after the viewer closes; redact source identifiers and endpoints.
+- Changing a feed or hiding/leaving a view releases only its viewer subscription. Quality is a viewer choice, not a profile setting.
 
 ## Reusable implementation
 
@@ -45,3 +59,6 @@ Rules:
 - Keep badge colors and labels synchronized between `ui/src/App.vue`, `ui/src/components/StatusBadge.vue`, and localized messages.
 - Add a table-driven or focused unit test whenever the monitoring state contract changes, especially around stale status plus error precedence.
 - When `content-visibility` defers cards in large collections, restore normal painting on the active card with `:focus-within` and the component's explicit open state. This lets menus and popovers escape the card boundary without giving up off-screen rendering savings for the rest of the collection.
+- Primary buttons use cyan-700 with white text in light mode and cyan-500 with gray-950 text in dark mode; operational telemetry remains legible in both themes.
+- Keep file refresh errors visible above retained entries, suppress contradictory plate totals, and show a loading state when a large preview has no cached image yet.
+- Minimum native window size is 1280×800; desktop CSS breakpoints are 480/640/720/840/1400 px. Check the smaller effective CSS viewport at OS scaling instead of assuming the native pixel width.

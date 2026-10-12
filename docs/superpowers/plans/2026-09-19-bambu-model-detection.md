@@ -1,5 +1,15 @@
 # Bambu Printer Model Detection Implementation Plan
 
+Last-updated: 2026-10-12
+
+**Status:** Historical implementation plan. The identity table, authenticated
+firmware/serial/profile trust order, capability re-derivation and conflict
+provenance are implemented. The table contains 15 protocol rows mapping to
+14 canonical models because H2C has two codes. Detection does not persistently
+rewrite the profile. See [current model detection](../../bambu-compatibility.md#model-detection).
+Original task checkboxes, source line numbers and physical-verification steps
+are retained as historical context, not proof of completed hardware qualification.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Resolve a Bambu printer's canonical model from LAN evidence the printer already gives us, instead of from whatever string the user typed into `--model`. Fix the `canonicalModel: "unknown"` misidentification observed on all three physical printers (filed out of the AMS-drying plan), and record which channel produced the answer so a disagreement is visible rather than silently wrong.

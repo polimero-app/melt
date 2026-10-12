@@ -1,5 +1,16 @@
 # Firmware-Update Availability Implementation Plan
 
+Last-updated: 2026-10-12
+
+**Status:** Historical implementation plan. Driver-neutral reports, Bambu LAN
+inventory/advertisements, Moonraker Klipper Update Manager, CLI checks and the
+desktop's separate cache/UI are implemented. Hybrid history/public evidence
+and assessment fields were added later. See
+[firmware evidence](../../firmware-updates.md) for the current JSON, opt-ins,
+cache and no-update semantics. Original checkboxes and exclusions below refer
+to the initial LAN-only phase; they are not the current backlog or a physical
+qualification attestation.
+
 **Goal:** Add a read-only, local-first way to determine whether a configured
 printer has an advertised firmware or printer-software update, expose the
 result consistently through the core, CLI, desktop IPC, and UI, and preserve
@@ -549,7 +560,7 @@ Document this behavior and its evidence boundary in:
 - [ ] Run `cargo fmt --all -- --check`.
 - [ ] Run `cargo clippy --workspace --all-targets --locked -- -D warnings`.
 - [ ] Run `cargo test --workspace --locked`.
-- [ ] Run `bun test --cwd ui` and `bun run --cwd ui build`.
+- [ ] Run `bun run --cwd ui test` and `bun run --cwd ui build`.
 - [ ] Run `make bambu-evidence-check` and `make contract`.
 - [ ] Run `make ci`.
 - [ ] On a Bambu printer with an advertised update, confirm module/current/

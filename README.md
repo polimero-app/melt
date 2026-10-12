@@ -1,5 +1,7 @@
 # Melt
 
+Last-updated: 2026-10-12
+
 <https://melt.polimero.app>
 
 Melt is a local-first 3D printer control application with two surfaces from
@@ -7,6 +9,9 @@ one executable:
 
 - a headless CLI for automation and scripting;
 - a Tauri desktop application for day-to-day printer control.
+
+See the [documentation index](docs/README.md) for usage, configuration,
+development, compatibility, and release guides.
 
 The CLI, GUI, desktop application, and shared source are licensed under the GNU
 Affero General Public License v3.0 only (`AGPL-3.0-only`). See
@@ -25,9 +30,11 @@ Fyne GUI, and Go application implementations.
   job progress, layers, time estimates, fans, lights, Wi-Fi signal, and AMS
   inventory including drying state. Background monitors retain the last useful
   status during bounded reconnect attempts.
-- **Camera** — share one authenticated upstream per physical Bambu printer
-  across snapshots, native H.264 WebRTC/WebCodecs viewers, and MJPEG fallback,
-  with bounded fan-out and reconnect behavior.
+- **Cameras** — use built-in Bambu cameras or independent Tapo IP cameras,
+  link external cameras to printers, and select a default desktop feed.
+  Viewers share upstreams per physical Bambu printer or external camera and
+  quality, with native H.264 WebRTC/WebCodecs playback, snapshots, MJPEG
+  fallback, bounded fan-out, and reconnect behavior.
 - **File and print workflow** — browse printer storage, upload and download
   files, preview supported models, inspect sliced 3MF packages, reconcile
   filament/nozzle assignments, select a plate, and start a print only after
@@ -57,13 +64,23 @@ make build
 ./target/debug/melt --help
 ```
 
-Launch `./target/debug/melt` without arguments to open the desktop
-application. Passing command arguments selects headless CLI mode instead.
+Use `make run` to launch the development desktop; it starts the frontend
+server before the app. A packaged `melt` launches the desktop without
+arguments. Passing command arguments selects headless CLI mode instead.
 
 Source builds require Rust 1.95 or newer, Bun, and the platform dependencies
 required by Tauri 2. Printer credentials are stored through the platform
 keychain, so a usable Secret Service or desktop keychain must be available
-for authenticated profiles.
+for authenticated profiles. CI uses Bun 1.3.14. See
+[development setup](docs/development.md) for native prerequisites and builds.
+
+The [nightly workflow](.github/workflows/nightly.yml) publishes dated
+prereleases to [GitHub Releases](https://github.com/polimero-app/melt/releases)
+when the source has changed. Native packages cover Linux amd64/arm64
+(`deb`, `rpm`), macOS amd64/arm64 (`dmg`), and Windows amd64 (`msi`). The tagged
+release workflow retains packages as workflow artifacts and requires frozen
+release evidence. There is no in-app updater; see
+[release qualification](docs/release-qualification.md).
 
 ## CLI
 
@@ -73,7 +90,7 @@ The command groups cover:
 - `status`;
 - `firmware check`;
 - `camera add|edit|list|remove|link|unlink|select|snapshot|stream` (IP cameras: see [docs/ip-cameras.md](docs/ip-cameras.md));
-- `files roots|list|download|upload`;
+- `files roots|list|download|upload|delete`;
 - `jobs preflight|start|pause|resume|cancel`;
 - `temperature set`, `motion home|jog`, `fans set`, `lights set`,
   `ams dry start|stop`, and `speed set`;
@@ -106,14 +123,20 @@ On Unix, credential files supplied to `--access-code-file` must be regular
 files with user-only permissions (for example, mode `0600`).
 The same rules apply to `--password-file` for IP cameras.
 
-State-changing commands require explicit confirmation. In non-interactive CLI
-use, pass `--yes` only after independently validating the target printer and
-operation.
+Print controls, thermal/motion/fan/light/speed/drying controls, deletion,
+profile removal, and TLS refresh require confirmation; non-interactive use
+requires `--yes`. Uploads execute directly, with `--overwrite` needed to
+replace a destination. Emergency stop is immediate. Camera linking/selection
+and profile creation do not use the control confirmation prompt. See the
+[CLI reference](docs/cli.md) for every command, JSON envelopes, and exit codes.
 
 ## Screenshots
 
 See [`docs/screenshots.md`](docs/screenshots.md) for a tour of the desktop
-application's main views.
+application's current views. Nine fresh sample-data captures include Cameras,
+camera settings, native H.264 playback, idle/printing controls and the file
+preview dialog. `make screenshots` rebuilds the UI and reproduces the gallery;
+see the guide for its additional capture dependencies.
 
 ## Project layout
 
@@ -124,9 +147,10 @@ application's main views.
 - `crates/melt-desktop` selects CLI mode when arguments are present and
   starts Tauri for a no-argument launch.
 - `ui` contains the Vue, TypeScript, Tailwind CSS, and Headless UI frontend.
-- `fixtures` contains CLI contract fixtures and sanitized, manifest-governed
-  Bambu protocol evidence.
-- `docs` contains compatibility, qualification, evidence, and release policy.
+- `fixtures` contains CLI contract fixtures, sanitized manifest-governed Bambu
+  protocol evidence, Tapo C510W SDP captures, and isolated screenshot samples.
+- `docs` contains current usage/development guides, compatibility and
+  qualification policy, release procedures, and dated design/plan records.
 
 Unlike the retired Fyne GUI, the desktop does not shell out to a separate CLI
 process for each action. Both surfaces call the same Rust core. The desktop
@@ -145,7 +169,12 @@ contact binds the certificate identity to the configured physical printer
 serial before retaining its pin; a mismatch never silently rewrites the
 profile or falls back to insecure transport.
 
-IP camera profiles and printer links live in the same configuration file; camera passwords are stored in the OS keychain under the camera's immutable ID. Camera video uses plain RTSP with Digest authentication on the LAN.
+IP camera profiles and printer links live in the same configuration file;
+camera passwords are stored in the OS keychain under the camera's immutable
+ID. Camera video uses plain RTSP with Digest authentication on the LAN. See
+[configuration](docs/configuration.md) for file locations, schema versions,
+preferences, backups, and downgrade instructions, and the
+[desktop guide](docs/desktop.md) for the current views.
 
 Continuous desktop discovery is advisory. It keys presence by normalized
 physical serial and may show a newly advertised address as a suggestion, but it
@@ -194,10 +223,16 @@ compatibility matrix and
 [`docs/bambu-physical-qualification.md`](docs/bambu-physical-qualification.md)
 for the hardware-capture and quirk-promotion procedure.
 
+The Tapo driver supports H.264 RTSP streams and decoded snapshots; scoped
+RTSP qualification covers C510W hardware 1.0 / firmware 1.3.5. Desktop camera
+management, linking, and playback are implemented. ONVIF pan/tilt and camera
+discovery remain planned. There is no implemented `melt web` command.
+
 The desktop polls configured profiles locally every five seconds while open;
 failed profiles back off independently to one minute. Release tags build the
-native installer matrix and require frozen release evidence. Automated tests
-do not constitute physical-printer qualification.
+native installer matrix and require frozen release evidence. Nightlies are
+prereleases with a separate packaging path. Automated tests do not constitute
+physical-printer qualification.
 
 ## Development and verification
 
@@ -218,7 +253,8 @@ make release-qualification
 - `make contract` executes the checked-in CLI JSON/exit-code fixtures.
 - `make ci` additionally checks AGPL metadata and sanitized Bambu evidence.
 - `make release-qualification` runs the complete reproducible release gate and
-  installed CLI smoke test.
+  a smoke test of the built `target/debug/melt` CLI entry point. Installer
+  installation and launch checks are recorded separately.
 
 See [`docs/cli-contract-fixtures.md`](docs/cli-contract-fixtures.md),
 [`docs/bambu-protocol-evidence.md`](docs/bambu-protocol-evidence.md), and
@@ -246,10 +282,11 @@ GTK otherwise uses the session's own backend. Forcing XWayland with
 `GDK_BACKEND=x11` still works but is not the default: under XWayland on GNOME
 the window can stop receiving input and repaint events after switching to
 another window and back, while the application itself keeps running. A built
-binary therefore needs no special environment:
+binary therefore needs no special renderer environment. For a development
+binary, keep the Vite server running or use `make run`:
 
 ```sh
-./target/debug/melt
+make run
 ```
 
 A development build shows a placeholder icon in the window switcher because

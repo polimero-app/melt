@@ -1,5 +1,7 @@
 # Bambu protocol evidence policy
 
+Last-updated: 2026-10-12
+
 Melt treats undocumented printer behavior as qualified evidence, not as a
 permanent product truth. This policy covers identity aliases, capabilities,
 firmware quirks, transport probes, and physical-printer qualification.
@@ -27,7 +29,26 @@ binary fixtures need a reproducible textual summary.
 referenced textual artifact for common secret, private-key, user-path, private
 network, and MAC-address forms. This is a conservative floor, not proof of
 anonymity: contributors must still inspect semantic identifiers and decoded/raw
-forms before commit.
+forms before commit. The integration test mirrors the manifest contract with
+typed validation; it is not a general JSON Schema engine. It also rejects
+symlinked artifacts, undeclared files and self/unknown conflict references.
+
+## Checked-in evidence
+
+There is currently one Bambu manifest:
+`tunnel-6000-upload-frag-id`, under
+`fixtures/bambu/tunnel-6000/upload-frag-id`. It is `executable-test` evidence
+with `qualified` confidence, tied to upstream revision
+`7f8ba03057f394e844a6a336414425786d0a68c1`. It demonstrates top-level upload
+`frag_id` and typed/sequence-correlated replies using a synthetic device and
+zeroed bytes. It does not qualify a physical printer or a firmware range.
+
+`make bambu-evidence-check` validates manifests and sanitization. The transcript
+is also exercised by the core unit test
+`executable_upload_transcript_keeps_frag_id_top_level`, included in
+`make cargo-test`. The three runtime camera quirks remain provisional. Tapo
+SDP captures follow their [separate camera fixture notes](../fixtures/tapo/README.md),
+not the Bambu manifest schema.
 
 ## Conflict handling and runtime precedence
 
@@ -66,3 +87,9 @@ requires a manifest-governed physical fixture that identifies the exact model,
 module versions, full-versus-delta report shape, and clearing behavior. Tests
 with synthetic documents exercise parser safety but do not raise this physical
 qualification level.
+
+Optional device history and public stable releases remain separate evidence
+sources; they never turn an absent printer advertisement into a confirmed
+offer or no-update state. Public catalogue requests are opt-in and bounded,
+and do not use cloud account credentials. See
+[firmware update evidence](firmware-updates.md) for the current contract.

@@ -1,5 +1,7 @@
 # Bambu compatibility and qualification
 
+Last-updated: 2026-10-12
+
 Undocumented behavior and physical-printer captures follow the
 [protocol evidence policy](bambu-protocol-evidence.md). Live observations and
 safe probes outrank defaults; unresolved conflicts never become unconditional
@@ -17,8 +19,10 @@ is attached. Classic camera sources expose complete JPEG frames. This boundary
 permits snapshots and multiple viewers to share one upstream without
 transcoding native H.264 viewers.
 
-The shared camera manager is keyed by the normalized printer serial and a
-credential-free connection revision. Each subscriber mailbox retains only its
+The shared camera manager keys Bambu sources by the normalized printer serial
+and a credential-free connection revision. External Tapo sources use the
+immutable camera ID, quality and connection revision in the same manager;
+see [IP cameras](ip-cameras.md). Each subscriber mailbox retains only its
 newest complete media unit under backpressure. The most recent decoded JPEG is
 also retained for snapshots. The first subscriber opens the upstream; dropping
 the last subscriber interrupts its socket, and connection changes invalidate
@@ -36,8 +40,10 @@ configuration. Later keyframe parameter-set changes reconfigure the decoder;
 unchanged keyframes do not. This changes framing only, not video encoding.
 WebRTC remains the first choice, with WebCodecs next and MJPEG as the final
 fallback when native H.264 playback fails.
-The desktop releases its camera subscription whenever the Control view or the
-application window is hidden and reconnects when that view becomes visible.
+Each desktop viewer has an independent backend `viewerId`. Stopping a viewer
+releases only its subscription, so other viewers of the source keep running.
+The desktop releases subscriptions when their Control/Cameras view or the
+application window is hidden and reconnects when visible again.
 
 On Linux, WebRTC availability depends on the installed WebKitGTK build;
 WebCodecs can render H.264 even when `RTCPeerConnection` is unavailable.
@@ -225,6 +231,15 @@ redacted camera-owner state. Module serials, unknown module values, observed
 URLs, hosts, complete fingerprints, credentials, and raw capability objects are
 never serialized. Unknown values are represented only by their JSON kind.
 
+The desktop additionally includes external cameras as `camera-N` entries with
+per-quality RTSP stream state, subscriber counts and reconnect attempts. Both
+printer and external camera reports retain the latest frontend playback
+result (`webrtc`, `webcodecs`, `mjpeg`, or no successful transport) and bounded,
+redacted failure reasons after a viewer closes. Playback state is session-local;
+WebCodecs success is recorded only after a decoded frame. The camera badge
+shows WebRTC, H.264 (WebCodecs), or MJPEG rather than implying all live feeds
+use the same transport.
+
 An active camera owner reconnects the same negotiated transport while it still
 has subscribers, using interruptible exponential backoff from 250 ms through a
 4-second cap. TLS pin or certificate-identity failures terminate immediately.
@@ -336,8 +351,13 @@ contradicted, and expired entries remain visible but never alter runtime behavio
 ## Read-only firmware availability
 
 Firmware checks reuse the authenticated LAN MQTT session. They combine the
-installed module inventory with explicit printer-advertised targets and never
-send an `upgrade` command, download a package, or contact the Bambu cloud.
+installed module inventory with explicit printer-advertised targets, optional
+read-only `upgrade.get_history`, and opt-in official public stable pages.
+They never send an upgrade/install command, download a package, or log in to
+the Bambu cloud. Public HTTPS is separate from the default LAN-only CLI check;
+desktop history checks are automatic, and public checks require a saved or
+one-shot opt-in. See [firmware evidence](firmware-updates.md) for source
+provenance, cache behavior and assessment fields.
 Unknown modules with a qualified advertised target remain visible as accessory
 firmware rather than being discarded.
 
@@ -346,6 +366,9 @@ printer is current, so missing or empty target data remains unknown until the
 physical-evidence workflow qualifies a no-update state for an exact firmware
 line. Forced-update flags are retained as a required-update signal, while
 malformed or lower targets remain unknown and produce a bounded issue.
+Public/history versions retain their own evidence rails and do not become
+printer-advertised `availableVersion` values. A newer public release is not
+proof of that printer's eligibility or rollout.
 
 ## Automated qualification
 
@@ -361,9 +384,17 @@ make ci
 
 ## Physical-printer matrix
 
+Model identity parsing currently recognizes A1, A1 mini, A2L, P1P, P1S, P2S,
+X1, X1 Carbon, X1E, X2D, H2D, H2D Pro, H2S and H2C; this is an identity table,
+not a physical qualification claim. H2C has two protocol model-code rows for
+the same canonical model. All three checked-in runtime quirks (two disputed
+P1S camera routes and P2S RTP timestamps) remain provisional and inactive.
+
 Each supported firmware line needs at least one completed row. Record the
 exact marketed model, firmware, hardware/AMS configuration, transport actually
 observed, and evidence location; do not infer one row from another.
+No completed physical Bambu row is checked in yet. The current fixture is an
+executable-test port-6000 transcript, not a physical printer capture.
 
 | Family | Variants to qualify | Storage/protocol focus | Material-system focus |
 | --- | --- | --- | --- |
