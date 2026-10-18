@@ -1,6 +1,6 @@
 # Design and implementation records
 
-Last-updated: 2026-10-12
+Last-updated: 2026-10-18
 
 These dated records preserve the original rationale, task breakdowns, examples
 and review findings. They are not a current backlog or command reference.
@@ -22,6 +22,7 @@ and the [documentation index](../README.md) point to maintained guides.
 | [IP camera design](specs/2026-10-08-ip-cameras-design.md) | Phases 1/2 implemented; ONVIF pan/tilt and optional discovery remain planned | [IP cameras](../ip-cameras.md) |
 | [IP camera phase 1](plans/2026-10-08-ip-cameras.md) | Shared RTSP, schema v2, Tapo profiles/links, CLI snapshot/stream implemented; native H.264 output added | [CLI](../cli.md#cameras), [Tapo evidence](../../fixtures/tapo/README.md) |
 | [IP camera phase 2](plans/2026-10-08-ip-cameras-desktop.md) | Shared sources, viewer IDs, Cameras view and feed selection implemented; Linux native H.264 and diagnostics added | [Desktop cameras](../desktop.md#cameras-and-feed-selection) |
+| [Smart plug support](plans/2026-10-18-smart-plugs.md) | In progress: independent plug drivers/profiles, printer/camera attachments, P110 relay control in CLI and desktop | [Implementation plan](plans/2026-10-18-smart-plugs.md) |
 
 The existing web-command proposal in the working tree is unimplemented and
 has been preserved separately. No `melt web` command, HTTP application API or
