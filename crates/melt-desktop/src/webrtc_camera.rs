@@ -122,68 +122,8 @@ async fn serve(
     let pps = parameters.pps.to_vec();
     let mut timestamp_repair = RtpTimestampRepair::new(subscription.repair_rtp_timestamps());
     let (codec, payload_type) = codec_capability(&sps, &pps, &offer_sdp)?;
-    let mut media_engine = MediaEngine::default();
-    media_engine
-        .register_default_codecs()
-        .map_err(|error| format!("WebRTC codecs: {error}"))?;
-    let registry = register_default_interceptors(Registry::new(), &mut media_engine)
-        .map_err(|error| format!("WebRTC interceptors: {error}"))?;
     let (gathering_tx, mut gathering_rx) = tokio::sync::mpsc::channel(1);
-    // The webview runs on this machine; one socket per IPv4 interface yields its host candidates.
-    let peer = PeerConnectionBuilder::new()
-        .with_configuration(RTCConfiguration::default())
-        .with_media_engine(media_engine)
-        .with_interceptor_registry(registry)
-        .with_handler(Arc::new(GatheringHandler {
-            complete: gathering_tx,
-        }))
-        .with_udp_addrs(vec!["0.0.0.0:0".to_owned()])
-        .build()
-        .await
-        .map_err(|error| format!("WebRTC peer: {error}"))?;
-    let track = Arc::new(TrackLocalStaticRTP::new(MediaStreamTrack::new(
-        "bambu-camera".to_owned(),
-        "video".to_owned(),
-        "video".to_owned(),
-        RtpCodecKind::Video,
-        vec![RTCRtpEncodingParameters {
-            rtp_coding_parameters: RTCRtpCodingParameters {
-                ssrc: Some(TRACK_SSRC),
-                ..Default::default()
-            },
-            codec: codec.clone(),
-            ..Default::default()
-        }],
-    )));
-    peer.add_track(Arc::clone(&track) as Arc<dyn TrackLocal>)
-        .await
-        .map_err(|error| format!("WebRTC track: {error}"))?;
-    let transceiver = peer
-        .get_transceivers()
-        .await
-        .into_iter()
-        .last()
-        .ok_or_else(|| "WebRTC video transceiver missing".to_owned())?;
-    transceiver
-        .set_codec_preferences(vec![RTCRtpCodecParameters {
-            rtp_codec: codec,
-            payload_type,
-        }])
-        .await
-        .map_err(|error| format!("WebRTC H.264 profile: {error}"))?;
-
-    let offer = RTCSessionDescription::offer(offer_sdp)
-        .map_err(|error| format!("WebRTC offer: {error}"))?;
-    peer.set_remote_description(offer)
-        .await
-        .map_err(|error| format!("WebRTC remote description: {error}"))?;
-    let answer = peer
-        .create_answer(None)
-        .await
-        .map_err(|error| format!("WebRTC answer: {error}"))?;
-    peer.set_local_description(answer)
-        .await
-        .map_err(|error| format!("WebRTC local description: {error}"))?;
+    let (peer, track) = negotiate(codec, payload_type, offer_sdp, gathering_tx).await?;
     tokio::time::timeout(SETUP_TIMEOUT, gathering_rx.recv())
         .await
         .map_err(|_| "WebRTC ICE gathering timed out".to_owned())?
@@ -269,6 +209,70 @@ async fn serve(
     Ok(())
 }
 
+async fn negotiate(
+    codec: RTCRtpCodec,
+    payload_type: u8,
+    offer_sdp: String,
+    gathering_tx: tokio::sync::mpsc::Sender<()>,
+) -> Result<(impl PeerConnection, Arc<TrackLocalStaticRTP>), String> {
+    // Only the camera's exact profile at the offer's payload type: negotiation keeps exact
+    // fmtp matches only, and the sender drops packets whose payload type wasn't negotiated.
+    let mut media_engine = MediaEngine::default();
+    media_engine
+        .register_codec(
+            RTCRtpCodecParameters {
+                rtp_codec: codec.clone(),
+                payload_type,
+            },
+            RtpCodecKind::Video,
+        )
+        .map_err(|error| format!("WebRTC H.264 profile: {error}"))?;
+    let registry = register_default_interceptors(Registry::new(), &mut media_engine)
+        .map_err(|error| format!("WebRTC interceptors: {error}"))?;
+    // The webview runs on this machine; one socket per IPv4 interface yields its host candidates.
+    let peer = PeerConnectionBuilder::new()
+        .with_configuration(RTCConfiguration::default())
+        .with_media_engine(media_engine)
+        .with_interceptor_registry(registry)
+        .with_handler(Arc::new(GatheringHandler {
+            complete: gathering_tx,
+        }))
+        .with_udp_addrs(vec!["0.0.0.0:0".to_owned()])
+        .build()
+        .await
+        .map_err(|error| format!("WebRTC peer: {error}"))?;
+    let track = Arc::new(TrackLocalStaticRTP::new(MediaStreamTrack::new(
+        "bambu-camera".to_owned(),
+        "video".to_owned(),
+        "video".to_owned(),
+        RtpCodecKind::Video,
+        vec![RTCRtpEncodingParameters {
+            rtp_coding_parameters: RTCRtpCodingParameters {
+                ssrc: Some(TRACK_SSRC),
+                ..Default::default()
+            },
+            codec,
+            ..Default::default()
+        }],
+    )));
+    peer.add_track(Arc::clone(&track) as Arc<dyn TrackLocal>)
+        .await
+        .map_err(|error| format!("WebRTC track: {error}"))?;
+    let offer = RTCSessionDescription::offer(offer_sdp)
+        .map_err(|error| format!("WebRTC offer: {error}"))?;
+    peer.set_remote_description(offer)
+        .await
+        .map_err(|error| format!("WebRTC remote description: {error}"))?;
+    let answer = peer
+        .create_answer(None)
+        .await
+        .map_err(|error| format!("WebRTC answer: {error}"))?;
+    peer.set_local_description(answer)
+        .await
+        .map_err(|error| format!("WebRTC local description: {error}"))?;
+    Ok((peer, track))
+}
+
 struct RtpTimestampRepair {
     enabled: bool,
     last_source: Option<u32>,
@@ -340,7 +344,8 @@ fn codec_capability(sps: &[u8], pps: &[u8], offer_sdp: &str) -> Result<(RTCRtpCo
 }
 
 // webrtc 0.21 drops (and only logs) packets whose SSRC, payload type or header
-// extensions were not negotiated, so camera packets are retagged for our track.
+// extensions were not negotiated, so camera packets are retagged for our track
+// and the payload type negotiated in `negotiate`.
 fn prepare_for_sender(packet: &mut Packet, ssrc: u32, payload_type: u8) {
     packet.header.ssrc = ssrc;
     packet.header.payload_type = payload_type;
@@ -422,9 +427,43 @@ mod tests {
     };
 
     use super::{
-        Packet, RtpTimestampRepair, Session, await_answer, compatible_offer_profile,
-        decode_profile, is_idr_start, prepare_for_sender,
+        Packet, RtpTimestampRepair, Session, await_answer, codec_capability,
+        compatible_offer_profile, decode_profile, is_idr_start, negotiate, prepare_for_sender,
     };
+    use webrtc::peer_connection::PeerConnection;
+
+    const OFFER: &str = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96 102 106 112\r\nc=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\na=ice-ufrag:abcd\r\na=ice-pwd:abcdefghijklmnopqrstuvwx\r\na=fingerprint:sha-256 AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99\r\na=setup:actpass\r\na=mid:0\r\na=recvonly\r\na=rtcp-mux\r\na=rtpmap:96 VP8/90000\r\na=rtpmap:102 H264/90000\r\na=fmtp:102 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f\r\na=rtpmap:106 H264/90000\r\na=fmtp:106 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=4d001f\r\na=rtpmap:112 H264/90000\r\na=fmtp:112 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=64001f\r\n";
+
+    #[test]
+    fn negotiates_offer_payload_type_for_non_default_camera_profile() {
+        // Main profile 4d00 is not among webrtc's built-in H.264 codecs.
+        let (codec, payload_type) =
+            codec_capability(&[0x67, 0x4d, 0x00, 0x1f], &[0x68], OFFER).unwrap();
+        assert_eq!(payload_type, 106);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let (gathering_tx, _gathering_rx) = tokio::sync::mpsc::channel(1);
+            let (peer, _track) = negotiate(codec, payload_type, OFFER.to_owned(), gathering_tx)
+                .await
+                .unwrap();
+            let sender = peer.get_senders().await.pop().unwrap();
+            let codecs = sender.get_parameters().await.unwrap().rtp_parameters.codecs;
+            peer.close().await.unwrap();
+            assert!(
+                codecs
+                    .iter()
+                    .any(|codec| codec.payload_type == payload_type),
+                "{payload_type} not negotiated: {:?}",
+                codecs
+                    .iter()
+                    .map(|codec| codec.payload_type)
+                    .collect::<Vec<_>>()
+            );
+        });
+    }
 
     #[test]
     fn prepare_for_sender_retags_packet_for_negotiated_track() {
