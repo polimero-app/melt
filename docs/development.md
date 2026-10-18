@@ -5,8 +5,9 @@ Last-updated: 2026-10-18
 ## Prerequisites and first build
 
 The Rust workspace uses edition 2024 and declares MSRV **1.95**, which CI's
-`msrv` job checks. Install Rust/Cargo with rustfmt and Clippy, Bun (CI pins
-**1.3.14**), and native Tauri 2 dependencies. The frontend uses Vue 3, TypeScript 6, Vite 8, Tailwind CSS 4,
+`msrv` job checks. Install Rust/Cargo with rustfmt and Clippy, `cargo-deny` (CI pins
+**0.20.2**; `cargo install cargo-deny --locked`), Bun (CI pins **1.3.14**), and
+native Tauri 2 dependencies. The frontend uses Vue 3, TypeScript 6, Vite 8, Tailwind CSS 4,
 Headless UI, Phosphor icons and Vitest. Cargo.lock and ui/bun.lock govern
 reproducible dependency resolution; use the locked Make targets.
 
@@ -106,6 +107,7 @@ permission to run blocking I/O in the UI.
 | `make ui-audit` | `bun audit` against `ui/bun.lock`; fails on any known advisory |
 | `make ui-build` | `vue-tsc --noEmit` (strict, no unused locals/parameters) then Vite production build |
 | `make build` | UI build, then release workspace build embedding `ui/dist` (standalone `target/release/melt`) |
+| `make cargo-deny` | `cargo deny check`: RustSec advisories, AGPL-compatible license allowlist and crates.io-only sources per `deny.toml`; each ignored advisory carries its reason there |
 | `make cargo-test` | All Rust workspace tests with `--locked` |
 | `make ui-test` | `bun run --cwd ui test`, which runs Vitest |
 | `make screenshots` | Build the production UI and capture documentation views using isolated sample IPC/media; see [screenshot prerequisites](screenshots.md#reproducing-the-captures) |
@@ -114,7 +116,7 @@ permission to run blocking I/O in the UI.
 | `make contract` | Checked-in CLI JSON/exit fixtures |
 | `make bambu-evidence-check` | Bambu manifest/redaction integration test; transcript execution is covered by core unit tests |
 | `make license-check` | AGPL metadata, license file and bundled license declaration |
-| `make ci-rust` | License check, Rust lint, workspace tests (including Bambu evidence), debug build and CLI fixtures; the CI `cargo` job |
+| `make ci-rust` | License check, `cargo-deny`, Rust lint, workspace tests (including Bambu evidence), debug build and CLI fixtures; the CI `cargo` job |
 | `make ci-ui` | Locked UI install, dependency audit, UI tests and UI build; the CI `ui` job |
 | `make ci` | `ci-rust` and `ci-ui`, the same checks the CI workflow runs |
 | `make release-gate` | Evidence, CLI fixtures, Rust build and built executable version smoke test |

@@ -51,6 +51,10 @@ jobs:
           echo "OPENSSL_DIR=C:/Program Files/OpenSSL/" >> $env:GITHUB_ENV
           echo "OPENSSL_LIB_DIR=C:/Program Files/OpenSSL/lib/VC/x64/MD" >> $env:GITHUB_ENV
           echo "OPENSSL_INCLUDE_DIR=C:/Program Files/OpenSSL/include" >> $env:GITHUB_ENV
+      - if: runner.os == 'Linux'
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-deny@0.20.2
       - name: Verify automated release qualification
         if: runner.os == 'Linux'
         run: make release-qualification

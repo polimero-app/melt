@@ -1,0 +1,49 @@
+# cargo-deny policy: `cargo deny check` (advisories, licenses, bans, sources).
+# melt is AGPL-3.0-only, so every allowed license must be AGPLv3-compatible.
+
+[graph]
+all-features = true
+
+[advisories]
+# Any RustSec advisory, unmaintained or yanked crate fails; justify each
+# exception here with the advisory id and why it does not apply.
+ignore = [
+  # gtk-rs 0.18 (glib-macros), pinned by Tauri's Linux webview; moves with Tauri.
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error via gtk-rs 0.18, pinned by Tauri" },
+  # zbus family, via tauri-plugin-notification > notify-rust; moves with the plugin.
+  { id = "RUSTSEC-2026-0370", reason = "zvariant via tauri-plugin-notification > notify-rust > zbus" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names via tauri-plugin-notification > notify-rust > zbus" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via tauri-plugin-notification > notify-rust > zbus" },
+  # Our own direct dependency: serde_yaml is deprecated. Remove once melt-core
+  # moves config/preferences YAML to a maintained crate.
+  { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml via serde_yaml (melt-core); migration pending" },
+]
+
+[licenses]
+confidence-threshold = 0.93
+# Only licenses some locked crate actually needs (OR choices resolve to the
+# first allowed one). Add a license here only after checking AGPL
+# compatibility.
+allow = [
+  "AGPL-3.0-only",                # melt's own crates
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception", # target-lexicon
+  "BSD-2-Clause",                 # openh264
+  "BSD-3-Clause",
+  "CC0-1.0",                      # notify
+  "CDLA-Permissive-2.0",          # webpki-root-certs (data, not code)
+  "IJG",                          # jpeg-encoder
+  "ISC",
+  "MIT",
+  "MPL-2.0",                      # cssparser (file-level copyleft, GPL-compatible)
+  "Unicode-3.0",
+  "Zlib",
+]
+
+[bans]
+# Duplicate versions are common across the Tauri/GTK tree; report, don't fail.
+multiple-versions = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
