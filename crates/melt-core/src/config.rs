@@ -813,4 +813,110 @@ profiles:
             Err(ConfigError::CameraAlreadyExists)
         ));
     }
+
+    /// Bytes exactly as serde_yaml 0.9 wrote them, including scalars a YAML
+    /// library could retype (`'0123'`, `'null'`, `'~'`, plain `yes`).
+    const SERDE_YAML_V2: &str = r#"version: 2
+profiles:
+  '0123':
+    driver: bambu-lan
+    host: 192.0.2.11
+    serial: '0123'
+    model: 'true'
+    timeout: '10'
+    insecure: false
+    created: 2026-06-13T11:00:00Z
+    updated: 2026-06-13T11:00:00Z
+  'attic: p1s':
+    driver: bambu-lan
+    host: 192.0.2.11
+    serial: 'null'
+    model: 'true'
+    timeout: '10'
+    insecure: false
+    created: 2026-06-13T11:00:00Z
+    updated: 2026-06-13T11:00:00Z
+cameras:
+  yes:
+    id: 0123456789abcdef0123456789abcdef
+    driver: tapo
+    host: cam.local
+    username: '~'
+    rtsp_port: 554
+    timeout: '1e3'
+    created: 2026-06-13T11:00:00Z
+    updated: 2026-06-13T11:00:00Z
+printer_cameras:
+  '0123':
+    cameras:
+    - 0123456789abcdef0123456789abcdef
+    selected: 0123456789abcdef0123456789abcdef
+  'attic: p1s':
+    cameras: []
+"#;
+
+    #[test]
+    fn reads_and_rewrites_files_written_by_serde_yaml() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(CONFIG_FILE), SERDE_YAML_V2).unwrap();
+
+        let mut config = Config::open(dir.path()).unwrap();
+        let tricky = config.get_profile("0123").unwrap();
+        assert_eq!(
+            (
+                tricky.serial.as_str(),
+                tricky.model.as_str(),
+                tricky.timeout.as_str()
+            ),
+            ("0123", "true", "10")
+        );
+        assert_eq!(config.get_profile("attic: p1s").unwrap().serial, "null");
+        let camera = &config.cameras["yes"];
+        assert_eq!(
+            (
+                camera.username.as_str(),
+                camera.timeout.as_str(),
+                camera.rtsp_port
+            ),
+            ("~", "1e3", Some(554))
+        );
+        assert_eq!(
+            config.printer_cameras["0123"].selected.as_deref(),
+            Some("0123456789abcdef0123456789abcdef")
+        );
+        assert_eq!(
+            config.printer_cameras["attic: p1s"],
+            PrinterCameras::default()
+        );
+
+        let (profiles, cameras, links) = (
+            config.profiles.clone(),
+            config.cameras.clone(),
+            config.printer_cameras.clone(),
+        );
+        config.save(dir.path()).unwrap();
+        let written = fs::read_to_string(dir.path().join(CONFIG_FILE)).unwrap();
+        // Ambiguous strings must stay quoted so older serde_yaml builds read them.
+        for plain in [
+            "serial: 0123\n",
+            "serial: null\n",
+            "model: true\n",
+            "username: ~\n",
+            "timeout: 1e3\n",
+        ] {
+            assert!(
+                !written.contains(plain),
+                "unquoted {plain:?} in:\n{written}"
+            );
+        }
+        let reopened = Config::open(dir.path()).unwrap();
+        assert_eq!(
+            (
+                reopened.profiles,
+                reopened.cameras,
+                reopened.printer_cameras
+            ),
+            (profiles, cameras, links)
+        );
+    }
 }

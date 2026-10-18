@@ -427,4 +427,47 @@ mod tests {
             Err(PreferencesError::ConcurrentUpdate)
         ));
     }
+
+    #[test]
+    fn reads_and_rewrites_files_written_by_serde_yaml() {
+        // Bytes exactly as serde_yaml 0.9 wrote them; `off` is a plain string.
+        for (yaml, library_path) in [
+            ("libraryPath: null\n", None),
+            (
+                "libraryPath: 'C:\\prints: #1 ''models'''\n",
+                Some("C:\\prints: #1 'models'"),
+            ),
+        ] {
+            let dir = tempdir().unwrap();
+            let file = format!(
+                "version: 1\nnotifications:\n  completion: true\n  failure: false\n  disconnection: true\nslicers:\n- name: off\n  path: /usr/bin/orca slicer\n  enabled: false\n{yaml}publicFirmwareCatalogue: true\n"
+            );
+            fs::write(dir.path().join(PREFERENCES_FILE), file).unwrap();
+
+            let mut preferences = Preferences::open(dir.path()).unwrap();
+            let expected = Preferences {
+                notifications: NotificationPreferences {
+                    completion: true,
+                    failure: false,
+                    disconnection: true,
+                },
+                slicers: vec![Slicer {
+                    name: "off".into(),
+                    path: "/usr/bin/orca slicer".into(),
+                    enabled: false,
+                }],
+                library_path: library_path.map(Into::into),
+                public_firmware_catalogue: true,
+                digest: preferences.digest,
+            };
+            assert_eq!(preferences, expected);
+
+            preferences.save(dir.path()).unwrap();
+            let reopened = Preferences::open(dir.path()).unwrap();
+            assert_eq!(
+                (reopened.slicers, reopened.library_path),
+                (expected.slicers, expected.library_path)
+            );
+        }
+    }
 }
