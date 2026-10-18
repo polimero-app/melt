@@ -151,6 +151,62 @@ export type MessageKey =
   | "camerasView.qualityLow"
   | "camerasView.feed"
   | "camerasView.builtInFeed"
+  | "nav.plugs"
+  | "plugsView.description"
+  | "plugsView.add"
+  | "plugsView.edit"
+  | "plugsView.actions"
+  | "plugsView.remove"
+  | "plugsView.empty"
+  | "plugsView.emptyHint"
+  | "plugsView.formDescription"
+  | "plugsView.driver"
+  | "plugsView.username"
+  | "plugsView.password"
+  | "plugsView.passwordKeep"
+  | "plugsView.printers"
+  | "plugsView.cameras"
+  | "plugsView.attachmentsHint"
+  | "plugsView.attachedNone"
+  | "plugsView.connectionHint"
+  | "plugsView.saved"
+  | "plugsView.removed"
+  | "plugsView.attachmentsFailed"
+  | "plugsView.removeTitle"
+  | "plugsView.removeDescription"
+  | "plugsView.relayOn"
+  | "plugsView.relayOff"
+  | "plugsView.relayUnknown"
+  | "plugsView.lastKnown"
+  | "plugsView.stale"
+  | "plugsView.observed"
+  | "plugsView.noReading"
+  | "plugsView.connection.unknown"
+  | "plugsView.connection.online"
+  | "plugsView.connection.unreachable"
+  | "plugsView.connection.authFailed"
+  | "plugsView.connection.locked"
+  | "plugsView.connection.unsupported"
+  | "errors.plugInvalidUsername"
+  | "errors.plugInvalidPassword"
+  | "errors.plugInvalidTimeout"
+  | "errors.plugNotFound"
+  | "errors.plugExists"
+  | "errors.plugNotLinked"
+  | "errors.plugAuthFailed"
+  | "errors.plugCompatibilityDisabled"
+  | "errors.plugLocked"
+  | "errors.plugUnsupportedDevice"
+  | "errors.plugUnsupportedProtocol"
+  | "errors.plugUnreachable"
+  | "errors.plugDeviceRejected"
+  | "errors.plugTimeout"
+  | "errors.plugPowerUnconfirmed"
+  | "errors.plugPowerMismatch"
+  | "errors.plugProfileChanged"
+  | "errors.plugPasswordUnavailable"
+  | "errors.plugInvalidTarget"
+  | "errors.internalError"
   | "nav.selectPrinter"
   | "nav.groupSections"
   | "status.idle"
@@ -747,6 +803,62 @@ const messages: Record<Locale, Messages> = {
     "camerasView.qualityLow": "Low",
     "camerasView.feed": "Camera feed",
     "camerasView.builtInFeed": "Built-in camera",
+    "nav.plugs": "Smart plugs",
+    "plugsView.description": "Smart plugs that power printers and cameras. Melt reads each relay and can switch it on or off.",
+    "plugsView.add": "Add smart plug",
+    "plugsView.edit": "Edit smart plug",
+    "plugsView.actions": "Smart plug actions",
+    "plugsView.remove": "Remove smart plug",
+    "plugsView.empty": "No smart plugs yet",
+    "plugsView.emptyHint": "Add a Tapo P110 to see and control the power of a printer or camera.",
+    "plugsView.formDescription": "Melt connects to the plug to check these settings before saving.",
+    "plugsView.driver": "Driver",
+    "plugsView.username": "TP-Link account email",
+    "plugsView.password": "TP-Link account password",
+    "plugsView.passwordKeep": "TP-Link account password (leave blank to keep existing)",
+    "plugsView.printers": "Powered printers",
+    "plugsView.cameras": "Powered cameras",
+    "plugsView.attachmentsHint": "Choose what loses power when this plug is switched off.",
+    "plugsView.attachedNone": "Nothing attached",
+    "plugsView.connectionHint": "Use your TP-Link account email and password, the same ones as in the Tapo app. In the Tapo app, turn on Third-Party Compatibility for the plug. Melt talks to the plug directly on your network.",
+    "plugsView.saved": "Smart plug saved",
+    "plugsView.removed": "Smart plug removed",
+    "plugsView.attachmentsFailed": "Plug saved, but some attachments could not be updated.",
+    "plugsView.removeTitle": "Remove {name}?",
+    "plugsView.removeDescription": "This removes the smart plug, its stored password, and its printer and camera attachments. The plug itself is not changed and keeps its current power state.",
+    "plugsView.relayOn": "Relay on",
+    "plugsView.relayOff": "Relay off",
+    "plugsView.relayUnknown": "Relay unknown",
+    "plugsView.lastKnown": "Last known: {state}",
+    "plugsView.stale": "stale",
+    "plugsView.observed": "Observed {time}",
+    "plugsView.noReading": "Waiting for the first reading",
+    "plugsView.connection.unknown": "Not checked yet",
+    "plugsView.connection.online": "Connected",
+    "plugsView.connection.unreachable": "Unreachable",
+    "plugsView.connection.authFailed": "Sign-in failed",
+    "plugsView.connection.locked": "Locked out",
+    "plugsView.connection.unsupported": "Unsupported device",
+    "errors.plugInvalidUsername": "Enter the TP-Link account email, without quotes or control characters.",
+    "errors.plugInvalidPassword": "The password must not be empty or contain control characters.",
+    "errors.plugInvalidTimeout": "Smart plug timeout is invalid. Use a duration like 10s.",
+    "errors.plugNotFound": "Smart plug not found.",
+    "errors.plugExists": "A smart plug with this name already exists.",
+    "errors.plugNotLinked": "This smart plug is not attached to that printer or camera.",
+    "errors.plugAuthFailed": "The plug rejected the TP-Link account email or password. Melt will not retry on its own; check them and try again.",
+    "errors.plugCompatibilityDisabled": "The plug refused the connection. Turn on Third-Party Compatibility for it in the Tapo app.",
+    "errors.plugLocked": "The plug has temporarily locked out sign-ins after failed attempts. Wait a few minutes, then try again.",
+    "errors.plugUnsupportedDevice": "This device is not a supported smart plug. Only the Tapo P110 is supported.",
+    "errors.plugUnsupportedProtocol": "The plug uses a protocol Melt does not support.",
+    "errors.plugUnreachable": "Cannot reach the smart plug. Check that it is powered and on the same network.",
+    "errors.plugDeviceRejected": "The plug rejected the command. The relay was not changed.",
+    "errors.plugTimeout": "The smart plug did not respond in time.",
+    "errors.plugPowerUnconfirmed": "Melt could not confirm the relay state after sending the command. Check the plug before trying again.",
+    "errors.plugPowerMismatch": "The plug answered with a different relay state than requested.",
+    "errors.plugProfileChanged": "This smart plug was edited while the command ran. Try again.",
+    "errors.plugPasswordUnavailable": "The stored smart plug password is unavailable. Edit the plug and enter it again.",
+    "errors.plugInvalidTarget": "Choose exactly one printer or camera.",
+    "errors.internalError": "An internal error occurred. Try again.",
     "nav.groupSections": "Sections",
     "nav.selectPrinter": "Select printer",
     "status.idle": "Idle",
@@ -1340,6 +1452,62 @@ const messages: Record<Locale, Messages> = {
     "camerasView.qualityLow": "Baixa",
     "camerasView.feed": "Fonte da câmera",
     "camerasView.builtInFeed": "Câmera embutida",
+    "nav.plugs": "Tomadas inteligentes",
+    "plugsView.description": "Tomadas inteligentes que alimentam impressoras e câmeras. O Melt lê o estado de cada relé e pode ligá-lo ou desligá-lo.",
+    "plugsView.add": "Adicionar tomada inteligente",
+    "plugsView.edit": "Editar tomada inteligente",
+    "plugsView.actions": "Ações da tomada inteligente",
+    "plugsView.remove": "Remover tomada inteligente",
+    "plugsView.empty": "Nenhuma tomada inteligente ainda",
+    "plugsView.emptyHint": "Adicione uma Tapo P110 para ver e controlar a energia de uma impressora ou câmera.",
+    "plugsView.formDescription": "O Melt se conecta à tomada para verificar estas configurações antes de salvar.",
+    "plugsView.driver": "Driver",
+    "plugsView.username": "E-mail da conta TP-Link",
+    "plugsView.password": "Senha da conta TP-Link",
+    "plugsView.passwordKeep": "Senha da conta TP-Link (deixe em branco para manter a atual)",
+    "plugsView.printers": "Impressoras alimentadas",
+    "plugsView.cameras": "Câmeras alimentadas",
+    "plugsView.attachmentsHint": "Escolha o que fica sem energia quando esta tomada for desligada.",
+    "plugsView.attachedNone": "Nada conectado",
+    "plugsView.connectionHint": "Use o e-mail e a senha da sua conta TP-Link, os mesmos do app Tapo. No app Tapo, ative a Compatibilidade com Terceiros na tomada. O Melt fala com a tomada diretamente na sua rede.",
+    "plugsView.saved": "Tomada inteligente salva",
+    "plugsView.removed": "Tomada inteligente removida",
+    "plugsView.attachmentsFailed": "Tomada salva, mas alguns vínculos não puderam ser atualizados.",
+    "plugsView.removeTitle": "Remover {name}?",
+    "plugsView.removeDescription": "Isso remove a tomada inteligente, a senha salva e os vínculos com impressoras e câmeras. A tomada em si não é alterada e mantém o estado de energia atual.",
+    "plugsView.relayOn": "Relé ligado",
+    "plugsView.relayOff": "Relé desligado",
+    "plugsView.relayUnknown": "Relé desconhecido",
+    "plugsView.lastKnown": "Último estado conhecido: {state}",
+    "plugsView.stale": "desatualizado",
+    "plugsView.observed": "Observado {time}",
+    "plugsView.noReading": "Aguardando a primeira leitura",
+    "plugsView.connection.unknown": "Ainda não verificada",
+    "plugsView.connection.online": "Conectada",
+    "plugsView.connection.unreachable": "Inacessível",
+    "plugsView.connection.authFailed": "Falha no login",
+    "plugsView.connection.locked": "Bloqueada",
+    "plugsView.connection.unsupported": "Dispositivo não suportado",
+    "errors.plugInvalidUsername": "Informe o e-mail da conta TP-Link, sem aspas nem caracteres de controle.",
+    "errors.plugInvalidPassword": "A senha não pode ficar vazia nem conter caracteres de controle.",
+    "errors.plugInvalidTimeout": "O tempo limite da tomada inteligente é inválido. Use uma duração como 10s.",
+    "errors.plugNotFound": "Tomada inteligente não encontrada.",
+    "errors.plugExists": "Já existe uma tomada inteligente com este nome.",
+    "errors.plugNotLinked": "Esta tomada inteligente não está vinculada a essa impressora ou câmera.",
+    "errors.plugAuthFailed": "A tomada rejeitou o e-mail ou a senha da conta TP-Link. O Melt não tentará de novo sozinho; confira os dados e tente outra vez.",
+    "errors.plugCompatibilityDisabled": "A tomada recusou a conexão. Ative a Compatibilidade com Terceiros nela, no app Tapo.",
+    "errors.plugLocked": "A tomada bloqueou temporariamente os logins após tentativas falhas. Aguarde alguns minutos e tente de novo.",
+    "errors.plugUnsupportedDevice": "Este dispositivo não é uma tomada inteligente suportada. Apenas a Tapo P110 é suportada.",
+    "errors.plugUnsupportedProtocol": "A tomada usa um protocolo que o Melt não suporta.",
+    "errors.plugUnreachable": "Não foi possível acessar a tomada inteligente. Verifique se ela está ligada e na mesma rede.",
+    "errors.plugDeviceRejected": "A tomada rejeitou o comando. O relé não foi alterado.",
+    "errors.plugTimeout": "A tomada inteligente não respondeu a tempo.",
+    "errors.plugPowerUnconfirmed": "O Melt não conseguiu confirmar o estado do relé após enviar o comando. Verifique a tomada antes de tentar de novo.",
+    "errors.plugPowerMismatch": "A tomada respondeu com um estado de relé diferente do solicitado.",
+    "errors.plugProfileChanged": "Esta tomada inteligente foi editada enquanto o comando era executado. Tente de novo.",
+    "errors.plugPasswordUnavailable": "A senha salva da tomada inteligente não está disponível. Edite a tomada e informe-a novamente.",
+    "errors.plugInvalidTarget": "Escolha exatamente uma impressora ou câmera.",
+    "errors.internalError": "Ocorreu um erro interno. Tente de novo.",
     "nav.groupSections": "Seções",
     "nav.selectPrinter": "Selecionar impressora",
     "status.idle": "Ociosa",

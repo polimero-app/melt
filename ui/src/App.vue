@@ -12,6 +12,7 @@ import { printStageLabel } from './stages'
 import { awaitsFirstSample, badgeDotClasses, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { cameraPlayback, cameraTransportLabels, linkChanges, linkedCameras, printerSource, type CameraPlayback, type CameraSummary, type Quality } from './cameras'
+import { isStale, type PlugObservation, type PlugSummary, type RelayState } from './plugs'
 import { hmsGuideUrl, hmsSeverity, type HmsSeverity } from './hms'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import {
@@ -91,6 +92,7 @@ import {
   PhThermometerSimple,
   PhTrash,
   PhUploadSimple,
+  PhPlug,
   PhVideoCamera,
   PhWarning,
   PhWarningCircle,
@@ -101,7 +103,7 @@ import {
   PhX,
 } from '@phosphor-icons/vue'
 
-type View = 'control' | 'printers' | 'cameras' | 'settings' | 'files'
+type View = 'control' | 'printers' | 'cameras' | 'plugs' | 'settings' | 'files'
 type ModelTone = 'cyan' | 'amber' | 'rose' | 'violet'
 
 type AppInfo = {
@@ -474,6 +476,7 @@ let transferUnlisten: UnlistenFn | undefined
 let printStageUnlisten: UnlistenFn | undefined
 let libraryChangeTimer: number | undefined
 let libraryChangeUnlisten: UnlistenFn | undefined
+let plugsUnlisten: UnlistenFn | undefined
 let selectionRequest = 0
 let fileRequest = 0
 let libraryRequest = 0
@@ -482,11 +485,12 @@ let toastTimer: number | undefined
 // Restored across launches like theme and locale: a desktop app that stays
 // open for hours should reopen where it was left. A stored view that is no
 // longer valid falls back to the control view.
-const views: View[] = ['control', 'printers', 'cameras', 'settings', 'files']
+const views: View[] = ['control', 'printers', 'cameras', 'plugs', 'settings', 'files']
 const activeView = ref<View>(views.find((view) => view === localStorage.getItem('activeView')) ?? 'control')
 const sectionTabs = computed<{ view: View; label: string; icon: Component }[]>(() => [
   { view: 'printers', label: t('nav.printers'), icon: PhPrinter },
   { view: 'cameras', label: t('nav.cameras'), icon: PhVideoCamera },
+  { view: 'plugs', label: t('nav.plugs'), icon: PhPlug },
   { view: 'settings', label: t('nav.settings'), icon: PhGearSix },
   { view: 'files', label: t('nav.files'), icon: PhFolder },
 ])
@@ -927,6 +931,15 @@ const editingCamera = ref<string>()
 const cameraDraft = ref({ name: '', host: '', username: '', password: '', rtspPort: '', timeout: '10s', printers: [] as string[] })
 const cameraSaving = ref(false)
 const cameraFormError = ref<string>()
+// Plug state lives here for the Smart plugs view; the on/off control reads it too.
+const plugs = ref<PlugSummary[]>([])
+const plugsError = ref<string>()
+const plugObservations = ref<Record<string, PlugObservation>>({})
+const plugFormOpen = ref(false)
+const editingPlug = ref<string>()
+const plugDraft = ref({ name: '', host: '', username: '', password: '', timeout: '10s', printers: [] as string[], cameras: [] as string[] })
+const plugSaving = ref(false)
+const plugFormError = ref<string>()
 
 const fleetStats = computed(() => [
   { label: t('printersView.totalPrinters'), value: printers.value.length, tone: 'text-gray-900 dark:text-white' },
@@ -1121,6 +1134,8 @@ async function load() {
   void loadPreferences()
 
   void loadCameras()
+  void loadPlugs()
+  void loadPlugObservations()
 
   const [appInfo, profiles, availableDrivers] = await Promise.allSettled([
     invoke<AppInfo>('app_info'),
@@ -1425,6 +1440,7 @@ async function addPrinter() {
     // detected model name, and it already returns them sorted.
     printers.value = await invoke<Printer[]>('configured_printers')
     void loadCameras()
+    void loadPlugs()
     additionOpen.value = false
     editingPrinter.value = undefined
     draft.value.accessCode = ''
@@ -1467,6 +1483,7 @@ async function confirmRemovePrinter(name: string) {
     monitoring.value = monitoring.value.filter((printer) => printer.name !== name)
     showToast(t('printersView.removed'))
     void loadCameras()
+    void loadPlugs()
     const next = printers.value[0]
     if (next) await selectPrinter(next.name, false)
     else {
@@ -1530,6 +1547,7 @@ async function saveCamera() {
     cameraFormOpen.value = false
     viewedCameraName.value = saved.name
     await loadCameras()
+    void loadPlugs()
     showToast(t('camerasView.saved'))
     // Same name, same source key: restart so the viewer picks up new settings.
     await nextTick()
@@ -1539,6 +1557,111 @@ async function saveCamera() {
   } finally {
     cameraSaving.value = false
   }
+}
+
+async function loadPlugs() {
+  try {
+    plugs.value = await invoke<PlugSummary[]>('plug_list')
+    plugsError.value = undefined
+  } catch (reason) {
+    plugsError.value = message(reason)
+  }
+}
+
+async function loadPlugObservations() {
+  try {
+    plugObservations.value = await invoke<Record<string, PlugObservation>>('plug_observations')
+  } catch {
+    // The next plugs-updated event carries the same data.
+  }
+}
+
+function openPlugForm(plug?: PlugSummary) {
+  editingPlug.value = plug?.name
+  plugDraft.value = {
+    name: plug?.name ?? '',
+    host: plug?.host ?? '',
+    username: plug?.username ?? '',
+    password: '',
+    timeout: plug?.timeout ?? '10s',
+    printers: [...(plug?.printers ?? [])],
+    cameras: [...(plug?.cameras ?? [])],
+  }
+  plugFormError.value = undefined
+  plugFormOpen.value = true
+}
+
+async function savePlug() {
+  if (plugSaving.value) return
+  plugSaving.value = true
+  plugFormError.value = undefined
+  const draft = plugDraft.value
+  const request = { name: draft.name, driver: 'tapo', host: draft.host, username: draft.username, password: draft.password, timeout: draft.timeout }
+  let saved: PlugSummary
+  try {
+    const editing = editingPlug.value
+    saved = editing
+      ? await invoke<PlugSummary>('plug_edit', { name: editing, request })
+      : await invoke<PlugSummary>('plug_add', { request })
+  } catch (reason) {
+    plugFormError.value = [message(reason), commandDetail(reason)].filter(Boolean).join(' ')
+    plugSaving.value = false
+    return
+  }
+  // The profile is saved; a retry after a failed link must edit, not add.
+  editingPlug.value = saved.name
+  draft.password = ''
+  const printerChanges = linkChanges(saved.printers, draft.printers)
+  const cameraChanges = linkChanges(saved.cameras, draft.cameras)
+  try {
+    for (const printer of printerChanges.link) await invoke('plug_link', { plug: saved.name, printer })
+    for (const printer of printerChanges.unlink) await invoke('plug_unlink', { plug: saved.name, printer })
+    for (const camera of cameraChanges.link) await invoke('plug_link', { plug: saved.name, camera })
+    for (const camera of cameraChanges.unlink) await invoke('plug_unlink', { plug: saved.name, camera })
+    plugFormOpen.value = false
+    showToast(t('plugsView.saved'))
+  } catch (reason) {
+    plugFormError.value = [t('plugsView.attachmentsFailed'), message(reason), commandDetail(reason)].filter(Boolean).join(' ')
+  } finally {
+    await loadPlugs()
+    plugSaving.value = false
+  }
+}
+
+function plugActionItems(plug: PlugSummary): ActionMenuItem[] {
+  return [
+    { label: t('plugsView.edit'), icon: PhPencilSimple, onSelect: () => openPlugForm(plug) },
+    { label: t('plugsView.remove'), icon: PhTrash, danger: true, onSelect: () => removePlug(plug.name) },
+  ]
+}
+
+function removePlug(name: string) {
+  askConfirmation(
+    { title: 'plugsView.removeTitle', description: 'plugsView.removeDescription', confirm: 'plugsView.remove' },
+    { name },
+    async () => {
+      await invoke('plug_remove', { name })
+      await loadPlugs()
+      showToast(t('plugsView.removed'))
+    },
+  )
+}
+
+function plugRelayLabel(relay: RelayState) {
+  return t(relay === 'on' ? 'plugsView.relayOn' : relay === 'off' ? 'plugsView.relayOff' : 'plugsView.relayUnknown')
+}
+
+/** Relay, connection and observation time; the stale last reading when the relay is unknown. */
+function plugStatusLine(plug: PlugSummary) {
+  const observation = plugObservations.value[plug.id]
+  if (!observation) return t('plugsView.noReading')
+  const parts = [plugRelayLabel(observation.relay)]
+  if (isStale(observation) && observation.last) {
+    parts.push(`${t('plugsView.lastKnown', { state: plugRelayLabel(observation.last.state) })} (${t('plugsView.stale')})`)
+  }
+  parts.push(t(`plugsView.connection.${observation.connection}` as MessageKey))
+  if (observation.last) parts.push(t('plugsView.observed', { time: formatDate(observation.last.observedAt) }))
+  return parts.join(' · ')
 }
 
 function cameraActionItems(camera: CameraSummary): ActionMenuItem[] {
@@ -1556,6 +1679,7 @@ function removeCamera(name: string) {
       const result = await invoke<{ warnings: unknown[] }>('camera_remove', { name })
       // Reloading drops the camera from every viewer's source, which stops them.
       await loadCameras()
+      void loadPlugs()
       if (result.warnings.length) showToast(t('camerasView.passwordNotDeleted'), 'error')
       else showToast(t('camerasView.removed'))
     },
@@ -2248,6 +2372,11 @@ onMounted(() => {
   }).then((unlisten) => {
     transferUnlisten = unlisten
   })
+  void listen<Record<string, PlugObservation>>('plugs-updated', (event) => {
+    plugObservations.value = event.payload
+  }).then((unlisten) => {
+    plugsUnlisten = unlisten
+  })
   void listen<PrintStageEvent>('print-stage', (event) => {
     printStage.value = event.payload
   }).then((unlisten) => {
@@ -2266,6 +2395,7 @@ onUnmounted(() => {
   transferUnlisten?.()
   printStageUnlisten?.()
   libraryChangeUnlisten?.()
+  plugsUnlisten?.()
   if (libraryChangeTimer !== undefined) window.clearTimeout(libraryChangeTimer)
   if (toastTimer !== undefined) window.clearTimeout(toastTimer)
   Object.values(temperatureTimers).forEach((timer) => {
@@ -3258,6 +3388,42 @@ onUnmounted(() => {
         </button>
       </template>
 
+      <template v-else-if="activeView === 'plugs'">
+        <div class="mb-7 px-4 sm:px-0 lg:flex lg:items-center lg:justify-between">
+          <div class="min-w-0 flex-1">
+            <h2 class="text-2xl/7 font-bold text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight dark:text-white">{{ t('nav.plugs') }}</h2>
+            <p class="mt-2 max-w-4xl text-sm text-gray-500 dark:text-gray-400">{{ t('plugsView.description') }}</p>
+          </div>
+          <div class="mt-5 flex lg:mt-0 lg:ml-4">
+            <Button variant="primary" @click="openPlugForm()"><PhPlus class="size-4" aria-hidden="true" /> {{ t('plugsView.add') }}</Button>
+          </div>
+        </div>
+        <p v-if="plugsError" class="mb-5 px-4 text-sm text-red-600 sm:px-0 dark:text-red-400" role="alert">{{ plugsError }}</p>
+        <ul v-if="plugs.length" class="grid grid-cols-1 gap-5 xl:grid-cols-2">
+          <Card v-for="plug in plugs" :key="plug.id" as="li" class="flex items-start gap-2 py-4 pr-2 pl-4 sm:pl-6">
+            <PhPlug class="mt-0.5 size-5 shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
+            <div class="min-w-0 flex-1">
+              <span class="block truncate text-sm font-semibold text-gray-900 dark:text-white">{{ plug.name }}</span>
+              <span class="mt-0.5 block truncate font-mono text-xs text-gray-500 dark:text-gray-400">{{ plug.host }}</span>
+              <span class="mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400">{{ plug.username }}</span>
+              <span class="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{{ plug.printers.length || plug.cameras.length ? [...plug.printers, ...plug.cameras].join(', ') : t('plugsView.attachedNone') }}</span>
+              <span class="mt-2 block text-xs text-gray-700 dark:text-gray-300" :class="plugObservations[plug.id] && plugObservations[plug.id].connection !== 'online' && 'text-amber-700 dark:text-amber-400'">{{ plugStatusLine(plug) }}</span>
+            </div>
+            <ActionMenu :label="t('plugsView.actions')" :items="plugActionItems(plug)" />
+          </Card>
+        </ul>
+        <button
+          v-else-if="!plugsError"
+          type="button"
+          class="relative flex min-h-55 w-full flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 p-12 text-center hover:border-gray-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600 dark:border-white/15 dark:hover:border-white/25 dark:focus-visible:outline-cyan-500"
+          @click="openPlugForm()"
+        >
+          <PhPlug class="mx-auto size-12 text-gray-400 dark:text-gray-500" aria-hidden="true" />
+          <span class="mt-2 block text-sm font-semibold text-gray-900 dark:text-white">{{ t('plugsView.empty') }}</span>
+          <span class="mt-1 block text-sm text-gray-500 dark:text-gray-400">{{ t('plugsView.emptyHint') }}</span>
+        </button>
+      </template>
+
       <template v-else-if="activeView === 'settings'">
         <div class="mb-7 px-4 sm:px-0 lg:flex lg:items-center lg:justify-between">
           <div class="min-w-0 flex-1">
@@ -3845,6 +4011,60 @@ onUnmounted(() => {
       <template #footer>
         <Button :disabled="cameraSaving" @click="cameraFormOpen = false">{{ t('common.cancel') }}</Button>
         <Button variant="primary" type="submit" form="camera-form" :disabled="cameraSaving">{{ cameraSaving ? t('common.adding') : editingCamera ? t('profiles.save') : t('camerasView.add') }}</Button>
+      </template>
+    </SlideOver>
+
+    <SlideOver :open="plugFormOpen" :title="editingPlug ? t('plugsView.edit') : t('plugsView.add')" :description="t('plugsView.formDescription')" :close-label="t('common.closePanel')" @close="!plugSaving && (plugFormOpen = false)">
+      <form id="plug-form" class="space-y-4" @submit.prevent="savePlug">
+        <div>
+          <label for="plug-driver" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('plugsView.driver') }}</label>
+          <input id="plug-driver" value="tapo" disabled class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+        </div>
+        <div>
+          <label for="plug-name" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.name') }}</label>
+          <input id="plug-name" v-model="plugDraft.name" required maxlength="64" autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+        </div>
+        <div>
+          <label for="plug-host" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.host') }}</label>
+          <input id="plug-host" v-model="plugDraft.host" required autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+        </div>
+        <div>
+          <label for="plug-username" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('plugsView.username') }}</label>
+          <input id="plug-username" v-model="plugDraft.username" type="email" required autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+        </div>
+        <div>
+          <label for="plug-password" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ editingPlug ? t('plugsView.passwordKeep') : t('plugsView.password') }}</label>
+          <input id="plug-password" v-model="plugDraft.password" type="password" :required="!editingPlug" autocomplete="new-password" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+        </div>
+        <div>
+          <label for="plug-timeout" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.timeout') }}</label>
+          <input id="plug-timeout" v-model="plugDraft.timeout" required class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+        </div>
+        <fieldset v-if="printers.length">
+          <legend class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('plugsView.printers') }}</legend>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('plugsView.attachmentsHint') }}</p>
+          <div class="mt-2 space-y-2">
+            <label v-for="printer in printers" :key="printer.name" class="flex items-center gap-2 text-sm text-gray-900 dark:text-white">
+              <input v-model="plugDraft.printers" type="checkbox" :value="printer.name" class="size-4 accent-cyan-600" />
+              {{ printer.name }}
+            </label>
+          </div>
+        </fieldset>
+        <fieldset v-if="cameras.length">
+          <legend class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('plugsView.cameras') }}</legend>
+          <div class="mt-2 space-y-2">
+            <label v-for="camera in cameras" :key="camera.id" class="flex items-center gap-2 text-sm text-gray-900 dark:text-white">
+              <input v-model="plugDraft.cameras" type="checkbox" :value="camera.name" class="size-4 accent-cyan-600" />
+              {{ camera.name }}
+            </label>
+          </div>
+        </fieldset>
+        <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('plugsView.connectionHint') }}</p>
+        <p v-if="plugFormError" class="text-sm text-red-600 dark:text-red-400" role="alert">{{ plugFormError }}</p>
+      </form>
+      <template #footer>
+        <Button :disabled="plugSaving" @click="plugFormOpen = false">{{ t('common.cancel') }}</Button>
+        <Button variant="primary" type="submit" form="plug-form" :disabled="plugSaving">{{ plugSaving ? t('common.adding') : editingPlug ? t('profiles.save') : t('plugsView.add') }}</Button>
       </template>
     </SlideOver>
 
