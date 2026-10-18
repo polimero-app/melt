@@ -1,0 +1,12 @@
+{
+  "ok": false,
+  "data": null,
+  "error": {
+    "code": "config_error",
+    "message": "plug \"ghost\" not found",
+    "details": {}
+  },
+  "meta": {
+    "command": "plug remove"
+  }
+}

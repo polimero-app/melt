@@ -2,10 +2,7 @@
 //! commands added here a positional argument is always a camera name and a
 //! printer is always `--printer`.
 
-use std::{
-    io::{IsTerminal, Write},
-    time::Duration,
-};
+use std::{io::Write, time::Duration};
 
 use melt_core::{
     AppError,
@@ -17,8 +14,8 @@ use melt_core::{
 use serde::Serialize;
 
 use super::{
-    OutputFormat, ParsedOptions, StreamFeed, StreamFormat, config_error, mark_network_call,
-    parse_options, read_secret_file, serve_camera_feed, snapshot_destination,
+    OutputFormat, ParsedOptions, StreamFeed, StreamFormat, config_error, confirm,
+    mark_network_call, parse_options, read_secret_file, serve_camera_feed, snapshot_destination,
     validate_snapshot_destination, write_error, write_snapshot_file, write_success,
 };
 
@@ -120,7 +117,7 @@ pub(crate) fn run_profile_command(
 }
 
 /// Renders human text eagerly so the JSON and human paths share one result.
-fn respond<T: Serialize>(
+pub(crate) fn respond<T: Serialize>(
     command: &str,
     format: OutputFormat,
     result: Result<T, AppError>,
@@ -271,24 +268,13 @@ fn remove(args: &[&String], err: &mut dyn Write) -> Result<cameras::CameraRemove
     let (positionals, options) = parse_options(args, &["yes"], &[]).map_err(AppError::usage)?;
     let name = one_camera("camera remove", &positionals)?;
     if !options.enabled("yes") {
-        if !std::io::stdin().is_terminal() {
-            return Err(AppError::usage("non-interactive mode requires --yes"));
-        }
-        let _ = write!(
+        confirm(
             err,
-            "Remove camera {name}, its printer links, and its stored password? Type 'yes' to continue: "
-        );
-        let mut answer = String::new();
-        std::io::stdin()
-            .read_line(&mut answer)
-            .map_err(|_| AppError {
-                exit_code: 1,
-                code: "internal_error",
-                message: "cannot read confirmation".into(),
-            })?;
-        if answer.trim_end() != "yes" {
-            return Err(AppError::usage("confirmation declined; camera not removed"));
-        }
+            &format!(
+                "Remove camera {name}, its printer links, and its stored password? Type 'yes' to continue: "
+            ),
+            "confirmation declined; camera not removed",
+        )?;
     }
     let dir = config_dir().map_err(config_error)?;
     cameras::remove(dir, &SystemKeychain, name).map_err(camera_error)
@@ -349,7 +335,7 @@ fn one_camera<'a>(command: &str, positionals: &'a [String]) -> Result<&'a str, A
     }
 }
 
-fn required(options: &ParsedOptions, name: &str) -> Result<String, AppError> {
+pub(crate) fn required(options: &ParsedOptions, name: &str) -> Result<String, AppError> {
     options
         .value(name)
         .map(str::to_owned)

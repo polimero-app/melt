@@ -10,7 +10,15 @@
     {"path": "camera list", "arguments": "", "flags": [], "implementation": "implemented"},
     {"path": "camera remove", "arguments": "<camera>", "flags": ["--yes"], "implementation": "implemented"},
     {"path": "camera select", "arguments": "<printer> [<camera>]", "flags": ["--builtin"], "implementation": "implemented"},
-    {"path": "camera unlink", "arguments": "<camera> <printer>", "flags": [], "implementation": "implemented"}
+    {"path": "camera unlink", "arguments": "<camera> <printer>", "flags": [], "implementation": "implemented"},
+    {"path": "plug", "arguments": "", "flags": [], "implementation": "implemented"},
+    {"path": "plug drivers", "arguments": "", "flags": [], "implementation": "implemented"},
+    {"path": "plug add", "arguments": "<plug>", "flags": ["--driver <driver>", "--host <host>", "--username <email>", "--password-file <path>", "--timeout <duration>"], "implementation": "implemented"},
+    {"path": "plug edit", "arguments": "<plug>", "flags": ["--name <name>", "--host <host>", "--username <email>", "--password-file <path>", "--timeout <duration>"], "implementation": "implemented"},
+    {"path": "plug list", "arguments": "", "flags": ["--printer <printer>", "--camera <camera>"], "implementation": "implemented"},
+    {"path": "plug remove", "arguments": "<plug>", "flags": ["--yes"], "implementation": "implemented"},
+    {"path": "plug link", "arguments": "<plug>", "flags": ["--printer <printer>", "--camera <camera>"], "implementation": "implemented"},
+    {"path": "plug unlink", "arguments": "<plug>", "flags": ["--printer <printer>", "--camera <camera>"], "implementation": "implemented"}
   ],
   "commands": [
     {"path": "melt", "arguments": "", "flags": [], "implementation": "implemented"},

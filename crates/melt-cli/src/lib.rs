@@ -31,6 +31,7 @@ use serde::Serialize;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 mod cameras;
+mod plugs;
 
 #[derive(Clone, Copy)]
 enum OutputFormat {
@@ -245,6 +246,48 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
         flags: "  -h, --help   help for list",
     },
     LeafCommand {
+        path: &["plug", "add"],
+        short: "Add a smart plug profile",
+        args: "<plug> [flags]",
+        flags: "      --driver string          plug driver: tapo (required)\n  -h, --help                   help for add\n      --host string            plug IP address or hostname (required)\n      --password-file string   file containing the TP-Link account password (required)\n      --timeout string         connection timeout (default \"10s\")\n      --username string        TP-Link account email (required)",
+    },
+    LeafCommand {
+        path: &["plug", "drivers"],
+        short: "List supported smart plug drivers",
+        args: "[flags]",
+        flags: "  -h, --help help for drivers",
+    },
+    LeafCommand {
+        path: &["plug", "edit"],
+        short: "Edit a smart plug profile",
+        args: "<plug> [flags]",
+        flags: "  -h, --help                   help for edit\n      --host string            plug IP address or hostname\n      --name string            rename the plug\n      --password-file string   file containing a new TP-Link account password\n      --timeout string         connection timeout (e.g. 10s)\n      --username string        TP-Link account email",
+    },
+    LeafCommand {
+        path: &["plug", "link"],
+        short: "Attach a smart plug to a printer or camera",
+        args: "<plug> (--printer <printer> | --camera <camera>) [flags]",
+        flags: "      --camera string    IP camera the plug powers\n  -h, --help             help for link\n      --printer string   printer the plug powers",
+    },
+    LeafCommand {
+        path: &["plug", "list"],
+        short: "List smart plug profiles and their attachments",
+        args: "[flags]",
+        flags: "      --camera string    only plugs attached to this camera\n  -h, --help             help for list\n      --printer string   only plugs attached to this printer",
+    },
+    LeafCommand {
+        path: &["plug", "remove"],
+        short: "Remove a smart plug profile",
+        args: "<plug> [flags]",
+        flags: "  -h, --help help for remove\n      --yes  skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["plug", "unlink"],
+        short: "Detach a smart plug from a printer or camera",
+        args: "<plug> (--printer <printer> | --camera <camera>) [flags]",
+        flags: "      --camera string    IP camera to detach\n  -h, --help             help for unlink\n      --printer string   printer to detach",
+    },
+    LeafCommand {
         path: &["printer", "remove"],
         short: "Remove a printer profile",
         args: "<name> [flags]",
@@ -298,6 +341,7 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
             ("jobs", "Job control operations on a named printer"),
             ("lights", "Light control operations on a named printer"),
             ("motion", "Motion control operations on a named printer"),
+            ("plug", "Smart plug profiles and attachments"),
             ("printer", "Manage 3D printer profiles"),
             ("speed", "Print speed control operations on a named printer"),
             ("status", "Show the current status of a printer"),
@@ -339,6 +383,19 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
                 "Stream a printer or IP camera via a local HTTP server",
             ),
             ("unlink", "Unlink an IP camera from a printer"),
+        ],
+    },
+    CommandGroup {
+        path: &["plug"],
+        short: "Smart plug profiles and attachments",
+        commands: &[
+            ("add", "Add a smart plug profile"),
+            ("drivers", "List supported smart plug drivers"),
+            ("edit", "Edit a smart plug profile"),
+            ("link", "Attach a smart plug to a printer or camera"),
+            ("list", "List smart plug profiles and their attachments"),
+            ("remove", "Remove a smart plug profile"),
+            ("unlink", "Detach a smart plug from a printer or camera"),
         ],
     },
     CommandGroup {
@@ -660,6 +717,17 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             if files.as_str() == "files" && download.as_str() == "download" =>
         {
             files_download(invocation.format, rest, out, err)
+        }
+        [plug, rest @ ..]
+            if plug.as_str() == "plug"
+                && rest.first().is_some_and(|action| {
+                    matches!(
+                        action.as_str(),
+                        "add" | "drivers" | "edit" | "link" | "list" | "remove" | "unlink"
+                    )
+                }) =>
+        {
+            plugs::run_plug_command(invocation.format, rest, out, err)
         }
         [camera, action, rest @ ..]
             if camera.as_str() == "camera"
@@ -5463,6 +5531,26 @@ fn write_error(
 fn write_json<T: Serialize>(out: &mut dyn Write, value: &T) -> serde_json::Result<()> {
     serde_json::to_writer_pretty(&mut *out, value)?;
     writeln!(out).map_err(serde_json::Error::io)
+}
+
+/// Asks for a typed `yes` on stderr/stdin; refuses when stdin is not a terminal.
+fn confirm(err: &mut dyn Write, prompt: &str, declined: &str) -> Result<(), AppError> {
+    if !std::io::stdin().is_terminal() {
+        return Err(AppError::usage("non-interactive mode requires --yes"));
+    }
+    let _ = write!(err, "{prompt}");
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .map_err(|_| AppError {
+            exit_code: 1,
+            code: "internal_error",
+            message: "cannot read confirmation".into(),
+        })?;
+    if answer.trim_end() != "yes" {
+        return Err(AppError::usage(declined));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -1,0 +1,493 @@
+//! `melt plug` profile and attachment commands. A plug target is always a
+//! named option (`--printer` or `--camera`), because both kinds can share a
+//! name.
+
+use std::io::Write;
+
+use melt_core::{
+    AppError,
+    config::{PlugTarget, config_dir},
+    keychain::SystemKeychain,
+    plugs::{
+        self, DEFAULT_TIMEOUT, DRIVERS, PlugError, PlugRemoveResult, PlugRequest, PlugSummary,
+        ResolvedPlug,
+    },
+};
+use serde::Serialize;
+
+use super::{
+    OutputFormat, ParsedOptions,
+    cameras::{required, respond},
+    config_error, confirm, mark_network_call, parse_options, read_secret_file,
+};
+
+/// `args` starts with the action (`add`, `list`, ...).
+pub(crate) fn run_plug_command(
+    format: OutputFormat,
+    args: &[&String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (action, rest) = args.split_first().expect("dispatch passes an action");
+    let command = format!("plug {action}");
+    match action.as_str() {
+        "drivers" => respond(
+            &command,
+            format,
+            drivers(rest),
+            |data: &DriverList, out| {
+                for driver in &data.drivers {
+                    writeln!(out, "{driver}")?;
+                }
+                Ok(())
+            },
+            out,
+            err,
+        ),
+        "add" => respond(&command, format, add(rest), summary("Plug added"), out, err),
+        "edit" => respond(
+            &command,
+            format,
+            edit(rest),
+            summary("Plug updated"),
+            out,
+            err,
+        ),
+        "link" => respond(
+            &command,
+            format,
+            link(rest, true),
+            summary("Plug linked"),
+            out,
+            err,
+        ),
+        "unlink" => respond(
+            &command,
+            format,
+            link(rest, false),
+            summary("Plug unlinked"),
+            out,
+            err,
+        ),
+        "list" => respond(
+            &command,
+            format,
+            list(rest),
+            |data: &PlugList, out| {
+                if data.plugs.is_empty() {
+                    return writeln!(out, "No plugs configured.");
+                }
+                for plug in &data.plugs {
+                    writeln!(out, "{}", summary_line(plug))?;
+                }
+                Ok(())
+            },
+            out,
+            err,
+        ),
+        "remove" => {
+            let result = remove(rest, err);
+            respond(
+                &command,
+                format,
+                result,
+                |removed: &PlugRemoveResult, out| {
+                    writeln!(out, "Plug removed: {}", removed.name)?;
+                    for warning in &removed.warnings {
+                        writeln!(out, "Warning: {}", warning.message)?;
+                    }
+                    Ok(())
+                },
+                out,
+                err,
+            )
+        }
+        _ => unreachable!("dispatch matches only known plug commands"),
+    }
+}
+
+fn summary(verb: &'static str) -> impl FnOnce(&PlugSummary, &mut dyn Write) -> std::io::Result<()> {
+    move |plug, out| writeln!(out, "{verb}: {}", summary_line(plug))
+}
+
+fn summary_line(plug: &PlugSummary) -> String {
+    let join = |names: &[String]| {
+        if names.is_empty() {
+            "-".to_owned()
+        } else {
+            names.join(",")
+        }
+    };
+    format!(
+        "{}  {}  printers: {}  cameras: {}",
+        plug.name,
+        plug.host,
+        join(&plug.printers),
+        join(&plug.cameras)
+    )
+}
+
+#[derive(Serialize)]
+struct DriverList {
+    drivers: Vec<&'static str>,
+}
+
+#[derive(Serialize)]
+struct PlugList {
+    plugs: Vec<PlugSummary>,
+}
+
+fn drivers(args: &[&String]) -> Result<DriverList, AppError> {
+    let (positionals, _) = parse_options(args, &[], &[]).map_err(AppError::usage)?;
+    if !positionals.is_empty() {
+        return Err(AppError::usage("plug drivers takes no arguments"));
+    }
+    Ok(DriverList {
+        drivers: DRIVERS.to_vec(),
+    })
+}
+
+fn one_plug<'a>(command: &str, positionals: &'a [String]) -> Result<&'a str, AppError> {
+    match positionals {
+        [name] => Ok(name),
+        [] => Err(AppError::usage(format!("{command} requires a plug name"))),
+        _ => Err(AppError::usage(format!(
+            "{command} expects exactly one plug name"
+        ))),
+    }
+}
+
+/// Runs the async verification on a throwaway current-thread runtime.
+fn verify(plug: &ResolvedPlug) -> Result<(), AppError> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| AppError {
+            exit_code: 1,
+            code: "internal_error",
+            message: "cannot start async runtime".into(),
+        })?;
+    mark_network_call();
+    runtime
+        .block_on(plugs::verify(plug))
+        .map(drop)
+        .map_err(plug_error)
+}
+
+fn add(args: &[&String]) -> Result<PlugSummary, AppError> {
+    let (positionals, options) = parse_options(
+        args,
+        &[],
+        &["driver", "host", "username", "password-file", "timeout"],
+    )
+    .map_err(AppError::usage)?;
+    let name = one_plug("plug add", &positionals)?;
+    let driver = required(&options, "driver")?;
+    if !DRIVERS.contains(&driver.as_str()) {
+        return Err(AppError::usage(format!(
+            "--driver must be one of: {}",
+            DRIVERS.join(", ")
+        )));
+    }
+    let request = PlugRequest {
+        name: name.to_owned(),
+        driver,
+        host: required(&options, "host")?,
+        username: required(&options, "username")?,
+        password: read_secret_file("--password-file", &required(&options, "password-file")?)
+            .map_err(AppError::usage)?,
+        timeout: options
+            .value("timeout")
+            .unwrap_or(DEFAULT_TIMEOUT)
+            .to_owned(),
+    };
+    let dir = config_dir().map_err(config_error)?;
+    let plug = plugs::prepare_create(&dir, request).map_err(plug_error)?;
+    verify(&plug)?;
+    plugs::commit_create(&dir, &SystemKeychain, plug).map_err(plug_error)
+}
+
+fn edit(args: &[&String]) -> Result<PlugSummary, AppError> {
+    let (positionals, options) = parse_options(
+        args,
+        &[],
+        &["name", "host", "username", "password-file", "timeout"],
+    )
+    .map_err(AppError::usage)?;
+    let current = one_plug("plug edit", &positionals)?;
+    if options.values.is_empty() {
+        return Err(AppError::usage(
+            "plug edit requires at least one option to change",
+        ));
+    }
+    // The core reads an empty password as "keep the stored one".
+    let password = match options.value("password-file") {
+        Some(path) => {
+            let password = read_secret_file("--password-file", path).map_err(AppError::usage)?;
+            if password.is_empty() {
+                return Err(AppError::usage("--password-file must not be empty"));
+            }
+            password
+        }
+        None => String::new(),
+    };
+    let dir = config_dir().map_err(config_error)?;
+    let existing = plugs::list(&dir)
+        .map_err(plug_error)?
+        .into_iter()
+        .find(|plug| plug.name == current)
+        .ok_or_else(|| plug_error(PlugError::NotFound(current.to_owned())))?;
+    let request = PlugRequest {
+        name: options.value("name").unwrap_or(current).to_owned(),
+        driver: existing.driver,
+        host: options.value("host").map_or(existing.host, str::to_owned),
+        username: options
+            .value("username")
+            .map_or(existing.username, str::to_owned),
+        password,
+        timeout: options
+            .value("timeout")
+            .map_or(existing.timeout, str::to_owned),
+    };
+    let update =
+        plugs::prepare_update(&dir, &SystemKeychain, current, request).map_err(plug_error)?;
+    if update.needs_verify {
+        verify(&update.plug)?;
+    }
+    plugs::commit_update(&dir, &SystemKeychain, update).map_err(plug_error)
+}
+
+/// Exactly one of `--printer` / `--camera`.
+fn target(command: &str, options: &ParsedOptions) -> Result<PlugTarget, AppError> {
+    match (options.value("printer"), options.value("camera")) {
+        (Some(printer), None) => Ok(PlugTarget::Printer(printer.to_owned())),
+        (None, Some(camera)) => Ok(PlugTarget::Camera(camera.to_owned())),
+        _ => Err(AppError::usage(format!(
+            "{command} requires exactly one of --printer or --camera"
+        ))),
+    }
+}
+
+fn link(args: &[&String], attach: bool) -> Result<PlugSummary, AppError> {
+    let command = if attach { "plug link" } else { "plug unlink" };
+    let (positionals, options) =
+        parse_options(args, &[], &["printer", "camera"]).map_err(AppError::usage)?;
+    let name = one_plug(command, &positionals)?;
+    let target = target(command, &options)?;
+    let dir = config_dir().map_err(config_error)?;
+    if attach {
+        plugs::link(dir, name, &target)
+    } else {
+        plugs::unlink(dir, name, &target)
+    }
+    .map_err(plug_error)
+}
+
+fn list(args: &[&String]) -> Result<PlugList, AppError> {
+    let (positionals, options) =
+        parse_options(args, &[], &["printer", "camera"]).map_err(AppError::usage)?;
+    if !positionals.is_empty() {
+        return Err(AppError::usage("plug list takes no arguments"));
+    }
+    let filter = match (options.value("printer"), options.value("camera")) {
+        (Some(_), Some(_)) => {
+            return Err(AppError::usage(
+                "use either --printer or --camera, not both",
+            ));
+        }
+        (Some(printer), None) => Some(PlugTarget::Printer(printer.to_owned())),
+        (None, Some(camera)) => Some(PlugTarget::Camera(camera.to_owned())),
+        (None, None) => None,
+    };
+    let dir = config_dir().map_err(config_error)?;
+    let plugs = match filter {
+        Some(target) => plugs::list_for(dir, &target),
+        None => plugs::list(dir),
+    }
+    .map_err(plug_error)?;
+    Ok(PlugList { plugs })
+}
+
+fn remove(args: &[&String], err: &mut dyn Write) -> Result<PlugRemoveResult, AppError> {
+    let (positionals, options) = parse_options(args, &["yes"], &[]).map_err(AppError::usage)?;
+    let name = one_plug("plug remove", &positionals)?;
+    if !options.enabled("yes") {
+        confirm(
+            err,
+            &format!(
+                "Remove plug {name}, its attachments, and its stored password? Type 'yes' to continue: "
+            ),
+            "confirmation declined; plug not removed",
+        )?;
+    }
+    let dir = config_dir().map_err(config_error)?;
+    plugs::remove(dir, &SystemKeychain, name).map_err(plug_error)
+}
+
+pub(crate) fn plug_error(error: PlugError) -> AppError {
+    let message = error.to_string();
+    let (exit_code, code) = match error {
+        PlugError::Config(error) => return config_error(error),
+        PlugError::Authentication | PlugError::CompatibilityDisabled => {
+            (3, "authentication_failed")
+        }
+        PlugError::Lockout => (3, "authentication_locked"),
+        PlugError::MissingSecret => (3, "secret_not_found"),
+        PlugError::Secret(_) => (3, "secret_store_failed"),
+        PlugError::Timeout => (4, "timeout"),
+        PlugError::Connect | PlugError::MalformedResponse => (4, "connection_failed"),
+        PlugError::DeviceRejected => (4, "device_rejected"),
+        PlugError::PowerUnconfirmed { .. } => (4, "power_change_unconfirmed"),
+        PlugError::PowerMismatch { .. } => (4, "power_change_mismatch"),
+        PlugError::UnsupportedDevice(_) | PlugError::UnsupportedProtocol => {
+            (5, "capability_unsupported")
+        }
+        PlugError::RollbackFailed => (1, "internal_error"),
+        _ => return AppError::usage(message),
+    };
+    AppError {
+        exit_code,
+        code,
+        message,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use melt_core::{keychain::SecretError, plugs::PowerState};
+
+    fn strings(values: &[&str]) -> Vec<String> {
+        values.iter().map(|v| (*v).to_owned()).collect()
+    }
+
+    #[test]
+    fn plug_errors_follow_the_exit_contract() {
+        let cases = [
+            (PlugError::MissingName, 2, "config_error"),
+            (PlugError::InvalidName, 2, "config_error"),
+            (PlugError::UnknownDriver("x".into()), 2, "config_error"),
+            (PlugError::InvalidHost, 2, "config_error"),
+            (PlugError::InvalidUsername, 2, "config_error"),
+            (PlugError::InvalidPassword, 2, "config_error"),
+            (PlugError::InvalidTimeout, 2, "config_error"),
+            (PlugError::NotFound("a".into()), 2, "config_error"),
+            (PlugError::AlreadyExists("a".into()), 2, "config_error"),
+            (PlugError::PrinterNotFound("a".into()), 2, "config_error"),
+            (PlugError::CameraNotFound("a".into()), 2, "config_error"),
+            (
+                PlugError::NotLinked {
+                    plug: "a".into(),
+                    target: "b".into(),
+                },
+                2,
+                "config_error",
+            ),
+            (PlugError::ProfileChanged, 2, "config_error"),
+            (PlugError::Authentication, 3, "authentication_failed"),
+            (PlugError::CompatibilityDisabled, 3, "authentication_failed"),
+            (PlugError::Lockout, 3, "authentication_locked"),
+            (PlugError::MissingSecret, 3, "secret_not_found"),
+            (
+                PlugError::Secret(SecretError::Unavailable("x".into())),
+                3,
+                "secret_store_failed",
+            ),
+            (PlugError::Timeout, 4, "timeout"),
+            (PlugError::Connect, 4, "connection_failed"),
+            (PlugError::MalformedResponse, 4, "connection_failed"),
+            (PlugError::DeviceRejected, 4, "device_rejected"),
+            (
+                PlugError::PowerUnconfirmed {
+                    requested: PowerState::Off,
+                    last_observed: None,
+                },
+                4,
+                "power_change_unconfirmed",
+            ),
+            (
+                PlugError::PowerMismatch {
+                    requested: PowerState::Off,
+                    observed: PowerState::On,
+                },
+                4,
+                "power_change_mismatch",
+            ),
+            (
+                PlugError::UnsupportedDevice("P100".into()),
+                5,
+                "capability_unsupported",
+            ),
+            (PlugError::UnsupportedProtocol, 5, "capability_unsupported"),
+            (PlugError::RollbackFailed, 1, "internal_error"),
+        ];
+        for (error, exit_code, code) in cases {
+            let name = format!("{error:?}");
+            let mapped = plug_error(error);
+            assert_eq!((mapped.exit_code, mapped.code), (exit_code, code), "{name}");
+        }
+    }
+
+    #[test]
+    fn link_requires_exactly_one_target() {
+        for (args, ok) in [
+            (&["--printer", "p"][..], true),
+            (&["--camera", "c"][..], true),
+            (&[][..], false),
+            (&["--printer", "p", "--camera", "c"][..], false),
+        ] {
+            let args = strings(args);
+            let refs: Vec<&String> = args.iter().collect();
+            let (_, options) = parse_options(&refs, &[], &["printer", "camera"]).unwrap();
+            let got = target("plug link", &options);
+            assert_eq!(got.is_ok(), ok, "{args:?}");
+            if let Err(error) = got {
+                assert_eq!(error.exit_code, 2);
+            }
+        }
+    }
+
+    #[test]
+    fn list_rejects_both_filters() {
+        let args = strings(&["--printer", "p", "--camera", "c"]);
+        let refs: Vec<&String> = args.iter().collect();
+        let Err(error) = list(&refs) else {
+            panic!("both filters rejected")
+        };
+        assert_eq!(error.exit_code, 2);
+    }
+
+    #[test]
+    fn add_requires_password_file() {
+        let args = strings(&[
+            "bench",
+            "--driver",
+            "tapo",
+            "--host",
+            "h",
+            "--username",
+            "u",
+        ]);
+        let refs: Vec<&String> = args.iter().collect();
+        let Err(error) = add(&refs) else {
+            panic!("password file required")
+        };
+        assert_eq!(error.exit_code, 2);
+        assert_eq!(error.message, "--password-file is required");
+    }
+
+    #[test]
+    fn remove_without_yes_in_noninteractive_mode_fails() {
+        use std::io::IsTerminal;
+        if std::io::stdin().is_terminal() {
+            return; // would prompt
+        }
+        let args = strings(&["bench"]);
+        let refs: Vec<&String> = args.iter().collect();
+        let Err(error) = remove(&refs, &mut Vec::new()) else {
+            panic!("needs --yes")
+        };
+        assert_eq!(error.exit_code, 2);
+        assert_eq!(error.message, "non-interactive mode requires --yes");
+    }
+}

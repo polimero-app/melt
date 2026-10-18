@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "data": {
+    "drivers": [
+      "tapo"
+    ]
+  },
+  "error": null,
+  "meta": {
+    "command": "plug drivers"
+  }
+}

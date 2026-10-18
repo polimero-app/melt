@@ -117,6 +117,60 @@
       "stdout": "golden/camera-snapshot-unknown-camera.json",
       "stderr": "",
       "ignoreJsonPointers": []
+    },
+    {
+      "id": "plug-list-empty-json",
+      "command": "plug list",
+      "args": ["plug", "list", "--output", "json"],
+      "exitCode": 0,
+      "stdout": "golden/plug-list-empty.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
+    },
+    {
+      "id": "plug-drivers-json",
+      "command": "plug drivers",
+      "args": ["plug", "drivers", "--output", "json"],
+      "exitCode": 0,
+      "stdout": "golden/plug-drivers.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
+    },
+    {
+      "id": "plug-remove-unknown-json",
+      "command": "plug remove",
+      "args": ["plug", "remove", "ghost", "--yes", "--output", "json"],
+      "exitCode": 2,
+      "stdout": "golden/plug-remove-unknown.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
+    },
+    {
+      "id": "plug-link-no-target-json",
+      "command": "plug link",
+      "args": ["plug", "link", "bench", "--output", "json"],
+      "exitCode": 2,
+      "stdout": "golden/plug-link-no-target.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
+    },
+    {
+      "id": "plug-link-both-targets-json",
+      "command": "plug link",
+      "args": ["plug", "link", "bench", "--printer", "workshop", "--camera", "porch", "--output", "json"],
+      "exitCode": 2,
+      "stdout": "golden/plug-link-both-targets.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
+    },
+    {
+      "id": "plug-link-unknown-printer-json",
+      "command": "plug link",
+      "args": ["plug", "link", "bench", "--printer", "ghost", "--output", "json"],
+      "exitCode": 2,
+      "stdout": "golden/plug-link-unknown-printer.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
     }
   ]
 }
