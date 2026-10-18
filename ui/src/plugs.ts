@@ -36,3 +36,12 @@ export function plugsForCamera(camera: string, plugs: PlugSummary[]): PlugSummar
 export function isStale(observation: PlugObservation | undefined): boolean {
   return observation?.relay === 'unknown' && Boolean(observation.last)
 }
+
+/** Everything switching `plug` off cuts power to. `activity` maps lowercase printer name to a known state; `active` lists printers with one. */
+export function offConfirmation(plug: PlugSummary, activity: Record<string, string>) {
+  return {
+    printers: plug.printers,
+    cameras: plug.cameras,
+    active: plug.printers.filter((printer) => activity[printer.toLowerCase()]),
+  }
+}

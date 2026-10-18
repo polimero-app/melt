@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { linkChanges } from './cameras'
-import { isStale, plugsForCamera, plugsForPrinter, type PlugObservation, type PlugSummary } from './plugs'
+import { isStale, offConfirmation, plugsForCamera, plugsForPrinter, type PlugObservation, type PlugSummary } from './plugs'
 
 function plug(name: string, printers: string[] = [], cameras: string[] = []): PlugSummary {
   return { name, id: `${name}-id`, driver: 'tapo', host: '192.0.2.30', username: 'a@example.invalid', timeout: '10s', printers, cameras, updated: '2026-10-18T12:00:00Z' }
@@ -36,5 +36,17 @@ describe('isStale', () => {
     expect(isStale(observation('unknown', null))).toBe(false)
     expect(isStale(observation('on', last))).toBe(false)
     expect(isStale(undefined)).toBe(false)
+  })
+})
+
+describe('offConfirmation', () => {
+  it('offConfirmation lists both kinds and known activity', () => {
+    const result = offConfirmation(plug('shelf', ['p1s', 'a1'], ['door']), { p1s: 'printing' })
+    expect(result).toEqual({ printers: ['p1s', 'a1'], cameras: ['door'], active: ['p1s'] })
+  })
+
+  it('offConfirmation keeps unknown printers without blocking', () => {
+    const result = offConfirmation(plug('bench', ['x1c']), {})
+    expect(result).toEqual({ printers: ['x1c'], cameras: [], active: [] })
   })
 })

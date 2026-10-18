@@ -12,7 +12,7 @@ import { printStageLabel } from './stages'
 import { awaitsFirstSample, badgeDotClasses, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { cameraPlayback, cameraTransportLabels, linkChanges, linkedCameras, printerSource, type CameraPlayback, type CameraSummary, type Quality } from './cameras'
-import { isStale, type PlugObservation, type PlugSummary, type RelayState } from './plugs'
+import { plugsForCamera, plugsForPrinter, type PlugObservation, type PlugSummary, type PowerState } from './plugs'
 import { hmsGuideUrl, hmsSeverity, type HmsSeverity } from './hms'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import {
@@ -48,6 +48,7 @@ import CardHeader from './components/CardHeader.vue'
 import ModelThumbnail from './components/ModelThumbnail.vue'
 import FilePreviewDialog from './components/FilePreviewDialog.vue'
 import CameraViewer from './components/CameraViewer.vue'
+import PlugControl from './components/PlugControl.vue'
 import {
   PhArrowsClockwise,
   PhArrowsOutCardinal,
@@ -926,6 +927,7 @@ const viewedCamera = computed(() => cameras.value.find((camera) => camera.name =
 const viewedCameraMayRun = computed(() => shouldRunCamera(activeView.value, 'cameras', documentVisible.value, true))
 const cameraQuality = ref<Quality>('high')
 const cameraViewer = ref<InstanceType<typeof CameraViewer>>()
+const controlCameraViewer = ref<InstanceType<typeof CameraViewer>>()
 const cameraFormOpen = ref(false)
 const editingCamera = ref<string>()
 const cameraDraft = ref({ name: '', host: '', username: '', password: '', rtspPort: '', timeout: '10s', printers: [] as string[] })
@@ -1648,21 +1650,24 @@ function removePlug(name: string) {
   )
 }
 
-function plugRelayLabel(relay: RelayState) {
-  return t(relay === 'on' ? 'plugsView.relayOn' : relay === 'off' ? 'plugsView.relayOff' : 'plugsView.relayUnknown')
-}
-
-/** Relay, connection and observation time; the stale last reading when the relay is unknown. */
-function plugStatusLine(plug: PlugSummary) {
-  const observation = plugObservations.value[plug.id]
-  if (!observation) return t('plugsView.noReading')
-  const parts = [plugRelayLabel(observation.relay)]
-  if (isStale(observation) && observation.last) {
-    parts.push(`${t('plugsView.lastKnown', { state: plugRelayLabel(observation.last.state) })} (${t('plugsView.stale')})`)
+/** Known printer activity by lowercase name, from monitoring already loaded; absent when unknown. */
+const plugActivity = computed(() => {
+  const activity: Record<string, string> = {}
+  for (const entry of monitoring.value) {
+    const status = entry.status
+    if (!status) continue
+    const units = status.extensions?.['bambu-lan']?.ams?.units ?? []
+    const targets = Object.values(status.temperatures ?? {}).some((temperature) => (temperature?.targetCelsius ?? 0) > 0)
+    const value = status.state === 'printing' || status.state === 'paused' ? status.state : units.some((unit) => unit.drying?.active) ? 'drying' : targets ? 'heating' : undefined
+    if (value) activity[entry.name.toLowerCase()] = value
   }
-  parts.push(t(`plugsView.connection.${observation.connection}` as MessageKey))
-  if (observation.last) parts.push(t('plugsView.observed', { time: formatDate(observation.last.observedAt) }))
-  return parts.join(' · ')
+  return activity
+})
+
+/** After a confirmed on, restart the visible viewers this plug powers. Never opens one. */
+function plugChanged(plug: PlugSummary, _state: PowerState) {
+  if (activeView.value === 'cameras' && viewedCamera.value && plugsForCamera(viewedCamera.value.name, [plug]).length) void cameraViewer.value?.refresh()
+  if (activeView.value === 'control' && activePrinter.value && (plugsForPrinter(activePrinter.value.name, [plug]).length || plug.cameras.includes(controlCameraName.value ?? ''))) void controlCameraViewer.value?.refresh()
 }
 
 function cameraActionItems(camera: CameraSummary): ActionMenuItem[] {
@@ -2606,6 +2611,11 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- Power control stays reachable whatever the printer's connectivity. -->
+        <div v-if="activePrinter && plugsForPrinter(activePrinter.name, plugs).length" class="mx-4 mb-5 space-y-3 rounded-lg border border-gray-200 px-4 py-3 sm:mx-0 dark:border-white/10">
+          <PlugControl v-for="plug in plugsForPrinter(activePrinter.name, plugs)" :key="plug.id" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :t="t" :locale="locale" @changed="plugChanged(plug, $event)" />
+        </div>
+
         <!-- Awaiting the first sample: neutral, no alarm language, no recovery
              CTA — nothing has failed yet. -->
         <div
@@ -2684,6 +2694,7 @@ onUnmounted(() => {
           </section>
           <section class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
             <CameraViewer
+              ref="controlCameraViewer"
               :source="controlCameraSource"
               :active="cameraMayRun"
               :can-stream="Boolean(controlCameraName || capabilities?.cameraStream)"
@@ -3358,6 +3369,7 @@ onUnmounted(() => {
               <ActionMenu :label="t('camerasView.actions')" :items="cameraActionItems(camera)" />
             </li>
           </Card>
+          <div class="space-y-3">
           <CameraViewer
             ref="cameraViewer"
             :source="{ camera: viewedCamera.name }"
@@ -3376,6 +3388,10 @@ onUnmounted(() => {
               </select>
             </template>
           </CameraViewer>
+          <div v-if="plugsForCamera(viewedCamera.name, plugs).length" class="space-y-3 rounded-lg border border-gray-200 px-4 py-3 dark:border-white/10">
+            <PlugControl v-for="plug in plugsForCamera(viewedCamera.name, plugs)" :key="plug.id" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :t="t" :locale="locale" @changed="plugChanged(plug, $event)" />
+          </div>
+          </div>
         </section>
         <button
           v-else-if="!camerasError"
@@ -3407,8 +3423,7 @@ onUnmounted(() => {
               <span class="block truncate text-sm font-semibold text-gray-900 dark:text-white">{{ plug.name }}</span>
               <span class="mt-0.5 block truncate font-mono text-xs text-gray-500 dark:text-gray-400">{{ plug.host }}</span>
               <span class="mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400">{{ plug.username }}</span>
-              <span class="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{{ plug.printers.length || plug.cameras.length ? [...plug.printers, ...plug.cameras].join(', ') : t('plugsView.attachedNone') }}</span>
-              <span class="mt-2 block text-xs text-gray-700 dark:text-gray-300" :class="plugObservations[plug.id] && plugObservations[plug.id].connection !== 'online' && 'text-amber-700 dark:text-amber-400'">{{ plugStatusLine(plug) }}</span>
+              <PlugControl class="mt-2" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :t="t" :locale="locale" :show-name="false" @changed="plugChanged(plug, $event)" />
             </div>
             <ActionMenu :label="t('plugsView.actions')" :items="plugActionItems(plug)" />
           </Card>

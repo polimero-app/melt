@@ -1,0 +1,106 @@
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { PhPlug, PhPower } from '@phosphor-icons/vue'
+import type { MessageKey } from '../i18n'
+import { commandDetail, commandMessage, type Translate } from '../errors'
+import { isStale, offConfirmation, type PlugObservation, type PlugSummary, type PowerState, type RelayState } from '../plugs'
+import Button from './Button.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
+
+const props = withDefaults(defineProps<{
+  plug: PlugSummary
+  observation?: PlugObservation
+  /** Known activity by lowercase printer name: printing, paused, heating or drying. */
+  activity: Record<string, string>
+  t: Translate
+  locale: string
+  showName?: boolean
+}>(), { showName: true })
+
+// After a confirmed "on" the parent restarts the affected visible camera viewers.
+const emit = defineEmits<{ changed: [state: PowerState] }>()
+
+const busy = ref(false)
+const confirmOpen = ref(false)
+const error = ref<string>()
+
+const relayLabel = (relay: RelayState) => props.t(relay === 'on' ? 'plugsView.relayOn' : relay === 'off' ? 'plugsView.relayOff' : 'plugsView.relayUnknown')
+
+const statusLine = computed(() => {
+  const observation = props.observation
+  if (!observation) return props.t('plugsView.noReading')
+  const parts = [relayLabel(observation.relay)]
+  if (isStale(observation) && observation.last) {
+    parts.push(`${props.t('plugsView.lastKnown', { state: relayLabel(observation.last.state) })} (${props.t('plugsView.stale')})`)
+  }
+  parts.push(props.t(`plugsView.connection.${observation.connection}` as MessageKey))
+  if (observation.last) {
+    const date = new Date(observation.last.observedAt)
+    const when = Number.isNaN(date.getTime()) ? observation.last.observedAt : new Intl.DateTimeFormat(props.locale, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+    parts.push(props.t('plugsView.observed', { time: when }))
+  }
+  return parts.join(' · ')
+})
+
+const attached = computed(() => [...props.plug.printers, ...props.plug.cameras].join(', ') || props.t('plugsView.attachedNone'))
+
+const confirmation = computed(() => {
+  const { printers, cameras, active } = offConfirmation(props.plug, props.activity)
+  const none = props.t('plugControl.none')
+  const printerList = printers.map((name) => (active.includes(name) ? `${name} (${props.t(`plugControl.activity.${props.activity[name.toLowerCase()]}` as MessageKey)})` : name))
+  return props.t('plugControl.offDescription', {
+    printers: printerList.join(', ') || none,
+    cameras: cameras.join(', ') || none,
+  })
+})
+
+async function setPower(state: PowerState) {
+  if (busy.value) return
+  busy.value = true
+  error.value = undefined
+  try {
+    await invoke('plug_set_power', { id: props.plug.id, state })
+    // Never optimistic: the displayed relay comes from the device reading.
+    await invoke('plug_status', { id: props.plug.id }).catch(() => undefined)
+    if (state === 'on') emit('changed', state)
+  } catch (reason) {
+    const code = (reason as { code?: string } | null)?.code
+    error.value = [commandMessage(reason, props.t), commandDetail(reason)].filter(Boolean).join(' ')
+    if (code === 'plugPowerMismatch') await invoke('plug_status', { id: props.plug.id }).catch(() => undefined)
+  } finally {
+    busy.value = false
+  }
+}
+
+function confirmOff() {
+  confirmOpen.value = false
+  void setPower('off')
+}
+</script>
+
+<template>
+  <div class="min-w-0">
+    <div class="flex items-center gap-2">
+      <PhPlug v-if="showName" class="size-4 shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
+      <span v-if="showName" class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ plug.name }}</span>
+    </div>
+    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ attached }}</p>
+    <p class="mt-1 text-xs text-gray-700 dark:text-gray-300" :class="observation && observation.connection !== 'online' && 'text-amber-700 dark:text-amber-400'">{{ statusLine }}</p>
+    <div class="mt-2 flex flex-wrap gap-2">
+      <Button variant="secondary" :disabled="busy" :aria-label="t('plugControl.turnOnLabel', { name: plug.name })" @click="setPower('on')"><PhPower class="size-4" aria-hidden="true" /> {{ t('plugControl.on') }}</Button>
+      <Button variant="danger" :disabled="busy" :aria-label="t('plugControl.turnOffLabel', { name: plug.name })" @click="confirmOpen = true"><PhPower class="size-4" aria-hidden="true" /> {{ t('plugControl.off') }}</Button>
+    </div>
+    <p v-if="busy" class="mt-1 text-xs text-gray-500 dark:text-gray-400" role="status">{{ t('plugControl.working') }}</p>
+    <p v-if="error" class="mt-1 text-xs text-red-600 dark:text-red-400" role="alert">{{ error }}</p>
+    <ConfirmDialog
+      :open="confirmOpen"
+      :title="t('plugControl.offTitle', { name: plug.name })"
+      :description="confirmation"
+      :confirm-label="t('plugControl.off')"
+      :cancel-label="t('common.cancel')"
+      @close="confirmOpen = false"
+      @confirm="confirmOff"
+    />
+  </div>
+</template>

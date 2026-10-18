@@ -188,6 +188,18 @@ export type MessageKey =
   | "plugsView.connection.authFailed"
   | "plugsView.connection.locked"
   | "plugsView.connection.unsupported"
+  | "plugControl.on"
+  | "plugControl.off"
+  | "plugControl.turnOnLabel"
+  | "plugControl.turnOffLabel"
+  | "plugControl.offTitle"
+  | "plugControl.offDescription"
+  | "plugControl.none"
+  | "plugControl.working"
+  | "plugControl.activity.printing"
+  | "plugControl.activity.paused"
+  | "plugControl.activity.heating"
+  | "plugControl.activity.drying"
   | "errors.plugInvalidUsername"
   | "errors.plugInvalidPassword"
   | "errors.plugInvalidTimeout"
@@ -841,6 +853,18 @@ const messages: Record<Locale, Messages> = {
     "plugsView.connection.authFailed": "Sign-in failed",
     "plugsView.connection.locked": "Locked out",
     "plugsView.connection.unsupported": "Unsupported device",
+    "plugControl.on": "Turn on",
+    "plugControl.off": "Turn off",
+    "plugControl.turnOnLabel": "Turn on {name}",
+    "plugControl.turnOffLabel": "Turn off {name}",
+    "plugControl.offTitle": "Turn off {name}?",
+    "plugControl.offDescription": "This cuts power immediately and does not stop anything gracefully. Printers: {printers}. Cameras: {cameras}.",
+    "plugControl.none": "none",
+    "plugControl.working": "Waiting for the plug to confirm...",
+    "plugControl.activity.printing": "printing",
+    "plugControl.activity.paused": "paused",
+    "plugControl.activity.heating": "heating",
+    "plugControl.activity.drying": "drying",
     "errors.plugInvalidUsername": "Enter the TP-Link account email, without quotes or control characters.",
     "errors.plugInvalidPassword": "The password must not be empty or contain control characters.",
     "errors.plugInvalidTimeout": "Smart plug timeout is invalid. Use a duration like 10s.",
@@ -1491,6 +1515,18 @@ const messages: Record<Locale, Messages> = {
     "plugsView.connection.authFailed": "Falha no login",
     "plugsView.connection.locked": "Bloqueada",
     "plugsView.connection.unsupported": "Dispositivo não suportado",
+    "plugControl.on": "Ligar",
+    "plugControl.off": "Desligar",
+    "plugControl.turnOnLabel": "Ligar {name}",
+    "plugControl.turnOffLabel": "Desligar {name}",
+    "plugControl.offTitle": "Desligar {name}?",
+    "plugControl.offDescription": "Isso corta a energia imediatamente, sem encerrar nada com segurança. Impressoras: {printers}. Câmeras: {cameras}.",
+    "plugControl.none": "nenhuma",
+    "plugControl.working": "Aguardando a confirmação da tomada...",
+    "plugControl.activity.printing": "imprimindo",
+    "plugControl.activity.paused": "pausada",
+    "plugControl.activity.heating": "aquecendo",
+    "plugControl.activity.drying": "secando",
     "errors.plugInvalidUsername": "Informe o e-mail da conta TP-Link, sem aspas nem caracteres de controle.",
     "errors.plugInvalidPassword": "A senha não pode ficar vazia nem conter caracteres de controle.",
     "errors.plugInvalidTimeout": "O tempo limite da tomada inteligente é inválido. Use uma duração como 10s.",
