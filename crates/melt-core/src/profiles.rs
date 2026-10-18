@@ -552,6 +552,17 @@ pub fn validate_host(host: &str) -> Result<(), ProfileError> {
     Ok(())
 }
 
+/// A bare IP address or hostname: no scheme, port, path, or user info.
+pub(crate) fn validate_endpoint_host(host: &str) -> Result<(), ProfileError> {
+    if host.parse::<IpAddr>().is_ok() {
+        return Ok(());
+    }
+    if host.contains(['/', ':', '@']) {
+        return Err(ProfileError::InvalidHost);
+    }
+    validate_host(host)
+}
+
 pub(crate) struct StoredSecret {
     pub(crate) account: String,
     pub(crate) value: Option<String>,

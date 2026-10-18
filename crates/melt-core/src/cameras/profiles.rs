@@ -1,7 +1,7 @@
 //! Camera profile workflows: validated, verified, keychain-backed CRUD and
 //! printer links. Mirrors the printer workflow's secret rollback.
 
-use std::{net::IpAddr, path::Path};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -372,15 +372,8 @@ fn validate(request: &CameraRequest) -> Result<std::time::Duration, CameraError>
     parse_timeout(&request.timeout)
 }
 
-/// A bare IP address or hostname: no scheme, port, path, or user info.
 fn validate_host(host: &str) -> Result<(), CameraError> {
-    if host.parse::<IpAddr>().is_ok() {
-        return Ok(());
-    }
-    if host.contains(['/', ':', '@']) {
-        return Err(CameraError::InvalidHost);
-    }
-    profiles::validate_host(host).map_err(|_| CameraError::InvalidHost)
+    profiles::validate_endpoint_host(host).map_err(|_| CameraError::InvalidHost)
 }
 
 fn parse_timeout(value: &str) -> Result<std::time::Duration, CameraError> {

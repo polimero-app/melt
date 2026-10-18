@@ -9,6 +9,7 @@ pub mod firmware_updates;
 pub mod keychain;
 pub mod monitor;
 pub mod moonraker;
+pub mod plugs;
 pub mod pool;
 pub mod preferences;
 pub mod profiles;
