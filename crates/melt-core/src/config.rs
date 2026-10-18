@@ -41,6 +41,12 @@ pub enum ConfigError {
     CameraNotFound,
     #[error("camera is not linked to that printer")]
     CameraNotLinked,
+    #[error("plug already exists")]
+    PlugAlreadyExists,
+    #[error("plug not found")]
+    PlugNotFound,
+    #[error("plug is not linked to that target")]
+    PlugNotLinked,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -96,6 +102,14 @@ pub struct PlugProfile {
     pub cameras: Vec<String>,
     pub created: String,
     pub updated: String,
+}
+
+/// A device a plug powers. `Camera` holds the camera's name, resolved to its
+/// immutable ID inside [`Config`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PlugTarget {
+    Printer(String),
+    Camera(String),
 }
 
 /// Cameras linked to one printer. `selected: None` is the built-in feed.
@@ -189,6 +203,99 @@ impl Config {
         &self.plugs
     }
 
+    pub fn get_plug(&self, name: &str) -> Option<&PlugProfile> {
+        self.plugs.get(name)
+    }
+
+    pub fn plug_by_id(&self, id: &str) -> Option<(&str, &PlugProfile)> {
+        self.plugs
+            .iter()
+            .find(|(_, plug)| plug.id == id)
+            .map(|(name, plug)| (name.as_str(), plug))
+    }
+
+    pub fn camera_name(&self, id: &str) -> Option<&str> {
+        self.cameras
+            .iter()
+            .find(|(_, camera)| camera.id == id)
+            .map(|(name, _)| name.as_str())
+    }
+
+    pub fn add_plug(&mut self, name: &str, plug: PlugProfile) -> Result<(), ConfigError> {
+        if self.plugs.contains_key(name) {
+            return Err(ConfigError::PlugAlreadyExists);
+        }
+        self.plugs.insert(name.to_owned(), plug);
+        Ok(())
+    }
+
+    /// Replaces a plug, renaming it when `name` differs from `current`. The
+    /// caller passes the links it wants kept; the ID and keychain account
+    /// follow the profile it supplies.
+    pub fn replace_plug(
+        &mut self,
+        current: &str,
+        name: &str,
+        plug: PlugProfile,
+    ) -> Result<(), ConfigError> {
+        if name != current && self.plugs.contains_key(name) {
+            return Err(ConfigError::PlugAlreadyExists);
+        }
+        self.plugs
+            .remove(current)
+            .ok_or(ConfigError::PlugNotFound)?;
+        self.plugs.insert(name.to_owned(), plug);
+        Ok(())
+    }
+
+    /// Removes a plug and its links. Printer and camera profiles stay, and no
+    /// relay is touched.
+    pub fn remove_plug(&mut self, name: &str) -> Result<PlugProfile, ConfigError> {
+        self.plugs.remove(name).ok_or(ConfigError::PlugNotFound)
+    }
+
+    /// Resolves a target to the string a plug stores (printer name or camera ID).
+    fn plug_link_key(&self, target: &PlugTarget) -> Result<String, ConfigError> {
+        match target {
+            PlugTarget::Printer(name) if self.profiles.contains_key(name) => Ok(name.clone()),
+            PlugTarget::Printer(_) => Err(ConfigError::ProfileNotFound),
+            PlugTarget::Camera(name) => self
+                .cameras
+                .get(name)
+                .map(|camera| camera.id.clone())
+                .ok_or(ConfigError::CameraNotFound),
+        }
+    }
+
+    /// Links a plug to a printer or camera. Idempotent.
+    pub fn link_plug(&mut self, plug: &str, target: &PlugTarget) -> Result<(), ConfigError> {
+        let key = self.plug_link_key(target)?;
+        let stored = self.plugs.get_mut(plug).ok_or(ConfigError::PlugNotFound)?;
+        let links = match target {
+            PlugTarget::Printer(_) => &mut stored.printers,
+            PlugTarget::Camera(_) => &mut stored.cameras,
+        };
+        if !links.contains(&key) {
+            links.push(key);
+        }
+        Ok(())
+    }
+
+    pub fn unlink_plug(&mut self, plug: &str, target: &PlugTarget) -> Result<(), ConfigError> {
+        let key = self.plug_link_key(target)?;
+        let stored = self.plugs.get_mut(plug).ok_or(ConfigError::PlugNotFound)?;
+        let links = match target {
+            PlugTarget::Printer(_) => &mut stored.printers,
+            PlugTarget::Camera(_) => &mut stored.cameras,
+        };
+        let before = links.len();
+        links.retain(|linked| *linked != key);
+        if links.len() == before {
+            return Err(ConfigError::PlugNotLinked);
+        }
+        Ok(())
+    }
+
     pub fn get_profile(&self, name: &str) -> Option<&Profile> {
         self.profiles.get(name)
     }
@@ -225,17 +332,22 @@ impl Config {
         Ok(())
     }
 
-    /// Removes a printer and its camera links. Camera profiles stay.
+    /// Removes a printer, its camera links and its plug links. Camera and plug
+    /// profiles stay.
     pub fn remove_profile(&mut self, name: &str) -> Result<Profile, ConfigError> {
         let profile = self
             .profiles
             .remove(name)
             .ok_or(ConfigError::ProfileNotFound)?;
         self.printer_cameras.remove(name);
+        for plug in self.plugs.values_mut() {
+            plug.printers.retain(|printer| printer != name);
+        }
         Ok(profile)
     }
 
-    /// Renames a printer, carrying its camera links along in the same write.
+    /// Renames a printer, carrying its camera and plug links along in the same
+    /// write.
     pub fn rename_profile(
         &mut self,
         current: &str,
@@ -251,6 +363,11 @@ impl Config {
         self.profiles.insert(name.to_owned(), profile);
         if let Some(links) = self.printer_cameras.remove(current) {
             self.printer_cameras.insert(name.to_owned(), links);
+        }
+        for printer in self.plugs.values_mut().flat_map(|p| &mut p.printers) {
+            if printer == current {
+                name.clone_into(printer);
+            }
         }
         Ok(())
     }
@@ -288,8 +405,8 @@ impl Config {
         Ok(())
     }
 
-    /// Removes a camera and every link to it; printers that had it selected
-    /// fall back to their built-in feed.
+    /// Removes a camera and every link to it, including plug links; printers
+    /// that had it selected fall back to their built-in feed.
     pub fn remove_camera(&mut self, name: &str) -> Result<CameraProfile, ConfigError> {
         let camera = self
             .cameras
@@ -303,6 +420,9 @@ impl Config {
         }
         self.printer_cameras
             .retain(|_, links| !links.cameras.is_empty());
+        for plug in self.plugs.values_mut() {
+            plug.cameras.retain(|id| *id != camera.id);
+        }
         Ok(camera)
     }
 
@@ -1132,5 +1252,178 @@ printer_cameras:
             ),
             (profiles, cameras, links)
         );
+    }
+
+    fn plug_fixture(dir: &Path) -> Config {
+        let mut config = Config::open(dir).unwrap();
+        config.add_profile("old", profile()).unwrap();
+        config.add_profile("other", profile()).unwrap();
+        config.add_camera("porch", camera(PORCH)).unwrap();
+        config.add_plug("socket", plug(SOCKET)).unwrap();
+        config
+            .link_plug("socket", &PlugTarget::Printer("old".into()))
+            .unwrap();
+        config
+            .link_plug("socket", &PlugTarget::Printer("other".into()))
+            .unwrap();
+        config
+            .link_plug("socket", &PlugTarget::Camera("porch".into()))
+            .unwrap();
+        config
+    }
+
+    #[test]
+    fn printer_rename_rewrites_plug_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = plug_fixture(dir.path());
+        config.rename_profile("old", "new", profile()).unwrap();
+        config.save(dir.path()).unwrap();
+        let reopened = Config::open(dir.path()).unwrap();
+        assert_eq!(
+            reopened.get_plug("socket").unwrap().printers,
+            ["new", "other"]
+        );
+    }
+
+    #[test]
+    fn printer_removal_drops_it_from_plugs_and_keeps_plugs() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = plug_fixture(dir.path());
+        config.remove_profile("old").unwrap();
+        config.save(dir.path()).unwrap();
+        let reopened = Config::open(dir.path()).unwrap();
+        let socket = reopened.get_plug("socket").unwrap();
+        assert_eq!(socket.printers, ["other"]);
+        assert_eq!(socket.cameras, [PORCH]);
+    }
+
+    #[test]
+    fn camera_rename_keeps_plug_links_and_removal_drops_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = plug_fixture(dir.path());
+        let renamed = config.get_camera("porch").unwrap().clone();
+        config.replace_camera("porch", "deck", renamed).unwrap();
+        assert_eq!(config.get_plug("socket").unwrap().cameras, [PORCH]);
+        assert_eq!(config.camera_name(PORCH), Some("deck"));
+        config.remove_camera("deck").unwrap();
+        config.save(dir.path()).unwrap();
+        let reopened = Config::open(dir.path()).unwrap();
+        assert!(reopened.get_plug("socket").unwrap().cameras.is_empty());
+        assert_eq!(reopened.camera_name(PORCH), None);
+    }
+
+    #[test]
+    fn plug_links_are_idempotent_and_mixed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = plug_fixture(dir.path());
+        for _ in 0..2 {
+            config
+                .link_plug("socket", &PlugTarget::Printer("old".into()))
+                .unwrap();
+            config
+                .link_plug("socket", &PlugTarget::Camera("porch".into()))
+                .unwrap();
+        }
+        let socket = config.get_plug("socket").unwrap();
+        assert_eq!(socket.printers, ["old", "other"]);
+        assert_eq!(socket.cameras, [PORCH]);
+        assert_eq!(
+            config.plug_by_id(SOCKET).map(|(name, _)| name),
+            Some("socket")
+        );
+        config
+            .unlink_plug("socket", &PlugTarget::Printer("old".into()))
+            .unwrap();
+        config
+            .unlink_plug("socket", &PlugTarget::Camera("porch".into()))
+            .unwrap();
+        let socket = config.get_plug("socket").unwrap();
+        assert_eq!(socket.printers, ["other"]);
+        assert!(socket.cameras.is_empty());
+    }
+
+    #[test]
+    fn unlinking_an_absent_target_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = plug_fixture(dir.path());
+        config
+            .unlink_plug("socket", &PlugTarget::Printer("old".into()))
+            .unwrap();
+        config
+            .unlink_plug("socket", &PlugTarget::Camera("porch".into()))
+            .unwrap();
+        for target in [
+            PlugTarget::Printer("old".into()),
+            PlugTarget::Camera("porch".into()),
+        ] {
+            assert!(matches!(
+                config.unlink_plug("socket", &target),
+                Err(ConfigError::PlugNotLinked)
+            ));
+        }
+    }
+
+    #[test]
+    fn linking_unknown_targets_fails_without_mutation() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = plug_fixture(dir.path());
+        let before = config.get_plug("socket").unwrap().clone();
+        assert!(matches!(
+            config.link_plug("socket", &PlugTarget::Printer("nope".into())),
+            Err(ConfigError::ProfileNotFound)
+        ));
+        assert!(matches!(
+            config.link_plug("socket", &PlugTarget::Camera("nope".into())),
+            Err(ConfigError::CameraNotFound)
+        ));
+        assert!(matches!(
+            config.link_plug("nope", &PlugTarget::Printer("old".into())),
+            Err(ConfigError::PlugNotFound)
+        ));
+        assert_eq!(config.get_plug("socket"), Some(&before));
+    }
+
+    #[test]
+    fn plug_crud_rejects_duplicates_and_missing_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = plug_fixture(dir.path());
+        assert!(matches!(
+            config.add_plug("socket", plug(LAMP)),
+            Err(ConfigError::PlugAlreadyExists)
+        ));
+        config.add_plug("lamp", plug(LAMP)).unwrap();
+        assert!(matches!(
+            config.replace_plug("socket", "lamp", plug(SOCKET)),
+            Err(ConfigError::PlugAlreadyExists)
+        ));
+        assert!(matches!(
+            config.replace_plug("nope", "x", plug(SOCKET)),
+            Err(ConfigError::PlugNotFound)
+        ));
+        let mut kept = config.get_plug("socket").unwrap().clone();
+        kept.host = "192.0.2.31".into();
+        config
+            .replace_plug("socket", "bench", kept.clone())
+            .unwrap();
+        assert_eq!(config.get_plug("socket"), None);
+        assert_eq!(config.get_plug("bench"), Some(&kept));
+        assert_eq!(config.remove_plug("bench").unwrap(), kept);
+        assert!(matches!(
+            config.remove_plug("bench"),
+            Err(ConfigError::PlugNotFound)
+        ));
+        assert!(config.get_profile("old").is_some());
+    }
+
+    #[test]
+    fn renamed_then_removed_printer_leaves_a_valid_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = plug_fixture(dir.path());
+        config.save(dir.path()).unwrap();
+        config.rename_profile("old", "new", profile()).unwrap();
+        config.remove_profile("new").unwrap();
+        config.save(dir.path()).unwrap();
+        let reopened = Config::open(dir.path()).unwrap();
+        assert_eq!(reopened.get_plug("socket").unwrap().printers, ["other"]);
     }
 }
