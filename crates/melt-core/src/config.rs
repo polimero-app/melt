@@ -433,9 +433,9 @@ impl Config {
             }
         }
         let mut plug_ids = BTreeSet::new();
-        let mut powered_printers = BTreeSet::new();
-        let mut powered_cameras = BTreeSet::new();
         for plug in self.plugs.values() {
+            let mut printers = BTreeSet::new();
+            let mut cameras = BTreeSet::new();
             if !is_profile_id(&plug.id) || !plug_ids.insert(plug.id.as_str()) {
                 return Err(ConfigError::InvalidPlugs(
                     "plug IDs must be unique 32-digit lowercase hex values",
@@ -445,20 +445,16 @@ impl Config {
                 if !self.profiles.contains_key(printer) {
                     return Err(ConfigError::InvalidPlugs("a plug names an unknown printer"));
                 }
-                if !powered_printers.insert(printer.as_str()) {
-                    return Err(ConfigError::InvalidPlugs(
-                        "a printer is linked to more than one plug",
-                    ));
+                if !printers.insert(printer.as_str()) {
+                    return Err(ConfigError::InvalidPlugs("a plug repeats a printer"));
                 }
             }
             for camera in &plug.cameras {
                 if !ids.contains(camera.as_str()) {
                     return Err(ConfigError::InvalidPlugs("a plug names an unknown camera"));
                 }
-                if !powered_cameras.insert(camera.as_str()) {
-                    return Err(ConfigError::InvalidPlugs(
-                        "a camera is linked to more than one plug",
-                    ));
+                if !cameras.insert(camera.as_str()) {
+                    return Err(ConfigError::InvalidPlugs("a plug repeats a camera"));
                 }
             }
         }
@@ -918,6 +914,22 @@ profiles:
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn several_plugs_may_power_the_same_printer_and_camera() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::open(dir.path()).unwrap();
+        config.add_profile("garage", profile()).unwrap();
+        config.add_camera("porch", camera(PORCH)).unwrap();
+        for (name, id) in [("a", SOCKET), ("b", LAMP)] {
+            let mut shared = plug(id);
+            shared.printers = vec!["garage".into()];
+            shared.cameras = vec![PORCH.into()];
+            config.plugs.insert(name.into(), shared);
+        }
+        config.save(dir.path()).unwrap();
+        assert_eq!(Config::open(dir.path()).unwrap().plugs().len(), 2);
     }
 
     #[test]
