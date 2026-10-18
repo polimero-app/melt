@@ -1,4 +1,4 @@
-.PHONY: build test lint ci ci-rust ci-ui contract bambu-evidence-check help license-check run install-desktop uninstall-desktop release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test screenshots
+.PHONY: build test lint ci ci-rust ci-ui ui-audit contract bambu-evidence-check help license-check run install-desktop uninstall-desktop release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test screenshots
 .DEFAULT_GOAL := help
 
 build: ui-build ## Build a standalone release app with the UI embedded
@@ -13,7 +13,7 @@ ci: ci-rust ci-ui ## Run the continuous-integration checks
 # The CI workflow runs these as separate jobs; keep the list here only.
 ci-rust: license-check cargo-lint cargo-test cargo-build contract ## Run the Rust CI checks
 
-ci-ui: ui-install ui-test ui-build ## Run the UI CI checks
+ci-ui: ui-install ui-audit ui-test ui-build ## Run the UI CI checks
 
 license-check: ## Verify license declarations and files
 	test -f LICENSE
@@ -112,6 +112,9 @@ cargo-lint: ## Check Rust formatting and linting
 
 ui-install: ## Install locked UI dependencies
 	bun install --cwd ui --frozen-lockfile
+
+ui-audit: ## Fail on known advisories in locked UI dependencies
+	bun audit --cwd ui
 
 ui-build: ## Build the UI
 	bun run --cwd ui build

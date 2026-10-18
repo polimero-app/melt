@@ -103,7 +103,8 @@ permission to run blocking I/O in the UI.
 | --- | --- |
 | `make ui-install` | `bun install --cwd ui --frozen-lockfile` |
 | `make cargo-build` | `cargo build --workspace --locked` |
-| `make ui-build` | `vue-tsc --noEmit` then Vite production build |
+| `make ui-audit` | `bun audit` against `ui/bun.lock`; fails on any known advisory |
+| `make ui-build` | `vue-tsc --noEmit` (strict, no unused locals/parameters) then Vite production build |
 | `make build` | UI build, then release workspace build embedding `ui/dist` (standalone `target/release/melt`) |
 | `make cargo-test` | All Rust workspace tests with `--locked` |
 | `make ui-test` | `bun run --cwd ui test`, which runs Vitest |
@@ -114,7 +115,7 @@ permission to run blocking I/O in the UI.
 | `make bambu-evidence-check` | Bambu manifest/redaction integration test; transcript execution is covered by core unit tests |
 | `make license-check` | AGPL metadata, license file and bundled license declaration |
 | `make ci-rust` | License check, Rust lint, workspace tests (including Bambu evidence), debug build and CLI fixtures; the CI `cargo` job |
-| `make ci-ui` | Locked UI install, UI tests and UI build; the CI `ui` job |
+| `make ci-ui` | Locked UI install, dependency audit, UI tests and UI build; the CI `ui` job |
 | `make ci` | `ci-rust` and `ci-ui`, the same checks the CI workflow runs |
 | `make release-gate` | Evidence, CLI fixtures, Rust build and built executable version smoke test |
 | `make release-qualification` | Full `ci` plus executable version smoke test |
