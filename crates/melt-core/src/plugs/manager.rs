@@ -64,17 +64,27 @@ pub enum Connection {
 
 struct Slot {
     revision: String,
+    /// The [`Entry::generation`] this slot's session belongs to.
+    generation: u64,
     session: Option<Session>,
     /// The authentication error that stopped automatic logins, if any.
     blocked: Option<PlugError>,
 }
 
+struct Entry {
+    slot: Arc<AsyncMutex<Slot>>,
+    /// Bumped by `evict`: the slot's session and block are dropped by the
+    /// next operation, and results from before the bump are discarded.
+    generation: u64,
+}
+
+/// Lock order: `slots`, then `observations`.
 #[derive(Default)]
 pub struct PlugManager {
     /// Never held across `.await`.
-    slots: Mutex<HashMap<String, Arc<AsyncMutex<Slot>>>>,
-    /// Written only while the plug's slot lock is held, so results land in
-    /// completion order.
+    slots: Mutex<HashMap<String, Entry>>,
+    /// Written only while the plug's slot lock and `slots` are held, so
+    /// results land in completion order and never after an evict/retain.
     observations: Mutex<HashMap<String, PlugObservation>>,
 }
 
@@ -156,18 +166,22 @@ impl PlugManager {
         self.observations.lock().unwrap().clone()
     }
 
-    /// Drops the plug's session, auth block and observation.
-    // ponytail: an operation already holding the evicted slot finishes on
-    // its old session (its result is discarded), so it may briefly overlap
-    // with a new one; a per-slot "evicted" flag would close that window.
+    /// Drops the plug's session, auth block and observation. The slot stays,
+    /// so an operation in flight still serializes with the next one; its
+    /// result is discarded.
     pub fn evict(&self, id: &str) {
-        self.slots.lock().unwrap().remove(id);
+        let mut slots = self.slots.lock().unwrap();
+        if let Some(entry) = slots.get_mut(id) {
+            entry.generation += 1;
+        }
         self.observations.lock().unwrap().remove(id);
     }
 
-    /// Forgets every plug not in `ids`.
+    /// Forgets every plug not in `ids`. Those plugs are gone from the config,
+    /// so an operation that recreates a slot fails to resolve.
     pub fn retain(&self, ids: &HashSet<String>) {
-        self.slots.lock().unwrap().retain(|id, _| ids.contains(id));
+        let mut slots = self.slots.lock().unwrap();
+        slots.retain(|id, _| ids.contains(id));
         self.observations
             .lock()
             .unwrap()
@@ -175,7 +189,7 @@ impl PlugManager {
     }
 
     /// Takes the plug's slot lock within `deadline`, resetting the slot if
-    /// the profile revision changed.
+    /// the profile revision changed or the plug was evicted.
     async fn enter(
         &self,
         key: &PlugKey,
@@ -186,19 +200,31 @@ impl PlugManager {
             .lock()
             .unwrap()
             .entry(key.id.clone())
-            .or_insert_with(|| {
-                Arc::new(AsyncMutex::new(Slot {
+            .or_insert_with(|| Entry {
+                slot: Arc::new(AsyncMutex::new(Slot {
                     revision: key.revision.clone(),
+                    generation: 0,
                     session: None,
                     blocked: None,
-                }))
+                })),
+                generation: 0,
             })
+            .slot
             .clone();
         let mut slot = timeout_at(deadline, cell.lock_owned())
             .await
             .map_err(|_| PlugError::Timeout)?;
-        if slot.revision != key.revision {
+        // A slot retained away meanwhile keeps its generation; `settle`
+        // discards its result.
+        let generation = self
+            .slots
+            .lock()
+            .unwrap()
+            .get(&key.id)
+            .map_or(slot.generation, |entry| entry.generation);
+        if slot.revision != key.revision || slot.generation != generation {
             slot.revision = key.revision.clone();
+            slot.generation = generation;
             slot.session = None;
             slot.blocked = None;
         }
@@ -219,13 +245,15 @@ impl PlugManager {
                 slot.blocked = Some(blocked);
             }
         }
-        let current = self
-            .slots
-            .lock()
-            .unwrap()
-            .get(id)
-            .is_some_and(|cell| Arc::ptr_eq(cell, OwnedMutexGuard::mutex(slot)));
+        // Held until the observation is written, so an evict or retain cannot
+        // slip in between the check and the write.
+        let slots = self.slots.lock().unwrap();
+        let current = slots.get(id).is_some_and(|entry| {
+            Arc::ptr_eq(&entry.slot, OwnedMutexGuard::mutex(slot))
+                && entry.generation == slot.generation
+        });
         if !current {
+            slot.session = None;
             return;
         }
         let mut observations = self.observations.lock().unwrap();
@@ -752,5 +780,68 @@ mod tests {
         assert_eq!(seen.relay, RelayState::Unknown);
         assert_eq!(seen.connection, Connection::Unreachable);
         assert_eq!(seen.last.unwrap().state, PowerState::Off, "pre-read kept");
+    }
+
+    /// Starts a status on `host` whose session opens and then hangs, so the
+    /// task holds the slot lock until its deadline. Returns once it hangs.
+    async fn hanging(
+        manager: &Arc<PlugManager>,
+        host: &'static str,
+    ) -> tokio::task::JoinHandle<Result<PlugStatus, PlugError>> {
+        install(
+            host,
+            FakeSession::new(PowerState::On, [FakeStep::Ok, FakeStep::Hang]),
+        );
+        let task = tokio::spawn({
+            let manager = manager.clone();
+            async move { manager.status(&key(ID, "r1"), true, resolver(host)).await }
+        });
+        // The fake is taken and the read hangs within one poll of the task.
+        while installed(host) {
+            tokio::task::yield_now().await;
+        }
+        task
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn evict_keeps_operations_on_one_plug_serialized() {
+        let host = "manager-evict-serial";
+        let manager = Arc::new(PlugManager::default());
+        let first = hanging(&manager, host).await;
+
+        manager.evict(ID);
+        install(host, FakeSession::new(PowerState::Off, []));
+        let second = tokio::time::timeout(
+            Duration::from_secs(1),
+            manager.status(&key(ID, "r1"), false, resolver(host)),
+        )
+        .await;
+        assert!(second.is_err(), "second operation ran beside the first");
+        assert!(installed(host), "no second session while the first runs");
+
+        let error = first.await.unwrap().unwrap_err();
+        assert!(matches!(error, PlugError::Timeout), "{error:?}");
+        assert!(
+            manager.observations().is_empty(),
+            "an operation from before the evict records nothing"
+        );
+
+        // The evict dropped the old session: the next call opens a new one.
+        let status = manager
+            .status(&key(ID, "r1"), false, resolver(host))
+            .await
+            .unwrap();
+        assert_eq!(status.relay, PowerState::Off);
+        assert!(!installed(host));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retained_away_plug_gets_no_observation_from_in_flight_operation() {
+        let manager = Arc::new(PlugManager::default());
+        let first = hanging(&manager, "manager-retain-ghost").await;
+        manager.retain(&HashSet::new());
+        let error = first.await.unwrap().unwrap_err();
+        assert!(matches!(error, PlugError::Timeout), "{error:?}");
+        assert!(manager.observations().is_empty());
     }
 }
