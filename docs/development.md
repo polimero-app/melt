@@ -4,9 +4,9 @@ Last-updated: 2026-10-18
 
 ## Prerequisites and first build
 
-The Rust workspace uses edition 2024 and declares MSRV **1.95**. Install
-Rust/Cargo with rustfmt and Clippy, Bun (CI pins **1.3.14**), and native Tauri 2
-dependencies. The frontend uses Vue 3, TypeScript 6, Vite 8, Tailwind CSS 4,
+The Rust workspace uses edition 2024 and declares MSRV **1.95**, which CI's
+`msrv` job checks. Install Rust/Cargo with rustfmt and Clippy, Bun (CI pins
+**1.3.14**), and native Tauri 2 dependencies. The frontend uses Vue 3, TypeScript 6, Vite 8, Tailwind CSS 4,
 Headless UI, Phosphor icons and Vitest. Cargo.lock and ui/bun.lock govern
 reproducible dependency resolution; use the locked Make targets.
 
