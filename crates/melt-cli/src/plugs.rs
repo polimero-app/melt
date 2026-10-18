@@ -110,7 +110,7 @@ pub(crate) fn run_plug_command(
             format,
             status(rest),
             |data: &PlugStatus, out| {
-                let name = rest.first().map_or("", |name| name.as_str());
+                let name = display_name(rest, &[]);
                 writeln!(
                     out,
                     "Plug {name} is {} ({}, observed {})",
@@ -128,7 +128,14 @@ pub(crate) fn run_plug_command(
             } else {
                 PowerState::Off
             };
-            let name = rest.first().map_or("", |name| name.as_str());
+            let name = display_name(
+                rest,
+                if state == PowerState::Off {
+                    &["yes"]
+                } else {
+                    &[]
+                },
+            );
             let is_terminal = std::io::IsTerminal::is_terminal(&std::io::stdin());
             match power(rest, state, is_terminal, err) {
                 Ok(change) => respond(
@@ -153,6 +160,15 @@ pub(crate) fn run_plug_command(
         }
         _ => unreachable!("dispatch matches only known plug commands"),
     }
+}
+
+/// The plug name as stored (profile names are ASCII-lowercased), found among
+/// the arguments even when flags precede it.
+fn display_name(args: &[&String], flags: &[&str]) -> String {
+    parse_options(args, flags, &[])
+        .ok()
+        .and_then(|(positionals, _)| positionals.first().map(|name| name.to_ascii_lowercase()))
+        .unwrap_or_default()
 }
 
 fn state_word(state: PowerState) -> &'static str {
@@ -206,7 +222,8 @@ fn prepare_power(
         &[]
     };
     let (positionals, options) = parse_options(args, flags, &[]).map_err(AppError::usage)?;
-    let name = one_plug(&command, &positionals)?;
+    let name = one_plug(&command, &positionals)?.to_ascii_lowercase();
+    let name = name.as_str();
     if state == PowerState::Off {
         let summary = plugs::list(dir)
             .map_err(plug_error)?
@@ -404,7 +421,8 @@ fn edit(args: &[&String]) -> Result<PlugSummary, AppError> {
         &["name", "host", "username", "password-file", "timeout"],
     )
     .map_err(AppError::usage)?;
-    let current = one_plug("plug edit", &positionals)?;
+    let current = one_plug("plug edit", &positionals)?.to_ascii_lowercase();
+    let current = current.as_str();
     if options.values.is_empty() {
         return Err(AppError::usage(
             "plug edit requires at least one option to change",
@@ -754,6 +772,25 @@ mod tests {
             off_prompt(&plug),
             "Turn off plug bench? Power is cut immediately to printers: a, b; cameras: porch. Type 'yes' to continue: "
         );
+    }
+
+    #[test]
+    fn plug_names_are_accepted_in_any_case() {
+        let dir = plug_dir();
+        let args = strings(&["--yes", "Bench"]);
+        let refs: Vec<&String> = args.iter().collect();
+        // Passes the name lookup; stops at the missing keychain secret, not NotFound.
+        let result = prepare_power(&refs, PowerState::Off, dir.path(), false, &mut Vec::new());
+        if let Err(error) = result {
+            assert!(!error.message.ends_with("not found"), "{}", error.message);
+        }
+    }
+
+    #[test]
+    fn display_name_skips_flags_and_lowercases() {
+        let args = strings(&["--yes", "Bench"]);
+        let refs: Vec<&String> = args.iter().collect();
+        assert_eq!(display_name(&refs, &["yes"]), "bench");
     }
 
     fn summary_for_test() -> PlugSummary {
