@@ -10,27 +10,45 @@ use std::{
 
 use base64::Engine;
 use melt_core::bambu::{CameraFrame, CameraSubscription};
+use rtc::{
+    peer_connection::configuration::media_engine::MIME_TYPE_H264,
+    rtp::packet::Packet,
+    rtp_transceiver::rtp_sender::{
+        RTCRtpCodec, RTCRtpCodecParameters, RTCRtpCodingParameters, RTCRtpEncodingParameters,
+        RtpCodecKind,
+    },
+    shared::marshal::Unmarshal,
+};
 use tokio::runtime::Builder;
 use tokio::sync::watch;
 use webrtc::{
-    api::{
-        APIBuilder,
-        interceptor_registry::register_default_interceptors,
-        media_engine::{MIME_TYPE_H264, MediaEngine},
+    media_stream::{
+        MediaStreamTrack,
+        track_local::{TrackLocal, static_rtp::TrackLocalStaticRTP},
     },
-    interceptor::registry::Registry,
     peer_connection::{
-        configuration::RTCConfiguration, sdp::session_description::RTCSessionDescription,
+        MediaEngine, PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler,
+        RTCConfiguration, RTCIceGatheringState, RTCSessionDescription, Registry,
+        register_default_interceptors,
     },
-    rtp::packet::Packet,
-    rtp_transceiver::rtp_codec::{RTCRtpCodecCapability, RTCRtpCodecParameters},
-    track::track_local::{
-        TrackLocal, TrackLocalWriter, track_local_static_rtp::TrackLocalStaticRTP,
-    },
-    util::Unmarshal,
 };
 
 const SETUP_TIMEOUT: Duration = Duration::from_secs(15);
+// ponytail: one track per peer connection, so a fixed SSRC can't collide.
+const TRACK_SSRC: u32 = 0x6d65_6c74;
+
+struct GatheringHandler {
+    complete: tokio::sync::mpsc::Sender<()>,
+}
+
+#[async_trait::async_trait]
+impl PeerConnectionEventHandler for GatheringHandler {
+    async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
+        if state == RTCIceGatheringState::Complete {
+            let _ = self.complete.try_send(());
+        }
+    }
+}
 
 pub struct Session {
     stop: Arc<AtomicBool>,
@@ -110,22 +128,34 @@ async fn serve(
         .map_err(|error| format!("WebRTC codecs: {error}"))?;
     let registry = register_default_interceptors(Registry::new(), &mut media_engine)
         .map_err(|error| format!("WebRTC interceptors: {error}"))?;
-    let api = APIBuilder::new()
+    let (gathering_tx, mut gathering_rx) = tokio::sync::mpsc::channel(1);
+    // The webview runs on this machine; one socket per IPv4 interface yields its host candidates.
+    let peer = PeerConnectionBuilder::new()
+        .with_configuration(RTCConfiguration::default())
         .with_media_engine(media_engine)
         .with_interceptor_registry(registry)
-        .build();
-    let peer = Arc::new(
-        api.new_peer_connection(RTCConfiguration::default())
-            .await
-            .map_err(|error| format!("WebRTC peer: {error}"))?,
-    );
-    let track = Arc::new(TrackLocalStaticRTP::new(
-        codec.clone(),
-        "video".to_owned(),
+        .with_handler(Arc::new(GatheringHandler {
+            complete: gathering_tx,
+        }))
+        .with_udp_addrs(vec!["0.0.0.0:0".to_owned()])
+        .build()
+        .await
+        .map_err(|error| format!("WebRTC peer: {error}"))?;
+    let track = Arc::new(TrackLocalStaticRTP::new(MediaStreamTrack::new(
         "bambu-camera".to_owned(),
-    ));
-    let sender = peer
-        .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
+        "video".to_owned(),
+        "video".to_owned(),
+        RtpCodecKind::Video,
+        vec![RTCRtpEncodingParameters {
+            rtp_coding_parameters: RTCRtpCodingParameters {
+                ssrc: Some(TRACK_SSRC),
+                ..Default::default()
+            },
+            codec: codec.clone(),
+            ..Default::default()
+        }],
+    )));
+    peer.add_track(Arc::clone(&track) as Arc<dyn TrackLocal>)
         .await
         .map_err(|error| format!("WebRTC track: {error}"))?;
     let transceiver = peer
@@ -136,21 +166,11 @@ async fn serve(
         .ok_or_else(|| "WebRTC video transceiver missing".to_owned())?;
     transceiver
         .set_codec_preferences(vec![RTCRtpCodecParameters {
-            capability: codec,
+            rtp_codec: codec,
             payload_type,
-            ..Default::default()
         }])
         .await
         .map_err(|error| format!("WebRTC H.264 profile: {error}"))?;
-    let rtcp_stop = Arc::clone(&stop);
-    let rtcp_task = tokio::spawn(async move {
-        while !rtcp_stop.load(Ordering::Acquire) {
-            match tokio::time::timeout(Duration::from_secs(1), sender.read_rtcp()).await {
-                Ok(Ok(_)) | Err(_) => {}
-                Ok(Err(_)) => break,
-            }
-        }
-    });
 
     let offer = RTCSessionDescription::offer(offer_sdp)
         .map_err(|error| format!("WebRTC offer: {error}"))?;
@@ -161,11 +181,10 @@ async fn serve(
         .create_answer(None)
         .await
         .map_err(|error| format!("WebRTC answer: {error}"))?;
-    let mut gathering_complete = peer.gathering_complete_promise().await;
     peer.set_local_description(answer)
         .await
         .map_err(|error| format!("WebRTC local description: {error}"))?;
-    tokio::time::timeout(SETUP_TIMEOUT, gathering_complete.recv())
+    tokio::time::timeout(SETUP_TIMEOUT, gathering_rx.recv())
         .await
         .map_err(|_| "WebRTC ICE gathering timed out".to_owned())?
         .ok_or_else(|| "WebRTC ICE gathering canceled".to_owned())?;
@@ -208,7 +227,10 @@ async fn serve(
             .iter()
             .map(|raw| {
                 let mut raw = &raw[..];
-                Packet::unmarshal(&mut raw).map_err(|error| format!("RTP packet: {error}"))
+                let mut packet =
+                    Packet::unmarshal(&mut raw).map_err(|error| format!("RTP packet: {error}"))?;
+                prepare_for_sender(&mut packet, TRACK_SSRC, payload_type);
+                Ok::<_, String>(packet)
             })
             .collect::<Result<Vec<_>, _>>()?;
         if let Some(source_timestamp) = packets.first().map(|packet| packet.header.timestamp) {
@@ -229,19 +251,18 @@ async fn serve(
                         packet.header.sequence_number.wrapping_sub(sequence_offset);
                     configuration.payload = parameter_set.clone().into();
                     track
-                        .write_rtp(&configuration)
+                        .write_rtp(configuration)
                         .await
                         .map_err(|error| format!("WebRTC H.264 configuration: {error}"))?;
                 }
                 started = true;
             }
             track
-                .write_rtp(&packet)
+                .write_rtp(packet)
                 .await
                 .map_err(|error| format!("WebRTC RTP: {error}"))?;
         }
     }
-    rtcp_task.abort();
     peer.close()
         .await
         .map_err(|error| format!("WebRTC close: {error}"))?;
@@ -290,11 +311,7 @@ impl RtpTimestampRepair {
     }
 }
 
-fn codec_capability(
-    sps: &[u8],
-    pps: &[u8],
-    offer_sdp: &str,
-) -> Result<(RTCRtpCodecCapability, u8), String> {
+fn codec_capability(sps: &[u8], pps: &[u8], offer_sdp: &str) -> Result<(RTCRtpCodec, u8), String> {
     let camera_profile = sps
         .get(1..3)
         .ok_or_else(|| "camera H.264 SPS is missing its profile".to_owned())?;
@@ -312,7 +329,7 @@ fn codec_capability(
         base64::engine::general_purpose::STANDARD.encode(pps),
     );
     Ok((
-        RTCRtpCodecCapability {
+        RTCRtpCodec {
             mime_type: MIME_TYPE_H264.to_owned(),
             clock_rate: 90_000,
             sdp_fmtp_line: fmtp,
@@ -320,6 +337,16 @@ fn codec_capability(
         },
         payload_type,
     ))
+}
+
+// webrtc 0.21 drops (and only logs) packets whose SSRC, payload type or header
+// extensions were not negotiated, so camera packets are retagged for our track.
+fn prepare_for_sender(packet: &mut Packet, ssrc: u32, payload_type: u8) {
+    packet.header.ssrc = ssrc;
+    packet.header.payload_type = payload_type;
+    packet.header.extension = false;
+    packet.header.extension_profile = 0;
+    packet.header.extensions.clear();
 }
 
 fn compatible_offer_profile(offer_sdp: &str, camera_profile: &[u8]) -> Option<(u8, [u8; 3])> {
@@ -395,9 +422,35 @@ mod tests {
     };
 
     use super::{
-        RtpTimestampRepair, Session, await_answer, compatible_offer_profile, decode_profile,
-        is_idr_start,
+        Packet, RtpTimestampRepair, Session, await_answer, compatible_offer_profile,
+        decode_profile, is_idr_start, prepare_for_sender,
     };
+
+    #[test]
+    fn prepare_for_sender_retags_packet_for_negotiated_track() {
+        let mut packet = Packet::default();
+        packet.header.ssrc = 0xdead_beef;
+        packet.header.payload_type = 96;
+        packet.header.sequence_number = 7;
+        packet.header.timestamp = 90_000;
+        packet.header.marker = true;
+        packet.header.extension = true;
+        packet.header.extension_profile = 0xbede;
+        packet.header.set_extension(1, vec![0xaa].into()).unwrap();
+        packet.payload = vec![0x65, 0x01].into();
+
+        prepare_for_sender(&mut packet, 1234, 126);
+
+        assert_eq!(packet.header.ssrc, 1234);
+        assert_eq!(packet.header.payload_type, 126);
+        assert!(!packet.header.extension);
+        assert!(packet.header.extensions.is_empty());
+        assert_eq!(packet.header.extension_profile, 0);
+        assert_eq!(packet.header.sequence_number, 7);
+        assert_eq!(packet.header.timestamp, 90_000);
+        assert!(packet.header.marker);
+        assert_eq!(&packet.payload[..], &[0x65, 0x01]);
+    }
 
     #[test]
     fn selects_browser_profile_compatible_with_camera() {

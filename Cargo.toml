@@ -29,7 +29,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 base64 = "0.23"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 socket2 = "0.6"
-webrtc = "0.17.2"
+async-trait = "0.1"
+webrtc = "0.21.1"
+rtc = { version = "0.21.1", default-features = false }
 png = "0.18"
 
 # Desktop commands are sync `#[tauri::command(async)]` handlers, so their
