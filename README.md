@@ -274,6 +274,10 @@ Remove any old `WEBKIT_DISABLE_DMABUF_RENDERER=1` override before starting.
 On WebKitGTK 2.54.1, disabling the renderer leaves the shared GL display
 uninitialized, and H.264 WebCodecs probing aborts the web process.
 
+WebRTC availability is separate from renderer setup. See
+[Linux WebRTC status](docs/desktop.md#linux-webrtc-status) for the upstream
+tracker, expected H.264 fallback and checks after WebKitGTK upgrades.
+
 GTK otherwise uses the session's own backend. Forcing XWayland with
 `GDK_BACKEND=x11` still works but is not the default: under XWayland on GNOME
 the window can stop receiving input and repaint events after switching to

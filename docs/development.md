@@ -1,6 +1,6 @@
 # Development and architecture
 
-Last-updated: 2026-10-12
+Last-updated: 2026-10-18
 
 ## Prerequisites and first build
 
@@ -84,7 +84,9 @@ WebRTC forwards RTP; WebCodecs uses an authenticated loopback binary bridge
 and AVC decoder configuration; MJPEG/snapshots attach JPEG consumers only when
 needed. Last-viewer teardown closes the upstream. Camera errors are isolated
 from printer health. See [camera transport details](bambu-compatibility.md#camera-transport-selection)
-and [IP cameras](ip-cameras.md).
+and [IP cameras](ip-cameras.md). For Linux limitations, upstream tracking and
+checks after webview upgrades, see
+[Linux WebRTC status](desktop.md#linux-webrtc-status).
 
 The desktop also owns bounded model-preview rendering, local file watching,
 transfer progress/cancellation and slicer subprocess management. Its blocking

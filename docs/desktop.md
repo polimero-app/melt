@@ -1,6 +1,6 @@
 # Desktop guide
 
-Last-updated: 2026-10-12
+Last-updated: 2026-10-18
 
 Start the packaged `melt` executable without arguments. For a source checkout,
 use `make run` after `make ui-install`; it starts the frontend server before
@@ -67,6 +67,55 @@ active transport: **LIVE · WebRTC**, **LIVE · H.264** or amber **LIVE · MJPEG
 Classic Bambu JPEG sources use MJPEG. Webview/codec support determines whether
 native H.264 is available; Linux can use WebCodecs. See [IP cameras](ip-cameras.md)
 for setup and [Wayland notes](../README.md#running-on-linux-wayland).
+
+### Linux WebRTC status
+
+Last reviewed: **2026-10-18**. The upstream tracker,
+[tauri-apps/wry#85](https://github.com/tauri-apps/wry/issues/85), remains open.
+
+Wry embeds WebKitGTK on Linux. The
+[WebKitGTK 2.54.1 build defaults](https://github.com/WebKit/WebKit/blob/webkitgtk-2.54.1/Source/cmake/OptionsGTK.cmake)
+set `ENABLE_WEB_RTC` to `OFF` and `ENABLE_WEB_CODECS` to `ON`. Builds using those
+defaults do not expose JavaScript's `RTCPeerConnection`, even though they can
+decode H.264 with WebCodecs. Distribution and custom/experimental builds can
+differ; availability depends on the installed WebKitGTK build, not just the
+Melt or Wry version. This is not a Wayland-only issue: switching to X11 or
+XWayland cannot restore an API compiled out of the webview.
+
+For H.264 printers and external cameras, **LIVE · H.264** is therefore an
+expected Linux result, not the MJPEG fallback. Rust receives RTSP(S)/RTP and
+sends complete H.264 access units through an authenticated loopback stream to
+WebCodecs' `VideoDecoder`, which renders to a canvas. Annex-B-to-AVC conversion
+changes framing only; there is no JPEG transcoding or H.264 re-encoding.
+Decoder hardware selection remains the browser's responsibility. See
+[camera transport details](bambu-compatibility.md) for the shared pipeline.
+
+Capture permission handlers and desktop portals concern local camera,
+microphone or screen capture; Melt's receive-only camera viewer needs none
+of those permissions. Granting them cannot supply a missing
+`RTCPeerConnection`. Neither can `GDK_BACKEND`, renderer environment overrides
+or an update to the Rust `webrtc` sender crate. `WEBLOCK_USE_PORTAL` is not a
+recognized Wry/WebKitGTK setting. Keep renderer troubleshooting separate;
+the [Wayland notes](../README.md#running-on-linux-wayland) explain the settings
+needed to preserve working WebCodecs playback.
+
+When a WebKitGTK, Wry or distribution update claims to resolve this:
+
+1. Record the distribution, WebKitGTK package version/build and display backend.
+   Development hosts can query the version with
+   `pkg-config --modversion webkit2gtk-4.1`. Recheck the upstream tracker and
+   build configuration for that version; a version number alone is insufficient.
+2. Inspect `typeof window.RTCPeerConnection` and `typeof window.VideoDecoder`
+   in Melt's embedded webview, not an external browser. An `undefined` peer
+   connection API rules out native WebRTC; a present API does not prove H.264
+   codec or connection support.
+3. Open a real H.264 feed and confirm moving video, the actual playback badge
+   and **Configuration → About → Diagnostics**. Record the working transport or
+   fallback reason, and confirm fallback playback still works. A connected
+   peer or successful Rust build alone does not qualify native video playback.
+4. Update this review date, reference version/source and observed platform
+   results when support changes. Keep the WebCodecs/MJPEG fallbacks; closing
+   the upstream issue alone does not qualify every supported WebKitGTK build.
 
 ## File library and slicers
 
