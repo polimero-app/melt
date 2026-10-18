@@ -22,7 +22,7 @@ use melt_core::{
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Semaphore;
 
-use crate::{CommandError, unreadable_config};
+use crate::CommandError;
 
 const UPDATED_EVENT: &str = "plugs-updated";
 const POLL_CONCURRENCY: usize = 4;
@@ -30,7 +30,7 @@ const POLL_CONCURRENCY: usize = 4;
 #[tauri::command]
 pub async fn plug_list() -> Result<Vec<PlugSummary>, CommandError> {
     let dir = dir()?;
-    blocking(move || plugs::list(dir).map_err(|_| unreadable_config())).await
+    blocking(move || plugs::list(dir).map_err(|_| unreadable_plugs())).await
 }
 
 /// Saves only after the plug answers with the given credentials.
@@ -305,7 +305,7 @@ fn publish(app: &AppHandle, manager: &PlugManager) {
 }
 
 fn dir() -> Result<PathBuf, CommandError> {
-    config_dir().map_err(|_| unreadable_config())
+    config_dir().map_err(|_| unreadable_plugs())
 }
 
 async fn blocking<T, F>(work: F) -> Result<T, CommandError>
@@ -323,7 +323,7 @@ async fn current_key(id: &str) -> Result<(PathBuf, PlugKey), CommandError> {
     let dir = dir()?;
     let summaries = {
         let dir = dir.clone();
-        blocking(move || plugs::list(dir).map_err(|_| unreadable_config())).await?
+        blocking(move || plugs::list(dir).map_err(|_| unreadable_plugs())).await?
     };
     let summary = summaries
         .iter()
@@ -351,13 +351,17 @@ fn link_target(
     }
 }
 
+fn unreadable_plugs() -> CommandError {
+    CommandError::new("plugConfigUnreadable")
+}
+
 /// No variant carries upstream text, so codes alone cross the boundary.
 fn plug_error(error: PlugError) -> CommandError {
     use PlugError as E;
     CommandError::new(match error {
         E::MissingName => "profileMissingName",
         E::InvalidName => "profileInvalidName",
-        E::InvalidHost => "profileInvalidHost",
+        E::InvalidHost => "plugInvalidHost",
         E::UnknownDriver(_) => "profileInvalid",
         E::InvalidUsername => "plugInvalidUsername",
         E::InvalidPassword => "plugInvalidPassword",
@@ -379,8 +383,8 @@ fn plug_error(error: PlugError) -> CommandError {
         E::PowerMismatch { .. } => "plugPowerMismatch",
         E::ProfileChanged => "plugProfileChanged",
         E::MissingSecret => "plugPasswordUnavailable",
-        E::Secret(_) | E::RollbackFailed => "keychainFailed",
-        E::Config(_) => "configUnwritable",
+        E::Secret(_) | E::RollbackFailed => "plugKeychainFailed",
+        E::Config(_) => "plugConfigUnwritable",
     })
 }
 
@@ -478,7 +482,7 @@ mod tests {
             (PlugError::MissingName, "profileMissingName"),
             (PlugError::InvalidName, "profileInvalidName"),
             (PlugError::UnknownDriver("x".into()), "profileInvalid"),
-            (PlugError::InvalidHost, "profileInvalidHost"),
+            (PlugError::InvalidHost, "plugInvalidHost"),
             (PlugError::InvalidUsername, "plugInvalidUsername"),
             (PlugError::InvalidPassword, "plugInvalidPassword"),
             (PlugError::InvalidTimeout, "plugInvalidTimeout"),
@@ -527,12 +531,15 @@ mod tests {
             ),
             (PlugError::ProfileChanged, "plugProfileChanged"),
             (PlugError::MissingSecret, "plugPasswordUnavailable"),
-            (PlugError::Secret(SecretError::NotFound), "keychainFailed"),
+            (
+                PlugError::Secret(SecretError::NotFound),
+                "plugKeychainFailed",
+            ),
             (
                 PlugError::Config(ConfigError::PlugNotFound),
-                "configUnwritable",
+                "plugConfigUnwritable",
             ),
-            (PlugError::RollbackFailed, "keychainFailed"),
+            (PlugError::RollbackFailed, "plugKeychainFailed"),
         ];
         for (error, code) in cases {
             assert_eq!(plug_error(error).code, code);
