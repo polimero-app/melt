@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { PhPlug, PhPower } from '@phosphor-icons/vue'
+import { PhArrowClockwise, PhPlug, PhPower } from '@phosphor-icons/vue'
 import type { MessageKey } from '../i18n'
 import { commandDetail, commandMessage, type Translate } from '../errors'
 import { isStale, offConfirmation, type PlugObservation, type PlugSummary, type PowerState, type RelayState } from '../plugs'
@@ -16,6 +16,8 @@ const props = withDefaults(defineProps<{
   t: Translate
   locale: string
   showName?: boolean
+  /** Reloads the plug list so the Off dialog names current attachments. */
+  refresh?: () => Promise<void>
 }>(), { showName: true })
 
 // After a confirmed "on" the parent restarts the affected visible camera viewers.
@@ -73,6 +75,24 @@ async function setPower(state: PowerState) {
   }
 }
 
+async function checkStatus() {
+  if (busy.value) return
+  busy.value = true
+  error.value = undefined
+  try {
+    await invoke('plug_status', { id: props.plug.id })
+  } catch (reason) {
+    error.value = [commandMessage(reason, props.t), commandDetail(reason)].filter(Boolean).join(' ')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function askOff() {
+  await props.refresh?.().catch(() => undefined)
+  confirmOpen.value = true
+}
+
 function confirmOff() {
   confirmOpen.value = false
   void setPower('off')
@@ -86,10 +106,11 @@ function confirmOff() {
       <span v-if="showName" class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ plug.name }}</span>
     </div>
     <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ attached }}</p>
-    <p class="mt-1 text-xs text-gray-700 dark:text-gray-300" :class="observation && observation.connection !== 'online' && 'text-amber-700 dark:text-amber-400'">{{ statusLine }}</p>
+    <p class="mt-1 text-xs" :class="observation && observation.connection !== 'online' ? 'text-amber-700 dark:text-amber-400' : 'text-gray-700 dark:text-gray-300'">{{ statusLine }}</p>
     <div class="mt-2 flex flex-wrap gap-2">
       <Button variant="secondary" :disabled="busy" :aria-label="t('plugControl.turnOnLabel', { name: plug.name })" @click="setPower('on')"><PhPower class="size-4" aria-hidden="true" /> {{ t('plugControl.on') }}</Button>
-      <Button variant="danger" :disabled="busy" :aria-label="t('plugControl.turnOffLabel', { name: plug.name })" @click="confirmOpen = true"><PhPower class="size-4" aria-hidden="true" /> {{ t('plugControl.off') }}</Button>
+      <Button variant="danger" :disabled="busy" :aria-label="t('plugControl.turnOffLabel', { name: plug.name })" @click="askOff"><PhPower class="size-4" aria-hidden="true" /> {{ t('plugControl.off') }}</Button>
+      <Button variant="secondary" :disabled="busy" :aria-label="t('plugControl.checkStatusLabel', { name: plug.name })" @click="checkStatus"><PhArrowClockwise class="size-4" aria-hidden="true" /> {{ t('plugControl.checkStatus') }}</Button>
     </div>
     <p v-if="busy" class="mt-1 text-xs text-gray-500 dark:text-gray-400" role="status">{{ t('plugControl.working') }}</p>
     <p v-if="error" class="mt-1 text-xs text-red-600 dark:text-red-400" role="alert">{{ error }}</p>

@@ -196,6 +196,8 @@ export type MessageKey =
   | "plugControl.offDescription"
   | "plugControl.none"
   | "plugControl.working"
+  | "plugControl.checkStatus"
+  | "plugControl.checkStatusLabel"
   | "plugControl.activity.printing"
   | "plugControl.activity.paused"
   | "plugControl.activity.heating"
@@ -218,6 +220,10 @@ export type MessageKey =
   | "errors.plugPowerMismatch"
   | "errors.plugProfileChanged"
   | "errors.plugPasswordUnavailable"
+  | "errors.plugKeychainFailed"
+  | "errors.plugConfigUnwritable"
+  | "errors.plugConfigUnreadable"
+  | "errors.plugInvalidHost"
   | "errors.plugInvalidTarget"
   | "errors.internalError"
   | "nav.selectPrinter"
@@ -861,6 +867,8 @@ const messages: Record<Locale, Messages> = {
     "plugControl.offDescription": "This cuts power immediately and does not stop anything gracefully. Printers: {printers}. Cameras: {cameras}.",
     "plugControl.none": "none",
     "plugControl.working": "Waiting for the plug to confirm...",
+    "plugControl.checkStatus": "Check status",
+    "plugControl.checkStatusLabel": "Check status of plug {name}",
     "plugControl.activity.printing": "printing",
     "plugControl.activity.paused": "paused",
     "plugControl.activity.heating": "heating",
@@ -877,12 +885,16 @@ const messages: Record<Locale, Messages> = {
     "errors.plugUnsupportedDevice": "This device is not a supported smart plug. Only the Tapo P110 is supported.",
     "errors.plugUnsupportedProtocol": "The plug uses a protocol Melt does not support.",
     "errors.plugUnreachable": "Cannot reach the smart plug. Check that it is powered and on the same network.",
-    "errors.plugDeviceRejected": "The plug rejected the command. The relay was not changed.",
+    "errors.plugDeviceRejected": "The plug refused the request. If it was a switch command, it was not applied.",
     "errors.plugTimeout": "The smart plug did not respond in time.",
     "errors.plugPowerUnconfirmed": "Melt could not confirm the relay state after sending the command. Check the plug before trying again.",
     "errors.plugPowerMismatch": "The plug answered with a different relay state than requested.",
     "errors.plugProfileChanged": "This smart plug was edited while the command ran. Try again.",
     "errors.plugPasswordUnavailable": "The stored smart plug password is unavailable. Edit the plug and enter it again.",
+    "errors.plugKeychainFailed": "Melt cannot access your system keychain, so it cannot read or save the smart plug password. Unlock your keychain and try again.",
+    "errors.plugConfigUnwritable": "Unable to save the smart plug configuration.",
+    "errors.plugConfigUnreadable": "Unable to read the smart plug configuration.",
+    "errors.plugInvalidHost": "That smart plug host is not valid.",
     "errors.plugInvalidTarget": "Choose exactly one printer or camera.",
     "errors.internalError": "An internal error occurred. Try again.",
     "nav.groupSections": "Sections",
@@ -1523,6 +1535,8 @@ const messages: Record<Locale, Messages> = {
     "plugControl.offDescription": "Isso corta a energia imediatamente, sem encerrar nada com segurança. Impressoras: {printers}. Câmeras: {cameras}.",
     "plugControl.none": "nenhuma",
     "plugControl.working": "Aguardando a confirmação da tomada...",
+    "plugControl.checkStatus": "Verificar status",
+    "plugControl.checkStatusLabel": "Verificar o status da tomada {name}",
     "plugControl.activity.printing": "imprimindo",
     "plugControl.activity.paused": "pausada",
     "plugControl.activity.heating": "aquecendo",
@@ -1539,12 +1553,16 @@ const messages: Record<Locale, Messages> = {
     "errors.plugUnsupportedDevice": "Este dispositivo não é uma tomada inteligente suportada. Apenas a Tapo P110 é suportada.",
     "errors.plugUnsupportedProtocol": "A tomada usa um protocolo que o Melt não suporta.",
     "errors.plugUnreachable": "Não foi possível acessar a tomada inteligente. Verifique se ela está ligada e na mesma rede.",
-    "errors.plugDeviceRejected": "A tomada rejeitou o comando. O relé não foi alterado.",
+    "errors.plugDeviceRejected": "A tomada recusou a solicitação. Se era um comando de liga/desliga, ele não foi aplicado.",
     "errors.plugTimeout": "A tomada inteligente não respondeu a tempo.",
     "errors.plugPowerUnconfirmed": "O Melt não conseguiu confirmar o estado do relé após enviar o comando. Verifique a tomada antes de tentar de novo.",
     "errors.plugPowerMismatch": "A tomada respondeu com um estado de relé diferente do solicitado.",
     "errors.plugProfileChanged": "Esta tomada inteligente foi editada enquanto o comando era executado. Tente de novo.",
     "errors.plugPasswordUnavailable": "A senha salva da tomada inteligente não está disponível. Edite a tomada e informe-a novamente.",
+    "errors.plugKeychainFailed": "O Melt não consegue acessar o chaveiro do sistema e, por isso, não consegue ler nem salvar a senha da tomada inteligente. Desbloqueie o chaveiro e tente novamente.",
+    "errors.plugConfigUnwritable": "Não foi possível salvar a configuração da tomada inteligente.",
+    "errors.plugConfigUnreadable": "Não foi possível ler a configuração da tomada inteligente.",
+    "errors.plugInvalidHost": "O host da tomada inteligente não é válido.",
     "errors.plugInvalidTarget": "Escolha exatamente uma impressora ou câmera.",
     "errors.internalError": "Ocorreu um erro interno. Tente de novo.",
     "nav.groupSections": "Seções",

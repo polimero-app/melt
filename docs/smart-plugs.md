@@ -17,7 +17,8 @@ print or energy data.
 P110 support is implemented, but hardware and firmware qualification has not
 been run. Until then, P110 (qualification pending) is the only claim. Melt
 accepts only a device that reports the exact model `P110`; any other Tapo
-device is refused with `capability_unsupported`. Evidence is tracked in
+device is refused and nothing is sent to it: usually as `capability_unsupported`,
+or as `connection_failed` if its reply cannot be read. Evidence is tracked in
 [the plug fixtures](../fixtures/tapo/plugs/README.md).
 
 ## Tapo setup
@@ -125,9 +126,9 @@ device's value; Melt never answers from a cache.
 
 The **Smart plugs** view lists plug profiles with their attachments, relay
 state, connection and observation time, and adds, edits, links and removes
-them. The same On/Off control appears in three other places: on the printer's
-**Control** view (including the offline screen), and under an external
-camera's details. See [Desktop](desktop.md#smart-plugs).
+them. The same On/Off control appears in two other places: on the printer's
+**Control** view (including the offline screen) and under an external
+camera's details. Each control also has a **Check status** button. See [Desktop](desktop.md#smart-plugs).
 
 Relay state (on, off, unknown) is separate from connection health. When a plug
 is unreachable the state is unknown and the last observation is shown as

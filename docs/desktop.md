@@ -132,7 +132,9 @@ camera, because power is cut immediately. A button never shows a new state
 before the device confirms it, and a failed or unconfirmed command keeps the
 last observation marked stale. Melt reads each plug every 5 seconds, backing
 off per plug up to 60 seconds; authentication failures stop automatic
-attempts until the profile changes or you act. Removing a plug warns if its
+attempts until the profile changes or you act; **Check status** on a plug
+control reads the relay once on demand (for example after enabling Third-Party
+Compatibility). Removing a plug warns if its
 keychain password could not be deleted. See [smart plugs](smart-plugs.md).
 
 ## File library and slicers

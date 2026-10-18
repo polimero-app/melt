@@ -2613,7 +2613,7 @@ onUnmounted(() => {
 
         <!-- Power control stays reachable whatever the printer's connectivity. -->
         <div v-if="activePrinter && plugsForPrinter(activePrinter.name, plugs).length" class="mx-4 mb-5 space-y-3 rounded-lg border border-gray-200 px-4 py-3 sm:mx-0 dark:border-white/10">
-          <PlugControl v-for="plug in plugsForPrinter(activePrinter.name, plugs)" :key="plug.id" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :t="t" :locale="locale" @changed="plugChanged(plug, $event)" />
+          <PlugControl v-for="plug in plugsForPrinter(activePrinter.name, plugs)" :key="plug.id" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :refresh="loadPlugs" :t="t" :locale="locale" @changed="plugChanged(plug, $event)" />
         </div>
 
         <!-- Awaiting the first sample: neutral, no alarm language, no recovery
@@ -3389,7 +3389,7 @@ onUnmounted(() => {
             </template>
           </CameraViewer>
           <div v-if="plugsForCamera(viewedCamera.name, plugs).length" class="space-y-3 rounded-lg border border-gray-200 px-4 py-3 dark:border-white/10">
-            <PlugControl v-for="plug in plugsForCamera(viewedCamera.name, plugs)" :key="plug.id" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :t="t" :locale="locale" @changed="plugChanged(plug, $event)" />
+            <PlugControl v-for="plug in plugsForCamera(viewedCamera.name, plugs)" :key="plug.id" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :refresh="loadPlugs" :t="t" :locale="locale" @changed="plugChanged(plug, $event)" />
           </div>
           </div>
         </section>
@@ -3423,7 +3423,7 @@ onUnmounted(() => {
               <span class="block truncate text-sm font-semibold text-gray-900 dark:text-white">{{ plug.name }}</span>
               <span class="mt-0.5 block truncate font-mono text-xs text-gray-500 dark:text-gray-400">{{ plug.host }}</span>
               <span class="mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400">{{ plug.username }}</span>
-              <PlugControl class="mt-2" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :t="t" :locale="locale" :show-name="false" @changed="plugChanged(plug, $event)" />
+              <PlugControl class="mt-2" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :refresh="loadPlugs" :t="t" :locale="locale" :show-name="false" @changed="plugChanged(plug, $event)" />
             </div>
             <ActionMenu :label="t('plugsView.actions')" :items="plugActionItems(plug)" />
           </Card>
