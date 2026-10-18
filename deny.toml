@@ -14,6 +14,7 @@ ignore = [
   { id = "RUSTSEC-2026-0370", reason = "zvariant via tauri-plugin-notification > notify-rust > zbus" },
   { id = "RUSTSEC-2026-0371", reason = "zbus_names via tauri-plugin-notification > notify-rust > zbus" },
   { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via tauri-plugin-notification > notify-rust > zbus" },
+  { id = "RUSTSEC-2023-0071", reason = "rsa via tapo: only tapo's AES UDP discovery (aes_discovery_query_generator.rs) uses it; Melt never calls discovery; no fixed rsa release" },
 ]
 
 [licenses]
