@@ -3086,7 +3086,10 @@ fn write_disk_preview_cache(cache_key: &str, preview: &FilePreviewResponse) {
 /// `Metadata/thumbnail.png` silently missed real files.
 fn extract_3mf_thumbnail(reader: impl Read + std::io::Seek) -> Option<Vec<u8>> {
     let mut archive = zip::ZipArchive::new(reader).ok()?;
-    let names: Vec<String> = archive.file_names().map(str::to_owned).collect();
+    let names: Vec<String> = archive
+        .file_names()
+        .filter_map(|name| name.ok().map(|name| name.into_owned()))
+        .collect();
     let mut fallback = None;
     let mut chosen = None;
     for name in names {
@@ -4623,7 +4626,7 @@ mod tests {
         let mut buffer = Vec::new();
         {
             let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut buffer));
-            let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+            let options = zip::write::SimpleFileOptions::default();
             for (name, contents) in entries {
                 zip.start_file(*name, options).unwrap();
                 std::io::Write::write_all(&mut zip, contents).unwrap();

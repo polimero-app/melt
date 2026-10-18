@@ -42,8 +42,10 @@ pub fn first_model_in_zip(reader: impl Read + Seek) -> Result<(String, Vec<u8>),
         if entry.is_dir() {
             continue;
         }
-        let extension = entry
-            .name()
+        // zip 9 surfaces undecodable names as errors; such an entry can't be
+        // a model we recognize, so skip it rather than reject the archive.
+        let Ok(name) = entry.name() else { continue };
+        let extension = name
             .rsplit('.')
             .next()
             .unwrap_or_default()
@@ -541,7 +543,7 @@ mod tests {
         let mut buffer = Vec::new();
         {
             let mut zip = zip::ZipWriter::new(Cursor::new(&mut buffer));
-            let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+            let options = zip::write::SimpleFileOptions::default();
             zip.start_file("3D/3dmodel.model", options).unwrap();
             zip.write_all(model_xml.as_bytes()).unwrap();
             zip.finish().unwrap();
@@ -555,7 +557,7 @@ mod tests {
         let mut buffer = Vec::new();
         {
             let mut zip = zip::ZipWriter::new(Cursor::new(&mut buffer));
-            let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default()
+            let options = zip::write::SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Deflated)
                 .large_file(true);
             zip.start_file("3D/3dmodel.model", options).unwrap();
@@ -579,7 +581,7 @@ mod tests {
         let mut buffer = Vec::new();
         {
             let mut zip = zip::ZipWriter::new(Cursor::new(&mut buffer));
-            let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+            let options = zip::write::SimpleFileOptions::default();
             zip.start_file("notes/readme.txt", options).unwrap();
             zip.write_all(b"not a model").unwrap();
             zip.start_file("models/first.OBJ", options).unwrap();
@@ -599,7 +601,7 @@ mod tests {
         let mut buffer = Vec::new();
         {
             let mut zip = zip::ZipWriter::new(Cursor::new(&mut buffer));
-            let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+            let options = zip::write::SimpleFileOptions::default();
             zip.start_file("readme.txt", options).unwrap();
             zip.write_all(b"not a model").unwrap();
             zip.finish().unwrap();
