@@ -4,14 +4,13 @@
 use std::{net::IpAddr, path::Path};
 
 use serde::{Deserialize, Serialize};
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use super::{CameraError, DRIVERS, ResolvedCamera, TAPO_RTSP_PORT};
 use crate::{
     config::{CameraProfile, Config, ConfigError},
     drivers,
     keychain::{SERVICE, SecretError, SecretStore, account},
-    profiles::{self, ProfileError, RemoveWarning, StoredSecret},
+    profiles::{self, ProfileError, RemoveWarning, StoredSecret, new_id, now},
 };
 
 /// Add or edit input. Deliberately not `Debug`: it holds a password. An
@@ -399,18 +398,6 @@ fn secret_error(error: ProfileError) -> CameraError {
     }
 }
 
-fn new_id() -> String {
-    let mut bytes = [0u8; 16];
-    openssl::rand::rand_bytes(&mut bytes).expect("OpenSSL random source is available");
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn now() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .expect("formatting an RFC 3339 timestamp cannot fail")
-}
-
 #[cfg(test)]
 mod tests {
     use std::{cell::Cell, fs};
@@ -469,7 +456,7 @@ mod tests {
         assert!(seen.get());
         assert_eq!(summary.name, "porch");
         assert_eq!(summary.rtsp_port, 554);
-        assert!(crate::config::is_camera_id(&summary.id));
+        assert!(crate::config::is_profile_id(&summary.id));
         let yaml = fs::read_to_string(dir.path().join("melt.yaml")).unwrap();
         assert!(!yaml.contains("s3cret"));
         assert_eq!(

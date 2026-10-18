@@ -12,18 +12,21 @@ use tempfile::NamedTempFile;
 use thiserror::Error;
 
 const CONFIG_FILE: &str = "melt.yaml";
-/// Version 2 adds camera profiles and printer links. Files without camera
-/// data are still written as version 1 so older binaries keep reading them.
-const MAX_VERSION: u8 = 2;
+/// Version 2 adds camera profiles and printer links; version 3 adds smart
+/// plugs. The writer picks the minimum version that fits the data, so older
+/// binaries keep reading files that do not use newer features.
+const MAX_VERSION: u8 = 3;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    #[error("unsupported config schema version: got {got}, want 1 or {MAX_VERSION}")]
+    #[error("unsupported config schema version: got {got}, want 1 to {MAX_VERSION}")]
     UnsupportedVersion { got: u8 },
     #[error("malformed config file: {0}")]
     Malformed(#[from] serde_saphyr::Error),
     #[error("invalid camera configuration: {0}")]
     InvalidCameras(&'static str),
+    #[error("invalid plug configuration: {0}")]
+    InvalidPlugs(&'static str),
     #[error("config file changed since it was read")]
     ConcurrentUpdate,
     #[error("{0}")]
@@ -77,6 +80,24 @@ pub struct CameraProfile {
     pub updated: String,
 }
 
+/// A smart plug. `id` is immutable; `printers` are printer profile names and
+/// `cameras` are camera IDs this plug powers.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlugProfile {
+    pub id: String,
+    pub driver: String,
+    pub host: String,
+    pub username: String,
+    pub timeout: String,
+    #[serde(default)]
+    pub printers: Vec<String>,
+    #[serde(default)]
+    pub cameras: Vec<String>,
+    pub created: String,
+    pub updated: String,
+}
+
 /// Cameras linked to one printer. `selected: None` is the built-in feed.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -87,7 +108,7 @@ pub struct PrinterCameras {
     pub selected: Option<String>,
 }
 
-pub fn is_camera_id(id: &str) -> bool {
+pub fn is_profile_id(id: &str) -> bool {
     id.len() == 32
         && id
             .bytes()
@@ -105,6 +126,8 @@ struct ConfigFile {
     cameras: BTreeMap<String, CameraProfile>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     printer_cameras: BTreeMap<String, PrinterCameras>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    plugs: BTreeMap<String, PlugProfile>,
 }
 
 #[derive(Debug)]
@@ -112,6 +135,7 @@ pub struct Config {
     profiles: BTreeMap<String, Profile>,
     cameras: BTreeMap<String, CameraProfile>,
     printer_cameras: BTreeMap<String, PrinterCameras>,
+    plugs: BTreeMap<String, PlugProfile>,
     digest: Option<[u8; 32]>,
 }
 
@@ -141,10 +165,16 @@ impl Config {
                 "camera data requires config version 2",
             ));
         }
+        if file.version < 3 && !file.plugs.is_empty() {
+            return Err(ConfigError::InvalidPlugs(
+                "plug data requires config version 3",
+            ));
+        }
         let config = Self {
             profiles: file.profiles,
             cameras: file.cameras,
             printer_cameras: file.printer_cameras,
+            plugs: file.plugs,
             digest: Some(digest(&bytes)),
         };
         config.validate()?;
@@ -153,6 +183,10 @@ impl Config {
 
     pub fn load() -> Result<Self, ConfigError> {
         Self::open(config_dir()?)
+    }
+
+    pub fn plugs(&self) -> &BTreeMap<String, PlugProfile> {
+        &self.plugs
     }
 
     pub fn get_profile(&self, name: &str) -> Option<&Profile> {
@@ -370,7 +404,7 @@ impl Config {
     fn validate(&self) -> Result<(), ConfigError> {
         let mut ids = BTreeSet::new();
         for camera in self.cameras.values() {
-            if !is_camera_id(&camera.id) || !ids.insert(camera.id.as_str()) {
+            if !is_profile_id(&camera.id) || !ids.insert(camera.id.as_str()) {
                 return Err(ConfigError::InvalidCameras(
                     "camera IDs must be unique 32-digit lowercase hex values",
                 ));
@@ -398,6 +432,36 @@ impl Config {
                 ));
             }
         }
+        let mut plug_ids = BTreeSet::new();
+        let mut powered_printers = BTreeSet::new();
+        let mut powered_cameras = BTreeSet::new();
+        for plug in self.plugs.values() {
+            if !is_profile_id(&plug.id) || !plug_ids.insert(plug.id.as_str()) {
+                return Err(ConfigError::InvalidPlugs(
+                    "plug IDs must be unique 32-digit lowercase hex values",
+                ));
+            }
+            for printer in &plug.printers {
+                if !self.profiles.contains_key(printer) {
+                    return Err(ConfigError::InvalidPlugs("a plug names an unknown printer"));
+                }
+                if !powered_printers.insert(printer.as_str()) {
+                    return Err(ConfigError::InvalidPlugs(
+                        "a printer is linked to more than one plug",
+                    ));
+                }
+            }
+            for camera in &plug.cameras {
+                if !ids.contains(camera.as_str()) {
+                    return Err(ConfigError::InvalidPlugs("a plug names an unknown camera"));
+                }
+                if !powered_cameras.insert(camera.as_str()) {
+                    return Err(ConfigError::InvalidPlugs(
+                        "a camera is linked to more than one plug",
+                    ));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -410,10 +474,17 @@ impl Config {
 
         let has_cameras = !self.cameras.is_empty() || !self.printer_cameras.is_empty();
         let bytes = serde_saphyr::to_string(&ConfigFile {
-            version: if has_cameras { MAX_VERSION } else { 1 },
+            version: if !self.plugs.is_empty() {
+                3
+            } else if has_cameras {
+                2
+            } else {
+                1
+            },
             profiles: self.profiles.clone(),
             cameras: self.cameras.clone(),
             printer_cameras: self.printer_cameras.clone(),
+            plugs: self.plugs.clone(),
         })
         .map_err(std::io::Error::other)?
         .into_bytes();
@@ -435,6 +506,7 @@ impl Config {
             profiles: BTreeMap::new(),
             cameras: BTreeMap::new(),
             printer_cameras: BTreeMap::new(),
+            plugs: BTreeMap::new(),
             digest: None,
         }
     }
@@ -725,11 +797,141 @@ profiles:
     #[test]
     fn future_versions_are_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join(CONFIG_FILE), "version: 3\n").unwrap();
+        fs::write(dir.path().join(CONFIG_FILE), "version: 4\n").unwrap();
         assert!(matches!(
             Config::open(dir.path()),
-            Err(ConfigError::UnsupportedVersion { got: 3 })
+            Err(ConfigError::UnsupportedVersion { got: 4 })
         ));
+    }
+
+    const SOCKET: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const LAMP: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    fn plug(id: &str) -> PlugProfile {
+        PlugProfile {
+            id: id.into(),
+            driver: "tapo".into(),
+            host: "192.0.2.30".into(),
+            username: "melt".into(),
+            timeout: "10s".into(),
+            printers: vec![],
+            cameras: vec![],
+            created: "2026-10-18T12:00:00Z".into(),
+            updated: "2026-10-18T12:00:00Z".into(),
+        }
+    }
+
+    fn saved_version(config: &mut Config) -> String {
+        let dir = tempfile::tempdir().unwrap();
+        config.digest = None;
+        config.save(dir.path()).unwrap();
+        let yaml = fs::read_to_string(dir.path().join(CONFIG_FILE)).unwrap();
+        yaml.lines().next().unwrap().to_owned()
+    }
+
+    #[test]
+    fn plug_data_round_trips_as_version_3() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::open(dir.path()).unwrap();
+        config.add_profile("garage", profile()).unwrap();
+        config.add_camera("porch", camera(PORCH)).unwrap();
+        let mut socket = plug(SOCKET);
+        socket.printers = vec!["garage".into()];
+        socket.cameras = vec![PORCH.into()];
+        config.plugs.insert("socket".into(), socket.clone());
+        config.save(dir.path()).unwrap();
+
+        let yaml = fs::read_to_string(dir.path().join(CONFIG_FILE)).unwrap();
+        assert!(yaml.starts_with("version: 3\n"), "{yaml}");
+        let reopened = Config::open(dir.path()).unwrap();
+        assert_eq!(reopened.plugs().get("socket"), Some(&socket));
+    }
+
+    #[test]
+    fn writer_picks_the_minimum_version() {
+        let mut config = Config::empty();
+        assert_eq!(saved_version(&mut config), "version: 1");
+        config.add_camera("porch", camera(PORCH)).unwrap();
+        assert_eq!(saved_version(&mut config), "version: 2");
+        config.plugs.insert("socket".into(), plug(SOCKET));
+        assert_eq!(saved_version(&mut config), "version: 3");
+        config.cameras.clear();
+        assert_eq!(saved_version(&mut config), "version: 3");
+    }
+
+    #[test]
+    fn plug_data_in_older_schemas_is_rejected() {
+        let plugs = format!(
+            "plugs:\n  socket: {{id: {SOCKET}, driver: tapo, host: h, username: u, timeout: 10s, created: x, updated: x}}\n"
+        );
+        for version in [1, 2] {
+            let dir = tempfile::tempdir().unwrap();
+            fs::write(
+                dir.path().join(CONFIG_FILE),
+                format!("version: {version}\n{plugs}"),
+            )
+            .unwrap();
+            assert!(
+                matches!(
+                    Config::open(dir.path()),
+                    Err(ConfigError::InvalidPlugs(
+                        "plug data requires config version 3"
+                    ))
+                ),
+                "version {version}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_plug_data_is_rejected() {
+        type Mutate = fn(&mut BTreeMap<String, PlugProfile>);
+        let cases: [(&str, Mutate); 6] = [
+            ("malformed id", |p| {
+                p.get_mut("a").unwrap().id = "NOPE".into()
+            }),
+            ("duplicate id", |p| {
+                p.get_mut("b").unwrap().id = SOCKET.into()
+            }),
+            ("repeated printer", |p| {
+                p.get_mut("a").unwrap().printers = vec!["garage".into(), "garage".into()]
+            }),
+            ("repeated camera", |p| {
+                p.get_mut("a").unwrap().cameras = vec![PORCH.into(), PORCH.into()]
+            }),
+            ("unknown printer", |p| {
+                p.get_mut("a").unwrap().printers = vec!["nope".into()]
+            }),
+            ("unknown camera", |p| {
+                p.get_mut("a").unwrap().cameras = vec![GATE.into()]
+            }),
+        ];
+        for (name, mutate) in cases {
+            let mut config = Config::empty();
+            config.add_profile("garage", profile()).unwrap();
+            config.add_camera("porch", camera(PORCH)).unwrap();
+            config.plugs.insert("a".into(), plug(SOCKET));
+            config.plugs.insert("b".into(), plug(LAMP));
+            mutate(&mut config.plugs);
+            assert!(
+                matches!(config.validate(), Err(ConfigError::InvalidPlugs(_))),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn version_2_files_open_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(CONFIG_FILE), SERDE_YAML_V2).unwrap();
+        let mut config = Config::open(dir.path()).unwrap();
+        assert!(config.plugs().is_empty());
+        config.save(dir.path()).unwrap();
+        let written = fs::read_to_string(dir.path().join(CONFIG_FILE)).unwrap();
+        // The serializer's quoting style differs from serde_yaml's, so compare
+        // the schema, not the bytes.
+        assert!(written.starts_with("version: 2\n"), "{written}");
+        assert!(!written.contains("plugs"), "{written}");
     }
 
     #[test]

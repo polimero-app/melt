@@ -429,7 +429,13 @@ fn default_timeout() -> String {
     "10s".into()
 }
 
-fn now() -> String {
+pub(crate) fn new_id() -> String {
+    let mut bytes = [0u8; 16];
+    openssl::rand::rand_bytes(&mut bytes).expect("OpenSSL random source is available");
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+pub(crate) fn now() -> String {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .expect("formatting an RFC 3339 timestamp cannot fail")
