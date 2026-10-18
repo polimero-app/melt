@@ -31,6 +31,7 @@ use sha2::{Digest, Sha256};
 use tauri::{Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
+mod plugs;
 mod preview;
 mod webrtc_camera;
 
@@ -4097,6 +4098,7 @@ fn main() {
         .manage(LibraryWatchState::default())
         .manage(TransferState::default())
         .manage(SlicerState::default())
+        .manage(Arc::new(melt_core::plugs::manager::PlugManager::default()))
         .setup(|app| {
             let state = app.state::<MonitorState>().inner().clone();
             let firmware_state = app.state::<FirmwareUpdateState>().inner().clone();
@@ -4104,6 +4106,11 @@ fn main() {
             start_monitor_worker(app.handle().clone(), state, presence.clone());
             start_firmware_update_worker(app.handle().clone(), firmware_state);
             start_presence_worker(app.handle().clone(), presence);
+            let plug_manager = app
+                .state::<Arc<melt_core::plugs::manager::PlugManager>>()
+                .inner()
+                .clone();
+            plugs::start_poller(app.handle().clone(), plug_manager);
             Ok(())
         })
         .manage(PreferencesState::default())
@@ -4168,6 +4175,15 @@ fn main() {
             camera_link,
             camera_unlink,
             camera_select,
+            plugs::plug_list,
+            plugs::plug_add,
+            plugs::plug_edit,
+            plugs::plug_remove,
+            plugs::plug_link,
+            plugs::plug_unlink,
+            plugs::plug_status,
+            plugs::plug_set_power,
+            plugs::plug_observations,
             diagnostics_report,
             remove_configured_printer
         ])
