@@ -1,6 +1,6 @@
 # CLI reference
 
-Last-updated: 2026-10-12
+Last-updated: 2026-10-18
 
 The packaged `melt` executable enters CLI mode whenever it receives arguments.
 With no arguments it starts the desktop app. `melt --help`, group help, and
@@ -40,10 +40,10 @@ For predictable automation, supply `--yes` on commands that require it.
 | --- | --- |
 | 0 | Success |
 | 1 | Internal/local I/O error or an unclassified printer failure |
-| 2 | Usage, validation, configuration, missing profile or invalid printer state |
-| 3 | Authentication, TLS identity/pin or keychain failure |
-| 4 | Connection, timeout or classified remote operation failure |
-| 5 | Unsupported driver operation/capability, including signing-required or conflicting Bambu authorization |
+| 2 | Usage, validation, configuration, missing profile, declined or missing confirmation, or invalid printer state |
+| 3 | Authentication, lockout, TLS identity/pin or keychain failure |
+| 4 | Connection, timeout, classified remote operation failure, or an unconfirmed or mismatched plug power change |
+| 5 | Unsupported driver operation/capability or plug device/protocol, including signing-required or conflicting Bambu authorization |
 
 Use `error.code` for the specific recovery action. The stable response and
 fixture rules are in [CLI contract fixtures](cli-contract-fixtures.md).
@@ -193,3 +193,59 @@ native H.264 is an Annex-B stream for ffplay/VLC and requires an H.264 source.
 These loopback streams are separate from the desktop's viewer-scoped proxies.
 See [IP cameras](ip-cameras.md) for setup and playback details. Pan/tilt,
 ONVIF and camera discovery commands are not implemented.
+
+## Smart plugs
+
+| Command | Arguments and main options |
+| --- | --- |
+| `plug add` | `<plug> --driver tapo --host <host> --username <email> --password-file <path> [--timeout 10s]` |
+| `plug edit` | `<plug>` with at least one of `--name`, `--host`, `--username`, `--password-file`, `--timeout` |
+| `plug list` | `[--printer <printer> | --camera <camera>]`; profiles and attachments |
+| `plug drivers` | List supported plug drivers |
+| `plug remove` | `<plug> [--yes]`; removes the profile, its links and its stored password |
+| `plug link` | `<plug> (--printer <printer> | --camera <camera>)` |
+| `plug unlink` | `<plug> (--printer <printer> | --camera <camera>)` |
+| `plug status` | `<plug>`; reads the relay state, model and observation time |
+| `plug on` | `<plug>`; no confirmation |
+| `plug off` | `<plug> [--yes]`; cuts power immediately |
+
+`plug add` logs in and reads the device before saving, and never changes the
+relay. The password comes from a private file (the rules under
+[Printer profiles](#printer-profiles-status-and-firmware) apply); it is the
+TP-Link account password. `plug link`/`unlink` take exactly one of
+`--printer` or `--camera`; plugs and cameras are named, and attachments
+describe power only. Plug commands have no `--timeout` except add/edit, no
+`--insecure` and no `--protocol-trace`.
+
+`plug off` asks for confirmation naming the plug and its attached printers
+and cameras. Interactively you type `yes`; without a terminal and without
+`--yes` it exits 2 before any network request. `plug on` never prompts. A
+power change is read back, never retried:
+
+| `error.code` | Exit | Meaning |
+| --- | --- | --- |
+| `power_change_mismatch` | 4 | The plug answered with the other state |
+| `power_change_unconfirmed` | 4 | The result could not be confirmed; the relay may have changed |
+| `device_rejected` | 4 | The plug refused the command; nothing was applied |
+| `authentication_failed`, `authentication_locked` | 3 | Wrong password, Third-Party Compatibility off, or lockout |
+| `secret_not_found`, `secret_store_failed` | 3 | Keychain password missing or store unavailable |
+| `connection_failed`, `timeout` | 4 | Plug unreachable or too slow |
+| `capability_unsupported` | 5 | Not a P110, or unsupported protocol |
+
+For the two power-change errors, JSON `error.details` has `requestedState`,
+`lastObservedState` (or `null`), `observedAt` (or `null`) and
+`deliveryUncertain` (true for unconfirmed):
+
+```json
+{"ok":false,"data":null,"error":{"code":"power_change_unconfirmed","message":"Sent \"off\" to plug bench-power but could not confirm the result. Last known state: on.","details":{"requestedState":"off","lastObservedState":"on","observedAt":"2026-10-18T12:00:00Z","deliveryUncertain":true}},"meta":{"command":"plug off"}}
+```
+
+```sh
+melt plug add bench-power --driver tapo --host 192.0.2.30 \
+  --username operator@example.invalid --password-file ./plug.pw
+melt plug link bench-power --printer workshop
+melt plug status bench-power --output json
+melt plug off bench-power --yes
+```
+
+See [smart plugs](smart-plugs.md) for setup, semantics and troubleshooting.

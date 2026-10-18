@@ -5,7 +5,7 @@ Last-updated: 2026-10-18
 Start the packaged `melt` executable without arguments. For a source checkout,
 use `make run` after `make ui-install`; it starts the frontend server before
 the Tauri process. The main navigation is **Printers**, **Control**,
-**Cameras**, **Configuration** and **Files** (the File library view). Historical
+**Cameras**, **Smart plugs**, **Configuration** and **Files** (the File library view). Historical
 plans call Printers “Manage printers”; the [screenshot gallery](screenshots.md)
 now captures the current labels with sanitized sample data.
 
@@ -116,6 +116,24 @@ When a WebKitGTK, Wry or distribution update claims to resolve this:
 4. Update this review date, reference version/source and observed platform
    results when support changes. Keep the WebCodecs/MJPEG fallbacks; closing
    the upstream issue alone does not qualify every supported WebKitGTK build.
+
+## Smart plugs
+
+**Smart plugs** manages Tapo P110 profiles: add or edit (the password is
+verified before saving, and a blank password on edit keeps the stored one),
+link printers and cameras, and remove. Each plug card has On and Off buttons,
+the relay state, the last observation and connection health. The same control
+also appears above a printer's Control view, including its offline screen, and
+under an external camera's viewer.
+
+Off asks for confirmation. The dialog names the plug, every attached printer
+(with known printing, paused, heating or drying activity) and every attached
+camera, because power is cut immediately. A button never shows a new state
+before the device confirms it, and a failed or unconfirmed command keeps the
+last observation marked stale. Melt reads each plug every 5 seconds, backing
+off per plug up to 60 seconds; authentication failures stop automatic
+attempts until the profile changes or you act. Removing a plug warns if its
+keychain password could not be deleted. See [smart plugs](smart-plugs.md).
 
 ## File library and slicers
 

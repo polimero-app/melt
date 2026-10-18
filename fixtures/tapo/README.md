@@ -1,6 +1,6 @@
 # Tapo RTSP evidence
 
-Last-updated: 2026-10-12
+Last-updated: 2026-10-18
 
 The current physical RTSP scope is a Tapo C510W, hardware 1.0, firmware 1.3.5,
 captured 2026-10-08. The local address is replaced with documentation address
@@ -35,6 +35,8 @@ long-running live behavior or every OS/webview's native playback. ONVIF
 pan/tilt and discovery remain future phases. New physical evidence should
 record the exact model/hardware/firmware/date and preserve only sanitized
 protocol facts. These files do not use the Bambu manifest schema.
+
+Smart plug (Tapo P110) evidence is tracked separately in [`plugs/`](plugs/README.md).
 
 See [IP camera usage](../../docs/ip-cameras.md) and
 [the camera design](../../docs/superpowers/specs/2026-10-08-ip-cameras-design.md)

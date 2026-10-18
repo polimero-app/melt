@@ -1,6 +1,6 @@
 # Configuration and credentials
 
-Last-updated: 2026-10-12
+Last-updated: 2026-10-18
 
 The CLI and desktop read the same printer/camera configuration. They store
 passwords and TLS pins separately in the OS keychain, under service `melt`.
@@ -19,10 +19,10 @@ keychain or the Tauri webview's local storage.
 
 | File/store | Contents |
 | --- | --- |
-| `melt.yaml` | Printer profiles, optional independent camera profiles, printer-camera links |
+| `melt.yaml` | Printer profiles, optional independent camera and smart plug profiles, printer-camera links |
 | `melt-preferences.yaml` | Notifications, slicers, last library folder, public firmware catalogue opt-in |
 | `melt-status-cache.json` | Last desktop monitoring payload for initial display; not configuration |
-| OS keychain | Printer access codes/API keys, Bambu TLS pins, camera passwords |
+| OS keychain | Printer access codes/API keys, Bambu TLS pins, camera and smart plug passwords |
 | Webview local storage | Theme, language, active view/printer and temperature presets |
 
 Missing profile/preference files produce empty/default settings. Unsupported
@@ -78,6 +78,34 @@ secrets but preserves independent camera profiles. Renaming a printer in the
 desktop moves its links. The CLI has no `printer edit` command; camera editing
 is available on both surfaces.
 
+## Smart plug schema
+
+Plug profiles add schema version 3. Saves use version 3 only while plug
+profiles exist, otherwise 2 while camera data exists, otherwise 1. Readers
+accept versions 1 to 3. Plug IDs are immutable 32-character lowercase
+hexadecimal values, like camera IDs. See [smart plugs](smart-plugs.md).
+
+```yaml
+version: 3
+plugs:
+  bench-power:
+    id: '11111111111111111111111111111111'
+    driver: tapo
+    host: 192.0.2.30
+    username: operator@example.invalid
+    timeout: 10s
+    printers: [workshop]
+    cameras: ['0123456789abcdef0123456789abcdef']
+    created: '2026-10-18T12:00:00Z'
+    updated: '2026-10-18T12:00:00Z'
+```
+
+`printers` holds printer names, because printers have no stable ID. `cameras`
+holds camera IDs. The username keeps its case. Model, hardware and firmware
+are observed, never stored. Renaming a printer rewrites its name in every
+plug; removing a printer or camera drops it from every plug, and removing a
+plug drops its links. None of these operations switches a relay.
+
 ## Preferences and appearance
 
 The preferences file remains schema version 1 and uses camelCase keys:
@@ -111,6 +139,7 @@ than this YAML file. See [desktop usage](desktop.md).
 | `<driver>:<printer-name>:access-code` | Bambu LAN access code or optional Moonraker API key |
 | `bambu-lan:<printer-name>:tls-fingerprint` | Pinned certificate SHA-256 identity |
 | `camera:<immutable-id>:password` | Local Camera Account password |
+| `plug:<immutable-id>:password` | TP-Link account password for a smart plug |
 
 Linux uses Secret Service; macOS and Windows use their native keychain
 backends. Authenticated operations need access to that user's credential
@@ -149,3 +178,9 @@ For a manual downgrade, close Melt, back up `melt.yaml`, remove `cameras` and
 `printer_cameras`, and set `version: 1`. Remove orphaned
 `camera:<id>:password` entries if they are no longer needed. Do not change only
 the version number while retaining camera data.
+
+To run a version-2 or older build after using smart plugs, remove the plugs
+with the current CLI/desktop. Manually, back up `melt.yaml`, delete `plugs:`
+and set `version` to 2 (cameras present) or 1, then delete the orphaned
+`plug:<id>:password` entries. Do not change only the version number while
+retaining plug data.

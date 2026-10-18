@@ -1,6 +1,6 @@
 # Melt Interface System
 
-Last-updated: 2026-10-12
+Last-updated: 2026-10-18
 
 ## Direction and feel
 
@@ -47,6 +47,8 @@ Rules:
 ## Camera state pattern
 
 - Section navigation labels are Printers, Cameras, Configuration and Files (the File library view); selecting a printer opens Control. The earlier “Manage printers” label remains only in historical plans.
+- Smart plug state mirrors this split: relay (on, off, unknown) is separate from connection and observation time. An unreachable plug shows its last relay state as stale, never as current. Plug control never changes a printer's or camera's health, and the relay text changes only after the device confirms it.
+- Plug Off always confirms by naming the plug and every attached printer and camera, because it cuts power immediately; On needs no confirmation. Disable both buttons only for the plug whose command is running.
 - Camera errors stay in the viewer and never change the printer's health. An external camera can remain live while its linked printer is offline.
 - The live badge reports the actual playback: `LIVE · WebRTC`, `LIVE · H.264` (WebCodecs), or amber `LIVE · MJPEG`. Amber describes the more expensive fallback, not a disconnected feed.
 - WebCodecs becomes successful only after a decoded frame. Keep bounded fallback reasons available to diagnostics after the viewer closes; redact source identifiers and endpoints.

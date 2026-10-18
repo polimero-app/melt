@@ -59,13 +59,14 @@ has no frontend build hook, so an explicit UI build is required. See
 | `crates/melt-core/src/bambu/` | MQTT, pinned TLS, discovery, storage, package/print workflow, capability and firmware evidence |
 | `crates/melt-core/src/moonraker.rs` | HTTP status, storage, jobs, controls and Klipper Update Manager |
 | `crates/melt-core/src/rtsp.rs`, `cameras.rs`, `cameras/` | Shared RTSP/Digest/H.264 client and independent Tapo workflows |
+| `crates/melt-core/src/plugs.rs`, `plugs/` | Smart plug domain types, validated profiles, `tapo` adapter (the only place vendor types appear) and the per-plug `PlugManager` |
 | `crates/melt-core/src/bambu/camera_manager.rs` | Shared Bambu/external camera upstreams and bounded subscriptions |
 | `crates/melt-core/src/diagnostics.rs`, `trace.rs` | Redacted compatibility reports and protocol tracing |
 | `crates/melt-cli` | Public help, parsing, confirmation, JSON envelopes and exit codes |
 | `crates/melt-desktop` | The `melt` entry point, Tauri commands/events, local library/previews and camera playback bridges |
 | `ui/src/App.vue`, `components/` | Desktop views and reusable UI, including viewer-scoped `CameraViewer.vue` |
 | `ui/src/*.ts`, `*.test.ts` | Pure presentation/validation/playback helpers and Vitest coverage |
-| `fixtures/` | CLI goldens, Bambu evidence manifests/transcript, sanitized Tapo SDP |
+| `fixtures/` | CLI goldens, Bambu evidence manifests/transcript, sanitized Tapo SDP, plug qualification placeholder |
 
 Both surfaces call the Rust core directly. Desktop actions do not spawn a
 separate CLI process. A profile-aware connection pool shares Moonraker HTTP
