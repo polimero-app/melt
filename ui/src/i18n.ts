@@ -171,6 +171,7 @@ export type MessageKey =
   | "plugsView.connectionHint"
   | "plugsView.saved"
   | "plugsView.removed"
+  | "plugsView.passwordNotDeleted"
   | "plugsView.attachmentsFailed"
   | "plugsView.removeTitle"
   | "plugsView.removeDescription"
@@ -823,6 +824,7 @@ const messages: Record<Locale, Messages> = {
     "plugsView.connectionHint": "Use your TP-Link account email and password, the same ones as in the Tapo app. In the Tapo app, turn on Third-Party Compatibility for the plug. Melt talks to the plug directly on your network.",
     "plugsView.saved": "Smart plug saved",
     "plugsView.removed": "Smart plug removed",
+    "plugsView.passwordNotDeleted": "Smart plug removed, but its password could not be deleted from the keychain.",
     "plugsView.attachmentsFailed": "Plug saved, but some attachments could not be updated.",
     "plugsView.removeTitle": "Remove {name}?",
     "plugsView.removeDescription": "This removes the smart plug, its stored password, and its printer and camera attachments. The plug itself is not changed and keeps its current power state.",
@@ -1472,6 +1474,7 @@ const messages: Record<Locale, Messages> = {
     "plugsView.connectionHint": "Use o e-mail e a senha da sua conta TP-Link, os mesmos do app Tapo. No app Tapo, ative a Compatibilidade com Terceiros na tomada. O Melt fala com a tomada diretamente na sua rede.",
     "plugsView.saved": "Tomada inteligente salva",
     "plugsView.removed": "Tomada inteligente removida",
+    "plugsView.passwordNotDeleted": "Tomada inteligente removida, mas a senha não pôde ser apagada do chaveiro.",
     "plugsView.attachmentsFailed": "Tomada salva, mas alguns vínculos não puderam ser atualizados.",
     "plugsView.removeTitle": "Remover {name}?",
     "plugsView.removeDescription": "Isso remove a tomada inteligente, a senha salva e os vínculos com impressoras e câmeras. A tomada em si não é alterada e mantém o estado de energia atual.",

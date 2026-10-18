@@ -1640,9 +1640,10 @@ function removePlug(name: string) {
     { title: 'plugsView.removeTitle', description: 'plugsView.removeDescription', confirm: 'plugsView.remove' },
     { name },
     async () => {
-      await invoke('plug_remove', { name })
+      const result = await invoke<{ warnings: unknown[] }>('plug_remove', { name })
       await loadPlugs()
-      showToast(t('plugsView.removed'))
+      if (result.warnings.length) showToast(t('plugsView.passwordNotDeleted'), 'error')
+      else showToast(t('plugsView.removed'))
     },
   )
 }
