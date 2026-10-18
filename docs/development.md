@@ -134,7 +134,7 @@ dependencies and runs Vitest/type-check/build. Native jobs compile the desktop;
 CI does not install or launch every packaged artifact.
 
 Dependabot groups weekly Cargo, Bun and GitHub Actions updates. It defers
-WebRTC minor/major upgrades (API migration), vek minor/major upgrades (euc
+WebRTC minor/major upgrades (pre-1.0 API breaks), vek minor/major upgrades (euc
 compatibility), and the TypeScript next major (vue-tsc compatibility).
 
 Keep driver behavior in the core and surface adapters thin. Add user-facing

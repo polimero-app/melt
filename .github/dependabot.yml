@@ -8,8 +8,8 @@ updates:
       cargo:
         patterns: ["*"]
     ignore:
-      # 0.21 replaced the whole API with a Sans-I/O core; porting the camera
-      # session is a project, not a bump. Patches still land.
+      # Pre-1.0: webrtc minors may break the camera session API; port
+      # deliberately. Patches still land.
       - dependency-name: webrtc
         update-types:
           - version-update:semver-minor
