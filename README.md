@@ -1,6 +1,6 @@
 # Melt
 
-Last-updated: 2026-10-12
+Last-updated: 2026-10-18
 
 <https://melt.polimero.app>
 
@@ -58,7 +58,7 @@ Install the UI dependencies once, then build the complete workspace:
 ```sh
 make ui-install
 make build
-./target/debug/melt --help
+./target/release/melt --help
 ```
 
 Use `make run` to launch the development desktop; it starts the frontend
@@ -243,7 +243,7 @@ make ci
 make release-qualification
 ```
 
-- `make build` builds the Rust workspace and production UI.
+- `make build` builds the production UI and a standalone release `melt` that embeds it.
 - `make test` runs the Rust and UI tests.
 - `make lint` checks Rust formatting and runs Clippy with warnings denied.
 - `make contract` executes the checked-in CLI JSON/exit-code fixtures.

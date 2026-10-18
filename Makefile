@@ -1,13 +1,14 @@
 .PHONY: build test lint ci contract bambu-evidence-check help license-check run install-desktop uninstall-desktop release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test screenshots
 .DEFAULT_GOAL := help
 
-build: cargo-build ui-build ## Build the Rust workspace and UI
+build: ui-build ## Build a standalone release app with the UI embedded
+	cargo build --workspace --locked --release --features tauri/custom-protocol
 
 test: cargo-test ui-test ## Run the Rust and UI test suites
 
 lint: cargo-lint ## Check Rust formatting and linting
 
-ci: license-check bambu-evidence-check ui-install lint test build contract ## Run the continuous-integration checks
+ci: license-check bambu-evidence-check ui-install lint test cargo-build ui-build contract ## Run the continuous-integration checks
 
 license-check: ## Verify license declarations and files
 	test -f LICENSE
@@ -74,7 +75,7 @@ uninstall-desktop: ## Remove the development desktop entry and icons
 release-gate: bambu-evidence-check contract cargo-build ## Run required release checks
 	$(MAKE) release-cli-check
 
-release-cli-check: ## Verify the release CLI output
+release-cli-check: cargo-build ## Verify the release CLI output
 	MELT_CONFIG_DIR="$(CURDIR)/fixtures/cli-contract/config/empty" \
 		./target/debug/melt version --output json
 

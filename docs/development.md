@@ -22,14 +22,16 @@ From the repository root:
 ```sh
 make ui-install
 make build
-./target/debug/melt --help
+./target/release/melt --help
 make run
 ```
 
-`make build` compiles the debug Rust workspace and type-checks/builds the UI; it
-does not create native installers. `make run` starts Vite at
-`http://127.0.0.1:1420`, waits for it, then runs `melt-desktop`'s `melt` binary.
-The development app uses this server, while packaged builds use `ui/dist`.
+`make build` type-checks/builds the UI, then compiles a release workspace with
+Tauri's `custom-protocol` feature so `target/release/melt` embeds `ui/dist` and
+runs standalone; it does not create native installers. `make run` starts Vite
+at `http://127.0.0.1:1420`, waits for it, then runs the debug `melt` binary,
+which loads the UI from that server. A debug build without `custom-protocol`
+always expects the dev server and shows a connection error without it.
 CLI commands enter before GTK/Tauri startup and do not need a display server.
 Serving the UI alone does not provide the Tauri backend or printer controls.
 
@@ -102,7 +104,7 @@ permission to run blocking I/O in the UI.
 | `make ui-install` | `bun install --cwd ui --frozen-lockfile` |
 | `make cargo-build` | `cargo build --workspace --locked` |
 | `make ui-build` | `vue-tsc --noEmit` then Vite production build |
-| `make build` | Rust debug build and UI build |
+| `make build` | UI build, then release workspace build embedding `ui/dist` (standalone `target/release/melt`) |
 | `make cargo-test` | All Rust workspace tests with `--locked` |
 | `make ui-test` | `bun run --cwd ui test`, which runs Vitest |
 | `make screenshots` | Build the production UI and capture documentation views using isolated sample IPC/media; see [screenshot prerequisites](screenshots.md#reproducing-the-captures) |
@@ -111,10 +113,10 @@ permission to run blocking I/O in the UI.
 | `make contract` | Checked-in CLI JSON/exit fixtures |
 | `make bambu-evidence-check` | Bambu manifest/redaction integration test; transcript execution is covered by core unit tests |
 | `make license-check` | AGPL metadata, license file and bundled license declaration |
-| `make ci` | License/evidence checks, locked UI install, lint, tests, builds and CLI fixtures |
+| `make ci` | License/evidence checks, locked UI install, lint, tests, debug Rust build, UI build and CLI fixtures |
 | `make release-gate` | Evidence, CLI fixtures, Rust build and built executable version smoke test |
 | `make release-qualification` | Full `ci` plus executable version smoke test |
-| `make release-cli-check` | `target/debug/melt version --output json` against empty fixture config; requires a prior build |
+| `make release-cli-check` | `target/debug/melt version --output json` against empty fixture config; runs `cargo-build` first |
 | `make release-evidence RELEASE_TAG=<tag>` | Structural validation of frozen release documents |
 | `make install-desktop` / `make uninstall-desktop` | Add/remove the development desktop entry and hicolor icons |
 | `make help` | Full target list |
