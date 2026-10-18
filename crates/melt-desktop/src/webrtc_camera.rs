@@ -229,7 +229,7 @@ async fn negotiate(
         .map_err(|error| format!("WebRTC H.264 profile: {error}"))?;
     let registry = register_default_interceptors(Registry::new(), &mut media_engine)
         .map_err(|error| format!("WebRTC interceptors: {error}"))?;
-    // The webview runs on this machine; one socket per IPv4 interface yields its host candidates.
+    // One socket per IPv4/IPv6 interface; webrtc skips unsupported address families.
     let peer = PeerConnectionBuilder::new()
         .with_configuration(RTCConfiguration::default())
         .with_media_engine(media_engine)
@@ -237,7 +237,7 @@ async fn negotiate(
         .with_handler(Arc::new(GatheringHandler {
             complete: gathering_tx,
         }))
-        .with_udp_addrs(vec!["0.0.0.0:0".to_owned()])
+        .with_udp_addrs(vec!["0.0.0.0:0".to_owned(), "[::]:0".to_owned()])
         .build()
         .await
         .map_err(|error| format!("WebRTC peer: {error}"))?;
@@ -417,6 +417,7 @@ fn decode_profile(value: &str) -> Option<[u8; 3]> {
 #[cfg(test)]
 mod tests {
     use std::{
+        net::{IpAddr, UdpSocket},
         sync::{
             Arc,
             atomic::{AtomicBool, Ordering},
@@ -462,6 +463,42 @@ mod tests {
                     .map(|codec| codec.payload_type)
                     .collect::<Vec<_>>()
             );
+        });
+    }
+
+    #[test]
+    fn gathers_candidates_for_supported_address_families() {
+        let (codec, payload_type) =
+            codec_capability(&[0x67, 0x4d, 0x00, 0x1f], &[0x68], OFFER).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let (gathering_tx, mut gathering_rx) = tokio::sync::mpsc::channel(1);
+            let (peer, _track) = negotiate(codec, payload_type, OFFER.to_owned(), gathering_tx)
+                .await
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(5), gathering_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let answer = peer.local_description().await.unwrap();
+            peer.close().await.unwrap();
+            let addresses: Vec<IpAddr> = answer
+                .sdp
+                .lines()
+                .filter(|line| line.starts_with("a=candidate:"))
+                .map(|line| line.split_whitespace().nth(4).unwrap().parse().unwrap())
+                .collect();
+            for (bind_addr, ipv6) in [("0.0.0.0:0", false), ("[::]:0", true)] {
+                if UdpSocket::bind(bind_addr).is_ok() {
+                    assert!(
+                        addresses.iter().any(|address| address.is_ipv6() == ipv6),
+                        "no candidate for supported bind address {bind_addr}: {addresses:?}"
+                    );
+                }
+            }
         });
     }
 
