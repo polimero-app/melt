@@ -8,9 +8,13 @@ updates:
       cargo:
         patterns: ["*"]
     ignore:
-      # Pre-1.0: webrtc minors may break the camera session API; port
-      # deliberately. Patches still land.
+      # Pre-1.0: webrtc and rtc minors may break the camera session API;
+      # port them together. Patches still land.
       - dependency-name: webrtc
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+      - dependency-name: rtc
         update-types:
           - version-update:semver-minor
           - version-update:semver-major
