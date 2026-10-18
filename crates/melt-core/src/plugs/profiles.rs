@@ -198,6 +198,9 @@ pub fn commit_update(
     let latest = config
         .get_plug(&current)
         .ok_or_else(|| PlugError::NotFound(current.clone()))?;
+    if latest.id != plug.profile.id {
+        return Err(PlugError::ProfileChanged);
+    }
     plug.profile.printers = latest.printers.clone();
     plug.profile.cameras = latest.cameras.clone();
 
@@ -906,5 +909,23 @@ mod tests {
             fs::read_to_string(dir.path().join("melt.yaml")).unwrap(),
             before
         );
+    }
+
+    #[test]
+    fn commit_update_refuses_a_replaced_plug() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::default();
+        create(dir.path(), &store, "bench");
+        let update = prepare_update(dir.path(), &store, "bench", request("bench", "new")).unwrap();
+        remove(dir.path(), &store, "bench").unwrap();
+        let recreated = create(dir.path(), &store, "bench");
+
+        let result = commit_update(dir.path(), &store, update);
+
+        assert!(matches!(result, Err(PlugError::ProfileChanged)));
+        let now = resolve(dir.path(), &store, "bench").unwrap();
+        assert_eq!(now.profile.id, recreated.id);
+        assert_eq!(now.password, "s3cret");
+        assert_eq!(store.0.lock().unwrap().len(), 1);
     }
 }
