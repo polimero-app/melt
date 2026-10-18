@@ -1,4 +1,4 @@
-.PHONY: build test lint ci contract bambu-evidence-check help license-check run install-desktop uninstall-desktop release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test screenshots
+.PHONY: build test lint ci ci-rust ci-ui contract bambu-evidence-check help license-check run install-desktop uninstall-desktop release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test screenshots
 .DEFAULT_GOAL := help
 
 build: ui-build ## Build a standalone release app with the UI embedded
@@ -8,7 +8,12 @@ test: cargo-test ui-test ## Run the Rust and UI test suites
 
 lint: cargo-lint ## Check Rust formatting and linting
 
-ci: license-check bambu-evidence-check ui-install lint test cargo-build ui-build contract ## Run the continuous-integration checks
+ci: ci-rust ci-ui ## Run the continuous-integration checks
+
+# The CI workflow runs these as separate jobs; keep the list here only.
+ci-rust: license-check cargo-lint cargo-test cargo-build contract ## Run the Rust CI checks
+
+ci-ui: ui-install ui-test ui-build ## Run the UI CI checks
 
 license-check: ## Verify license declarations and files
 	test -f LICENSE

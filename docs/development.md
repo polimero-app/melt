@@ -113,7 +113,9 @@ permission to run blocking I/O in the UI.
 | `make contract` | Checked-in CLI JSON/exit fixtures |
 | `make bambu-evidence-check` | Bambu manifest/redaction integration test; transcript execution is covered by core unit tests |
 | `make license-check` | AGPL metadata, license file and bundled license declaration |
-| `make ci` | License/evidence checks, locked UI install, lint, tests, debug Rust build, UI build and CLI fixtures |
+| `make ci-rust` | License check, Rust lint, workspace tests (including Bambu evidence), debug build and CLI fixtures; the CI `cargo` job |
+| `make ci-ui` | Locked UI install, UI tests and UI build; the CI `ui` job |
+| `make ci` | `ci-rust` and `ci-ui`, the same checks the CI workflow runs |
 | `make release-gate` | Evidence, CLI fixtures, Rust build and built executable version smoke test |
 | `make release-qualification` | Full `ci` plus executable version smoke test |
 | `make release-cli-check` | `target/debug/melt version --output json` against empty fixture config; runs `cargo-build` first |
