@@ -4099,6 +4099,7 @@ fn main() {
         .manage(TransferState::default())
         .manage(SlicerState::default())
         .manage(Arc::new(melt_core::plugs::manager::PlugManager::default()))
+        .manage(plugs::SharedSchedule::default())
         .setup(|app| {
             let state = app.state::<MonitorState>().inner().clone();
             let firmware_state = app.state::<FirmwareUpdateState>().inner().clone();
@@ -4110,7 +4111,8 @@ fn main() {
                 .state::<Arc<melt_core::plugs::manager::PlugManager>>()
                 .inner()
                 .clone();
-            plugs::start_poller(app.handle().clone(), plug_manager);
+            let plug_schedule = app.state::<plugs::SharedSchedule>().inner().clone();
+            plugs::start_poller(app.handle().clone(), plug_manager, plug_schedule);
             Ok(())
         })
         .manage(PreferencesState::default())
