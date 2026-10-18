@@ -2,6 +2,7 @@
 //! Drivers form a closed set; `tapo` is the only one today. Only [`Session`]
 //! and the functions built on it touch the network.
 
+pub mod manager;
 mod profiles;
 mod tapo;
 
