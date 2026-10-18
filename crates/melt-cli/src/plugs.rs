@@ -2,23 +2,26 @@
 //! named option (`--printer` or `--camera`), because both kinds can share a
 //! name.
 
-use std::io::Write;
+use std::{collections::BTreeMap, io::Write, path::Path};
 
 use melt_core::{
     AppError,
     config::{PlugTarget, config_dir},
     keychain::SystemKeychain,
     plugs::{
-        self, DEFAULT_TIMEOUT, DRIVERS, PlugError, PlugRemoveResult, PlugRequest, PlugSummary,
-        ResolvedPlug,
+        self, DEFAULT_TIMEOUT, DRIVERS, Observation, PlugError, PlugRemoveResult, PlugRequest,
+        PlugStatus, PlugSummary, PowerChange, PowerState, ResolvedPlug,
     },
 };
 use serde::Serialize;
+use serde_json::{Value, json};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use super::{
     OutputFormat, ParsedOptions,
     cameras::{required, respond},
-    config_error, confirm, mark_network_call, parse_options, read_secret_file,
+    config_error, confirm, confirm_on, mark_network_call, parse_options, read_secret_file,
+    write_error_with_details,
 };
 
 /// `args` starts with the action (`add`, `list`, ...).
@@ -102,7 +105,190 @@ pub(crate) fn run_plug_command(
                 err,
             )
         }
+        "status" => respond(
+            &command,
+            format,
+            status(rest),
+            |data: &PlugStatus, out| {
+                let name = rest.first().map_or("", |name| name.as_str());
+                writeln!(
+                    out,
+                    "Plug {name} is {} ({}, observed {})",
+                    state_word(data.relay),
+                    data.device.model,
+                    data.observed_at
+                )
+            },
+            out,
+            err,
+        ),
+        "on" | "off" => {
+            let state = if action.as_str() == "on" {
+                PowerState::On
+            } else {
+                PowerState::Off
+            };
+            let name = rest.first().map_or("", |name| name.as_str());
+            let is_terminal = std::io::IsTerminal::is_terminal(&std::io::stdin());
+            match power(rest, state, is_terminal, err) {
+                Ok(change) => respond(
+                    &command,
+                    format,
+                    Ok(change),
+                    |data: &PowerChange, out| {
+                        writeln!(
+                            out,
+                            "Plug {name} is {} (confirmed {})",
+                            state_word(data.status.relay),
+                            data.status.observed_at
+                        )
+                    },
+                    out,
+                    err,
+                ),
+                Err((error, details)) => {
+                    write_error_with_details(&command, format, error, details, out, err)
+                }
+            }
+        }
         _ => unreachable!("dispatch matches only known plug commands"),
+    }
+}
+
+fn state_word(state: PowerState) -> &'static str {
+    match state {
+        PowerState::On => "on",
+        PowerState::Off => "off",
+    }
+}
+
+type Failure = (AppError, BTreeMap<String, Value>);
+
+fn status(args: &[&String]) -> Result<PlugStatus, AppError> {
+    let (positionals, _) = parse_options(args, &[], &[]).map_err(AppError::usage)?;
+    let name = one_plug("plug status", &positionals)?;
+    let dir = config_dir().map_err(config_error)?;
+    let plug = plugs::resolve(dir, &SystemKeychain, name).map_err(plug_error)?;
+    runtime()?
+        .block_on(plugs::status(&plug))
+        .map_err(plug_error)
+}
+
+fn off_prompt(plug: &PlugSummary) -> String {
+    let list = |names: &[String]| {
+        if names.is_empty() {
+            "none".to_owned()
+        } else {
+            names.join(", ")
+        }
+    };
+    format!(
+        "Turn off plug {}? Power is cut immediately to printers: {}; cameras: {}. Type 'yes' to continue: ",
+        plug.name,
+        list(&plug.printers),
+        list(&plug.cameras)
+    )
+}
+
+/// Parses, confirms (`off` only) and resolves the secret. Nothing here
+/// touches the network, so a refusal leaves `durationMs` unset.
+fn prepare_power(
+    args: &[&String],
+    state: PowerState,
+    dir: &Path,
+    is_terminal: bool,
+    err: &mut dyn Write,
+) -> Result<ResolvedPlug, AppError> {
+    let command = format!("plug {}", state_word(state));
+    let flags: &[&str] = if state == PowerState::Off {
+        &["yes"]
+    } else {
+        &[]
+    };
+    let (positionals, options) = parse_options(args, flags, &[]).map_err(AppError::usage)?;
+    let name = one_plug(&command, &positionals)?;
+    if state == PowerState::Off {
+        let summary = plugs::list(dir)
+            .map_err(plug_error)?
+            .into_iter()
+            .find(|plug| plug.name == name)
+            .ok_or_else(|| plug_error(PlugError::NotFound(name.to_owned())))?;
+        if !options.enabled("yes") {
+            confirm_on(
+                is_terminal,
+                err,
+                &off_prompt(&summary),
+                "confirmation declined; no power command was sent",
+            )?;
+        }
+    }
+    plugs::resolve(dir, &SystemKeychain, name).map_err(plug_error)
+}
+
+fn power(
+    args: &[&String],
+    state: PowerState,
+    is_terminal: bool,
+    err: &mut dyn Write,
+) -> Result<PowerChange, Failure> {
+    let early = |error| (error, BTreeMap::new());
+    let dir = config_dir().map_err(config_error).map_err(early)?;
+    let plug = prepare_power(args, state, &dir, is_terminal, err).map_err(early)?;
+    runtime()
+        .map_err(early)?
+        .block_on(plugs::set_power(&plug, state))
+        .map_err(|error| power_failure(&plug.name, error))
+}
+
+/// Maps a power error to its CLI error and machine-readable details.
+fn power_failure(name: &str, error: PlugError) -> Failure {
+    let details = |requested: PowerState, observed: Option<(PowerState, String)>, uncertain| {
+        let (state, at) = observed.unzip();
+        BTreeMap::from([
+            ("requestedState".to_owned(), json!(state_word(requested))),
+            ("lastObservedState".to_owned(), json!(state.map(state_word))),
+            ("observedAt".to_owned(), json!(at)),
+            ("deliveryUncertain".to_owned(), json!(uncertain)),
+        ])
+    };
+    match &error {
+        PlugError::PowerUnconfirmed {
+            requested,
+            last_observed,
+        } => {
+            let observed = last_observed
+                .as_ref()
+                .map(|Observation { state, observed_at }| (*state, observed_at.clone()));
+            let last = observed
+                .as_ref()
+                .map_or("unknown", |(state, _)| state_word(*state));
+            let message = format!(
+                "Sent \"{}\" to plug {name} but could not confirm the result. Last known state: {last}.",
+                state_word(*requested)
+            );
+            let details = details(*requested, observed, true);
+            let mut mapped = plug_error(error);
+            mapped.message = message;
+            (mapped, details)
+        }
+        PlugError::PowerMismatch {
+            requested,
+            observed,
+        } => {
+            let message = format!(
+                "Sent \"{}\" to plug {name} but it reports {}.",
+                state_word(*requested),
+                state_word(*observed)
+            );
+            let now = OffsetDateTime::now_utc()
+                .format(&Rfc3339)
+                .unwrap_or_default();
+            let details = details(*requested, Some((*observed, now)), false);
+            let mut mapped = plug_error(error);
+            mapped.message = message;
+            (mapped, details)
+        }
+        _ => (plug_error(error), BTreeMap::new()),
     }
 }
 
@@ -157,8 +343,8 @@ fn one_plug<'a>(command: &str, positionals: &'a [String]) -> Result<&'a str, App
     }
 }
 
-/// Runs the async verification on a throwaway current-thread runtime.
-fn verify(plug: &ResolvedPlug) -> Result<(), AppError> {
+/// A throwaway current-thread runtime; creating it marks the network call.
+fn runtime() -> Result<tokio::runtime::Runtime, AppError> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -168,7 +354,11 @@ fn verify(plug: &ResolvedPlug) -> Result<(), AppError> {
             message: "cannot start async runtime".into(),
         })?;
     mark_network_call();
-    runtime
+    Ok(runtime)
+}
+
+fn verify(plug: &ResolvedPlug) -> Result<(), AppError> {
+    runtime()?
         .block_on(plugs::verify(plug))
         .map(drop)
         .map_err(plug_error)
@@ -355,7 +545,13 @@ pub(crate) fn plug_error(error: PlugError) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use melt_core::{keychain::SecretError, plugs::PowerState};
+    use crate::write_error_with_details;
+    use melt_core::{
+        keychain::SecretError,
+        plugs::{Observation, PowerState},
+    };
+    use serde_json::Value;
+    use std::collections::BTreeMap;
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|v| (*v).to_owned()).collect()
@@ -489,5 +685,158 @@ mod tests {
         };
         assert_eq!(error.exit_code, 2);
         assert_eq!(error.message, "non-interactive mode requires --yes");
+    }
+
+    fn plug_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("melt.yaml"),
+            "version: 3\nplugs:\n  bench:\n    id: '11111111111111111111111111111111'\n    driver: tapo\n    host: 192.0.2.30\n    username: operator@example.invalid\n    timeout: 10s\n    created: '2026-10-18T12:00:00Z'\n    updated: '2026-10-18T12:00:00Z'\n",
+        )
+        .unwrap();
+        dir
+    }
+
+    fn envelope(error: AppError, details: BTreeMap<String, Value>) -> Value {
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        write_error_with_details(
+            "plug on",
+            OutputFormat::Json,
+            error,
+            details,
+            &mut out,
+            &mut err,
+        );
+        serde_json::from_slice(&out).unwrap()
+    }
+
+    #[test]
+    fn off_without_tty_or_yes_sends_nothing() {
+        let dir = plug_dir();
+        let args = strings(&["bench"]);
+        let refs: Vec<&String> = args.iter().collect();
+        let mut err = Vec::new();
+        let Err(error) = prepare_power(&refs, PowerState::Off, dir.path(), false, &mut err) else {
+            panic!("needs --yes")
+        };
+        assert_eq!(error.exit_code, 2);
+        assert_eq!(error.code, "config_error");
+        assert_eq!(error.message, "non-interactive mode requires --yes");
+        assert!(err.is_empty(), "no prompt without a terminal");
+        assert!(crate::network_duration_ms().is_none(), "no network attempt");
+        let json = envelope(error, BTreeMap::new());
+        assert!(json["meta"].get("durationMs").is_none());
+    }
+
+    #[test]
+    fn unknown_plug_is_a_config_error_before_any_prompt() {
+        let dir = plug_dir();
+        let args = strings(&["ghost"]);
+        let refs: Vec<&String> = args.iter().collect();
+        let mut err = Vec::new();
+        let Err(error) = prepare_power(&refs, PowerState::Off, dir.path(), true, &mut err) else {
+            panic!("unknown plug")
+        };
+        assert_eq!((error.exit_code, error.code), (2, "config_error"));
+        assert!(err.is_empty());
+    }
+
+    #[test]
+    fn off_prompt_names_attachments() {
+        let mut plug = summary_for_test();
+        assert_eq!(
+            off_prompt(&plug),
+            "Turn off plug bench? Power is cut immediately to printers: none; cameras: none. Type 'yes' to continue: "
+        );
+        plug.printers = vec!["a".into(), "b".into()];
+        plug.cameras = vec!["porch".into()];
+        assert_eq!(
+            off_prompt(&plug),
+            "Turn off plug bench? Power is cut immediately to printers: a, b; cameras: porch. Type 'yes' to continue: "
+        );
+    }
+
+    fn summary_for_test() -> PlugSummary {
+        let dir = plug_dir();
+        plugs::list(dir.path()).unwrap().remove(0)
+    }
+
+    #[test]
+    fn unconfirmed_error_carries_details() {
+        let (error, details) = power_failure(
+            "bench",
+            PlugError::PowerUnconfirmed {
+                requested: PowerState::On,
+                last_observed: Some(Observation {
+                    state: PowerState::Off,
+                    observed_at: "2026-10-18T12:00:00Z".into(),
+                }),
+            },
+        );
+        assert_eq!(
+            error.message,
+            "Sent \"on\" to plug bench but could not confirm the result. Last known state: off."
+        );
+        assert_eq!(
+            envelope(error, details)["error"],
+            serde_json::json!({
+                "code": "power_change_unconfirmed",
+                "message": "Sent \"on\" to plug bench but could not confirm the result. Last known state: off.",
+                "details": {
+                    "requestedState": "on",
+                    "lastObservedState": "off",
+                    "observedAt": "2026-10-18T12:00:00Z",
+                    "deliveryUncertain": true
+                }
+            })
+        );
+        let (error, details) = power_failure(
+            "bench",
+            PlugError::PowerUnconfirmed {
+                requested: PowerState::Off,
+                last_observed: None,
+            },
+        );
+        assert!(error.message.ends_with("Last known state: unknown."));
+        let details = envelope(error, details)["error"]["details"].clone();
+        assert_eq!(
+            details,
+            serde_json::json!({
+                "requestedState": "off",
+                "lastObservedState": null,
+                "observedAt": null,
+                "deliveryUncertain": true
+            })
+        );
+    }
+
+    #[test]
+    fn mismatch_error_carries_details() {
+        let (error, details) = power_failure(
+            "bench",
+            PlugError::PowerMismatch {
+                requested: PowerState::On,
+                observed: PowerState::Off,
+            },
+        );
+        assert_eq!(
+            error.message,
+            "Sent \"on\" to plug bench but it reports off."
+        );
+        let details = envelope(error, details)["error"]["details"].clone();
+        assert_eq!(details["requestedState"], "on");
+        assert_eq!(details["lastObservedState"], "off");
+        assert_eq!(details["deliveryUncertain"], false);
+        assert!(details["observedAt"].is_string());
+    }
+
+    #[test]
+    fn existing_error_details_stay_empty() {
+        let (error, details) = power_failure("bench", PlugError::Timeout);
+        assert_eq!(error.code, "timeout");
+        assert_eq!(
+            envelope(error, details)["error"]["details"],
+            serde_json::json!({})
+        );
     }
 }

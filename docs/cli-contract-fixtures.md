@@ -13,11 +13,11 @@ exit code and JSON golden response. Goldens define the accepted output for the
 current Melt contract. Review intended response changes before updating a
 golden; history and previous expectations remain available in Git.
 
-The inventory currently has 41 paths in `commands` and 17 in
+The inventory currently has 41 paths in `commands` and 20 in
 `meltNativeCommands`, including command groups. All are marked implemented.
 The inventory is not a complete command/option reference; see the
 [CLI reference](cli.md) and command help for current syntax. The manifest has
-19 hardware-independent JSON/error cases; it is representative fixture
+21 hardware-independent JSON/error cases; it is representative fixture
 coverage, not a successful network fixture for every public operation.
 Unit/simulated network tests provide further behavior coverage.
 

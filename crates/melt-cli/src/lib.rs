@@ -276,10 +276,28 @@ const LEAF_COMMANDS: &[LeafCommand] = &[
         flags: "      --camera string    only plugs attached to this camera\n  -h, --help             help for list\n      --printer string   only plugs attached to this printer",
     },
     LeafCommand {
+        path: &["plug", "off"],
+        short: "Turn a smart plug off (cuts power immediately)",
+        args: "<plug> [flags]",
+        flags: "  -h, --help help for off\n      --yes  skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["plug", "on"],
+        short: "Turn a smart plug on",
+        args: "<plug> [flags]",
+        flags: "  -h, --help help for on",
+    },
+    LeafCommand {
         path: &["plug", "remove"],
         short: "Remove a smart plug profile",
         args: "<plug> [flags]",
         flags: "  -h, --help help for remove\n      --yes  skip interactive confirmation",
+    },
+    LeafCommand {
+        path: &["plug", "status"],
+        short: "Show a smart plug's relay state",
+        args: "<plug> [flags]",
+        flags: "  -h, --help help for status",
     },
     LeafCommand {
         path: &["plug", "unlink"],
@@ -394,7 +412,10 @@ const COMMAND_GROUPS: &[CommandGroup] = &[
             ("edit", "Edit a smart plug profile"),
             ("link", "Attach a smart plug to a printer or camera"),
             ("list", "List smart plug profiles and their attachments"),
+            ("off", "Turn a smart plug off (cuts power immediately)"),
+            ("on", "Turn a smart plug on"),
             ("remove", "Remove a smart plug profile"),
+            ("status", "Show a smart plug's relay state"),
             ("unlink", "Detach a smart plug from a printer or camera"),
         ],
     },
@@ -574,7 +595,7 @@ fn meta(command: &str) -> Meta<'_> {
 struct ErrorDetail<'a> {
     code: &'a str,
     message: &'a str,
-    details: BTreeMap<String, String>,
+    details: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -723,7 +744,16 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                 && rest.first().is_some_and(|action| {
                     matches!(
                         action.as_str(),
-                        "add" | "drivers" | "edit" | "link" | "list" | "remove" | "unlink"
+                        "add"
+                            | "drivers"
+                            | "edit"
+                            | "link"
+                            | "list"
+                            | "off"
+                            | "on"
+                            | "remove"
+                            | "status"
+                            | "unlink"
                     )
                 }) =>
         {
@@ -5506,6 +5536,17 @@ fn write_error(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
+    write_error_with_details(command, format, error, BTreeMap::new(), out, err)
+}
+
+fn write_error_with_details(
+    command: &str,
+    format: OutputFormat,
+    error: AppError,
+    details: BTreeMap<String, serde_json::Value>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
     if matches!(format, OutputFormat::Json) {
         let envelope: Envelope<()> = Envelope {
             ok: false,
@@ -5513,7 +5554,7 @@ fn write_error(
             error: Some(ErrorDetail {
                 code: error.code,
                 message: &error.message,
-                details: BTreeMap::new(),
+                details,
             }),
             // The reference implementation reports durationMs on success only.
             meta: Meta {
@@ -5535,7 +5576,16 @@ fn write_json<T: Serialize>(out: &mut dyn Write, value: &T) -> serde_json::Resul
 
 /// Asks for a typed `yes` on stderr/stdin; refuses when stdin is not a terminal.
 fn confirm(err: &mut dyn Write, prompt: &str, declined: &str) -> Result<(), AppError> {
-    if !std::io::stdin().is_terminal() {
+    confirm_on(std::io::stdin().is_terminal(), err, prompt, declined)
+}
+
+fn confirm_on(
+    is_terminal: bool,
+    err: &mut dyn Write,
+    prompt: &str,
+    declined: &str,
+) -> Result<(), AppError> {
+    if !is_terminal {
         return Err(AppError::usage("non-interactive mode requires --yes"));
     }
     let _ = write!(err, "{prompt}");

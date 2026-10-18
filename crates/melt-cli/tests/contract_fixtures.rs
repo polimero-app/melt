@@ -1,4 +1,4 @@
-use std::{collections::HashSet, env, ffi::OsString, fs, path::Path, sync::Mutex};
+use std::{collections::HashSet, env, ffi::OsString, fs, io::IsTerminal, path::Path, sync::Mutex};
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -22,6 +22,9 @@ struct Fixture {
     stdout: String,
     stderr: String,
     ignore_json_pointers: Vec<String>,
+    config_dir: Option<String>,
+    #[serde(default)]
+    requires_no_tty: bool,
 }
 
 static CONFIG_ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -61,10 +64,17 @@ fn contract_fixtures_match_the_cli_envelope_and_exit_contract() {
 
     let manifest: Manifest = serde_json::from_value(read_json("manifest.json")).expect("manifest");
     assert_eq!(manifest.schema_version, 1);
-    assert_eq!(manifest.fixtures.len(), 19);
+    assert_eq!(manifest.fixtures.len(), 21);
     let mut fixture_ids = HashSet::new();
 
     for fixture in manifest.fixtures {
+        // A real terminal would get an interactive prompt; the unit tests cover
+        // that branch deterministically.
+        let skip = fixture.requires_no_tty && std::io::stdin().is_terminal();
+        let _fixture_config = fixture
+            .config_dir
+            .as_ref()
+            .map(|dir| ConfigDirGuard::set(Path::new(FIXTURE_ROOT).join(dir)));
         assert!(
             fixture_ids.insert(fixture.id.clone()),
             "duplicate fixture ID"
@@ -105,6 +115,9 @@ fn contract_fixtures_match_the_cli_envelope_and_exit_contract() {
             remove_pointer(&mut output, pointer);
         }
 
+        if skip {
+            continue;
+        }
         let mut actual_stdout = Vec::new();
         let mut actual_stderr = Vec::new();
         let actual_exit = melt_cli::run(&fixture.args, &mut actual_stdout, &mut actual_stderr);

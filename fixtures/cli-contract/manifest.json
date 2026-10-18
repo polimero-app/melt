@@ -171,6 +171,26 @@
       "stdout": "golden/plug-link-unknown-printer.json",
       "stderr": "",
       "ignoreJsonPointers": []
+    },
+    {
+      "id": "plug-status-unknown-json",
+      "command": "plug status",
+      "args": ["plug", "status", "ghost", "--output", "json"],
+      "exitCode": 2,
+      "stdout": "golden/plug-status-unknown.json",
+      "stderr": "",
+      "ignoreJsonPointers": []
+    },
+    {
+      "id": "plug-off-noninteractive-json",
+      "command": "plug off",
+      "args": ["plug", "off", "bench", "--output", "json"],
+      "exitCode": 2,
+      "stdout": "golden/plug-off-noninteractive.json",
+      "stderr": "",
+      "ignoreJsonPointers": [],
+      "configDir": "config/plug",
+      "requiresNoTty": true
     }
   ]
 }

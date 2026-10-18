@@ -1,0 +1,10 @@
+version: 3
+plugs:
+  bench:
+    id: '11111111111111111111111111111111'
+    driver: tapo
+    host: 192.0.2.30
+    username: operator@example.invalid
+    timeout: 10s
+    created: '2026-10-18T12:00:00Z'
+    updated: '2026-10-18T12:00:00Z'

@@ -18,7 +18,10 @@
     {"path": "plug list", "arguments": "", "flags": ["--printer <printer>", "--camera <camera>"], "implementation": "implemented"},
     {"path": "plug remove", "arguments": "<plug>", "flags": ["--yes"], "implementation": "implemented"},
     {"path": "plug link", "arguments": "<plug>", "flags": ["--printer <printer>", "--camera <camera>"], "implementation": "implemented"},
-    {"path": "plug unlink", "arguments": "<plug>", "flags": ["--printer <printer>", "--camera <camera>"], "implementation": "implemented"}
+    {"path": "plug unlink", "arguments": "<plug>", "flags": ["--printer <printer>", "--camera <camera>"], "implementation": "implemented"},
+    {"path": "plug status", "arguments": "<plug>", "flags": [], "implementation": "implemented"},
+    {"path": "plug on", "arguments": "<plug>", "flags": [], "implementation": "implemented"},
+    {"path": "plug off", "arguments": "<plug>", "flags": ["--yes"], "implementation": "implemented"}
   ],
   "commands": [
     {"path": "melt", "arguments": "", "flags": [], "implementation": "implemented"},
