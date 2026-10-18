@@ -14,9 +14,6 @@ ignore = [
   { id = "RUSTSEC-2026-0370", reason = "zvariant via tauri-plugin-notification > notify-rust > zbus" },
   { id = "RUSTSEC-2026-0371", reason = "zbus_names via tauri-plugin-notification > notify-rust > zbus" },
   { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via tauri-plugin-notification > notify-rust > zbus" },
-  # Our own direct dependency: serde_yaml is deprecated. Remove once melt-core
-  # moves config/preferences YAML to a maintained crate.
-  { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml via serde_yaml (melt-core); migration pending" },
 ]
 
 [licenses]

@@ -16,7 +16,7 @@ pub enum PreferencesError {
     #[error("unsupported preferences schema version: got {got}")]
     UnsupportedVersion { got: u8 },
     #[error("malformed preferences file: {0}")]
-    Malformed(#[from] serde_yaml::Error),
+    Malformed(#[from] serde_saphyr::Error),
     #[error("preferences file changed since it was read")]
     ConcurrentUpdate,
     #[error("{0}")]
@@ -102,7 +102,7 @@ impl Preferences {
             });
         }
 
-        let file: PreferencesFile = serde_yaml::from_slice(&bytes)?;
+        let file: PreferencesFile = serde_saphyr::from_slice(&bytes)?;
         if file.version != CURRENT_VERSION {
             return Err(PreferencesError::UnsupportedVersion { got: file.version });
         }
@@ -165,13 +165,14 @@ impl Preferences {
 
         fs::create_dir_all(dir)?;
         restrict_dir_permissions(dir)?;
-        let bytes = serde_yaml::to_string(&PreferencesFile {
+        let bytes = serde_saphyr::to_string(&PreferencesFile {
             version: CURRENT_VERSION,
             notifications: self.notifications.clone(),
             slicers: self.slicers.clone(),
             library_path: self.library_path.clone(),
             public_firmware_catalogue: self.public_firmware_catalogue,
-        })?
+        })
+        .map_err(std::io::Error::other)?
         .into_bytes();
         let mut temp = NamedTempFile::new_in(dir)?;
         restrict_file_permissions(temp.as_file())?;

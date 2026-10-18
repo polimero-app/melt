@@ -21,7 +21,7 @@ pub enum ConfigError {
     #[error("unsupported config schema version: got {got}, want 1 or {MAX_VERSION}")]
     UnsupportedVersion { got: u8 },
     #[error("malformed config file: {0}")]
-    Malformed(#[from] serde_yaml::Error),
+    Malformed(#[from] serde_saphyr::Error),
     #[error("invalid camera configuration: {0}")]
     InvalidCameras(&'static str),
     #[error("config file changed since it was read")]
@@ -132,7 +132,7 @@ impl Config {
             });
         }
 
-        let file: ConfigFile = serde_yaml::from_slice(&bytes).map_err(ConfigError::Malformed)?;
+        let file: ConfigFile = serde_saphyr::from_slice(&bytes).map_err(ConfigError::Malformed)?;
         if !(1..=MAX_VERSION).contains(&file.version) {
             return Err(ConfigError::UnsupportedVersion { got: file.version });
         }
@@ -409,13 +409,13 @@ impl Config {
         restrict_dir_permissions(dir)?;
 
         let has_cameras = !self.cameras.is_empty() || !self.printer_cameras.is_empty();
-        let bytes = serde_yaml::to_string(&ConfigFile {
+        let bytes = serde_saphyr::to_string(&ConfigFile {
             version: if has_cameras { MAX_VERSION } else { 1 },
             profiles: self.profiles.clone(),
             cameras: self.cameras.clone(),
             printer_cameras: self.printer_cameras.clone(),
         })
-        .map_err(ConfigError::Malformed)?
+        .map_err(std::io::Error::other)?
         .into_bytes();
 
         let mut temp = NamedTempFile::new_in(dir)?;
