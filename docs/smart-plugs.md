@@ -133,10 +133,14 @@ with `requestedState`, `lastObservedState`, `observedAt` and
 [CLI reference](cli.md#smart-plugs).
 
 Immediately before dispatch, Melt rechecks the profile after the pre-read.
-An edit or removal during connection setup or that read aborts the command.
-A command already sent may still take effect. Concurrent edits also reject
-outdated profile changes before changing settings or keychain credentials;
-reload the profile before retrying a conflicting edit.
+The command keeps the plug ID, settings and attachments shown at confirmation:
+an edit, attachment change, removal or replacement while the prompt is open,
+during connection setup or during that read aborts it. The desktop does not
+offer power-off confirmation if it cannot refresh the attachments.
+A command already sent may still take effect. Concurrent profile saves
+serialize their config and keychain changes, including rollback. Desktop
+forms also reject changes made since the form opened; close and reopen a
+conflicting form to review the newer settings before retrying.
 
 If someone uses the Tapo app or the plug's button, the next read reports the
 device's value; Melt never answers from a cache.

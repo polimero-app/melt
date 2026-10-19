@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { PhArrowClockwise, PhPlug, PhPower } from '@phosphor-icons/vue'
 import type { MessageKey } from '../i18n'
 import { commandDetail, commandMessage, type Translate } from '../errors'
-import { isStale, offConfirmation, type PlugObservation, type PlugSummary, type PowerState, type RelayState } from '../plugs'
+import { isStale, offConfirmation, snapshotPlug, type PlugObservation, type PlugSummary, type PowerState, type RelayState } from '../plugs'
 import Button from './Button.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 
@@ -17,7 +17,7 @@ const props = withDefaults(defineProps<{
   locale: string
   showName?: boolean
   /** Reloads the plug list so the Off dialog names current attachments. */
-  refresh?: () => Promise<void>
+  refresh: () => Promise<PlugSummary[]>
 }>(), { showName: true })
 
 // After a confirmed "on" the parent restarts the affected visible camera viewers.
@@ -25,6 +25,7 @@ const emit = defineEmits<{ changed: [state: PowerState] }>()
 
 const busy = ref(false)
 const confirmOpen = ref(false)
+const confirmedPlug = ref(snapshotPlug(props.plug))
 const error = ref<string>()
 
 const relayLabel = (relay: RelayState) => props.t(relay === 'on' ? 'plugsView.relayOn' : relay === 'off' ? 'plugsView.relayOff' : 'plugsView.relayUnknown')
@@ -48,7 +49,7 @@ const statusLine = computed(() => {
 const attached = computed(() => [...props.plug.printers, ...props.plug.cameras].join(', ') || props.t('plugsView.attachedNone'))
 
 const confirmation = computed(() => {
-  const { printers, cameras, active } = offConfirmation(props.plug, props.activity)
+  const { printers, cameras, active } = offConfirmation(confirmedPlug.value, props.activity)
   const none = props.t('plugControl.none')
   const printerList = printers.map((name) => (active.includes(name) ? `${name} (${props.t(`plugControl.activity.${props.activity[name.toLowerCase()]}` as MessageKey)})` : name))
   return props.t('plugControl.offDescription', {
@@ -57,19 +58,19 @@ const confirmation = computed(() => {
   })
 })
 
-async function setPower(state: PowerState) {
+async function setPower(state: PowerState, expected = snapshotPlug(props.plug)) {
   if (busy.value) return
   busy.value = true
   error.value = undefined
   try {
-    await invoke('plug_set_power', { id: props.plug.id, state })
+    await invoke('plug_set_power', { expected, state })
     // Never optimistic: the displayed relay comes from the device reading.
-    await invoke('plug_status', { id: props.plug.id }).catch(() => undefined)
+    await invoke('plug_status', { id: expected.id }).catch(() => undefined)
     if (state === 'on') emit('changed', state)
   } catch (reason) {
     const code = (reason as { code?: string } | null)?.code
     error.value = [commandMessage(reason, props.t), commandDetail(reason)].filter(Boolean).join(' ')
-    if (code === 'plugPowerMismatch') await invoke('plug_status', { id: props.plug.id }).catch(() => undefined)
+    if (code === 'plugPowerMismatch') await invoke('plug_status', { id: expected.id }).catch(() => undefined)
   } finally {
     busy.value = false
   }
@@ -89,13 +90,25 @@ async function checkStatus() {
 }
 
 async function askOff() {
-  await props.refresh?.().catch(() => undefined)
-  confirmOpen.value = true
+  if (busy.value) return
+  busy.value = true
+  error.value = undefined
+  try {
+    const id = props.plug.id
+    const current = (await props.refresh()).find((plug) => plug.id === id)
+    if (!current) throw { code: 'plugNotFound' }
+    confirmedPlug.value = snapshotPlug(current)
+    confirmOpen.value = true
+  } catch (reason) {
+    error.value = [commandMessage(reason, props.t), commandDetail(reason)].filter(Boolean).join(' ')
+  } finally {
+    busy.value = false
+  }
 }
 
 function confirmOff() {
   confirmOpen.value = false
-  void setPower('off')
+  void setPower('off', confirmedPlug.value)
 }
 </script>
 
@@ -116,7 +129,7 @@ function confirmOff() {
     <p v-if="error" class="mt-1 text-xs text-red-600 dark:text-red-400" role="alert">{{ error }}</p>
     <ConfirmDialog
       :open="confirmOpen"
-      :title="t('plugControl.offTitle', { name: plug.name })"
+      :title="t('plugControl.offTitle', { name: confirmedPlug.name })"
       :description="confirmation"
       :confirm-label="t('plugControl.off')"
       :cancel-label="t('common.cancel')"

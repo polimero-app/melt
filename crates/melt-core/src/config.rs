@@ -155,9 +155,18 @@ pub struct Config {
     printer_cameras: BTreeMap<String, PrinterCameras>,
     plugs: BTreeMap<String, PlugProfile>,
     digest: Option<[u8; 32]>,
+    write_lock: Option<File>,
 }
 
 impl Config {
+    /// Holds the config's write lock until dropped; save back to the same directory.
+    pub(crate) fn open_locked(dir: impl AsRef<Path>) -> Result<Self, ConfigError> {
+        let lock = lock_config(dir.as_ref())?;
+        let mut config = Self::open(dir)?;
+        config.write_lock = Some(lock);
+        Ok(config)
+    }
+
     pub fn open(dir: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let path = dir.as_ref().join(CONFIG_FILE);
         let bytes = match fs::read(path) {
@@ -194,6 +203,7 @@ impl Config {
             printer_cameras: file.printer_cameras,
             plugs: file.plugs,
             digest: Some(digest(&bytes)),
+            write_lock: None,
         };
         config.validate()?;
         Ok(config)
@@ -597,9 +607,12 @@ impl Config {
     pub fn save(&mut self, dir: impl AsRef<Path>) -> Result<(), ConfigError> {
         let dir = dir.as_ref();
         self.validate()?;
+        let _lock = if self.write_lock.is_none() {
+            Some(lock_config(dir)?)
+        } else {
+            None
+        };
         self.check_unchanged(dir)?;
-        fs::create_dir_all(dir)?;
-        restrict_dir_permissions(dir)?;
 
         let has_cameras = !self.cameras.is_empty() || !self.printer_cameras.is_empty();
         let bytes = serde_saphyr::to_string(&ConfigFile {
@@ -637,6 +650,7 @@ impl Config {
             printer_cameras: BTreeMap::new(),
             plugs: BTreeMap::new(),
             digest: None,
+            write_lock: None,
         }
     }
 
@@ -652,6 +666,21 @@ impl Config {
         }
         Ok(())
     }
+}
+
+fn lock_config(dir: &Path) -> Result<File, ConfigError> {
+    fs::create_dir_all(dir)?;
+    restrict_dir_permissions(dir)?;
+    // The config is atomically replaced. Keep a separate, permanent lock inode.
+    let lock = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(dir.join("melt.yaml.lock"))?;
+    restrict_file_permissions(&lock)?;
+    lock.lock()?;
+    Ok(lock)
 }
 
 pub fn config_dir() -> Result<PathBuf, ConfigError> {
@@ -806,6 +835,44 @@ profiles:
             right.save(dir.path()),
             Err(ConfigError::ConcurrentUpdate)
         ));
+    }
+
+    #[test]
+    fn ordinary_saves_wait_for_a_locked_transaction_and_then_check_for_changes() {
+        use std::{sync::mpsc, time::Duration};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut transaction = Config::open_locked(dir.path()).unwrap();
+        let mut other = Config::open(dir.path()).unwrap();
+        other.add_profile("other", profile()).unwrap();
+        let (started_tx, started) = mpsc::channel();
+        let (finished_tx, finished) = mpsc::channel();
+        std::thread::scope(|scope| {
+            let path = dir.path();
+            let writer = scope.spawn(move || {
+                started_tx.send(()).unwrap();
+                let result = other.save(path);
+                finished_tx.send(()).unwrap();
+                result
+            });
+            started.recv().unwrap();
+            let overlapped = finished.recv_timeout(Duration::from_millis(100)).is_ok();
+            transaction.add_profile("winner", profile()).unwrap();
+            transaction.save(dir.path()).unwrap();
+            drop(transaction);
+            let result = writer.join().unwrap();
+            assert!(
+                !overlapped,
+                "ordinary saves must respect the transaction lock"
+            );
+            assert!(matches!(result, Err(ConfigError::ConcurrentUpdate)));
+        });
+        assert!(
+            Config::open(dir.path())
+                .unwrap()
+                .get_profile("winner")
+                .is_some()
+        );
     }
 
     #[test]

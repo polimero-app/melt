@@ -49,7 +49,7 @@ pub async fn plug_add(request: PlugRequest) -> Result<PlugSummary, CommandError>
 /// connection details change.
 #[tauri::command]
 pub async fn plug_edit(
-    name: String,
+    expected: PlugSummary,
     request: PlugRequest,
     app: AppHandle,
     manager: State<'_, Arc<PlugManager>>,
@@ -58,7 +58,7 @@ pub async fn plug_edit(
     let mut update = {
         let dir = dir.clone();
         blocking(move || {
-            plugs::prepare_update(dir, &SystemKeychain, &name, request).map_err(plug_error)
+            plugs::prepare_update(dir, &SystemKeychain, &expected, request).map_err(plug_error)
         })
         .await?
     };
@@ -131,19 +131,26 @@ pub async fn plug_status(
 /// Switches once with readback; never retried.
 #[tauri::command]
 pub async fn plug_set_power(
-    id: String,
+    expected: PlugSummary,
     state: PowerState,
     app: AppHandle,
     manager: State<'_, Arc<PlugManager>>,
     schedule: State<'_, SharedSchedule>,
 ) -> Result<PowerChange, CommandError> {
-    let (dir, key) = current_key(&id).await?;
+    let dir = dir()?;
+    let key = PlugKey::try_from(&expected).map_err(plug_error)?;
+    let id = expected.id.clone();
     let revision = {
-        let (dir, id) = (dir.clone(), id.clone());
-        move || plugs::revision(&dir, &id)
+        let (dir, expected) = (dir.clone(), expected.clone());
+        move || plugs::check_current(&dir, &expected).map(|()| Some(expected.updated.clone()))
     };
     let result = manager
-        .set_power(&key, state, resolver(dir, id.clone()), revision)
+        .set_power(
+            &key,
+            state,
+            move || plugs::resolve_expected(dir, &SystemKeychain, &expected),
+            revision,
+        )
         .await;
     publish(&app, &manager);
     if result.is_ok() {

@@ -27,7 +27,7 @@ pub struct PlugRequest {
     pub timeout: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlugSummary {
     pub name: String,
@@ -107,7 +107,7 @@ pub fn commit_create(
     plug: ResolvedPlug,
 ) -> Result<PlugSummary, PlugError> {
     let dir = dir.as_ref();
-    let mut config = Config::open(dir).map_err(PlugError::Config)?;
+    let mut config = Config::open_locked(dir).map_err(PlugError::Config)?;
     if config.get_plug(&plug.name).is_some() {
         return Err(PlugError::AlreadyExists(plug.name));
     }
@@ -133,10 +133,10 @@ pub fn commit_create(
 pub fn prepare_update(
     dir: impl AsRef<Path>,
     store: &dyn SecretStore,
-    current: &str,
+    expected: &PlugSummary,
     request: PlugRequest,
 ) -> Result<PlugUpdate, PlugError> {
-    let current = plug_name(current)?;
+    let current = plug_name(&expected.name)?;
     let name = plug_name(&request.name)?;
     let timeout = validate(&request)?;
     let config = Config::open(dir).map_err(PlugError::Config)?;
@@ -144,6 +144,9 @@ pub fn prepare_update(
         .get_plug(&current)
         .cloned()
         .ok_or_else(|| PlugError::NotFound(current.clone()))?;
+    if previous.id != expected.id || previous.updated != expected.updated {
+        return Err(PlugError::ProfileChanged);
+    }
     if name != current && config.get_plug(&name).is_some() {
         return Err(PlugError::AlreadyExists(name));
     }
@@ -201,7 +204,7 @@ pub fn commit_update(
         password_changed,
         needs_verify,
     } = update;
-    let mut config = Config::open(dir).map_err(PlugError::Config)?;
+    let mut config = Config::open_locked(dir).map_err(PlugError::Config)?;
     // Links may have changed while the caller verified; keep the latest.
     let latest = config
         .get_plug(&current)
@@ -241,7 +244,7 @@ pub fn remove(
 ) -> Result<PlugRemoveResult, PlugError> {
     let name = plug_name(name)?;
     let dir = dir.as_ref();
-    let mut config = Config::open(dir).map_err(PlugError::Config)?;
+    let mut config = Config::open_locked(dir).map_err(PlugError::Config)?;
     let plug = config
         .remove_plug(&name)
         .map_err(|error| config_error(error, &name))?;
@@ -329,6 +332,36 @@ pub fn resolve_by_id(
         .plug_by_id(id)
         .ok_or_else(|| PlugError::NotFound(id.to_owned()))?;
     resolved(store, name.to_owned(), profile.clone())
+}
+
+/// Resolves exactly the plug and attachments the caller displayed.
+pub fn resolve_expected(
+    dir: impl AsRef<Path>,
+    store: &dyn SecretStore,
+    expected: &PlugSummary,
+) -> Result<ResolvedPlug, PlugError> {
+    let config = Config::open(dir).map_err(PlugError::Config)?;
+    let profile = checked_profile(&config, expected)?;
+    resolved(store, expected.name.clone(), profile.clone())
+}
+
+/// Rechecks the displayed snapshot immediately before dispatch.
+pub fn check_current(dir: impl AsRef<Path>, expected: &PlugSummary) -> Result<(), PlugError> {
+    let config = Config::open(dir).map_err(PlugError::Config)?;
+    checked_profile(&config, expected).map(|_| ())
+}
+
+fn checked_profile<'a>(
+    config: &'a Config,
+    expected: &PlugSummary,
+) -> Result<&'a PlugProfile, PlugError> {
+    let (name, profile) = config
+        .plug_by_id(&expected.id)
+        .ok_or_else(|| PlugError::NotFound(expected.name.clone()))?;
+    if summary(config, name, profile) != *expected {
+        return Err(PlugError::ProfileChanged);
+    }
+    Ok(profile)
 }
 
 /// The profile revision, read from config only; `None` once removed.
@@ -508,6 +541,19 @@ mod tests {
         let mut plug = prepare_create(dir, request(name, "s3cret")).unwrap();
         plug.profile.device_id = Some("test-p110".into());
         commit_create(dir, store, plug).unwrap()
+    }
+
+    fn prepare_update(
+        dir: &Path,
+        store: &dyn SecretStore,
+        name: &str,
+        request: PlugRequest,
+    ) -> Result<PlugUpdate, PlugError> {
+        let expected = list(dir)?
+            .into_iter()
+            .find(|plug| plug.name == name)
+            .ok_or_else(|| PlugError::NotFound(name.into()))?;
+        super::prepare_update(dir, store, &expected, request)
     }
 
     fn add_devices(dir: &Path) -> String {
@@ -981,6 +1027,130 @@ mod tests {
         assert_eq!(
             resolve(dir.path(), &store, "bench").unwrap().password,
             "new-edit"
+        );
+    }
+
+    #[test]
+    fn a_stale_form_cannot_overwrite_settings_or_a_replacement_profile() {
+        for replace in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let store = MemoryStore::default();
+            let expected = create(dir.path(), &store, "bench");
+            if replace {
+                remove(dir.path(), &store, "bench").unwrap();
+                create(dir.path(), &store, "bench");
+            } else {
+                let mut changed = request("bench", "");
+                changed.timeout = "20s".into();
+                let newer = super::prepare_update(dir.path(), &store, &expected, changed).unwrap();
+                commit_update(dir.path(), &store, newer).unwrap();
+            }
+            let before = fs::read(dir.path().join("melt.yaml")).unwrap();
+            let result =
+                super::prepare_update(dir.path(), &store, &expected, request("renamed", ""));
+            assert!(matches!(result, Err(PlugError::ProfileChanged)));
+            assert_eq!(fs::read(dir.path().join("melt.yaml")).unwrap(), before);
+            assert_eq!(
+                resolve(dir.path(), &store, "bench").unwrap().password,
+                "s3cret"
+            );
+        }
+    }
+
+    #[test]
+    fn power_confirmation_includes_attachments_not_just_the_profile_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::default();
+        add_devices(dir.path());
+        create(dir.path(), &store, "bench");
+        for target in [printer(), camera()] {
+            let expected = list(dir.path()).unwrap().remove(0);
+            check_current(dir.path(), &expected).unwrap();
+            let linked = link(dir.path(), "bench", &target).unwrap();
+            assert_eq!(linked.updated, expected.updated);
+            assert!(matches!(
+                check_current(dir.path(), &expected),
+                Err(PlugError::ProfileChanged)
+            ));
+            assert!(matches!(
+                resolve_expected(dir.path(), &store, &expected),
+                Err(PlugError::ProfileChanged)
+            ));
+        }
+    }
+
+    #[test]
+    fn concurrent_password_commits_cannot_rollback_a_successful_save() {
+        use std::sync::{
+            Mutex,
+            atomic::{AtomicBool, Ordering},
+            mpsc,
+        };
+
+        struct GatedStore {
+            inner: MemoryStore,
+            gate: AtomicBool,
+            entered: mpsc::Sender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+        }
+        impl SecretStore for GatedStore {
+            fn get(&self, service: &str, account: &str) -> Result<String, SecretError> {
+                self.inner.get(service, account)
+            }
+            fn set(&self, service: &str, account: &str, secret: &str) -> Result<(), SecretError> {
+                if self.gate.swap(false, Ordering::SeqCst) {
+                    self.entered.send(()).unwrap();
+                    self.release.lock().unwrap().recv().unwrap();
+                }
+                self.inner.set(service, account, secret)
+            }
+            fn delete(&self, service: &str, account: &str) -> Result<(), SecretError> {
+                self.inner.delete(service, account)
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let inner = MemoryStore::default();
+        let expected = create(dir.path(), &inner, "bench");
+        let (entered_tx, entered) = mpsc::channel();
+        let (release, release_rx) = mpsc::channel();
+        let store = GatedStore {
+            inner,
+            gate: AtomicBool::new(true),
+            entered: entered_tx,
+            release: Mutex::new(release_rx),
+        };
+        let first =
+            super::prepare_update(dir.path(), &store, &expected, request("bench", "new")).unwrap();
+        let second =
+            super::prepare_update(dir.path(), &store, &expected, request("bench", "new")).unwrap();
+        std::thread::scope(|scope| {
+            let first = scope.spawn(|| commit_update(dir.path(), &store, first));
+            entered.recv_timeout(Duration::from_secs(5)).unwrap();
+            let (started_tx, started) = mpsc::channel();
+            let (finished_tx, finished) = mpsc::channel();
+            let (dir, store) = (dir.path(), &store);
+            let second = scope.spawn(move || {
+                started_tx.send(()).unwrap();
+                let result = commit_update(dir, store, second);
+                finished_tx.send(()).unwrap();
+                result
+            });
+            started.recv().unwrap();
+            let overlapped = finished.recv_timeout(Duration::from_millis(100)).is_ok();
+            release.send(()).unwrap();
+            let first = first.join().unwrap();
+            let second = second.join().unwrap();
+            assert!(
+                !overlapped,
+                "a second commit must wait for the secret/config transaction"
+            );
+            first.unwrap();
+            assert!(matches!(second, Err(PlugError::ProfileChanged)));
+        });
+        assert_eq!(
+            resolve(dir.path(), &store, "bench").unwrap().password,
+            "new"
         );
     }
 

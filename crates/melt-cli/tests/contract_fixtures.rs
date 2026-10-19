@@ -32,7 +32,6 @@ static CONFIG_ENV_LOCK: Mutex<()> = Mutex::new(());
 #[test]
 fn contract_fixtures_match_the_cli_envelope_and_exit_contract() {
     let _lock = CONFIG_ENV_LOCK.lock().unwrap();
-    let _config_dir = ConfigDirGuard::set(Path::new(FIXTURE_ROOT).join("config/empty"));
     let inventory: Value = read_json("inventory.json");
     assert_eq!(inventory["schemaVersion"], 2);
     let commands = inventory["commands"].as_array().expect("commands array");
@@ -71,10 +70,14 @@ fn contract_fixtures_match_the_cli_envelope_and_exit_contract() {
         // A real terminal would get an interactive prompt; the unit tests cover
         // that branch deterministically.
         let skip = fixture.requires_no_tty && std::io::stdin().is_terminal();
-        let _fixture_config = fixture
-            .config_dir
-            .as_ref()
-            .map(|dir| ConfigDirGuard::set(Path::new(FIXTURE_ROOT).join(dir)));
+        let dir = tempfile::tempdir().unwrap();
+        let source =
+            Path::new(FIXTURE_ROOT).join(fixture.config_dir.as_deref().unwrap_or("config/empty"));
+        for entry in fs::read_dir(source).unwrap() {
+            let entry = entry.unwrap();
+            fs::copy(entry.path(), dir.path().join(entry.file_name())).unwrap();
+        }
+        let _fixture_config = ConfigDirGuard::set(dir.path());
         assert!(
             fixture_ids.insert(fixture.id.clone()),
             "duplicate fixture ID"

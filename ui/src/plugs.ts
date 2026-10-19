@@ -15,6 +15,10 @@ export type PlugSummary = {
   updated: string
 }
 
+export function snapshotPlug(plug: PlugSummary): PlugSummary {
+  return { ...plug, printers: [...plug.printers], cameras: [...plug.cameras] }
+}
+
 /** Mirrors `PlugObservation`; the map from `plug_observations` is keyed by plug id. */
 export type PlugObservation = {
   relay: RelayState

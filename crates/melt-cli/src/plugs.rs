@@ -212,9 +212,8 @@ fn prepare_power(
     args: &[&String],
     state: PowerState,
     dir: &Path,
-    is_terminal: bool,
-    err: &mut dyn Write,
-) -> Result<ResolvedPlug, AppError> {
+    confirm: impl FnOnce(&PlugSummary) -> Result<(), AppError>,
+) -> Result<(ResolvedPlug, PlugSummary), AppError> {
     let command = format!("plug {}", state_word(state));
     let flags: &[&str] = if state == PowerState::Off {
         &["yes"]
@@ -224,22 +223,16 @@ fn prepare_power(
     let (positionals, options) = parse_options(args, flags, &[]).map_err(AppError::usage)?;
     let name = one_plug(&command, &positionals)?.to_ascii_lowercase();
     let name = name.as_str();
-    if state == PowerState::Off {
-        let summary = plugs::list(dir)
-            .map_err(plug_error)?
-            .into_iter()
-            .find(|plug| plug.name == name)
-            .ok_or_else(|| plug_error(PlugError::NotFound(name.to_owned())))?;
-        if !options.enabled("yes") {
-            confirm_on(
-                is_terminal,
-                err,
-                &off_prompt(&summary),
-                "confirmation declined; no power command was sent",
-            )?;
-        }
+    let expected = plugs::list(dir)
+        .map_err(plug_error)?
+        .into_iter()
+        .find(|plug| plug.name == name)
+        .ok_or_else(|| plug_error(PlugError::NotFound(name.to_owned())))?;
+    if state == PowerState::Off && !options.enabled("yes") {
+        confirm(&expected)?;
     }
-    plugs::resolve(dir, &SystemKeychain, name).map_err(plug_error)
+    let plug = plugs::resolve_expected(dir, &SystemKeychain, &expected).map_err(plug_error)?;
+    Ok((plug, expected))
 }
 
 fn power(
@@ -250,19 +243,21 @@ fn power(
 ) -> Result<PowerChange, Failure> {
     let early = |error| (error, BTreeMap::new());
     let dir = config_dir().map_err(config_error).map_err(early)?;
-    let plug = prepare_power(args, state, &dir, is_terminal, err).map_err(early)?;
-    let id = plug.profile.id.clone();
-    let expected_revision = plug.profile.updated.clone();
+    let (plug, expected) = prepare_power(args, state, &dir, |expected| {
+        confirm_on(
+            is_terminal,
+            err,
+            &off_prompt(expected),
+            "confirmation declined; no power command was sent",
+        )
+    })
+    .map_err(early)?;
     runtime()
         .map_err(early)?
         .block_on(plugs::set_power(&plug, state, move || async move {
-            tokio::task::spawn_blocking(move || match plugs::revision(dir, &id)? {
-                Some(revision) if revision == expected_revision => Ok(()),
-                Some(_) => Err(PlugError::ProfileChanged),
-                None => Err(PlugError::NotFound(id)),
-            })
-            .await
-            .unwrap_or(Err(PlugError::ProfileChanged))
+            tokio::task::spawn_blocking(move || plugs::check_current(dir, &expected))
+                .await
+                .unwrap_or(Err(PlugError::ProfileChanged))
         }))
         .map_err(|error| power_failure(&plug.name, error))
 }
@@ -458,18 +453,20 @@ fn edit(args: &[&String]) -> Result<PlugSummary, AppError> {
         .ok_or_else(|| plug_error(PlugError::NotFound(current.to_owned())))?;
     let request = PlugRequest {
         name: options.value("name").unwrap_or(current).to_owned(),
-        driver: existing.driver,
-        host: options.value("host").map_or(existing.host, str::to_owned),
+        driver: existing.driver.clone(),
+        host: options.value("host").unwrap_or(&existing.host).to_owned(),
         username: options
             .value("username")
-            .map_or(existing.username, str::to_owned),
+            .unwrap_or(&existing.username)
+            .to_owned(),
         password,
         timeout: options
             .value("timeout")
-            .map_or(existing.timeout, str::to_owned),
+            .unwrap_or(&existing.timeout)
+            .to_owned(),
     };
     let mut update =
-        plugs::prepare_update(&dir, &SystemKeychain, current, request).map_err(plug_error)?;
+        plugs::prepare_update(&dir, &SystemKeychain, &existing, request).map_err(plug_error)?;
     if update.needs_verify {
         verify(&mut update.plug)?;
     }
@@ -586,6 +583,45 @@ mod tests {
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|v| (*v).to_owned()).collect()
+    }
+
+    fn prepare_power(
+        args: &[&String],
+        state: PowerState,
+        dir: &Path,
+        is_terminal: bool,
+        err: &mut dyn Write,
+    ) -> Result<(ResolvedPlug, PlugSummary), AppError> {
+        super::prepare_power(args, state, dir, |expected| {
+            confirm_on(
+                is_terminal,
+                err,
+                &off_prompt(expected),
+                "confirmation declined; no power command was sent",
+            )
+        })
+    }
+
+    #[test]
+    fn off_refuses_a_plug_replaced_during_confirmation() {
+        let dir = plug_dir();
+        let args = strings(&["bench"]);
+        let refs: Vec<_> = args.iter().collect();
+        let result = super::prepare_power(&refs, PowerState::Off, dir.path(), |expected| {
+            let mut config = melt_core::config::Config::open(dir.path()).unwrap();
+            let mut replacement = config.remove_plug("bench").unwrap();
+            assert_eq!(replacement.id, expected.id);
+            replacement.id = "22222222222222222222222222222222".into();
+            config.add_plug("bench", replacement).unwrap();
+            config.save(dir.path()).unwrap();
+            Ok(())
+        });
+        let Err(error) = result else {
+            panic!("a replacement cannot use the original plug's confirmation")
+        };
+        assert_eq!(error.exit_code, 2);
+        assert_eq!(error.message, "plug \"bench\" not found");
+        assert!(crate::network_duration_ms().is_none());
     }
 
     #[test]

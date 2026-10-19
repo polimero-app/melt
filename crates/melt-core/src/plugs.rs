@@ -7,9 +7,9 @@ mod profiles;
 mod tapo;
 
 pub use profiles::{
-    PlugRemoveResult, PlugRequest, PlugSummary, PlugUpdate, commit_create, commit_update, link,
-    list, list_for, prepare_create, prepare_update, remove, resolve, resolve_by_id, revision,
-    unlink,
+    PlugRemoveResult, PlugRequest, PlugSummary, PlugUpdate, check_current, commit_create,
+    commit_update, link, list, list_for, prepare_create, prepare_update, remove, resolve,
+    resolve_by_id, resolve_expected, revision, unlink,
 };
 
 use std::time::Duration;

@@ -12,7 +12,7 @@ import { printStageLabel } from './stages'
 import { awaitsFirstSample, badgeDotClasses, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { cameraPlayback, cameraTransportLabels, linkChanges, linkedCameras, printerSource, type CameraPlayback, type CameraSummary, type Quality } from './cameras'
-import { plugsForCamera, plugsForPrinter, type PlugObservation, type PlugSummary, type PowerState } from './plugs'
+import { plugsForCamera, plugsForPrinter, snapshotPlug, type PlugObservation, type PlugSummary, type PowerState } from './plugs'
 import { hmsGuideUrl, hmsSeverity, type HmsSeverity } from './hms'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import {
@@ -938,7 +938,7 @@ const plugs = ref<PlugSummary[]>([])
 const plugsError = ref<string>()
 const plugObservations = ref<Record<string, PlugObservation>>({})
 const plugFormOpen = ref(false)
-const editingPlug = ref<string>()
+const editingPlug = ref<PlugSummary>()
 const plugDraft = ref({ name: '', host: '', username: '', password: '', timeout: '10s', printers: [] as string[], cameras: [] as string[] })
 const plugSaving = ref(false)
 const plugFormError = ref<string>()
@@ -1563,11 +1563,17 @@ async function saveCamera() {
 
 async function loadPlugs() {
   try {
-    plugs.value = await invoke<PlugSummary[]>('plug_list')
-    plugsError.value = undefined
+    await refreshPlugs()
   } catch (reason) {
     plugsError.value = message(reason)
   }
+}
+
+async function refreshPlugs() {
+  const current = await invoke<PlugSummary[]>('plug_list')
+  plugs.value = current
+  plugsError.value = undefined
+  return current
 }
 
 async function loadPlugObservations() {
@@ -1579,7 +1585,7 @@ async function loadPlugObservations() {
 }
 
 function openPlugForm(plug?: PlugSummary) {
-  editingPlug.value = plug?.name
+  editingPlug.value = plug && snapshotPlug(plug)
   plugDraft.value = {
     name: plug?.name ?? '',
     host: plug?.host ?? '',
@@ -1603,15 +1609,16 @@ async function savePlug() {
   try {
     const editing = editingPlug.value
     saved = editing
-      ? await invoke<PlugSummary>('plug_edit', { name: editing, request })
+      ? await invoke<PlugSummary>('plug_edit', { expected: editing, request })
       : await invoke<PlugSummary>('plug_add', { request })
   } catch (reason) {
     plugFormError.value = [message(reason), commandDetail(reason)].filter(Boolean).join(' ')
+    await loadPlugs()
     plugSaving.value = false
     return
   }
   // The profile is saved; a retry after a failed link must edit, not add.
-  editingPlug.value = saved.name
+  editingPlug.value = snapshotPlug(saved)
   draft.password = ''
   const printerChanges = linkChanges(saved.printers, draft.printers)
   const cameraChanges = linkChanges(saved.cameras, draft.cameras)
@@ -2613,7 +2620,7 @@ onUnmounted(() => {
 
         <!-- Power control stays reachable whatever the printer's connectivity. -->
         <div v-if="activePrinter && plugsForPrinter(activePrinter.name, plugs).length" class="mx-4 mb-5 space-y-3 rounded-lg border border-gray-200 px-4 py-3 sm:mx-0 dark:border-white/10">
-          <PlugControl v-for="plug in plugsForPrinter(activePrinter.name, plugs)" :key="plug.id" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :refresh="loadPlugs" :t="t" :locale="locale" @changed="plugChanged(plug, $event)" />
+          <PlugControl v-for="plug in plugsForPrinter(activePrinter.name, plugs)" :key="plug.id" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :refresh="refreshPlugs" :t="t" :locale="locale" @changed="plugChanged(plug, $event)" />
         </div>
 
         <!-- Awaiting the first sample: neutral, no alarm language, no recovery
@@ -3389,7 +3396,7 @@ onUnmounted(() => {
             </template>
           </CameraViewer>
           <div v-if="plugsForCamera(viewedCamera.name, plugs).length" class="space-y-3 rounded-lg border border-gray-200 px-4 py-3 dark:border-white/10">
-            <PlugControl v-for="plug in plugsForCamera(viewedCamera.name, plugs)" :key="plug.id" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :refresh="loadPlugs" :t="t" :locale="locale" @changed="plugChanged(plug, $event)" />
+            <PlugControl v-for="plug in plugsForCamera(viewedCamera.name, plugs)" :key="plug.id" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :refresh="refreshPlugs" :t="t" :locale="locale" @changed="plugChanged(plug, $event)" />
           </div>
           </div>
         </section>
@@ -3423,7 +3430,7 @@ onUnmounted(() => {
               <span class="block truncate text-sm font-semibold text-gray-900 dark:text-white">{{ plug.name }}</span>
               <span class="mt-0.5 block truncate font-mono text-xs text-gray-500 dark:text-gray-400">{{ plug.host }}</span>
               <span class="mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400">{{ plug.username }}</span>
-              <PlugControl class="mt-2" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :refresh="loadPlugs" :t="t" :locale="locale" :show-name="false" @changed="plugChanged(plug, $event)" />
+              <PlugControl class="mt-2" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :refresh="refreshPlugs" :t="t" :locale="locale" :show-name="false" @changed="plugChanged(plug, $event)" />
             </div>
             <ActionMenu :label="t('plugsView.actions')" :items="plugActionItems(plug)" />
           </Card>

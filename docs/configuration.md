@@ -20,6 +20,7 @@ keychain or the Tauri webview's local storage.
 | File/store | Contents |
 | --- | --- |
 | `melt.yaml` | Printer profiles, optional independent camera and smart plug profiles, printer-camera links |
+| `melt.yaml.lock` | Persistent coordination file for configuration writers; contains no profile data |
 | `melt-preferences.yaml` | Notifications, slicers, last library folder, public firmware catalogue opt-in |
 | `melt-status-cache.json` | Last desktop monitoring payload for initial display; not configuration |
 | OS keychain | Printer access codes/API keys, Bambu TLS pins, camera and smart plug passwords |
@@ -30,6 +31,10 @@ schema versions and malformed profiles are refused. Profile and preference
 writes use a temporary file and atomic replacement, and reject an external
 change since the file was read. Unix configuration directories are restricted
 to `0700`, and profile/preference files to `0600`.
+Configuration writers coordinate through `melt.yaml.lock`. Plug saves hold
+this lock across the revision check, keychain change, config write and any
+rollback, so concurrent CLI and desktop edits cannot undo each other's
+passwords. Do not delete the lock file while Melt is running.
 
 ## Printer and camera schema
 
@@ -112,7 +117,9 @@ configuration. Renaming a printer rewrites its name in every
 plug; removing a printer or camera drops it from every plug, and removing a
 plug drops its links. None of these operations switches a relay.
 Profile edits preserve the saved identity and reject concurrent changes to
-the same profile before touching its settings or password.
+the same profile before touching its settings or password. Desktop edits
+also check the ID and revision loaded when the form opened; a stale form
+must be closed and reopened to review the newer settings.
 
 ## Preferences and appearance
 
