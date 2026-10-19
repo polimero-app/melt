@@ -162,6 +162,8 @@ export type MessageKey =
   | "plugsView.formDescription"
   | "plugsView.driver"
   | "plugsView.username"
+  | "plugsView.host"
+  | "plugsView.nameHint"
   | "plugsView.password"
   | "plugsView.passwordKeep"
   | "plugsView.printers"
@@ -224,6 +226,8 @@ export type MessageKey =
   | "errors.plugConfigUnwritable"
   | "errors.plugConfigUnreadable"
   | "errors.plugInvalidHost"
+  | "errors.plugMissingName"
+  | "errors.plugInvalidName"
   | "errors.plugInvalidTarget"
   | "errors.internalError"
   | "nav.selectPrinter"
@@ -833,6 +837,8 @@ const messages: Record<Locale, Messages> = {
     "plugsView.formDescription": "Melt connects to the plug to check these settings before saving.",
     "plugsView.driver": "Driver",
     "plugsView.username": "TP-Link account email",
+    "plugsView.host": "Host or IP address",
+    "plugsView.nameHint": "Letters, numbers, dots, dashes and underscores; no spaces. Stored in lowercase.",
     "plugsView.password": "TP-Link account password",
     "plugsView.passwordKeep": "TP-Link account password (leave blank to keep existing)",
     "plugsView.printers": "Powered printers",
@@ -895,6 +901,8 @@ const messages: Record<Locale, Messages> = {
     "errors.plugConfigUnwritable": "Unable to save the smart plug configuration.",
     "errors.plugConfigUnreadable": "Unable to read the smart plug configuration.",
     "errors.plugInvalidHost": "That smart plug host is not valid.",
+    "errors.plugMissingName": "Enter a name for the smart plug.",
+    "errors.plugInvalidName": "Smart plug names can use letters, numbers, dots, dashes and underscores, with no spaces (for example dakota-p110).",
     "errors.plugInvalidTarget": "Choose exactly one printer or camera.",
     "errors.internalError": "An internal error occurred. Try again.",
     "nav.groupSections": "Sections",
@@ -1501,6 +1509,8 @@ const messages: Record<Locale, Messages> = {
     "plugsView.formDescription": "O Melt se conecta à tomada para verificar estas configurações antes de salvar.",
     "plugsView.driver": "Driver",
     "plugsView.username": "E-mail da conta TP-Link",
+    "plugsView.host": "Host ou endereço IP",
+    "plugsView.nameHint": "Letras, números, pontos, hifens e sublinhados; sem espaços. Salvo em minúsculas.",
     "plugsView.password": "Senha da conta TP-Link",
     "plugsView.passwordKeep": "Senha da conta TP-Link (deixe em branco para manter a atual)",
     "plugsView.printers": "Impressoras alimentadas",
@@ -1563,6 +1573,8 @@ const messages: Record<Locale, Messages> = {
     "errors.plugConfigUnwritable": "Não foi possível salvar a configuração da tomada inteligente.",
     "errors.plugConfigUnreadable": "Não foi possível ler a configuração da tomada inteligente.",
     "errors.plugInvalidHost": "O host da tomada inteligente não é válido.",
+    "errors.plugMissingName": "Informe um nome para a tomada inteligente.",
+    "errors.plugInvalidName": "Nomes de tomadas inteligentes aceitam letras, números, pontos, hifens e sublinhados, sem espaços (por exemplo dakota-p110).",
     "errors.plugInvalidTarget": "Escolha exatamente uma impressora ou câmera.",
     "errors.internalError": "Ocorreu um erro interno. Tente de novo.",
     "nav.groupSections": "Seções",

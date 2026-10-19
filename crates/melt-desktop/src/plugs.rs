@@ -359,8 +359,8 @@ fn unreadable_plugs() -> CommandError {
 fn plug_error(error: PlugError) -> CommandError {
     use PlugError as E;
     CommandError::new(match error {
-        E::MissingName => "profileMissingName",
-        E::InvalidName => "profileInvalidName",
+        E::MissingName => "plugMissingName",
+        E::InvalidName => "plugInvalidName",
         E::InvalidHost => "plugInvalidHost",
         E::UnknownDriver(_) => "profileInvalid",
         E::InvalidUsername => "plugInvalidUsername",
@@ -479,8 +479,8 @@ mod tests {
     #[test]
     fn plug_errors_map_to_stable_codes() {
         let cases = [
-            (PlugError::MissingName, "profileMissingName"),
-            (PlugError::InvalidName, "profileInvalidName"),
+            (PlugError::MissingName, "plugMissingName"),
+            (PlugError::InvalidName, "plugInvalidName"),
             (PlugError::UnknownDriver("x".into()), "profileInvalid"),
             (PlugError::InvalidHost, "plugInvalidHost"),
             (PlugError::InvalidUsername, "plugInvalidUsername"),

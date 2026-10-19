@@ -4038,10 +4038,12 @@ onUnmounted(() => {
         </div>
         <div>
           <label for="plug-name" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.name') }}</label>
-          <input id="plug-name" v-model="plugDraft.name" required maxlength="64" autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+          <!-- Mirrors profiles::normalize_name so the browser catches spaces before the round trip. -->
+          <input id="plug-name" v-model="plugDraft.name" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" :title="t('plugsView.nameHint')" aria-describedby="plug-name-hint" autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
+          <p id="plug-name-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('plugsView.nameHint') }}</p>
         </div>
         <div>
-          <label for="plug-host" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.host') }}</label>
+          <label for="plug-host" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('plugsView.host') }}</label>
           <input id="plug-host" v-model="plugDraft.host" required autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
         </div>
         <div>
