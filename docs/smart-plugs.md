@@ -14,9 +14,11 @@ print or energy data.
 |---|---|---|---|
 | `tapo` | TP-Link Tapo P110 | Qualification pending | On/off with readback |
 
-P110 support is implemented, but hardware and firmware qualification has not
-been run. Until then, P110 (qualification pending) is the only claim. Melt
-accepts only a device that reports the exact model `P110`; no power command
+P110 support is implemented, but relay control has not been qualified on
+hardware. A read-only login succeeded on one of three available P110s; the
+other two rejected the same account credentials. Until relay tests pass,
+P110 (qualification pending) is the only claim. Melt accepts only a device
+that reports the exact model `P110`; no power command
 is sent to another model: it fails as `capability_unsupported`,
 or as `connection_failed` if its reply cannot be read. Evidence is tracked in
 [the plug fixtures](../fixtures/tapo/plugs/README.md).
@@ -122,7 +124,7 @@ including any wait for that plug's lock). The result is one of:
 | Confirmed | The readback equals the requested state | success (0) |
 | Mismatch | The plug answered with the other state | `power_change_mismatch` (4) |
 | Unconfirmed | Transport error, timeout or malformed answer during or after the send; the relay may or may not have changed | `power_change_unconfirmed` (4) |
-| Rejected | The plug definitely refused the command (authentication, lockout, device error), so it was not applied | `authentication_failed`, `authentication_locked` or `device_rejected` |
+| Rejected | The plug definitely refused the command (authentication, lockout, device error), so it was not applied | `authentication_failed`, `credential_mismatch`, `authentication_locked` or `device_rejected` |
 
 Writes are never queued, replayed or retried. After an unconfirmed result,
 check the actual relay with `melt plug status` (or the Smart plugs view)
@@ -158,18 +160,19 @@ is unreachable the state is unknown and the last observation is shown as
 stale. Printer reachability and camera playback never decide relay state.
 
 The desktop reads every plug about every 5 seconds, with a per-plug backoff of
-up to 60 seconds after failures. An authentication failure or lockout stops
-automatic attempts for that plug until its profile changes or you explicitly
-read status or switch power.
-This also applies when authentication or lockout is reported during a power
-command's readback: the power result stays unconfirmed and automatic logins
-stop until an explicit retry or profile change.
+up to 60 seconds after failures. An authentication failure, credential
+mismatch, or lockout stops automatic attempts for that plug until its profile
+changes or you explicitly read status or switch power. This also applies when
+these errors arise during a power command's readback: the power result stays
+unconfirmed and automatic logins stop until an explicit retry or profile
+change.
 
 ## Troubleshooting
 
 | Symptom | Check |
 |---|---|
 | `authentication_failed` | The TP-Link account email and password (not the Camera Account); Third-Party Compatibility enabled |
+| `credential_mismatch` | The plug rejected the account credential hash. Match the email's exact case. If the same credentials work on another plug, factory reset the affected plug, remove it from the app, and add it again via Bluetooth setup; see [Tapo troubleshooting](https://github.com/mihai-dinculescu/tapo/blob/v0.11.1/TROUBLESHOOTING.md#handshake-fails-with-a-hash-mismatch-invalid-credentials). |
 | `authentication_locked` | Too many failed logins; wait, fix the password, then retry deliberately |
 | `device_identity_unverified` | Check the plug's address, then edit it and enter the password to verify and save its identity |
 | `device_identity_mismatch` | The address answers as another device; restore the original plug's address rather than replacing its saved identity |

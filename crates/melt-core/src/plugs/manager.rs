@@ -351,6 +351,7 @@ where
 fn auth_error(error: &PlugError) -> Option<PlugError> {
     match error {
         PlugError::Authentication => Some(PlugError::Authentication),
+        PlugError::CredentialMismatch => Some(PlugError::CredentialMismatch),
         PlugError::CompatibilityDisabled => Some(PlugError::CompatibilityDisabled),
         PlugError::Lockout => Some(PlugError::Lockout),
         PlugError::PowerUnconfirmed { cause, .. } => auth_error(cause),
@@ -360,7 +361,9 @@ fn auth_error(error: &PlugError) -> Option<PlugError> {
 
 fn connection(error: &PlugError) -> Connection {
     match error {
-        PlugError::Authentication | PlugError::CompatibilityDisabled => Connection::AuthFailed,
+        PlugError::Authentication
+        | PlugError::CredentialMismatch
+        | PlugError::CompatibilityDisabled => Connection::AuthFailed,
         PlugError::Lockout => Connection::Locked,
         PlugError::UnsupportedDevice(_)
         | PlugError::UnsupportedProtocol
@@ -521,6 +524,67 @@ mod tests {
         assert_eq!(status.relay, PowerState::Off);
         assert_eq!(resolves.load(Ordering::SeqCst), 2, "reconnect on revision");
         assert!(!installed(host), "new session came from the second fake");
+    }
+
+    #[tokio::test]
+    async fn credential_mismatch_on_one_plug_does_not_block_another_on_the_same_account() {
+        let bad_id = "22222222222222222222222222222222";
+        let bad_host = "manager-mismatch-bad";
+        let good_host = "manager-mismatch-good";
+        install(
+            bad_host,
+            FakeSession::new(
+                PowerState::Off,
+                [FakeStep::Err(PlugError::CredentialMismatch)],
+            ),
+        );
+        let good_relay = install(good_host, FakeSession::new(PowerState::Off, []));
+        let manager = PlugManager::default();
+
+        let bad_resolver = || {
+            let mut result = plug(bad_host);
+            result.profile.id = bad_id.into();
+            Ok(result)
+        };
+        let error = manager
+            .status(&key(bad_id, "r1"), true, bad_resolver)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, PlugError::CredentialMismatch));
+        assert_eq!(
+            observation(&manager, bad_id).connection,
+            Connection::AuthFailed
+        );
+
+        // A blocked automatic retry must not consume the replacement session.
+        install(bad_host, FakeSession::new(PowerState::On, []));
+        let error = manager
+            .status(&key(bad_id, "r1"), true, || {
+                let mut result = plug(bad_host);
+                result.profile.id = bad_id.into();
+                Ok(result)
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(error, PlugError::CredentialMismatch));
+        assert!(installed(bad_host));
+
+        let good = manager
+            .status(&key(ID, "r1"), true, resolver(good_host))
+            .await
+            .unwrap();
+        assert_eq!(good.relay, PowerState::Off);
+        manager
+            .set_power(
+                &key(ID, "r1"),
+                PowerState::On,
+                resolver(good_host),
+                revision(Some("r1")),
+            )
+            .await
+            .unwrap();
+        assert_eq!(*good_relay.lock().unwrap(), PowerState::On);
+        assert_eq!(observation(&manager, ID).connection, Connection::Online);
     }
 
     /// Runs a write queued behind a poll that holds the slot; `edit` runs
@@ -911,6 +975,7 @@ mod tests {
         for (suffix, error) in [
             ("lockout", PlugError::Lockout),
             ("auth", PlugError::Authentication),
+            ("mismatch", PlugError::CredentialMismatch),
             ("compatibility", PlugError::CompatibilityDisabled),
         ] {
             let host = format!("manager-readback-{suffix}");
@@ -941,6 +1006,7 @@ mod tests {
                     poll,
                     Err(PlugError::Lockout
                         | PlugError::Authentication
+                        | PlugError::CredentialMismatch
                         | PlugError::CompatibilityDisabled)
                 ),
                 "{poll:?}"

@@ -379,6 +379,7 @@ fn plug_error(error: PlugError) -> CommandError {
         E::CameraNotFound(_) => "cameraNotFound",
         E::NotLinked { .. } => "plugNotLinked",
         E::Authentication => "plugAuthFailed",
+        E::CredentialMismatch => "plugCredentialMismatch",
         E::CompatibilityDisabled => "plugCompatibilityDisabled",
         E::Lockout => "plugLocked",
         E::UnsupportedDevice(_) => "plugUnsupportedDevice",
@@ -507,6 +508,7 @@ mod tests {
                 "plugNotLinked",
             ),
             (PlugError::Authentication, "plugAuthFailed"),
+            (PlugError::CredentialMismatch, "plugCredentialMismatch"),
             (
                 PlugError::CompatibilityDisabled,
                 "plugCompatibilityDisabled",

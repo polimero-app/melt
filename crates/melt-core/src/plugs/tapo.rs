@@ -79,11 +79,12 @@ fn map_error(error: Error) -> PlugError {
         Error::Tapo(R::Unauthorized { kind, .. }) => match kind {
             "TPAP_AUTH_ATTEMPTS_LIMIT" => PlugError::Lockout,
             "FORBIDDEN" => PlugError::CompatibilityDisabled,
+            "HASH_MISMATCH" => PlugError::CredentialMismatch,
             "SESSION_TIMEOUT" | "SESSION_EXPIRED" | "TPAP_SESSION_INVALID" => {
                 PlugError::DeviceRejected
             }
-            // HASH_MISMATCH, TPAP_CREDENTIALS, TPAP_HASH_MISMATCH, LOGIN and
-            // any handshake refusal `tapo` adds later.
+            // TPAP_CREDENTIALS, TPAP_HASH_MISMATCH, LOGIN and any handshake
+            // refusal `tapo` adds later.
             _ => PlugError::Authentication,
         },
         Error::Tapo(R::DeviceError { kind: "LOGIN", .. }) => PlugError::Authentication,
@@ -165,7 +166,7 @@ mod tests {
             (
                 "hash",
                 unauthorized("HASH_MISMATCH"),
-                P::Authentication,
+                P::CredentialMismatch,
                 false,
             ),
             (

@@ -211,6 +211,7 @@ export type MessageKey =
   | "errors.plugExists"
   | "errors.plugNotLinked"
   | "errors.plugAuthFailed"
+  | "errors.plugCredentialMismatch"
   | "errors.plugCompatibilityDisabled"
   | "errors.plugLocked"
   | "errors.plugUnsupportedDevice"
@@ -888,6 +889,7 @@ const messages: Record<Locale, Messages> = {
     "errors.plugExists": "A smart plug with this name already exists.",
     "errors.plugNotLinked": "This smart plug is not attached to that printer or camera.",
     "errors.plugAuthFailed": "The plug rejected the TP-Link account email or password. Melt will not retry on its own; check them and try again.",
+    "errors.plugCredentialMismatch": "This plug rejected the account credentials, although another plug may accept them. Check the exact email case. If they work on another plug, reset and re-add this plug in the Tapo app using Bluetooth setup.",
     "errors.plugCompatibilityDisabled": "The plug refused the connection. Turn on Third-Party Compatibility for it in the Tapo app.",
     "errors.plugLocked": "The plug has temporarily locked out sign-ins after failed attempts. Wait a few minutes, then try again.",
     "errors.plugUnsupportedDevice": "This device is not a supported smart plug. Only the Tapo P110 is supported.",
@@ -1562,6 +1564,7 @@ const messages: Record<Locale, Messages> = {
     "errors.plugExists": "Já existe uma tomada inteligente com este nome.",
     "errors.plugNotLinked": "Esta tomada inteligente não está vinculada a essa impressora ou câmera.",
     "errors.plugAuthFailed": "A tomada rejeitou o e-mail ou a senha da conta TP-Link. O Melt não tentará de novo sozinho; confira os dados e tente outra vez.",
+    "errors.plugCredentialMismatch": "Esta tomada rejeitou os dados da conta, mesmo que outra tomada os aceite. Confira maiúsculas e minúsculas do e-mail. Se funcionarem em outra tomada, redefina e adicione-a novamente no app Tapo via Bluetooth.",
     "errors.plugCompatibilityDisabled": "A tomada recusou a conexão. Ative a Compatibilidade com Terceiros nela, no app Tapo.",
     "errors.plugLocked": "A tomada bloqueou temporariamente os logins após tentativas falhas. Aguarde alguns minutos e tente de novo.",
     "errors.plugUnsupportedDevice": "Este dispositivo não é uma tomada inteligente suportada. Apenas a Tapo P110 é suportada.",

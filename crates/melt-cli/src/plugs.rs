@@ -547,6 +547,7 @@ pub(crate) fn plug_error(error: PlugError) -> AppError {
         PlugError::Authentication | PlugError::CompatibilityDisabled => {
             (3, "authentication_failed")
         }
+        PlugError::CredentialMismatch => (3, "credential_mismatch"),
         PlugError::Lockout => (3, "authentication_locked"),
         PlugError::IdentityUnverified => (3, "device_identity_unverified"),
         PlugError::IdentityMismatch => (3, "device_identity_mismatch"),
@@ -648,6 +649,7 @@ mod tests {
             ),
             (PlugError::ProfileChanged, 2, "config_error"),
             (PlugError::Authentication, 3, "authentication_failed"),
+            (PlugError::CredentialMismatch, 3, "credential_mismatch"),
             (PlugError::CompatibilityDisabled, 3, "authentication_failed"),
             (PlugError::Lockout, 3, "authentication_locked"),
             (

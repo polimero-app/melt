@@ -232,6 +232,7 @@ power change is read back, never retried:
 | `power_change_unconfirmed` | 4 | The result could not be confirmed; the relay may have changed |
 | `device_rejected` | 4 | The plug refused the command; nothing was applied |
 | `authentication_failed`, `authentication_locked` | 3 | Login refused, incorrect credentials, or lockout |
+| `credential_mismatch` | 3 | The plug rejected the account credential hash; check exact email case and the plug's Tapo setup |
 | `device_identity_unverified`, `device_identity_mismatch` | 3 | Identity needs explicit verification, or the address answers as a different device |
 | `secret_not_found`, `secret_store_failed` | 3 | Keychain password missing or store unavailable |
 | `connection_failed`, `timeout` | 4 | Plug unreachable or too slow |

@@ -118,6 +118,10 @@ pub enum PlugError {
     NotLinked { plug: String, target: String },
     #[error("plug authentication failed")]
     Authentication,
+    #[error(
+        "plug rejected the account credential hash; check exact email case and re-add this plug via Bluetooth setup if the same credentials work on another plug"
+    )]
+    CredentialMismatch,
     #[error("plug rejected the login; enable third-party compatibility in the Tapo app")]
     CompatibilityDisabled,
     #[error("plug locked out further logins")]
@@ -354,6 +358,7 @@ where
         Ok(Ok(())) => {}
         Ok(Err(
             refusal @ (PlugError::Authentication
+            | PlugError::CredentialMismatch
             | PlugError::Lockout
             | PlugError::CompatibilityDisabled
             | PlugError::DeviceRejected),
@@ -652,14 +657,23 @@ mod tests {
 
     #[tokio::test]
     async fn device_refusal_passes_through() {
-        for refusal in [PlugError::Authentication, PlugError::DeviceRejected] {
+        for refusal in [
+            PlugError::Authentication,
+            PlugError::CredentialMismatch,
+            PlugError::DeviceRejected,
+        ] {
             let steps = [FakeStep::Ok, FakeStep::Err(refusal)];
             let mut s = session(FakeSession::new(PowerState::Off, steps));
             let error = switch(&mut s, PowerState::On, deadline(), None)
                 .await
                 .unwrap_err();
             assert!(
-                matches!(error, PlugError::Authentication | PlugError::DeviceRejected),
+                matches!(
+                    error,
+                    PlugError::Authentication
+                        | PlugError::CredentialMismatch
+                        | PlugError::DeviceRejected
+                ),
                 "{error:?}"
             );
             assert_eq!(fake(&s).sends, [PowerState::On]);
