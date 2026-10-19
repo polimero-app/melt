@@ -182,6 +182,7 @@ export type MessageKey =
   | "plugsView.lastKnown"
   | "plugsView.stale"
   | "plugsView.observed"
+  | "plugsView.power"
   | "plugsView.noReading"
   | "plugsView.connection.unknown"
   | "plugsView.connection.online"
@@ -859,6 +860,7 @@ const messages: Record<Locale, Messages> = {
     "plugsView.lastKnown": "Last known: {state}",
     "plugsView.stale": "stale",
     "plugsView.observed": "Observed {time}",
+    "plugsView.power": "{watts} W",
     "plugsView.noReading": "Waiting for the first reading",
     "plugsView.connection.unknown": "Not checked yet",
     "plugsView.connection.online": "Connected",
@@ -1533,6 +1535,7 @@ const messages: Record<Locale, Messages> = {
     "plugsView.lastKnown": "Último estado conhecido: {state}",
     "plugsView.stale": "desatualizado",
     "plugsView.observed": "Observado {time}",
+    "plugsView.power": "{watts} W",
     "plugsView.noReading": "Aguardando a primeira leitura",
     "plugsView.connection.unknown": "Ainda não verificada",
     "plugsView.connection.online": "Conectada",

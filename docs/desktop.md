@@ -121,10 +121,11 @@ When a WebKitGTK, Wry or distribution update claims to resolve this:
 
 **Smart plugs** manages Tapo P110 profiles: add or edit (the password is
 verified before saving, and a blank password on edit keeps the stored one),
-link printers and cameras, and remove. Each plug card has On and Off buttons,
-the relay state, the last observation and connection health. The same control
-also appears above a printer's Control view, including its offline screen, and
-under an external camera's viewer.
+link printers and cameras, and remove. Each plug card has a Turn on or Turn
+off button for the current relay state (both while it is unknown), the relay
+state, current draw in watts, the last observation and connection health. The
+same control also appears above a printer's Control view, including its
+offline screen, and under an external camera's viewer.
 Profiles from older builds without a device identity remain readable; edit
 the plug and enter its password again to verify its identity before switching.
 Verification does not change power, and a saved identity rejects a different

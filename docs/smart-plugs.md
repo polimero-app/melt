@@ -154,7 +154,9 @@ The **Smart plugs** view lists plug profiles with their attachments, relay
 state, connection and observation time, and adds, edits, links and removes
 them. The same On/Off control appears in two other places: on the printer's
 **Control** view (including the offline screen) and under an external
-camera's details. Each control also has a **Check status** button. See [Desktop](desktop.md#smart-plugs).
+camera's details. The control shows only the action that changes the current
+relay state (**Turn off** when on, **Turn on** when off); both appear while the
+state is unknown. Each control also has a **Check status** button. See [Desktop](desktop.md#smart-plugs).
 
 Relay state (on, off, unknown) is separate from connection health. When a plug
 is unreachable the state is unknown and the last observation is shown as
