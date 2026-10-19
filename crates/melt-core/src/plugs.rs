@@ -62,6 +62,8 @@ pub struct DeviceInfo {
 pub struct PlugStatus {
     pub device: DeviceInfo,
     pub relay: PowerState,
+    /// Draw in whole watts; `None` when the plug did not report it.
+    pub power_watts: Option<u64>,
     pub observed_at: String,
 }
 
@@ -408,6 +410,10 @@ pub(crate) enum FakeStep {
     Hang,
 }
 
+/// The draw every fake read reports.
+#[cfg(test)]
+pub(crate) const FAKE_WATTS: u64 = 12;
+
 /// Each read or send takes the next scripted step; with none left it acts as
 /// [`FakeStep::Ok`].
 #[cfg(test)]
@@ -458,6 +464,7 @@ impl FakeSession {
                 firmware: "1.0.0".into(),
             },
             relay,
+            power_watts: Some(FAKE_WATTS),
             observed_at: crate::profiles::now(),
         })
     }

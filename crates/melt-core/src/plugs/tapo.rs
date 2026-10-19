@@ -25,6 +25,13 @@ impl TapoSession {
                 false => ReadFailure::Plug(map_error(error)),
             }
         })?;
+        // ponytail: a failed power read only drops the watts, never the relay reading.
+        let power_watts = self
+            .handler
+            .get_current_power()
+            .await
+            .ok()
+            .map(|power| power.current_power);
         Ok(PlugStatus {
             device: DeviceInfo {
                 device_id: info.device_id,
@@ -37,6 +44,7 @@ impl TapoSession {
             } else {
                 PowerState::Off
             },
+            power_watts,
             observed_at: crate::profiles::now(),
         })
     }

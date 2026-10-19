@@ -18,7 +18,7 @@ function plug(name: string, printers: string[] = [], cameras: string[] = []): Pl
 }
 
 function observation(relay: PlugObservation['relay'], last: PlugObservation['last']): PlugObservation {
-  return { relay, connection: 'online', last, device: null }
+  return { relay, connection: 'online', last, device: null, powerWatts: null }
 }
 
 describe('plug attachments', () => {

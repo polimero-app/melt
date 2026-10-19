@@ -6,7 +6,8 @@ Melt can switch a smart plug on and off and show its relay state. A plug is an
 independent profile, like an IP camera: it can power several printers and
 cameras, and a printer or camera can have several plugs. Control is explicit:
 one plug, one state. There is no toggle, group, schedule, auto-off after a
-print or energy data.
+print or energy history. Each status line shows the plug's current draw in
+whole watts when the plug reports it.
 
 ## Supported plugs
 
@@ -157,7 +158,9 @@ camera's details. Each control also has a **Check status** button. See [Desktop]
 
 Relay state (on, off, unknown) is separate from connection health. When a plug
 is unreachable the state is unknown and the last observation is shown as
-stale. Printer reachability and camera playback never decide relay state.
+stale. Wattage comes only from the latest successful read, so a stale plug
+shows none. A failed power read drops the wattage, not the relay reading.
+Printer reachability and camera playback never decide relay state.
 
 The desktop reads every plug about every 5 seconds, with a per-plug backoff of
 up to 60 seconds after failures. An authentication failure, credential

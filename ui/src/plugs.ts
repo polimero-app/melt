@@ -25,6 +25,8 @@ export type PlugObservation = {
   connection: Connection
   last: { state: PowerState; observedAt: string } | null
   device: { model: string; hardware: string; firmware: string } | null
+  /** Latest successful read only; null when stale or not reported. */
+  powerWatts: number | null
 }
 
 export function plugsForPrinter(printer: string, plugs: PlugSummary[]): PlugSummary[] {

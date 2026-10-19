@@ -49,6 +49,8 @@ pub struct PlugObservation {
     /// The last relay reading; kept as stale while the plug is unreachable.
     pub last: Option<Observation>,
     pub device: Option<DeviceInfo>,
+    /// Draw from the latest successful read only; never kept as stale.
+    pub power_watts: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -273,6 +275,7 @@ impl PlugManager {
                 connection: Connection::Unknown,
                 last: None,
                 device: None,
+                power_watts: None,
             });
         match result {
             Ok(status) => {
@@ -283,11 +286,13 @@ impl PlugManager {
                     observed_at: status.observed_at.clone(),
                 });
                 seen.device = Some(status.device.clone());
+                seen.power_watts = status.power_watts;
             }
             // A fresh device reading, just not the requested one.
             Err(PlugError::PowerMismatch { observed, .. }) => {
                 seen.relay = relay(*observed);
                 seen.connection = Connection::Online;
+                seen.power_watts = None;
                 seen.last = Some(Observation {
                     state: *observed,
                     observed_at: crate::profiles::now(),
@@ -296,6 +301,7 @@ impl PlugManager {
             Err(error) => {
                 seen.relay = RelayState::Unknown;
                 seen.connection = connection(error);
+                seen.power_watts = None;
                 if let PlugError::PowerUnconfirmed {
                     last_observed: Some(before),
                     ..
@@ -393,7 +399,7 @@ mod tests {
     use super::*;
     use crate::{
         config::PlugProfile,
-        plugs::{DEFAULT_TIMEOUT, FAKES, FakeSession, FakeStep},
+        plugs::{DEFAULT_TIMEOUT, FAKE_WATTS, FAKES, FakeSession, FakeStep},
     };
 
     const ID: &str = "11111111111111111111111111111111";
@@ -492,6 +498,7 @@ mod tests {
         assert_eq!(seen.connection, Connection::Online);
         assert_eq!(seen.last.unwrap().state, PowerState::Off);
         assert_eq!(seen.device.unwrap().model, "P110");
+        assert_eq!(seen.power_watts, Some(FAKE_WATTS));
     }
 
     #[tokio::test]
@@ -801,6 +808,7 @@ mod tests {
         assert_eq!(seen.relay, RelayState::Unknown);
         assert_eq!(seen.connection, Connection::Unreachable);
         assert_eq!(seen.last.unwrap().state, PowerState::On);
+        assert_eq!(seen.power_watts, None, "no stale watts");
     }
 
     #[tokio::test]
