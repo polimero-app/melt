@@ -121,7 +121,7 @@ pub enum PlugError {
     #[error("plug authentication failed")]
     Authentication,
     #[error(
-        "plug rejected the account credential hash; check exact email case and re-add this plug via Bluetooth setup if the same credentials work on another plug"
+        "plug rejected the account credential hash; check exact email case and, if the same credentials work on another plug, re-add this plug via Bluetooth setup with every other Tapo device powered off"
     )]
     CredentialMismatch,
     #[error("plug rejected the login; enable third-party compatibility in the Tapo app")]
