@@ -16,8 +16,8 @@ print or energy data.
 
 P110 support is implemented, but hardware and firmware qualification has not
 been run. Until then, P110 (qualification pending) is the only claim. Melt
-accepts only a device that reports the exact model `P110`; any other Tapo
-device is refused and nothing is sent to it: usually as `capability_unsupported`,
+accepts only a device that reports the exact model `P110`; no power command
+is sent to another model: it fails as `capability_unsupported`,
 or as `connection_failed` if its reply cannot be read. Evidence is tracked in
 [the plug fixtures](../fixtures/tapo/plugs/README.md).
 
@@ -25,13 +25,14 @@ or as `connection_failed` if its reply cannot be read. Evidence is tracked in
 
 1. Add the plug to your TP-Link account in the Tapo app and give it a fixed
    LAN address (a DHCP reservation). If the address later answers as a
-   different Tapo device, Melt refuses it before any read or write.
+   different device, including another P110, Melt rejects its identity before
+   sending a power command. It reads device information to check that identity.
 2. The plug authenticates with your **TP-Link account** email and password,
    the full cloud account password. This is not the Tapo Camera Account used
    by [IP cameras](ip-cameras.md#tapo-setup). If your firmware shows a
-   **Third-Party Compatibility** option for the plug, turn it on; when it is
-   off the plug rejects local logins, which Melt reports as an authentication
-   failure.
+   **Third-Party Compatibility** option, the driver can negotiate KLAP or
+   TPAP with either setting. If a KLAP login is refused, check that setting
+   in the Tapo app.
 3. Melt must reach the plug directly on the LAN. It does not use the TP-Link
    cloud for control.
 4. Save the password to a file only you can read (one line, a regular file,
@@ -42,7 +43,7 @@ or as `connection_failed` if its reply cannot be read. Evidence is tracked in
    chmod 600 ~/.config/melt/bench-power.pw
    ```
 
-5. Add the plug. Melt logs in and reads the device once before saving; it
+5. Add the plug. Melt logs in and reads the device before saving; it
    never changes the relay during setup. A wrong password saves nothing and
    makes no second login attempt.
 
@@ -54,8 +55,20 @@ or as `connection_failed` if its reply cannot be read. Evidence is tracked in
 The password is stored in the OS keychain under service `melt`, account
 `plug:<id>:password`. It is never copied from, or shared with, a camera
 password. The profile in `melt.yaml` holds the ID, driver, host, username
-(case kept as entered), timeout and attachments, but no password and no
-observed model or firmware. See [configuration](configuration.md).
+(case kept as entered), timeout, attachments and the verified physical
+`device_id`, but no password and no observed model or firmware. The physical
+identity is checked on every read, including the pre-read before a power
+change and reads after reconnecting. It is omitted from public status and
+list responses. See [configuration](configuration.md).
+
+Profiles created by an earlier smart plug build may have no saved device
+identity. They remain readable, and background polling does not enroll a
+device. Check the address and connected load, then explicitly verify and save
+the identity with `melt plug edit <plug> --password-file <path>`, or enter the
+password again in the desktop edit form. Verification reads the device without
+switching power. An existing identity cannot be replaced by editing the host
+or password; to intentionally replace a physical plug, remove its profile,
+add the replacement, and attach the required printers and cameras again.
 
 ## Attachments
 
@@ -119,6 +132,12 @@ with `requestedState`, `lastObservedState`, `observedAt` and
 `deliveryUncertain` (true only for unconfirmed). See the
 [CLI reference](cli.md#smart-plugs).
 
+Immediately before dispatch, Melt rechecks the profile after the pre-read.
+An edit or removal during connection setup or that read aborts the command.
+A command already sent may still take effect. Concurrent edits also reject
+outdated profile changes before changing settings or keychain credentials;
+reload the profile before retrying a conflicting edit.
+
 If someone uses the Tapo app or the plug's button, the next read reports the
 device's value; Melt never answers from a cache.
 
@@ -138,6 +157,9 @@ The desktop reads every plug about every 5 seconds, with a per-plug backoff of
 up to 60 seconds after failures. An authentication failure or lockout stops
 automatic attempts for that plug until its profile changes or you explicitly
 read status or switch power.
+This also applies when authentication or lockout is reported during a power
+command's readback: the power result stays unconfirmed and automatic logins
+stop until an explicit retry or profile change.
 
 ## Troubleshooting
 
@@ -145,6 +167,8 @@ read status or switch power.
 |---|---|
 | `authentication_failed` | The TP-Link account email and password (not the Camera Account); Third-Party Compatibility enabled |
 | `authentication_locked` | Too many failed logins; wait, fix the password, then retry deliberately |
+| `device_identity_unverified` | Check the plug's address, then edit it and enter the password to verify and save its identity |
+| `device_identity_mismatch` | The address answers as another device; restore the original plug's address rather than replacing its saved identity |
 | `secret_not_found` / `secret_store_failed` | The keychain entry is missing or the store is unavailable: run `melt plug edit <plug> --password-file ...` to store the password again |
 | `connection_failed` / `timeout` | The plug is on the LAN, the address is correct, and the proxy settings below |
 | `capability_unsupported` | The address answers as a model other than P110, or the protocol is unsupported (also after DHCP reassignment) |

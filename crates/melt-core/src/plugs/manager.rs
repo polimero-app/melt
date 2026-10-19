@@ -115,9 +115,8 @@ impl PlugManager {
         result
     }
 
-    /// Switches the relay once with readback. `current_revision` runs after
-    /// the slot lock is taken, so a write queued behind an edit or removal
-    /// fails without sending anything.
+    /// Switches the relay once with readback. Revalidates the profile after
+    /// taking the slot and again after the pre-read, immediately before send.
     pub async fn set_power<R, C>(
         &self,
         key: &PlugKey,
@@ -127,17 +126,12 @@ impl PlugManager {
     ) -> Result<PowerChange, PlugError>
     where
         R: FnOnce() -> Result<ResolvedPlug, PlugError> + Send + 'static,
-        C: FnOnce() -> Result<Option<String>, PlugError> + Send + 'static,
+        C: Fn() -> Result<Option<String>, PlugError> + Clone + Send + 'static,
     {
         let deadline = Instant::now() + key.timeout;
         let mut slot = self.enter(key, deadline).await?;
         slot.blocked = None;
-        let checked = match with_deadline(deadline, blocking(current_revision)).await {
-            Ok(Some(revision)) if revision == key.revision => Ok(()),
-            Ok(Some(_)) => Err(PlugError::ProfileChanged),
-            Ok(None) => Err(PlugError::NotFound(key.id.clone())),
-            Err(error) => Err(error),
-        };
+        let checked = check_revision(key, deadline, current_revision.clone()).await;
         if let Err(error) = checked {
             // Nothing reached the device: leave the observation alone.
             slot.session = None;
@@ -149,9 +143,24 @@ impl PlugManager {
             .unwrap()
             .get(&key.id)
             .and_then(|seen| seen.last.clone());
+        let generation = slot.generation;
+        let cell = OwnedMutexGuard::mutex(&slot).clone();
         let result = async {
             let session = connected(&mut slot.session, resolve, deadline).await?;
-            switch(session, state, deadline, last).await
+            switch(session, state, deadline, last, || async {
+                check_revision(key, deadline, current_revision).await?;
+                let slots = self.slots.lock().unwrap();
+                match slots.get(&key.id) {
+                    None => Err(PlugError::NotFound(key.id.clone())),
+                    Some(entry)
+                        if !Arc::ptr_eq(&entry.slot, &cell) || entry.generation != generation =>
+                    {
+                        Err(PlugError::ProfileChanged)
+                    }
+                    Some(_) => Ok(()),
+                }
+            })
+            .await
         }
         .await;
         self.settle(
@@ -300,6 +309,17 @@ impl PlugManager {
     }
 }
 
+async fn check_revision<C>(key: &PlugKey, deadline: Instant, current: C) -> Result<(), PlugError>
+where
+    C: FnOnce() -> Result<Option<String>, PlugError> + Send + 'static,
+{
+    match with_deadline(deadline, blocking(current)).await? {
+        Some(revision) if revision == key.revision => Ok(()),
+        Some(_) => Err(PlugError::ProfileChanged),
+        None => Err(PlugError::NotFound(key.id.clone())),
+    }
+}
+
 /// Opens a session if the slot has none: `resolve` on the blocking pool,
 /// then connect, both within `deadline`.
 async fn connected<R>(
@@ -333,6 +353,7 @@ fn auth_error(error: &PlugError) -> Option<PlugError> {
         PlugError::Authentication => Some(PlugError::Authentication),
         PlugError::CompatibilityDisabled => Some(PlugError::CompatibilityDisabled),
         PlugError::Lockout => Some(PlugError::Lockout),
+        PlugError::PowerUnconfirmed { cause, .. } => auth_error(cause),
         _ => None,
     }
 }
@@ -341,7 +362,11 @@ fn connection(error: &PlugError) -> Connection {
     match error {
         PlugError::Authentication | PlugError::CompatibilityDisabled => Connection::AuthFailed,
         PlugError::Lockout => Connection::Locked,
-        PlugError::UnsupportedDevice(_) | PlugError::UnsupportedProtocol => Connection::Unsupported,
+        PlugError::UnsupportedDevice(_)
+        | PlugError::UnsupportedProtocol
+        | PlugError::IdentityUnverified
+        | PlugError::IdentityMismatch => Connection::Unsupported,
+        PlugError::PowerUnconfirmed { cause, .. } => connection(cause),
         _ => Connection::Unreachable,
     }
 }
@@ -383,6 +408,7 @@ mod tests {
             name: "bench".into(),
             profile: PlugProfile {
                 id: ID.into(),
+                device_id: Some("test-p110".into()),
                 driver: "fake".into(),
                 host: host.into(),
                 username: "user@example.com".into(),
@@ -413,9 +439,11 @@ mod tests {
         move || Ok(plug(&host))
     }
 
-    fn revision(value: Option<&str>) -> impl FnOnce() -> Result<Option<String>, PlugError> + Send {
+    fn revision(
+        value: Option<&str>,
+    ) -> impl Fn() -> Result<Option<String>, PlugError> + Clone + Send {
         let value = value.map(str::to_owned);
-        move || Ok(value)
+        move || Ok(value.clone())
     }
 
     /// A resolver that holds the slot lock until released: it reports on
@@ -843,5 +871,144 @@ mod tests {
         let error = first.await.unwrap().unwrap_err();
         assert!(matches!(error, PlugError::Timeout), "{error:?}");
         assert!(manager.observations().is_empty());
+    }
+
+    #[tokio::test]
+    async fn evicted_operation_cannot_dispatch_after_resolving_credentials() {
+        let host = "manager-evict-before-dispatch";
+        let relay = install(host, FakeSession::new(PowerState::On, []));
+        let manager = Arc::new(PlugManager::default());
+        let (resolve, entered, release) = gated(host);
+        let write = tokio::spawn({
+            let manager = manager.clone();
+            async move {
+                manager
+                    .set_power(
+                        &key(ID, "r1"),
+                        PowerState::Off,
+                        resolve,
+                        revision(Some("r1")),
+                    )
+                    .await
+            }
+        });
+        entered.await.unwrap();
+        manager.evict(ID);
+        release.send(()).unwrap();
+
+        let result = write.await.unwrap();
+        assert_eq!(
+            *relay.lock().unwrap(),
+            PowerState::On,
+            "no relay command after eviction"
+        );
+        assert!(matches!(result, Err(PlugError::ProfileChanged)));
+        assert!(manager.observations().is_empty());
+    }
+
+    #[tokio::test]
+    async fn authentication_failure_during_readback_blocks_automatic_logins() {
+        for (suffix, error) in [
+            ("lockout", PlugError::Lockout),
+            ("auth", PlugError::Authentication),
+            ("compatibility", PlugError::CompatibilityDisabled),
+        ] {
+            let host = format!("manager-readback-{suffix}");
+            install(
+                &host,
+                FakeSession::new(
+                    PowerState::On,
+                    [
+                        FakeStep::Ok,
+                        FakeStep::Ok,
+                        FakeStep::Ok,
+                        FakeStep::Err(error),
+                    ],
+                ),
+            );
+            let manager = PlugManager::default();
+            let k = key(ID, "r1");
+            let result = manager
+                .set_power(&k, PowerState::Off, resolver(&host), revision(Some("r1")))
+                .await;
+            assert!(matches!(result, Err(PlugError::PowerUnconfirmed { .. })));
+            install(&host, FakeSession::new(PowerState::Off, []));
+
+            let poll = manager.status(&k, true, resolver(&host)).await;
+
+            assert!(
+                matches!(
+                    poll,
+                    Err(PlugError::Lockout
+                        | PlugError::Authentication
+                        | PlugError::CompatibilityDisabled)
+                ),
+                "{poll:?}"
+            );
+            assert!(
+                installed(&host),
+                "automatic poll must not authenticate again"
+            );
+            assert_eq!(
+                observation(&manager, ID).connection,
+                if suffix == "lockout" {
+                    Connection::Locked
+                } else {
+                    Connection::AuthFailed
+                }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn changes_during_pre_read_are_rechecked_without_an_eviction_hook() {
+        for removed in [false, true] {
+            let host = format!(
+                "manager-pre-read-{}",
+                if removed { "remove" } else { "edit" }
+            );
+            let (entered_tx, entered) = oneshot::channel();
+            let (release, release_rx) = oneshot::channel();
+            let relay = install(
+                &host,
+                FakeSession::new(
+                    PowerState::On,
+                    [
+                        FakeStep::Ok,
+                        FakeStep::ReadGate {
+                            entered: entered_tx,
+                            release: release_rx,
+                        },
+                    ],
+                ),
+            );
+            let manager = Arc::new(PlugManager::default());
+            let stored = Arc::new(Mutex::new(Some("r1".to_owned())));
+            let write = tokio::spawn({
+                let manager = manager.clone();
+                let stored = stored.clone();
+                async move {
+                    manager
+                        .set_power(
+                            &key(ID, "r1"),
+                            PowerState::Off,
+                            resolver(&host),
+                            move || Ok(stored.lock().unwrap().clone()),
+                        )
+                        .await
+                }
+            });
+            entered.await.unwrap();
+            *stored.lock().unwrap() = if removed { None } else { Some("r2".into()) };
+            release.send(()).unwrap();
+
+            let result = write.await.unwrap();
+            assert_eq!(*relay.lock().unwrap(), PowerState::On);
+            if removed {
+                assert!(matches!(result, Err(PlugError::NotFound(_))));
+            } else {
+                assert!(matches!(result, Err(PlugError::ProfileChanged)));
+            }
+        }
     }
 }

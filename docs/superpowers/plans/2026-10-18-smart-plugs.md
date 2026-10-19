@@ -4,8 +4,17 @@ Last-updated: 2026-10-18
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Ready for development. Covers core, CLI and desktop; no change to
-existing printer or camera behavior.
+**Status:** Core, CLI and desktop implemented; physical P110 qualification
+remains pending. The original implementation tasks are retained below.
+
+**Review corrections implemented:** Power dispatch rechecks the current
+profile after its pre-read and honors manager invalidation. Profile commits
+reject stale revisions before changing credentials. Setup persists a physical
+`device_id`; older unbound profiles require explicit verification before
+switching, and another P110 cannot replace a saved identity. Unconfirmed
+results retain their authentication cause so readback lockouts stop automatic
+logins. These corrections supersede the corresponding original interfaces
+below; current behavior is documented in [Smart plugs](../../smart-plugs.md).
 
 **Goal:** Switch printer and camera mains power on and off from the CLI and
 desktop through independent, named smart plug profiles, starting with the

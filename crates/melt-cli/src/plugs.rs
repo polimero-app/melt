@@ -251,9 +251,19 @@ fn power(
     let early = |error| (error, BTreeMap::new());
     let dir = config_dir().map_err(config_error).map_err(early)?;
     let plug = prepare_power(args, state, &dir, is_terminal, err).map_err(early)?;
+    let id = plug.profile.id.clone();
+    let expected_revision = plug.profile.updated.clone();
     runtime()
         .map_err(early)?
-        .block_on(plugs::set_power(&plug, state))
+        .block_on(plugs::set_power(&plug, state, move || async move {
+            tokio::task::spawn_blocking(move || match plugs::revision(dir, &id)? {
+                Some(revision) if revision == expected_revision => Ok(()),
+                Some(_) => Err(PlugError::ProfileChanged),
+                None => Err(PlugError::NotFound(id)),
+            })
+            .await
+            .unwrap_or(Err(PlugError::ProfileChanged))
+        }))
         .map_err(|error| power_failure(&plug.name, error))
 }
 
@@ -272,6 +282,7 @@ fn power_failure(name: &str, error: PlugError) -> Failure {
         PlugError::PowerUnconfirmed {
             requested,
             last_observed,
+            ..
         } => {
             let observed = last_observed
                 .as_ref()
@@ -374,7 +385,7 @@ fn runtime() -> Result<tokio::runtime::Runtime, AppError> {
     Ok(runtime)
 }
 
-fn verify(plug: &ResolvedPlug) -> Result<(), AppError> {
+fn verify(plug: &mut ResolvedPlug) -> Result<(), AppError> {
     runtime()?
         .block_on(plugs::verify(plug))
         .map(drop)
@@ -409,8 +420,8 @@ fn add(args: &[&String]) -> Result<PlugSummary, AppError> {
             .to_owned(),
     };
     let dir = config_dir().map_err(config_error)?;
-    let plug = plugs::prepare_create(&dir, request).map_err(plug_error)?;
-    verify(&plug)?;
+    let mut plug = plugs::prepare_create(&dir, request).map_err(plug_error)?;
+    verify(&mut plug)?;
     plugs::commit_create(&dir, &SystemKeychain, plug).map_err(plug_error)
 }
 
@@ -457,10 +468,10 @@ fn edit(args: &[&String]) -> Result<PlugSummary, AppError> {
             .value("timeout")
             .map_or(existing.timeout, str::to_owned),
     };
-    let update =
+    let mut update =
         plugs::prepare_update(&dir, &SystemKeychain, current, request).map_err(plug_error)?;
     if update.needs_verify {
-        verify(&update.plug)?;
+        verify(&mut update.plug)?;
     }
     plugs::commit_update(&dir, &SystemKeychain, update).map_err(plug_error)
 }
@@ -540,6 +551,8 @@ pub(crate) fn plug_error(error: PlugError) -> AppError {
             (3, "authentication_failed")
         }
         PlugError::Lockout => (3, "authentication_locked"),
+        PlugError::IdentityUnverified => (3, "device_identity_unverified"),
+        PlugError::IdentityMismatch => (3, "device_identity_mismatch"),
         PlugError::MissingSecret => (3, "secret_not_found"),
         PlugError::Secret(_) => (3, "secret_store_failed"),
         PlugError::Timeout => (4, "timeout"),
@@ -601,6 +614,12 @@ mod tests {
             (PlugError::Authentication, 3, "authentication_failed"),
             (PlugError::CompatibilityDisabled, 3, "authentication_failed"),
             (PlugError::Lockout, 3, "authentication_locked"),
+            (
+                PlugError::IdentityUnverified,
+                3,
+                "device_identity_unverified",
+            ),
+            (PlugError::IdentityMismatch, 3, "device_identity_mismatch"),
             (PlugError::MissingSecret, 3, "secret_not_found"),
             (
                 PlugError::Secret(SecretError::Unavailable("x".into())),
@@ -615,6 +634,7 @@ mod tests {
                 PlugError::PowerUnconfirmed {
                     requested: PowerState::Off,
                     last_observed: None,
+                    cause: Box::new(PlugError::Timeout),
                 },
                 4,
                 "power_change_unconfirmed",
@@ -808,6 +828,7 @@ mod tests {
                     state: PowerState::Off,
                     observed_at: "2026-10-18T12:00:00Z".into(),
                 }),
+                cause: Box::new(PlugError::Timeout),
             },
         );
         assert_eq!(
@@ -832,6 +853,7 @@ mod tests {
             PlugError::PowerUnconfirmed {
                 requested: PowerState::Off,
                 last_observed: None,
+                cause: Box::new(PlugError::Timeout),
             },
         );
         assert!(error.message.ends_with("Last known state: unknown."));

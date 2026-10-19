@@ -49,6 +49,9 @@ pub enum RelayState {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
+    /// Used only for identity checks and persistence, never public status.
+    #[serde(skip)]
+    pub(crate) device_id: String,
     pub model: String,
     pub hardware: String,
     pub firmware: String,
@@ -121,6 +124,10 @@ pub enum PlugError {
     Lockout,
     #[error("unsupported plug device {0:?}")]
     UnsupportedDevice(String),
+    #[error("plug identity is unverified; verify it by editing the profile with its password")]
+    IdentityUnverified,
+    #[error("plug identity does not match the verified device; check its address")]
+    IdentityMismatch,
     #[error("plug speaks an unsupported protocol")]
     UnsupportedProtocol,
     #[error("plug rejected the request")]
@@ -135,6 +142,8 @@ pub enum PlugError {
     PowerUnconfirmed {
         requested: PowerState,
         last_observed: Option<Observation>,
+        #[source]
+        cause: Box<PlugError>,
     },
     #[error("plug relay is {observed:?} instead of {requested:?}")]
     PowerMismatch {
@@ -157,6 +166,8 @@ pub enum PlugError {
 /// never leave this module.
 pub struct Session {
     inner: Inner,
+    expected_device_id: Option<String>,
+    identity_verified: bool,
 }
 
 enum Inner {
@@ -188,7 +199,11 @@ impl Session {
             ),
             other => return Err(PlugError::UnknownDriver(other.to_owned())),
         };
-        let mut session = Session { inner };
+        let mut session = Session {
+            inner,
+            expected_device_id: plug.profile.device_id.clone(),
+            identity_verified: plug.profile.device_id.is_some(),
+        };
         session.status().await?;
         Ok(session)
     }
@@ -208,6 +223,18 @@ impl Session {
         })?;
         if !QUALIFIED_MODELS.contains(&status.device.model.as_str()) {
             return Err(PlugError::UnsupportedDevice(status.device.model));
+        }
+        if status.device.device_id.is_empty()
+            || status.device.device_id.chars().any(char::is_control)
+        {
+            return Err(PlugError::MalformedResponse);
+        }
+        match &self.expected_device_id {
+            Some(expected) if expected != &status.device.device_id => {
+                return Err(PlugError::IdentityMismatch);
+            }
+            None => self.expected_device_id = Some(status.device.device_id.clone()),
+            _ => {}
         }
         Ok(status)
     }
@@ -233,31 +260,56 @@ impl Session {
 
     /// Never reconnects or retries: a write goes out at most once.
     async fn send(&mut self, state: PowerState) -> Result<(), PlugError> {
+        self.require_verified_identity()?;
         match &mut self.inner {
             Inner::Tapo(session) => session.send(state).await,
             #[cfg(test)]
             Inner::Fake(session) => session.send(state).await,
         }
     }
+
+    fn require_verified_identity(&self) -> Result<(), PlugError> {
+        if self.identity_verified {
+            Ok(())
+        } else {
+            Err(PlugError::IdentityUnverified)
+        }
+    }
 }
 
-/// Connects and reads status; never switches the relay.
-pub async fn verify(plug: &ResolvedPlug) -> Result<PlugStatus, PlugError> {
+/// Explicit, read-only verification. Enrolls an unbound profile, and refuses
+/// to replace an existing physical identity.
+pub async fn verify(plug: &mut ResolvedPlug) -> Result<PlugStatus, PlugError> {
+    let status = status(plug).await?;
+    plug.profile.device_id = Some(status.device.device_id.clone());
+    Ok(status)
+}
+
+/// Reads status without enrolling a device or changing configuration.
+pub async fn status(plug: &ResolvedPlug) -> Result<PlugStatus, PlugError> {
     with_deadline(Instant::now() + plug.timeout, async {
         Session::connect(plug).await?.status().await
     })
     .await
 }
 
-pub async fn status(plug: &ResolvedPlug) -> Result<PlugStatus, PlugError> {
-    verify(plug).await
-}
-
 /// One-shot power change: connect, then [`switch`], all within `plug.timeout`.
-pub async fn set_power(plug: &ResolvedPlug, state: PowerState) -> Result<PowerChange, PlugError> {
+/// `before_send` revalidates the caller's configuration after the pre-read.
+pub async fn set_power<C, F>(
+    plug: &ResolvedPlug,
+    state: PowerState,
+    before_send: C,
+) -> Result<PowerChange, PlugError>
+where
+    C: FnOnce() -> F,
+    F: Future<Output = Result<(), PlugError>>,
+{
+    if plug.profile.device_id.is_none() {
+        return Err(PlugError::IdentityUnverified);
+    }
     let deadline = Instant::now() + plug.timeout;
     let mut session = with_deadline(deadline, Session::connect(plug)).await?;
-    switch(&mut session, state, deadline, None).await
+    switch(&mut session, state, deadline, None, before_send).await
 }
 
 async fn with_deadline<T>(
@@ -272,21 +324,31 @@ async fn with_deadline<T>(
 /// Pre-read, send once, read back. See the "Power state and command results"
 /// design: confirmed, mismatch, rejected or unconfirmed. `last` is what the
 /// caller observed before; a successful pre-read replaces it.
-pub(crate) async fn switch(
+pub(crate) async fn switch<C, F>(
     session: &mut Session,
     state: PowerState,
     deadline: Instant,
     last: Option<Observation>,
-) -> Result<PowerChange, PlugError> {
+    before_send: C,
+) -> Result<PowerChange, PlugError>
+where
+    C: FnOnce() -> F,
+    F: Future<Output = Result<(), PlugError>>,
+{
+    session.require_verified_identity()?;
     let before = with_deadline(deadline, session.status()).await?;
     let last = Some(Observation {
         state: before.relay,
         observed_at: before.observed_at,
     })
     .or(last);
-    let unconfirmed = || PlugError::PowerUnconfirmed {
+    // Connection setup and the pre-read can outlive an edit or removal.
+    // Nothing has been sent yet, so a failed guard is a definite refusal.
+    with_deadline(deadline, before_send()).await?;
+    let unconfirmed = |cause| PlugError::PowerUnconfirmed {
         requested: state,
         last_observed: last.clone(),
+        cause: Box::new(cause),
     };
     match timeout_at(deadline, session.send(state)).await {
         Ok(Ok(())) => {}
@@ -296,7 +358,8 @@ pub(crate) async fn switch(
             | PlugError::CompatibilityDisabled
             | PlugError::DeviceRejected),
         )) => return Err(refusal),
-        Ok(Err(_)) | Err(_) => return Err(unconfirmed()),
+        Ok(Err(error)) => return Err(unconfirmed(error)),
+        Err(_) => return Err(unconfirmed(PlugError::Timeout)),
     }
     match timeout_at(deadline, session.status()).await {
         Ok(Ok(status)) if status.relay == state => Ok(PowerChange {
@@ -307,7 +370,8 @@ pub(crate) async fn switch(
             requested: state,
             observed: status.relay,
         }),
-        Ok(Err(_)) | Err(_) => Err(unconfirmed()),
+        Ok(Err(error)) => Err(unconfirmed(error)),
+        Err(_) => Err(unconfirmed(PlugError::Timeout)),
     }
 }
 
@@ -325,6 +389,11 @@ pub(crate) static FAKES: std::sync::LazyLock<
 pub(crate) enum FakeStep {
     /// A read answers this relay state.
     Status(PowerState),
+    DeviceId(String),
+    ReadGate {
+        entered: tokio::sync::oneshot::Sender<()>,
+        release: tokio::sync::oneshot::Receiver<()>,
+    },
     /// The operation behaves normally: a read returns the shared relay, a
     /// send sets it.
     Ok,
@@ -338,6 +407,7 @@ pub(crate) enum FakeStep {
 /// [`FakeStep::Ok`].
 #[cfg(test)]
 pub(crate) struct FakeSession {
+    pub(crate) device_id: String,
     pub(crate) model: String,
     pub(crate) relay: std::sync::Arc<std::sync::Mutex<PowerState>>,
     pub(crate) steps: std::collections::VecDeque<FakeStep>,
@@ -349,6 +419,7 @@ pub(crate) struct FakeSession {
 impl FakeSession {
     pub(crate) fn new(relay: PowerState, steps: impl IntoIterator<Item = FakeStep>) -> Self {
         Self {
+            device_id: "test-p110".into(),
             model: "P110".into(),
             relay: std::sync::Arc::new(std::sync::Mutex::new(relay)),
             steps: steps.into_iter().collect(),
@@ -360,6 +431,15 @@ impl FakeSession {
     async fn read(&mut self) -> Result<PlugStatus, ReadFailure> {
         let relay = match self.steps.pop_front().unwrap_or(FakeStep::Ok) {
             FakeStep::Status(state) => state,
+            FakeStep::DeviceId(id) => {
+                self.device_id = id;
+                *self.relay.lock().unwrap()
+            }
+            FakeStep::ReadGate { entered, release } => {
+                let _ = entered.send(());
+                release.await.expect("test releases the read");
+                *self.relay.lock().unwrap()
+            }
             FakeStep::Ok => *self.relay.lock().unwrap(),
             FakeStep::Err(error) => return Err(ReadFailure::Plug(error)),
             FakeStep::Expired => return Err(ReadFailure::Expired),
@@ -367,6 +447,7 @@ impl FakeSession {
         };
         Ok(PlugStatus {
             device: DeviceInfo {
+                device_id: self.device_id.clone(),
                 model: self.model.clone(),
                 hardware: "1.0".into(),
                 firmware: "1.0.0".into(),
@@ -382,7 +463,10 @@ impl FakeSession {
             FakeStep::Ok => *self.relay.lock().unwrap() = state,
             FakeStep::Err(error) => return Err(error),
             FakeStep::Hang => std::future::pending().await,
-            FakeStep::Status(_) | FakeStep::Expired => panic!("not a send step"),
+            FakeStep::Status(_)
+            | FakeStep::DeviceId(_)
+            | FakeStep::ReadGate { .. }
+            | FakeStep::Expired => panic!("not a send step"),
         }
         Ok(())
     }
@@ -397,7 +481,22 @@ mod tests {
     fn session(fake: FakeSession) -> Session {
         Session {
             inner: Inner::Fake(fake),
+            expected_device_id: Some("test-p110".into()),
+            identity_verified: true,
         }
+    }
+
+    async fn switch(
+        session: &mut Session,
+        state: PowerState,
+        deadline: Instant,
+        last: Option<Observation>,
+    ) -> Result<PowerChange, PlugError> {
+        super::switch(session, state, deadline, last, || async { Ok(()) }).await
+    }
+
+    async fn set_power(plug: &ResolvedPlug, state: PowerState) -> Result<PowerChange, PlugError> {
+        super::set_power(plug, state, || async { Ok(()) }).await
     }
 
     fn fake(session: &Session) -> &FakeSession {
@@ -416,6 +515,7 @@ mod tests {
             name: "bench".into(),
             profile: PlugProfile {
                 id: "11111111111111111111111111111111".into(),
+                device_id: Some("test-p110".into()),
                 driver: FAKE.into(),
                 host: host.into(),
                 username: "user@example.com".into(),
@@ -488,6 +588,7 @@ mod tests {
         let PlugError::PowerUnconfirmed {
             requested,
             last_observed: Some(last),
+            ..
         } = error
         else {
             panic!("{error:?}");
@@ -515,7 +616,8 @@ mod tests {
                     last_observed: Some(Observation {
                         state: PowerState::On,
                         ..
-                    })
+                    }),
+                    ..
                 }
             ),
             "{error:?}"
@@ -613,7 +715,7 @@ mod tests {
             .lock()
             .unwrap()
             .insert("192.0.2.30".into(), FakeSession::new(PowerState::On, []));
-        let status = verify(&plug("192.0.2.30")).await.unwrap();
+        let status = verify(&mut plug("192.0.2.30")).await.unwrap();
         assert_eq!(status.relay, PowerState::On);
         assert_eq!(status.device.model, "P110");
     }
@@ -631,5 +733,108 @@ mod tests {
         let error = s.status().await.unwrap_err();
         assert!(matches!(error, PlugError::DeviceRejected), "{error:?}");
         assert_eq!(fake(&s).reconnects, 1);
+    }
+
+    #[tokio::test]
+    async fn same_model_replacement_is_rejected_before_switching() {
+        let host = "identity-replacement";
+        let mut replacement = FakeSession::new(PowerState::On, []);
+        replacement.device_id = "different-p110".into();
+        let relay = replacement.relay.clone();
+        FAKES.lock().unwrap().insert(host.into(), replacement);
+
+        let error = set_power(&plug(host), PowerState::Off).await.unwrap_err();
+
+        assert!(matches!(error, PlugError::IdentityMismatch), "{error:?}");
+        assert_eq!(*relay.lock().unwrap(), PowerState::On);
+    }
+
+    #[tokio::test]
+    async fn identity_is_checked_again_in_the_pre_read() {
+        let host = "identity-pre-read";
+        let replacement = FakeSession::new(
+            PowerState::On,
+            [FakeStep::Ok, FakeStep::DeviceId("different-p110".into())],
+        );
+        let relay = replacement.relay.clone();
+        FAKES.lock().unwrap().insert(host.into(), replacement);
+
+        let error = set_power(&plug(host), PowerState::Off).await.unwrap_err();
+
+        assert!(matches!(error, PlugError::IdentityMismatch), "{error:?}");
+        assert_eq!(*relay.lock().unwrap(), PowerState::On);
+    }
+
+    #[tokio::test]
+    async fn verification_pins_identity_without_exposing_it_in_status() {
+        let host = "identity-verification";
+        let mut plug = plug(host);
+        plug.profile.device_id = None;
+        FAKES
+            .lock()
+            .unwrap()
+            .insert(host.into(), FakeSession::new(PowerState::On, []));
+
+        let status = verify(&mut plug).await.unwrap();
+
+        assert_eq!(plug.profile.device_id.as_deref(), Some("test-p110"));
+        let json = serde_json::to_value(status).unwrap();
+        assert!(json["device"].get("deviceId").is_none());
+        assert!(!json.to_string().contains("test-p110"));
+    }
+
+    #[tokio::test]
+    async fn unverified_profiles_can_be_read_but_cannot_switch_power() {
+        let host = "identity-unverified";
+        let mut plug = plug(host);
+        plug.profile.device_id = None;
+        FAKES
+            .lock()
+            .unwrap()
+            .insert(host.into(), FakeSession::new(PowerState::On, []));
+        assert_eq!(status(&plug).await.unwrap().relay, PowerState::On);
+        assert!(
+            plug.profile.device_id.is_none(),
+            "background reads must not enroll a device"
+        );
+
+        let error = set_power(&plug, PowerState::Off).await.unwrap_err();
+        assert!(matches!(error, PlugError::IdentityUnverified), "{error:?}");
+    }
+
+    #[tokio::test]
+    async fn verification_cannot_replace_a_saved_identity() {
+        let host = "identity-reverification";
+        let mut plug = plug(host);
+        let mut replacement = FakeSession::new(PowerState::On, []);
+        replacement.device_id = "different-p110".into();
+        FAKES.lock().unwrap().insert(host.into(), replacement);
+
+        assert!(matches!(
+            verify(&mut plug).await,
+            Err(PlugError::IdentityMismatch)
+        ));
+        assert_eq!(plug.profile.device_id.as_deref(), Some("test-p110"));
+    }
+
+    #[tokio::test]
+    async fn reconnect_cannot_switch_to_a_different_p110() {
+        let host = "identity-reconnect";
+        let replacement = FakeSession::new(
+            PowerState::On,
+            [
+                FakeStep::Ok,
+                FakeStep::Expired,
+                FakeStep::DeviceId("different-p110".into()),
+            ],
+        );
+        let relay = replacement.relay.clone();
+        FAKES.lock().unwrap().insert(host.into(), replacement);
+
+        assert!(matches!(
+            set_power(&plug(host), PowerState::Off).await,
+            Err(PlugError::IdentityMismatch)
+        ));
+        assert_eq!(*relay.lock().unwrap(), PowerState::On);
     }
 }

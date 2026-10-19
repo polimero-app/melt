@@ -214,6 +214,8 @@ export type MessageKey =
   | "errors.plugCompatibilityDisabled"
   | "errors.plugLocked"
   | "errors.plugUnsupportedDevice"
+  | "errors.plugIdentityUnverified"
+  | "errors.plugIdentityMismatch"
   | "errors.plugUnsupportedProtocol"
   | "errors.plugUnreachable"
   | "errors.plugDeviceRejected"
@@ -889,6 +891,8 @@ const messages: Record<Locale, Messages> = {
     "errors.plugCompatibilityDisabled": "The plug refused the connection. Turn on Third-Party Compatibility for it in the Tapo app.",
     "errors.plugLocked": "The plug has temporarily locked out sign-ins after failed attempts. Wait a few minutes, then try again.",
     "errors.plugUnsupportedDevice": "This device is not a supported smart plug. Only the Tapo P110 is supported.",
+    "errors.plugIdentityUnverified": "This plug's identity has not been verified. Check its address, then edit the plug and enter its password to verify it before switching power.",
+    "errors.plugIdentityMismatch": "This address belongs to a different plug. Check the address of the original plug before switching power.",
     "errors.plugUnsupportedProtocol": "The plug uses a protocol Melt does not support.",
     "errors.plugUnreachable": "Cannot reach the smart plug. Check that it is powered and on the same network.",
     "errors.plugDeviceRejected": "The plug refused the request. If it was a switch command, it was not applied.",
@@ -1561,6 +1565,8 @@ const messages: Record<Locale, Messages> = {
     "errors.plugCompatibilityDisabled": "A tomada recusou a conexão. Ative a Compatibilidade com Terceiros nela, no app Tapo.",
     "errors.plugLocked": "A tomada bloqueou temporariamente os logins após tentativas falhas. Aguarde alguns minutos e tente de novo.",
     "errors.plugUnsupportedDevice": "Este dispositivo não é uma tomada inteligente suportada. Apenas a Tapo P110 é suportada.",
+    "errors.plugIdentityUnverified": "A identidade desta tomada ainda não foi verificada. Confira o endereço, edite a tomada e informe a senha para verificá-la antes de ligar ou desligar.",
+    "errors.plugIdentityMismatch": "Este endereço pertence a outra tomada. Confira o endereço da tomada original antes de ligar ou desligar.",
     "errors.plugUnsupportedProtocol": "A tomada usa um protocolo que o Melt não suporta.",
     "errors.plugUnreachable": "Não foi possível acessar a tomada inteligente. Verifique se ela está ligada e na mesma rede.",
     "errors.plugDeviceRejected": "A tomada recusou a solicitação. Se era um comando de liga/desliga, ele não foi aplicado.",

@@ -92,6 +92,10 @@ pub struct CameraProfile {
 #[serde(deny_unknown_fields)]
 pub struct PlugProfile {
     pub id: String,
+    /// Verified physical device identity. Older profiles remain read-only
+    /// until an explicit verification enrolls their device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<String>,
     pub driver: String,
     pub host: String,
     pub username: String,
@@ -561,6 +565,15 @@ impl Config {
                     "plug IDs must be unique 32-digit lowercase hex values",
                 ));
             }
+            if plug
+                .device_id
+                .as_ref()
+                .is_some_and(|id| id.is_empty() || id.chars().any(char::is_control))
+            {
+                return Err(ConfigError::InvalidPlugs(
+                    "a plug has an invalid device identity",
+                ));
+            }
             for printer in &plug.printers {
                 if !self.profiles.contains_key(printer) {
                     return Err(ConfigError::InvalidPlugs("a plug names an unknown printer"));
@@ -926,6 +939,7 @@ profiles:
     fn plug(id: &str) -> PlugProfile {
         PlugProfile {
             id: id.into(),
+            device_id: None,
             driver: "tapo".into(),
             host: "192.0.2.30".into(),
             username: "melt".into(),
@@ -935,6 +949,33 @@ profiles:
             created: "2026-10-18T12:00:00Z".into(),
             updated: "2026-10-18T12:00:00Z".into(),
         }
+    }
+
+    #[test]
+    fn legacy_plug_profiles_stay_unbound_and_verified_identity_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::open(dir.path()).unwrap();
+        config.add_plug("bench", plug(SOCKET)).unwrap();
+        config.save(dir.path()).unwrap();
+        let mut config = Config::open(dir.path()).unwrap();
+        assert!(config.get_plug("bench").unwrap().device_id.is_none());
+        let mut bound = config.get_plug("bench").unwrap().clone();
+        bound.device_id = Some("test-p110".into());
+        config.replace_plug("bench", "bench", bound).unwrap();
+        config.save(dir.path()).unwrap();
+
+        let mut config = Config::open(dir.path()).unwrap();
+        assert_eq!(
+            config.get_plug("bench").unwrap().device_id.as_deref(),
+            Some("test-p110")
+        );
+        let mut invalid = config.get_plug("bench").unwrap().clone();
+        invalid.device_id = Some(String::new());
+        config.replace_plug("bench", "bench", invalid).unwrap();
+        assert!(matches!(
+            config.save(dir.path()),
+            Err(ConfigError::InvalidPlugs(_))
+        ));
     }
 
     fn saved_version(config: &mut Config) -> String {

@@ -27,6 +27,7 @@ impl TapoSession {
         })?;
         Ok(PlugStatus {
             device: DeviceInfo {
+                device_id: info.device_id,
                 model: info.model,
                 hardware: info.hw_ver,
                 firmware: info.fw_ver,

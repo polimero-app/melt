@@ -125,6 +125,10 @@ link printers and cameras, and remove. Each plug card has On and Off buttons,
 the relay state, the last observation and connection health. The same control
 also appears above a printer's Control view, including its offline screen, and
 under an external camera's viewer.
+Profiles from older builds without a device identity remain readable; edit
+the plug and enter its password again to verify its identity before switching.
+Verification does not change power, and a saved identity rejects a different
+P110 at the same address.
 
 Off asks for confirmation. The dialog names the plug, every attached printer
 (with known printing, paused, heating or drying activity) and every attached

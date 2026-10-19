@@ -59,6 +59,7 @@ pub struct PlugUpdate {
     /// Carries the existing links; empty password unless `needs_verify`.
     pub plug: ResolvedPlug,
     current: String,
+    expected_revision: String,
     password_changed: bool,
     /// Driver, host, username or password changed: verify before committing.
     pub needs_verify: bool,
@@ -83,6 +84,7 @@ pub fn prepare_create(
         name,
         profile: PlugProfile {
             id: new_id(),
+            device_id: None,
             driver: request.driver,
             host: request.host,
             username: request.username,
@@ -108,6 +110,9 @@ pub fn commit_create(
     let mut config = Config::open(dir).map_err(PlugError::Config)?;
     if config.get_plug(&plug.name).is_some() {
         return Err(PlugError::AlreadyExists(plug.name));
+    }
+    if plug.profile.device_id.is_none() {
+        return Err(PlugError::IdentityUnverified);
     }
     let mut secrets = vec![
         StoredSecret::replace(store, password_account(&plug.profile.id), &plug.password)
@@ -163,6 +168,7 @@ pub fn prepare_update(
             name,
             profile: PlugProfile {
                 id: previous.id,
+                device_id: previous.device_id,
                 driver: request.driver,
                 host: request.host,
                 username: request.username,
@@ -176,6 +182,7 @@ pub fn prepare_update(
             timeout,
         },
         current,
+        expected_revision: previous.updated,
         password_changed,
         needs_verify,
     })
@@ -190,16 +197,20 @@ pub fn commit_update(
     let PlugUpdate {
         mut plug,
         current,
+        expected_revision,
         password_changed,
-        ..
+        needs_verify,
     } = update;
     let mut config = Config::open(dir).map_err(PlugError::Config)?;
     // Links may have changed while the caller verified; keep the latest.
     let latest = config
         .get_plug(&current)
         .ok_or_else(|| PlugError::NotFound(current.clone()))?;
-    if latest.id != plug.profile.id {
+    if latest.id != plug.profile.id || latest.updated != expected_revision {
         return Err(PlugError::ProfileChanged);
+    }
+    if needs_verify && plug.profile.device_id.is_none() {
+        return Err(PlugError::IdentityUnverified);
     }
     plug.profile.printers = latest.printers.clone();
     plug.profile.cameras = latest.cameras.clone();
@@ -494,7 +505,8 @@ mod tests {
     }
 
     fn create(dir: &Path, store: &dyn SecretStore, name: &str) -> PlugSummary {
-        let plug = prepare_create(dir, request(name, "s3cret")).unwrap();
+        let mut plug = prepare_create(dir, request(name, "s3cret")).unwrap();
+        plug.profile.device_id = Some("test-p110".into());
         commit_create(dir, store, plug).unwrap()
     }
 
@@ -548,9 +560,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::default();
 
-        let plug = prepare_create(dir.path(), request("Bench", "s3cret")).unwrap();
+        let mut plug = prepare_create(dir.path(), request("Bench", "s3cret")).unwrap();
         assert!(list(dir.path()).unwrap().is_empty());
         assert!(store.0.lock().unwrap().is_empty());
+        plug.profile.device_id = Some("test-p110".into());
         let summary = commit_create(dir.path(), &store, plug).unwrap();
 
         assert_eq!(summary.name, "bench");
@@ -589,6 +602,7 @@ mod tests {
         // An invalid ID passes the secret store but fails config validation on save.
         let mut plug = plug;
         plug.profile.id = "bad".into();
+        plug.profile.device_id = Some("test-p110".into());
 
         let result = commit_create(dir.path(), &store, plug);
 
@@ -707,7 +721,8 @@ mod tests {
         let store = MemoryStore::default();
         let mut mixed = request("bench", "s3cret");
         mixed.username = "Operator@Example.invalid".into();
-        let plug = prepare_create(dir.path(), mixed).unwrap();
+        let mut plug = prepare_create(dir.path(), mixed).unwrap();
+        plug.profile.device_id = Some("test-p110".into());
         commit_create(dir.path(), &store, plug).unwrap();
 
         let resolved = resolve(dir.path(), &store, "bench").unwrap();
@@ -927,5 +942,83 @@ mod tests {
         assert_eq!(now.profile.id, recreated.id);
         assert_eq!(now.password, "s3cret");
         assert_eq!(store.0.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn stale_metadata_edit_cannot_overwrite_newer_connection_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::default();
+        create(dir.path(), &store, "bench");
+        let earlier = prepare_update(dir.path(), &store, "bench", request("renamed", "")).unwrap();
+        let mut newer = request("bench", "new-password");
+        newer.host = "192.0.2.31".into();
+        let newer = prepare_update(dir.path(), &store, "bench", newer).unwrap();
+        commit_update(dir.path(), &store, newer).unwrap();
+
+        let result = commit_update(dir.path(), &store, earlier);
+
+        assert!(matches!(result, Err(PlugError::ProfileChanged)));
+        let saved = resolve(dir.path(), &store, "bench").unwrap();
+        assert_eq!(saved.profile.host, "192.0.2.31");
+        assert_eq!(saved.password, "new-password");
+    }
+
+    #[test]
+    fn stale_password_edit_cannot_replace_the_newer_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::default();
+        create(dir.path(), &store, "bench");
+        let earlier =
+            prepare_update(dir.path(), &store, "bench", request("bench", "old-edit")).unwrap();
+        let newer =
+            prepare_update(dir.path(), &store, "bench", request("bench", "new-edit")).unwrap();
+        commit_update(dir.path(), &store, newer).unwrap();
+
+        assert!(matches!(
+            commit_update(dir.path(), &store, earlier),
+            Err(PlugError::ProfileChanged)
+        ));
+        assert_eq!(
+            resolve(dir.path(), &store, "bench").unwrap().password,
+            "new-edit"
+        );
+    }
+
+    #[test]
+    fn unverified_create_cannot_save_a_profile_or_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::default();
+        let plug = prepare_create(dir.path(), request("bench", "s3cret")).unwrap();
+
+        assert!(matches!(
+            commit_create(dir.path(), &store, plug),
+            Err(PlugError::IdentityUnverified)
+        ));
+        assert!(store.0.lock().unwrap().is_empty());
+        assert!(list(dir.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn metadata_edits_preserve_identity_and_concurrent_attachment_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::default();
+        add_devices(dir.path());
+        create(dir.path(), &store, "bench");
+        let update = prepare_update(dir.path(), &store, "bench", request("renamed", "")).unwrap();
+        link(dir.path(), "bench", &camera()).unwrap();
+        store.0.lock().unwrap().clear();
+
+        let saved = commit_update(dir.path(), &store, update).unwrap();
+
+        assert_eq!(saved.cameras, ["porch"]);
+        assert_eq!(
+            Config::open(dir.path())
+                .unwrap()
+                .get_plug("renamed")
+                .unwrap()
+                .device_id
+                .as_deref(),
+            Some("test-p110")
+        );
     }
 }

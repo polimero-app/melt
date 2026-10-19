@@ -37,11 +37,11 @@ pub async fn plug_list() -> Result<Vec<PlugSummary>, CommandError> {
 #[tauri::command]
 pub async fn plug_add(request: PlugRequest) -> Result<PlugSummary, CommandError> {
     let dir = dir()?;
-    let plug = {
+    let mut plug = {
         let dir = dir.clone();
         blocking(move || plugs::prepare_create(dir, request).map_err(plug_error)).await?
     };
-    plugs::verify(&plug).await.map_err(plug_error)?;
+    plugs::verify(&mut plug).await.map_err(plug_error)?;
     blocking(move || plugs::commit_create(dir, &SystemKeychain, plug).map_err(plug_error)).await
 }
 
@@ -55,7 +55,7 @@ pub async fn plug_edit(
     manager: State<'_, Arc<PlugManager>>,
 ) -> Result<PlugSummary, CommandError> {
     let dir = dir()?;
-    let update = {
+    let mut update = {
         let dir = dir.clone();
         blocking(move || {
             plugs::prepare_update(dir, &SystemKeychain, &name, request).map_err(plug_error)
@@ -63,7 +63,7 @@ pub async fn plug_edit(
         .await?
     };
     if update.needs_verify {
-        plugs::verify(&update.plug).await.map_err(plug_error)?;
+        plugs::verify(&mut update.plug).await.map_err(plug_error)?;
     }
     let summary =
         blocking(move || plugs::commit_update(dir, &SystemKeychain, update).map_err(plug_error))
@@ -140,7 +140,7 @@ pub async fn plug_set_power(
     let (dir, key) = current_key(&id).await?;
     let revision = {
         let (dir, id) = (dir.clone(), id.clone());
-        move || plugs::revision(dir, &id)
+        move || plugs::revision(&dir, &id)
     };
     let result = manager
         .set_power(&key, state, resolver(dir, id.clone()), revision)
@@ -375,6 +375,8 @@ fn plug_error(error: PlugError) -> CommandError {
         E::CompatibilityDisabled => "plugCompatibilityDisabled",
         E::Lockout => "plugLocked",
         E::UnsupportedDevice(_) => "plugUnsupportedDevice",
+        E::IdentityUnverified => "plugIdentityUnverified",
+        E::IdentityMismatch => "plugIdentityMismatch",
         E::UnsupportedProtocol => "plugUnsupportedProtocol",
         E::Connect | E::MalformedResponse => "plugUnreachable",
         E::DeviceRejected => "plugDeviceRejected",
@@ -503,6 +505,8 @@ mod tests {
                 "plugCompatibilityDisabled",
             ),
             (PlugError::Lockout, "plugLocked"),
+            (PlugError::IdentityUnverified, "plugIdentityUnverified"),
+            (PlugError::IdentityMismatch, "plugIdentityMismatch"),
             (
                 PlugError::UnsupportedDevice("P100".into()),
                 "plugUnsupportedDevice",
@@ -519,6 +523,7 @@ mod tests {
                         state: PowerState::On,
                         observed_at: "2026-10-18T12:00:00Z".into(),
                     }),
+                    cause: Box::new(PlugError::Timeout),
                 },
                 "plugPowerUnconfirmed",
             ),

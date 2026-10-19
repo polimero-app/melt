@@ -217,6 +217,10 @@ TP-Link account password. `plug link`/`unlink` take exactly one of
 describe power only. Plug commands have no `--timeout` except add/edit, no
 `--insecure` and no `--protocol-trace`.
 
+Setup saves the physical device identity and rejects another P110 at the same
+address. Older profiles without an identity require explicit read-only
+verification with `plug edit <plug> --password-file <path>` before switching.
+
 `plug off` asks for confirmation naming the plug and its attached printers
 and cameras. Interactively you type `yes`; without a terminal and without
 `--yes` it exits 2 before any network request. `plug on` never prompts. A
@@ -227,7 +231,8 @@ power change is read back, never retried:
 | `power_change_mismatch` | 4 | The plug answered with the other state |
 | `power_change_unconfirmed` | 4 | The result could not be confirmed; the relay may have changed |
 | `device_rejected` | 4 | The plug refused the command; nothing was applied |
-| `authentication_failed`, `authentication_locked` | 3 | Wrong password, Third-Party Compatibility off, or lockout |
+| `authentication_failed`, `authentication_locked` | 3 | Login refused, incorrect credentials, or lockout |
+| `device_identity_unverified`, `device_identity_mismatch` | 3 | Identity needs explicit verification, or the address answers as a different device |
 | `secret_not_found`, `secret_store_failed` | 3 | Keychain password missing or store unavailable |
 | `connection_failed`, `timeout` | 4 | Plug unreachable or too slow |
 | `capability_unsupported` | 5 | Not a P110, or unsupported protocol |
