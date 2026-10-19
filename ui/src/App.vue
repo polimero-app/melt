@@ -4040,10 +4040,6 @@ onUnmounted(() => {
     <SlideOver :open="plugFormOpen" :title="editingPlug ? t('plugsView.edit') : t('plugsView.add')" :description="t('plugsView.formDescription')" :close-label="t('common.closePanel')" @close="!plugSaving && (plugFormOpen = false)">
       <form id="plug-form" class="space-y-4" @submit.prevent="savePlug">
         <div>
-          <label for="plug-driver" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('plugsView.driver') }}</label>
-          <input id="plug-driver" value="tapo" disabled class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
-        </div>
-        <div>
           <label for="plug-name" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.name') }}</label>
           <!-- Mirrors profiles::normalize_name so the browser catches spaces before the round trip. -->
           <input id="plug-name" v-model="plugDraft.name" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" :title="t('plugsView.nameHint')" aria-describedby="plug-name-hint" autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />

@@ -160,7 +160,6 @@ export type MessageKey =
   | "plugsView.empty"
   | "plugsView.emptyHint"
   | "plugsView.formDescription"
-  | "plugsView.driver"
   | "plugsView.username"
   | "plugsView.host"
   | "plugsView.nameHint"
@@ -838,7 +837,6 @@ const messages: Record<Locale, Messages> = {
     "plugsView.empty": "No smart plugs yet",
     "plugsView.emptyHint": "Add a Tapo P110 to see and control the power of a printer or camera.",
     "plugsView.formDescription": "Melt connects to the plug to check these settings before saving.",
-    "plugsView.driver": "Driver",
     "plugsView.username": "TP-Link account email",
     "plugsView.host": "Host or IP address",
     "plugsView.nameHint": "Letters, numbers, dots, dashes and underscores; no spaces. Stored in lowercase.",
@@ -1513,7 +1511,6 @@ const messages: Record<Locale, Messages> = {
     "plugsView.empty": "Nenhuma tomada inteligente ainda",
     "plugsView.emptyHint": "Adicione uma Tapo P110 para ver e controlar a energia de uma impressora ou câmera.",
     "plugsView.formDescription": "O Melt se conecta à tomada para verificar estas configurações antes de salvar.",
-    "plugsView.driver": "Driver",
     "plugsView.username": "E-mail da conta TP-Link",
     "plugsView.host": "Host ou endereço IP",
     "plugsView.nameHint": "Letras, números, pontos, hifens e sublinhados; sem espaços. Salvo em minúsculas.",
