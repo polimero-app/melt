@@ -461,7 +461,7 @@ const tlsPrinter = ref<string>()
 const diagnostics = ref<Diagnostics>()
 const diagnosticsError = ref<string>()
 const diagnosticsLoading = ref(false)
-const pendingConfirm = ref<{ title: string; description: string; confirm: string; variant: 'primary' | 'danger'; run: () => Promise<void> }>()
+const pendingConfirm = ref<{ title: string; description: string; confirm: string; variant: 'primary' | 'danger'; emergency?: boolean; run: () => Promise<void> }>()
 const confirming = ref(false)
 const documentVisible = ref(document.visibilityState === 'visible')
 let monitorUnlisten: UnlistenFn | undefined
@@ -946,7 +946,7 @@ function message(reason: unknown) {
 }
 
 function askConfirmation(
-  keys: { title: MessageKey; description: MessageKey; confirm: MessageKey },
+  keys: { title: MessageKey; description: MessageKey; confirm: MessageKey; emergency?: boolean },
   values: Record<string, string>,
   run: () => Promise<void>,
   variant: 'primary' | 'danger' = 'danger',
@@ -956,6 +956,7 @@ function askConfirmation(
     description: t(keys.description, values),
     confirm: t(keys.confirm),
     variant,
+    emergency: keys.emergency,
     run,
   }
 }
@@ -2043,7 +2044,7 @@ const dryingMenuItems = computed<ActionMenuItem[]>(() =>
 function emergencyStop() {
   if (!activePrinter.value) return
   askConfirmation(
-    { title: 'confirm.stopTitle', description: 'confirm.stopDescription', confirm: 'confirm.stopConfirm' },
+    { title: 'confirm.stopTitle', description: 'confirm.stopDescription', confirm: 'confirm.stopConfirm', emergency: true },
     { name: activePrinter.value.name },
     () => runEmergencyStop(),
   )
@@ -2609,10 +2610,10 @@ onUnmounted(() => {
             </span>
             <Button
               v-if="capabilities?.emergencyStop"
-              variant="danger"
+              variant="emergency"
               :disabled="!activeHasStatus"
               @click="emergencyStop"
-            ><PhStop class="size-4" aria-hidden="true" /> {{ t('dashboard.emergency') }}</Button>
+            ><PhWarning class="size-4" aria-hidden="true" /> {{ t('dashboard.emergency') }}</Button>
           </div>
         </div>
 
@@ -4204,6 +4205,7 @@ onUnmounted(() => {
       :cancel-label="t('common.cancel')"
       :confirm-variant="pendingConfirm?.variant"
       :busy="confirming"
+      :emergency="pendingConfirm?.emergency"
       @close="!confirming && (pendingConfirm = undefined)"
       @confirm="runConfirmation"
     />

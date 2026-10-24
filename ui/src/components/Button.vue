@@ -1,5 +1,5 @@
 <script setup lang="ts">
-withDefaults(defineProps<{ variant?: 'primary' | 'secondary' | 'danger'; type?: 'button' | 'submit' }>(), {
+withDefaults(defineProps<{ variant?: 'primary' | 'secondary' | 'danger' | 'emergency'; type?: 'button' | 'submit' }>(), {
   variant: 'secondary',
   type: 'button',
 })
@@ -11,6 +11,8 @@ const variantClasses: Record<string, string> = {
     'bg-white text-gray-900 shadow-xs inset-ring inset-ring-gray-300 hover:bg-gray-50 dark:bg-white/10 dark:text-white dark:shadow-none dark:inset-ring-white/5 dark:hover:bg-white/20',
   danger:
     'bg-red-50 text-red-700 shadow-xs inset-ring inset-ring-red-600/20 hover:bg-red-100 dark:bg-red-500/10 dark:text-red-400 dark:shadow-none dark:inset-ring-red-500/20 dark:hover:bg-red-500/20',
+  emergency:
+    'bg-red-700 text-white shadow-xs hover:bg-red-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 dark:bg-red-600 dark:shadow-none dark:hover:bg-red-700 dark:focus-visible:outline-red-400',
 }
 </script>
 

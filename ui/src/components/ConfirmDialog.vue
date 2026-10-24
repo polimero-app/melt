@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { ref, watchEffect } from 'vue'
 import { Dialog, DialogDescription, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } from '@headlessui/vue'
 import Button from './Button.vue'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   open: boolean
   title: string
   description?: string
@@ -10,14 +11,23 @@ withDefaults(defineProps<{
   cancelLabel: string
   confirmVariant?: 'primary' | 'danger'
   busy?: boolean
+  emergency?: boolean
 }>(), { confirmVariant: 'primary' })
 
 defineEmits<{ close: []; confirm: [] }>()
+
+const confirmButton = ref<InstanceType<typeof Button>>()
+const initialFocus = ref<HTMLElement>()
+
+watchEffect(() => {
+  // Keep the focus target stable through the leave transition.
+  if (props.open) initialFocus.value = props.emergency ? confirmButton.value?.$el : undefined
+})
 </script>
 
 <template>
   <TransitionRoot as="template" :show="open">
-    <Dialog class="relative z-50" role="alertdialog" @close="!busy && $emit('close')">
+    <Dialog class="relative z-50" role="alertdialog" :initial-focus="initialFocus" @close="!busy && $emit('close')">
       <TransitionChild as="template" enter="ease-out duration-300" enter-from="opacity-0" enter-to="opacity-100" leave="ease-in duration-200" leave-from="opacity-100" leave-to="opacity-0">
         <div class="fixed inset-0 bg-gray-500/75 transition-opacity dark:bg-gray-950/70" />
       </TransitionChild>
@@ -39,7 +49,7 @@ defineEmits<{ close: []; confirm: [] }>()
               <div v-if="$slots.default" class="mt-4"><slot /></div>
               <div class="mt-6 flex justify-end gap-2">
                 <Button :disabled="busy" @click="$emit('close')">{{ cancelLabel }}</Button>
-                <Button :variant="confirmVariant" :disabled="busy" @click="$emit('confirm')">{{ confirmLabel }}</Button>
+                <Button ref="confirmButton" :variant="emergency ? 'emergency' : confirmVariant" :disabled="busy" @click="$emit('confirm')">{{ confirmLabel }}</Button>
               </div>
             </DialogPanel>
           </TransitionChild>

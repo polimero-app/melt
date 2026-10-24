@@ -44,14 +44,20 @@ frontend. AMS drying controls appear only for a heater-equipped unit whose
 printer advertises remote drying. See [Bambu compatibility](bambu-compatibility.md).
 
 Print cancellation, destructive actions and print dispatch use confirmation
-flows. The dedicated emergency-stop button also asks for confirmation in the
-desktop and is disabled without usable status. Once confirmed, its backend
+flows. The dedicated emergency-stop button is solid red with a warning icon,
+distinct from Cancel print, and is disabled without usable status. Its desktop
+confirmation focuses **Stop now**, so Enter sends the stop; Escape or Cancel
+dismisses it. Other confirmations still focus Cancel. Once confirmed, its backend
 path avoids the ordinary pooled command lock. The CLI's `emergency-stop`
 command has no confirmation prompt; the two surfaces differ here.
 
 TLS pin replacement uses the same confirmation dialog, naming the printer and
 showing the captured fingerprint for review. Neutral confirmations use the
 primary action color; destructive actions retain red.
+
+Run `make ui-build && python3 scripts/check_emergency_stop.py` for an isolated
+browser check of keyboard behavior and both color themes. It uses the
+[screenshot tooling dependencies](screenshots.md) and never contacts hardware.
 
 ## Cameras and feed selection
 
