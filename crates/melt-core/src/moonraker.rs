@@ -1473,6 +1473,8 @@ pub struct GcodePosition {
 pub struct AmsTray {
     pub slot: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub present: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tray_index: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tray_info_id: Option<String>,

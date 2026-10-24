@@ -105,6 +105,7 @@ export type LightControl = {
 
 export type AmsTrayStatus = {
   slot: number
+  present?: boolean
   trayIndex?: number
   trayInfoId?: string
   settingId?: string
@@ -246,6 +247,7 @@ export type BambuCompatibilityDiagnostic = {
 
 export interface MaterialSlot {
   slot: string
+  present?: boolean
   type: string
   color: string
   colorLabel: string

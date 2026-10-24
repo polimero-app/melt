@@ -183,6 +183,13 @@ describe('plateLabel', () => {
 })
 
 describe('filamentFillPercent', () => {
+  it('never draws cached filament as present when the physical slot is empty', () => {
+    expect(filamentFillPercent(82, false)).toBe(0)
+    expect(filamentFillPercent(undefined, false)).toBe(0)
+    expect(filamentFillPercent(82, undefined)).toBe(82)
+    expect(filamentFillPercent(82, true)).toBe(82)
+  })
+
   it('uses a full fill when the remaining percentage is unsupported', () => {
     expect(filamentFillPercent(-1)).toBe(100)
     expect(filamentFillPercent(undefined)).toBe(100)

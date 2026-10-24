@@ -104,6 +104,9 @@ pub fn reconcile_filaments(plate: &PlateManifest, inventory: &AmsData) -> Filame
 }
 
 fn tray_matches(requirement: &super::FilamentRequirement, tray: &AmsTray) -> bool {
+    if tray.present == Some(false) {
+        return false;
+    }
     if let Some(required) = normalized(requirement.tray_info_id.as_deref()) {
         let identity_matches = [tray.tray_info_id.as_deref(), tray.setting_id.as_deref()]
             .into_iter()
@@ -199,6 +202,27 @@ mod tests {
         let missing = reconcile_filaments(&plate(&[("GFB00", "000000FF")]), &inventory);
         assert_eq!(missing.status, MappingStatus::Unavailable);
         assert_eq!(missing.ams_mapping, vec![-1]);
+    }
+
+    #[test]
+    fn excludes_physically_absent_trays_despite_matching_cached_metadata() {
+        let mut matching = tray(0, "GFA00", "FFFFFFFF");
+        matching.present = Some(false);
+        let mut inventory = AmsData {
+            units: vec![AmsUnit {
+                trays: vec![matching],
+                ..Default::default()
+            }],
+        };
+        let selected = plate(&[("GFA00", "FFFFFFFF")]);
+        let mapping = reconcile_filaments(&selected, &inventory);
+        assert_eq!(mapping.status, MappingStatus::Unavailable);
+        assert!(mapping.assignments[0].candidates.is_empty());
+
+        for present in [None, Some(true)] {
+            inventory.units[0].trays[0].present = present;
+            assert_eq!(reconcile_filaments(&selected, &inventory).ams_mapping, [0]);
+        }
     }
 
     #[test]
