@@ -1499,6 +1499,8 @@ pub struct AmsTray {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remaining_grams: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_grams_estimate: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub nominal_weight_grams: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diameter_mm: Option<f64>,

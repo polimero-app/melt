@@ -114,6 +114,7 @@ export type AmsTrayStatus = {
   color?: string
   remainingPercent?: number
   remainingGrams?: number
+  remainingGramsEstimate?: number
   nominalWeightGrams?: number
   diameterMm?: number
 }
@@ -253,6 +254,7 @@ export interface MaterialSlot {
   colorLabel: string
   remainingPercent: number
   remainingGrams?: number
+  gramsEstimated: boolean
 }
 
 export interface MaterialSystemView {

@@ -240,6 +240,16 @@ them as empty without stale quantities; unknown presence retains the reported
 metadata without claiming an empty slot. No universal tray-state heuristic is
 used. These source-scoped rules remain provisional hardware evidence.
 
+## Remaining filament quantities
+
+Reported `remainingGrams` always wins, including zero. When it is unavailable,
+an internal spool with a positive nominal weight and a remaining percentage
+from 0 through 100 may expose a separately labelled `remainingGramsEstimate`,
+rounded to the nearest gram. No default spool weight is invented. Invalid
+percentages, missing weights, explicitly absent trays and external holders
+produce no estimate. The desktop and detailed CLI mark estimates with `~`;
+the desktop also supplies a localized screen-reader approximation label.
+
 ## AMS drying
 
 Heater-equipped AMS units (AMS 2 Pro, AMS HT) report `dry_time` (minutes

@@ -1672,7 +1672,11 @@ fn human_status(name: &str, status: &moonraker::Status, detailed: bool) -> Strin
                         if let Some(color) = &tray.color {
                             line.push_str(&format!(" {}", sanitize(color)));
                         }
-                        if let Some(remaining) = tray.remaining_percent {
+                        if let Some(grams) = tray.remaining_grams {
+                            line.push_str(&format!(" ({grams} g)"));
+                        } else if let Some(grams) = tray.remaining_grams_estimate {
+                            line.push_str(&format!(" (~{grams} g)"));
+                        } else if let Some(remaining) = tray.remaining_percent {
                             line.push_str(&format!(" ({remaining}%)"));
                         }
                     }
@@ -5939,6 +5943,37 @@ mod tests {
             ),
             "{detailed}"
         );
+    }
+
+    #[test]
+    fn detailed_status_marks_estimates_and_prefers_reported_zero_grams() {
+        let mut status = sample_status();
+        status
+            .extensions
+            .bambu_lan
+            .as_mut()
+            .unwrap()
+            .ams
+            .as_mut()
+            .unwrap()
+            .units[0]
+            .trays[0]
+            .remaining_grams_estimate = Some(420);
+        assert!(human_status("dakota", &status, true).contains("PLA 161616FF (~420 g)"));
+        status
+            .extensions
+            .bambu_lan
+            .as_mut()
+            .unwrap()
+            .ams
+            .as_mut()
+            .unwrap()
+            .units[0]
+            .trays[0]
+            .remaining_grams = Some(0);
+        let detailed = human_status("dakota", &status, true);
+        assert!(detailed.contains("PLA 161616FF (0 g)"));
+        assert!(!detailed.contains("~420"));
     }
 
     #[test]

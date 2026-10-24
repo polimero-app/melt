@@ -367,7 +367,8 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
           ? t(colorName)
           : t('materials.colorLabel', { name: t(colorName), hex: color }),
         remainingPercent: filamentFillPercent(tray.remainingPercent, tray.present),
-        remainingGrams: tray.present === false ? undefined : tray.remainingGrams,
+        remainingGrams: tray.present === false ? undefined : tray.remainingGrams ?? tray.remainingGramsEstimate,
+        gramsEstimated: tray.remainingGrams === undefined && tray.remainingGramsEstimate !== undefined,
       }
     }),
   }))
@@ -1320,7 +1321,7 @@ onUnmounted(() => {
                     <span class="text-xs font-bold">{{ material.slot }}</span>
                     <span v-if="material.type !== '—'" class="text-[10px] font-semibold tracking-wide uppercase wrap-anywhere">{{ material.type }}</span>
                     <span class="sr-only">{{ material.colorLabel }}</span>
-                    <span v-if="material.remainingGrams !== undefined" class="text-[10px] font-medium">{{ material.remainingGrams }} g</span>
+                    <span v-if="material.remainingGrams !== undefined" class="text-[10px] font-medium"><span v-if="material.gramsEstimated" class="sr-only">{{ t('materials.approximate') }} </span><span v-if="material.gramsEstimated" aria-hidden="true">~</span>{{ material.remainingGrams }} g</span>
                   </span>
                 </div>
               </div>
