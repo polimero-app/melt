@@ -112,7 +112,9 @@ checked-in [sample IPC data](../fixtures/screenshots/state.json), blocks
 external browser requests and refuses unsupported backend actions. It never
 opens a printer connection, reads user configuration or accesses a keychain.
 WebRTC is unavailable in this capture environment; the actual WebCodecs path
-is attempted and MJPEG remains its fallback.
+is attempted and MJPEG remains its fallback. Before capturing, it checks
+navigation across all six views, retained file search, shared theme/locale
+changes and camera teardown when leaving the Cameras view.
 
 To review files before replacing the repository images:
 

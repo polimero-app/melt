@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LARGE_LIBRARY_THRESHOLD, nextSort, shouldDeferLibraryCards, sortedBy } from './library'
+import { fileTypeLabel, LARGE_LIBRARY_THRESHOLD, nextSort, shouldDeferLibraryCards, sortedBy } from './library'
 
 describe('shouldDeferLibraryCards', () => {
   it('defers rendering only after the large-library threshold', () => {
@@ -42,5 +42,12 @@ describe('nextSort', () => {
     expect(nextSort({ key: 'name', descending: false }, 'name')).toEqual({ key: 'name', descending: true })
     expect(nextSort({ key: 'name', descending: false }, 'size')).toEqual({ key: 'size', descending: true })
     expect(nextSort({ key: 'size', descending: true }, 'name')).toEqual({ key: 'name', descending: false })
+  })
+
+  it('uses the same file type labels in the printer table and local library', () => {
+    expect(fileTypeLabel({ name: 'models', type: 'directory' })).toBe('DIR')
+    expect(fileTypeLabel({ name: 'model.gcode.3mf', type: 'file' })).toBe('3MF')
+    expect(fileTypeLabel({ name: 'README', type: 'file' })).toBe('FILE')
+    expect(fileTypeLabel({ name: '.hidden', type: 'file' })).toBe('FILE')
   })
 })

@@ -3,6 +3,7 @@ import { createSSRApp } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { invoke } from '@tauri-apps/api/core'
 import App from './App.vue'
+import PrintersView from './views/PrintersView.vue'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 
@@ -24,13 +25,14 @@ afterEach(() => {
 
 async function app() {
   const setup = vi.spyOn(App, 'setup')
+  const printersSetup = vi.spyOn(PrintersView, 'setup')
   await renderToString(createSSRApp(App))
-  return setup.mock.results[0]!.value
+  return { shell: setup.mock.results[0]!.value, printers: printersSetup.mock.results[0]!.value }
 }
 
 it('keeps removal destructive while allowing neutral confirmations', async () => {
-  const instance = await app()
-  instance.removePrinter('workshop')
+  const { shell: instance, printers } = await app()
+  printers.removePrinter('workshop')
   expect(instance.pendingConfirm.value.variant).toBe('danger')
   instance.askConfirmation(
     { title: 'drying.startTitle', description: 'drying.startDescription', confirm: 'drying.startConfirm' },
@@ -42,7 +44,7 @@ it('keeps removal destructive while allowing neutral confirmations', async () =>
 })
 
 it.each(['printer', 'publicCatalogue'] as const)('tracks only the requested firmware source (%s) and clears it after failure', async (source) => {
-  const instance = await app()
+  const { shell: instance } = await app()
   let fail!: (reason: unknown) => void
   vi.mocked(invoke).mockReturnValueOnce(new Promise((_, reject) => { fail = reject }))
   const pending = source === 'printer'

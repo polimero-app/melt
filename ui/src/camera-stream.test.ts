@@ -124,7 +124,7 @@ describe('h264AvcAccessUnit', () => {
 describe('startH264Playback', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  function playback(chunks: Uint8Array[], configureError?: Error) {
+  function playback(chunks: Uint8Array[], configureError?: Error, abortError?: Error) {
     const configure = vi.fn((_: VideoDecoderConfig) => {
       if (configureError) throw configureError
     })
@@ -144,10 +144,11 @@ describe('startH264Playback', () => {
     vi.stubGlobal('HTMLCanvasElement', class {
       getContext() { return { drawImage: vi.fn() } }
     })
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream({
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, { signal }: RequestInit) => new Response(new ReadableStream({
       start(controller) {
         for (const chunk of chunks) controller.enqueue(chunk)
-        if (!configureError) controller.close()
+        if (abortError) signal?.addEventListener('abort', () => controller.error(abortError), { once: true })
+        if (!configureError && !abortError) controller.close()
       },
       cancel,
     }))))
@@ -196,6 +197,14 @@ describe('startH264Playback', () => {
     expect(decode).not.toHaveBeenCalled()
     expect(close).toHaveBeenCalledOnce()
     expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it('settles aborted reads and cancellation when leaving a camera view', async () => {
+    const { stream } = playback([], undefined, new DOMException('stream aborted', 'AbortError'))
+    const firstFrame = expect(stream.firstFrame).rejects.toThrow('stream aborted')
+    await Promise.resolve()
+    stream.stop()
+    await Promise.all([firstFrame, expect(stream.done).resolves.toBeUndefined()])
   })
 })
 

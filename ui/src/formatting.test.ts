@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampTarget, formatDuration, relativeAge, remainingTimePresentation } from './formatting'
+import { clampTarget, formatDate, formatDuration, formatSize, relativeAge, remainingTimePresentation } from './formatting'
 
 describe('relative age', () => {
   const now = Date.parse('2026-08-04T12:00:30.000Z')
@@ -57,6 +57,20 @@ describe('temperature target clamping', () => {
   it('clamps above the maximum and below zero', () => {
     expect(clampTarget(300, 999)).toBe(300)
     expect(clampTarget(300, -5)).toBe(0)
+  })
+
+  it('preserves file metadata formatting and the selected locale across views', () => {
+    expect(formatSize(undefined, 'en')).toBe('—')
+    expect(formatSize(-1, 'en')).toBe('—')
+    expect(formatSize(0, 'en')).toBe('0 byte')
+    expect(formatSize(1536, 'en')).toBe('1.5 kB')
+    expect(formatSize(1536, 'pt-BR')).toBe('1,5 kB')
+    expect(formatDate(undefined, 'en')).toBe('—')
+    expect(formatDate('invalid', 'en')).toBe('invalid')
+    const date = '2026-10-23T12:30:00Z'
+    expect(formatDate(date, 'pt-BR')).toBe(
+      new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(date)),
+    )
   })
 
   it('rounds to the nearest multiple of five', () => {
