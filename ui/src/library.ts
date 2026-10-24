@@ -11,7 +11,7 @@ export type FileSort = { key: SortKey; descending: boolean }
 // names read best from A to Z.
 export const naturallyDescending: Record<SortKey, boolean> = { name: false, size: true, modified: true }
 
-// ponytail: structural, so App.vue's FileEntry fits without moving the type out.
+// ponytail: sorting only needs file metadata, not a full backend entry.
 type SortableFile = { name: string; sizeBytes?: number; modifiedAt?: string }
 
 // Always ascending; sortedBy applies the direction.
@@ -32,4 +32,10 @@ export function sortedBy<T extends SortableFile>(files: T[], sort: FileSort): T[
 // natural direction.
 export function nextSort(current: FileSort, key: SortKey): FileSort {
   return current.key === key ? { key, descending: !current.descending } : { key, descending: naturallyDescending[key] }
+}
+
+export function fileTypeLabel(file: { name: string; type: 'file' | 'directory' }) {
+  if (file.type === 'directory') return 'DIR'
+  const dot = file.name.lastIndexOf('.')
+  return dot > 0 ? file.name.slice(dot + 1).toUpperCase() : 'FILE'
 }

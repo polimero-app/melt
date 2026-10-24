@@ -182,6 +182,7 @@ BRIDGE = r"""
 (() => {
   const fixture = __STATE__;
   const base = __BASE__;
+  const commands = window.__SCREENSHOT_COMMANDS__ = [];
   const callbacks = new Map(); let next = 1;
   const stamp = new Date(fixture.capturedAt).getTime();
   const RealDate = Date;
@@ -198,6 +199,7 @@ BRIDGE = r"""
     transformCallback(fn) { const id = next++; callbacks.set(id, fn); return id; },
     unregisterCallback(id) { callbacks.delete(id); },
     async invoke(cmd, args = {}) {
+      commands.push(cmd);
       const name = args.name || args.request?.name || 'workshop';
       switch (cmd) {
         case 'plugin:event|listen': return next++;
@@ -207,12 +209,18 @@ BRIDGE = r"""
         case 'registered_drivers': return fixture.drivers;
         case 'get_preferences': return fixture.preferences;
         case 'camera_list': return fixture.cameras;
+        case 'plug_list': return [];
+        case 'plug_observations': return {};
         case 'printer_capabilities': return {capabilities: fixture.capabilities};
         case 'cached_monitoring': case 'monitored_printers': return fixture.monitoring;
         case 'printer_status': return fixture.monitoring.find(p => p.name === name);
         case 'cached_firmware_updates': return fixture.firmware;
         case 'printer_firmware_updates': return fixture.firmware.find(p => p.profile === name);
         case 'printer_files': return {entries: fixture.printerFiles};
+        case 'inspect_printer_print': return {
+          sourceFileName: args.request.devicePath.split('/').pop(), sliced: true, issues: [],
+          plates: [{index: 1, gcodePath: 'Metadata/plate_1.gcode', thumbnailPaths: []}]
+        };
         case 'library_files': return fixture.library;
         case 'library_file_preview': case 'printer_file_preview': {
           const query = new URLSearchParams({name: args.request.devicePath || args.request.path, large: String(args.request.large || false)});
@@ -235,6 +243,39 @@ BRIDGE = r"""
 
 class CaptureServer(ThreadingHTTPServer):
     daemon_threads = True
+
+
+def check_view_navigation(page):
+    page.get_by_role("button", name="Files", exact=True).click()
+    page.get_by_role("button", name="Preview cable-organizer.stl", exact=True).wait_for()
+    page.locator('[name="file-search"]').fill("cable")
+    page.get_by_role("button", name="Configuration", exact=True).click()
+    page.locator("#theme").select_option("light")
+    page.wait_for_function("!document.documentElement.classList.contains('dark')")
+    page.locator("#theme").select_option("dark")
+    page.locator("#language").select_option("pt-BR")
+    page.get_by_role("button", name="Arquivos", exact=True).wait_for()
+    page.locator("#language").select_option("en")
+    page.get_by_role("button", name="Files", exact=True).click()
+    assert page.locator('[name="file-search"]').input_value() == "cable"
+    page.get_by_role("button", name="Clear search", exact=True).click()
+    page.get_by_role("button", name="Cameras", exact=True).click()
+    page.get_by_text(re.compile(r"LIVE · (H\.264|MJPEG)$")).wait_for(timeout=20000)
+    stops = page.evaluate("window.__SCREENSHOT_COMMANDS__.filter(cmd => cmd === 'camera_viewer_stop').length")
+    page.get_by_role("button", name="Smart plugs", exact=True).click()
+    page.get_by_role("heading", name="Smart plugs", exact=True).wait_for()
+    page.wait_for_function("count => window.__SCREENSHOT_COMMANDS__.filter(cmd => cmd === 'camera_viewer_stop').length > count", arg=stops)
+    assert page.get_by_text(re.compile(r"LIVE · (H\.264|MJPEG)$")).count() == 0
+    page.get_by_role("button", name=re.compile(r"^workshop\b")).click()
+    page.get_by_role("heading", name="workshop", exact=True).wait_for()
+    page.get_by_role("button", name="Print cable-organizer.gcode.3mf", exact=True).click()
+    expect(page.get_by_role("dialog").get_by_role("button", name="Print", exact=True)).to_be_visible()
+    expect(page.locator('[name="print-plate"]')).to_have_value("1")
+    assert page.evaluate("!window.__SCREENSHOT_COMMANDS__.includes('printer_job_action')")
+    page.get_by_role("dialog").get_by_role("button", name="Cancel", exact=True).click()
+    expect(page.get_by_role("dialog")).to_have_count(0)
+    page.get_by_role("button", name="Printers", exact=True).click()
+    page.get_by_role("heading", name="Printer management", exact=True).wait_for()
 
 
 def capture(args):
@@ -321,6 +362,7 @@ def capture(args):
                     cards = page.get_by_role("article")
                     expect(cards.get_by_role("button", name="Open control", exact=True)).to_have_count(len(state["printers"]))
                     expect(cards.get_by_role("button", name=re.compile("Firmware"))).to_have_count(0)
+                    check_view_navigation(page)
                 if kind == "firmware":
                     page.get_by_role("button", name="Printer actions", exact=True).first.click()
                     expect(page.get_by_role("menuitem", name="Firmware", exact=True)).to_have_count(1)

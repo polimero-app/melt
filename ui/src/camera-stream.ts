@@ -209,7 +209,7 @@ export function startH264Playback(canvas: HTMLCanvasElement, url: string): H264P
         }
       }
     } finally {
-      void reader.cancel()
+      await reader.cancel()
     }
   }
 

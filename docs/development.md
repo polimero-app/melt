@@ -1,6 +1,6 @@
 # Development and architecture
 
-Last-updated: 2026-10-18
+Last-updated: 2026-10-23
 
 ## Prerequisites and first build
 
@@ -69,7 +69,9 @@ has no frontend build hook, so an explicit UI build is required. See
 | `crates/melt-core/src/diagnostics.rs`, `trace.rs` | Redacted compatibility reports and protocol tracing |
 | `crates/melt-cli` | Public help, parsing, confirmation, JSON envelopes and exit codes |
 | `crates/melt-desktop` | The `melt` entry point, Tauri commands/events, local library/previews and camera playback bridges |
-| `ui/src/App.vue`, `components/` | Desktop views and reusable UI, including viewer-scoped `CameraViewer.vue` |
+| `ui/src/App.vue`, `app-types.ts` | Desktop shell, navigation, shared state and typed view contracts |
+| `ui/src/views/` | Control, files, config, cameras, printers and smart plugs; each owns its view-specific behavior and dialogs |
+| `ui/src/components/` | Reusable UI, including viewer-scoped `CameraViewer.vue` |
 | `ui/src/*.ts`, `*.test.ts` | Pure presentation/validation/playback helpers and Vitest coverage |
 | `fixtures/` | CLI goldens, Bambu evidence manifests/transcript, sanitized Tapo SDP, plug qualification placeholder |
 

@@ -35,3 +35,22 @@ export function remainingTimePresentation(seconds: number): RemainingTimePresent
 export function clampTarget(maximum: number, next: number): number {
   return Math.max(0, Math.min(maximum, Math.round(next / 5) * 5))
 }
+
+export function formatSize(sizeBytes: number | undefined, locale: string) {
+  if (sizeBytes === undefined || sizeBytes < 0) return '—'
+  const unit = sizeBytes < 1024 ? 'byte' : sizeBytes < 1024 * 1024 ? 'kilobyte' : 'megabyte'
+  const divisor = unit === 'byte' ? 1 : unit === 'kilobyte' ? 1024 : 1024 * 1024
+  return new Intl.NumberFormat(locale, {
+    style: 'unit',
+    unit,
+    unitDisplay: 'short',
+    maximumFractionDigits: unit === 'byte' ? 0 : 1,
+  }).format(sizeBytes / divisor)
+}
+
+export function formatDate(value: string | undefined, locale: string) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+}

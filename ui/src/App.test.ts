@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { createSSRApp } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import App from './App.vue'
+import ConfigView from './views/ConfigView.vue'
 import { defaultPresets } from './temperatures'
 
 afterEach(() => {
@@ -25,10 +26,12 @@ it('preserves custom presets until restoring defaults is confirmed', async () =>
     querySelector: vi.fn(),
   })
   const setup = vi.spyOn(App, 'setup')
+  const configSetup = vi.spyOn(ConfigView, 'setup')
   await renderToString(createSSRApp(App))
   const instance = setup.mock.results[0]!.value
+  const config = configSetup.mock.results[0]!.value
 
-  instance.restoreDefaultPresets()
+  config.restoreDefaultPresets()
   expect(instance.temperaturePresets.value).toEqual(customPresets)
   expect(instance.pendingConfirm.value).toMatchObject({
     title: 'Restore default presets?',
@@ -40,7 +43,7 @@ it('preserves custom presets until restoring defaults is confirmed', async () =>
   await instance.runConfirmation()
   expect(instance.temperaturePresets.value).toEqual(customPresets)
 
-  instance.restoreDefaultPresets()
+  config.restoreDefaultPresets()
   await instance.runConfirmation()
   expect(instance.temperaturePresets.value).toEqual(defaultPresets)
   expect(instance.pendingConfirm.value).toBeUndefined()
