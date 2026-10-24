@@ -966,7 +966,7 @@ onUnmounted(() => {
                 <option value="">{{ t('camerasView.builtInFeed') }}</option>
                 <option v-for="camera in controlCameras" :key="camera.id" :value="camera.name">{{ camera.name }}</option>
               </select>
-              <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-2 size-3.5 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
+              <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-1.5 size-4 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
             </div>
           </template>
         </CameraViewer>
