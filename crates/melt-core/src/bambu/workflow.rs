@@ -156,6 +156,7 @@ mod tests {
     fn composes_package_names_plate_and_exact_mapping() {
         let source = package();
         let inventory = AmsData {
+            active_filament: None,
             units: vec![AmsUnit {
                 trays: vec![AmsTray {
                     tray_index: Some(3),

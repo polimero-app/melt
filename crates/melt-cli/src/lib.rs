@@ -1628,6 +1628,19 @@ fn human_status(name: &str, status: &moonraker::Status, detailed: bool) -> Strin
         && let Some(ams) = &extension.ams
     {
         lines.push("AMS:".into());
+        lines.push(match ams.active_filament {
+            Some(moonraker::ActiveFilament::None) => "  Active filament: none selected".into(),
+            Some(moonraker::ActiveFilament::Tray { tray_index }) => {
+                format!("  Active filament: tray index {tray_index}")
+            }
+            Some(moonraker::ActiveFilament::External {
+                unit_id: Some(unit_id),
+            }) => format!("  Active filament: external spool (unit {unit_id})"),
+            Some(moonraker::ActiveFilament::External { unit_id: None }) => {
+                "  Active filament: external spool".into()
+            }
+            None => "  Active filament: unknown".into(),
+        });
         for unit in &ams.units {
             let mut parts = Vec::new();
             if let Some(percent) = unit.humidity_percent {
@@ -5726,6 +5739,7 @@ mod tests {
                 bambu_lan: Some(moonraker::BambuExtension {
                     detected_model: None,
                     ams: Some(moonraker::AmsData {
+                        active_filament: None,
                         units: vec![moonraker::AmsUnit {
                             id: 0,
                             humidity_percent: Some(25.0),
@@ -5939,10 +5953,45 @@ mod tests {
         assert!(detailed.contains("Timelapse: off"), "{detailed}");
         assert!(
             detailed.contains(
-                "AMS:\n  Unit 0 (humidity: 25%, temp: 25.4 C):\n    Slot 0: PLA 161616FF (42%)\n    Slot 1: (unknown)"
+                "AMS:\n  Active filament: unknown\n  Unit 0 (humidity: 25%, temp: 25.4 C):\n    Slot 0: PLA 161616FF (42%)\n    Slot 1: (unknown)"
             ),
             "{detailed}"
         );
+    }
+
+    #[test]
+    fn detailed_status_distinguishes_active_external_unassigned_and_unknown_filament() {
+        let mut status = sample_status();
+        for (active, label) in [
+            (
+                Some(moonraker::ActiveFilament::Tray { tray_index: 128 }),
+                "tray index 128",
+            ),
+            (
+                Some(moonraker::ActiveFilament::External { unit_id: Some(255) }),
+                "external spool (unit 255)",
+            ),
+            (
+                Some(moonraker::ActiveFilament::External { unit_id: None }),
+                "external spool",
+            ),
+            (Some(moonraker::ActiveFilament::None), "none selected"),
+            (None, "unknown"),
+        ] {
+            status
+                .extensions
+                .bambu_lan
+                .as_mut()
+                .unwrap()
+                .ams
+                .as_mut()
+                .unwrap()
+                .active_filament = active;
+            assert!(
+                human_status("dakota", &status, true)
+                    .contains(&format!("Active filament: {label}"))
+            );
+        }
     }
 
     #[test]

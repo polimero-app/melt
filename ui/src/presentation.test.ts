@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { awaitsFirstSample, badgeDotClasses, badgeFillClasses, badgeSurfaceClasses, cameraViewState, filamentColor, filamentColorName, filamentFillPercent, isActiveJobState, lightModeMessageKey, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
+import { activeFilamentMatches, awaitsFirstSample, badgeDotClasses, badgeFillClasses, badgeSurfaceClasses, cameraViewState, filamentColor, filamentColorName, filamentFillPercent, isActiveJobState, lightModeMessageKey, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import type { PrinterBadge } from './monitoring'
 import { translate } from './i18n'
 
@@ -200,5 +200,23 @@ describe('filamentFillPercent', () => {
     expect(filamentFillPercent(0)).toBe(0)
     expect(filamentFillPercent(42)).toBe(42)
     expect(filamentFillPercent(120)).toBe(100)
+  })
+})
+
+describe('activeFilamentMatches', () => {
+  it('marks only the reported canonical internal tray, including AMS HT', () => {
+    expect(activeFilamentMatches({ state: 'tray', trayIndex: 128 }, 128, 128, 0)).toBe(true)
+    expect(activeFilamentMatches({ state: 'tray', trayIndex: 3 }, 0, 2, 0)).toBe(false)
+    expect(activeFilamentMatches({ state: 'tray', trayIndex: 3 }, 0, undefined, 0)).toBe(false)
+    expect(activeFilamentMatches({ state: 'none' }, 0, 0, 0)).toBe(false)
+    expect(activeFilamentMatches(undefined, 0, 0, 0)).toBe(false)
+  })
+
+  it('does not guess which external holder is active from a legacy external sentinel', () => {
+    expect(activeFilamentMatches({ state: 'external' }, 255, 255, 1)).toBe(true)
+    expect(activeFilamentMatches({ state: 'external' }, 255, 255, 2)).toBe(false)
+    expect(activeFilamentMatches({ state: 'external' }, 254, 254, 2)).toBe(false)
+    expect(activeFilamentMatches({ state: 'external', unitId: 255 }, 255, 255, 2)).toBe(true)
+    expect(activeFilamentMatches({ state: 'external', unitId: 255 }, 254, 254, 2)).toBe(false)
   })
 })

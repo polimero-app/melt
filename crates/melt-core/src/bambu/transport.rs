@@ -13,13 +13,13 @@ use std::{
 
 use crate::firmware_updates::{FirmwareUpdateIssue, FirmwareUpdateReport};
 use crate::moonraker::{
-    AmsData, AmsDrying, AmsTray, AmsUnit, BambuExtension, ControlInventory, DryingRequest,
-    DryingResult, DryingSetting, DryingStatus, Extensions, FanControl, FanKind, FanMode, FanResult,
-    FileEntry, FileEntryType, FileList, FileRoot, GcodePosition, Job, JobResult, LightControl,
-    LightKind, LightMode, LightResult, LightState, MotionResult, MotionState, PrintMeta,
-    PrinterState, Progress, SpeedResult, Status, StatusError, StatusWarning, Temperature,
-    TemperatureControl, TemperatureKind, TemperatureResult, TemperatureTargets, Temperatures,
-    TimeEstimates, Timelapse, ToolPosition, Wifi,
+    ActiveFilament, AmsData, AmsDrying, AmsTray, AmsUnit, BambuExtension, ControlInventory,
+    DryingRequest, DryingResult, DryingSetting, DryingStatus, Extensions, FanControl, FanKind,
+    FanMode, FanResult, FileEntry, FileEntryType, FileList, FileRoot, GcodePosition, Job,
+    JobResult, LightControl, LightKind, LightMode, LightResult, LightState, MotionResult,
+    MotionState, PrintMeta, PrinterState, Progress, SpeedResult, Status, StatusError,
+    StatusWarning, Temperature, TemperatureControl, TemperatureKind, TemperatureResult,
+    TemperatureTargets, Temperatures, TimeEstimates, Timelapse, ToolPosition, Wifi,
 };
 use crate::trace::TraceEvent;
 use openssl::ssl::{
@@ -4086,7 +4086,98 @@ fn ams_data(print: &Map<String, Value>) -> Option<AmsData> {
         })
         .unwrap_or_default();
     units.extend(virtual_tray_units(print));
-    (!units.is_empty()).then_some(AmsData { units })
+    let active_filament = active_filament(print, &units);
+    (!units.is_empty() || active_filament.is_some()).then_some(AmsData {
+        units,
+        active_filament,
+    })
+}
+
+fn active_filament(print: &Map<String, Value>, units: &[AmsUnit]) -> Option<ActiveFilament> {
+    if let Some(extruder) = print
+        .get("device")
+        .and_then(|device| device.get("extruder"))
+    {
+        let entries = extruder.get("info").and_then(Value::as_array);
+        if let Some(state) = extruder.get("state") {
+            let state = u32::try_from(integer(Some(state))?).ok()?;
+            let entries = entries?;
+            let active_id = i64::from((state >> 4) & 0xf);
+            let mut matches = entries
+                .iter()
+                .filter(|entry| integer(entry.get("id")) == Some(active_id));
+            let entry = matches.next()?;
+            if matches.next().is_some() {
+                return None;
+            }
+            if let Some(snow) = entry.get("snow") {
+                let snow = u16::try_from(integer(Some(snow))?).ok()?;
+                return active_from_snow(print, units, state, snow);
+            }
+            if entries.iter().any(|entry| entry.get("snow").is_some()) {
+                return None;
+            }
+        } else if entries
+            .is_some_and(|entries| entries.iter().any(|entry| entry.get("snow").is_some()))
+        {
+            return None;
+        }
+    }
+    match integer(print.get("ams")?.get("tray_now"))? {
+        255 => Some(ActiveFilament::None),
+        254 => Some(ActiveFilament::External { unit_id: None }),
+        index @ 0..=253 => Some(ActiveFilament::Tray {
+            tray_index: index.try_into().ok()?,
+        }),
+        _ => None,
+    }
+}
+
+fn active_from_snow(
+    print: &Map<String, Value>,
+    units: &[AmsUnit],
+    state: u32,
+    snow: u16,
+) -> Option<ActiveFilament> {
+    if snow == u16::MAX {
+        // Studio clears 0xffff only for a single extruder. Do not apply that
+        // sentinel universally or resurrect a retained legacy selection.
+        return (state & 0xf == 1).then_some(ActiveFilament::None);
+    }
+    let unit_id = i64::from(snow >> 8);
+    let slot = i64::from(snow & 0xff);
+    if unit_id >= 254 {
+        return (slot != 255).then_some(ActiveFilament::External {
+            unit_id: Some(unit_id.try_into().ok()?),
+        });
+    }
+    let raw_unit = print
+        .get("ams")
+        .and_then(|ams| ams.get("ams"))
+        .and_then(Value::as_array)
+        .and_then(|entries| {
+            entries
+                .iter()
+                .find(|unit| integer(unit.get("id")) == Some(unit_id))
+        });
+    if raw_unit.is_some_and(malformed_ams_type) {
+        return None;
+    }
+    let kind = raw_unit.and_then(ams_type);
+    match (unit_id, slot, kind) {
+        (0..=253, 0..=3, Some(5))
+        | (0..=3, 0..=3, None | Some(1..=3))
+        | (128..=152, 0, None | Some(4)) => {}
+        _ => return None,
+    }
+    let tray_index = units
+        .iter()
+        .find(|unit| i64::from(unit.id) == unit_id)
+        .and_then(|unit| unit.trays.iter().find(|tray| i64::from(tray.slot) == slot))
+        .and_then(|tray| tray.tray_index)
+        .or_else(|| ams_slot_index(unit_id, slot, kind))
+        .filter(|index| (0..254).contains(index))?;
+    Some(ActiveFilament::Tray { tray_index })
 }
 
 fn ams_unit(unit: &Value, remote_dry: bool, presence_bits: Option<u64>) -> AmsUnit {
@@ -4236,9 +4327,16 @@ fn canonical_tray_index(unit: &Value, tray: &Value) -> Option<i32> {
     if let Some(index) = integer(tray.get("tray_id")).and_then(|value| value.try_into().ok()) {
         return Some(index);
     }
+    if malformed_ams_type(unit) {
+        return None;
+    }
     let unit_id = integer(unit.get("id"))?;
     let slot = integer(tray.get("id"))?;
-    let index = if ams_type(unit) == Some(5) && (0..4).contains(&slot) {
+    ams_slot_index(unit_id, slot, ams_type(unit))
+}
+
+fn ams_slot_index(unit_id: i64, slot: i64, kind: Option<u8>) -> Option<i32> {
+    let index = if kind == Some(5) && (0..4).contains(&slot) {
         24 + slot
     } else if unit_id >= 128 {
         unit_id
@@ -4253,11 +4351,18 @@ fn ams_type(unit: &Value) -> Option<u8> {
     Some((info & 0xf) as u8)
 }
 
+fn malformed_ams_type(unit: &Value) -> bool {
+    unit.get("info").is_some() && ams_type(unit).is_none()
+}
+
 fn ams_tray_present(unit: &Value, tray: &Value, bits: Option<u64>) -> Option<bool> {
+    if malformed_ams_type(unit) {
+        return None;
+    }
     let unit_id = integer(unit.get("id"))?;
     let slot = integer(tray.get("id"))?;
     let bit = match (unit_id, slot, ams_type(unit)) {
-        (0..=3, 0..=3, Some(5)) => 24 + slot,
+        (0..=253, 0..=3, Some(5)) => 24 + slot,
         (0..=3, 0..=3, None | Some(1..=3)) => unit_id * 4 + slot,
         (128..=152, 0, None | Some(4)) => 16 + unit_id - 128,
         _ => return None,
@@ -5497,6 +5602,103 @@ mod tests {
     }
 
     #[test]
+    fn active_filament_prefers_the_reported_extruder_id_over_list_order_and_legacy() {
+        let mut report: Value = serde_json::from_slice(include_bytes!(
+            "../../../../fixtures/bambu/mqtt/p2s-monitoring/report.json"
+        ))
+        .unwrap();
+        report["print"]["ams"]["tray_now"] = json!("1");
+        let ams = ams_data(report["print"].as_object().unwrap()).unwrap();
+        assert_eq!(
+            ams.active_filament,
+            Some(ActiveFilament::Tray { tray_index: 3 })
+        );
+        assert_eq!(
+            serde_json::to_value(&ams).unwrap()["activeFilament"],
+            json!({"state": "tray", "trayIndex": 3})
+        );
+
+        for (state, expected) in [(2, 3), (0x12, 5)] {
+            let print = json!({"device":{"extruder":{"state":state,"info":[
+                {"id":1,"snow":0x0101},{"id":0,"snow":3}
+            ]}},"ams":{"tray_now":"0"}});
+            assert_eq!(
+                active_filament(print.as_object().unwrap(), &[]),
+                Some(ActiveFilament::Tray {
+                    tray_index: expected
+                })
+            );
+        }
+        let print = json!({"device":{"extruder":{"state":1,"info":[{"id":0,"snow":0x8000}]}}});
+        assert_eq!(
+            active_filament(print.as_object().unwrap(), &[]),
+            Some(ActiveFilament::Tray { tray_index: 128 })
+        );
+        let print = json!({"device":{"extruder":{"state":1,"info":[{"id":0,"snow":0x0602}]}},"ams":{"tray_exist_bits":"4000000","ams":[{"id":"6","info":"1005","tray":[{"id":"2"}]}]}});
+        let ams = ams_data(print.as_object().unwrap()).unwrap();
+        assert_eq!(
+            ams.active_filament,
+            Some(ActiveFilament::Tray { tray_index: 26 })
+        );
+        assert_eq!(ams.units[0].trays[0].present, Some(true));
+    }
+
+    #[test]
+    fn active_filament_distinguishes_external_unassigned_and_unknown_reports() {
+        for (snow, state, expected) in [
+            (
+                0xff00,
+                1,
+                Some(ActiveFilament::External { unit_id: Some(255) }),
+            ),
+            (
+                0xfe00,
+                2,
+                Some(ActiveFilament::External { unit_id: Some(254) }),
+            ),
+            (0xffff, 1, Some(ActiveFilament::None)),
+            (0xffff, 2, None),
+            (-1, 1, None),
+            (0x10000, 1, None),
+        ] {
+            let print = json!({"device":{"extruder":{"state":state,"info":[{"id":0,"snow":snow}]}},"ams":{"tray_now":"3"}});
+            assert_eq!(
+                active_filament(print.as_object().unwrap(), &[]),
+                expected,
+                "{snow}/{state}"
+            );
+        }
+        for (legacy, expected) in [
+            (json!("255"), Some(ActiveFilament::None)),
+            (
+                json!("254"),
+                Some(ActiveFilament::External { unit_id: None }),
+            ),
+            (json!("129"), Some(ActiveFilament::Tray { tray_index: 129 })),
+            (json!(-1), None),
+            (json!(256), None),
+            (Value::Null, None),
+        ] {
+            let print = json!({"ams":{"tray_now":legacy}});
+            assert_eq!(active_filament(print.as_object().unwrap(), &[]), expected);
+        }
+        for extruder in [
+            json!({"state":0x12,"info":[{"id":0,"snow":3}]}),
+            json!({"state":1,"info":[{"id":0,"snow":3},{"id":0,"snow":4}]}),
+            json!({"info":[{"id":0,"snow":3}]}),
+            json!({"state":0x12,"info":[{"id":1},{"id":0,"snow":3}]}),
+        ] {
+            let print = json!({"device":{"extruder":extruder},"ams":{"tray_now":"3"}});
+            assert_eq!(active_filament(print.as_object().unwrap(), &[]), None);
+        }
+        let print = json!({"device":{"extruder":{"state":1,"info":[{"id":0,"temp":200}]}},"ams":{"tray_now":"3"}});
+        assert_eq!(
+            active_filament(print.as_object().unwrap(), &[]),
+            Some(ActiveFilament::Tray { tray_index: 3 })
+        );
+    }
+
+    #[test]
     fn ams_filament_estimates_require_valid_internal_spool_quantities() {
         for (percent, weight, reported, expected) in [
             (json!(41), json!("1000"), Value::Null, Some(410)),
@@ -5572,6 +5774,12 @@ mod tests {
                 ams_data(print.as_object().unwrap()).unwrap().units[0].trays[0].present,
                 None
             );
+        }
+        for info in [json!("not-hex"), Value::Null] {
+            let unit = json!({"id": "0", "info": info});
+            let tray = json!({"id": "0"});
+            assert_eq!(ams_tray_present(&unit, &tray, Some(0)), None);
+            assert_eq!(canonical_tray_index(&unit, &tray), None);
         }
         for (unit_id, slot, info) in [
             (4, 0, "1"),
