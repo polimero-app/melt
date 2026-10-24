@@ -67,7 +67,7 @@ const groups = computed(() =>
                     ? ''
                     : active
                       ? 'text-gray-500 dark:text-white'
-                      : 'text-gray-400 dark:text-gray-500'
+                      : 'text-gray-500 dark:text-gray-400'
                 "
                 aria-hidden="true"
               />

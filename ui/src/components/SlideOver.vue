@@ -34,7 +34,7 @@ defineEmits<{ close: [] }>()
                       <div class="ml-3 flex h-7 items-center">
                         <button
                           type="button"
-                          class="relative rounded-md text-gray-400 hover:text-gray-500 dark:hover:text-white"
+                          class="relative rounded-md text-gray-500 hover:text-gray-600 dark:text-gray-400 dark:hover:text-white"
                           @click="$emit('close')"
                         >
                           <span class="absolute -inset-2.5"></span>
