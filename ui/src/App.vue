@@ -155,6 +155,8 @@ const slicers = ref<SlicerSetting[]>(defaultSlicers)
 const publicFirmwareCatalogue = ref(false)
 const activePrinter = computed(() => printers.value.find((printer) => printer.name === activePrinterId.value) ?? printers.value[0])
 
+// Dense forms and lists read badly stretched; media-heavy views use the width.
+const capped = computed(() => activeView.value === 'printers' || activeView.value === 'settings')
 const compactNavValue = computed({
   get: () => {
     if (activeView.value !== 'control') return `view:${activeView.value}`
@@ -539,7 +541,7 @@ function requestPrint(file: FileEntry, printer?: string) {
       <!-- Scrolling one axis clips the other, which would cut off the printer
            menu. Only the compact layout below `lg` needs to scroll, and it
            uses a native select that the clip cannot reach. -->
-      <div class="mx-auto max-w-[1500px] overflow-x-auto px-4 sm:px-8 lg:overflow-x-visible lg:px-10">
+      <div :class="capped && 'max-w-[1500px]'" class="mx-auto overflow-x-auto px-4 sm:px-8 lg:overflow-x-visible lg:px-10">
         <nav class="flex min-w-0 items-stretch border-b border-gray-200 sm:min-w-max dark:border-white/10" :aria-label="t('nav.ariaLabel')">
           <div class="grid w-full grid-cols-1 py-2 lg:hidden">
             <select
@@ -656,7 +658,7 @@ function requestPrint(file: FileEntry, printer?: string) {
       </div>
     </header>
 
-    <main id="main-content" tabindex="-1" class="mx-auto max-w-[1500px] py-7 outline-none sm:px-8 lg:px-10">
+    <main id="main-content" tabindex="-1" :class="capped && 'max-w-[1500px]'" class="mx-auto py-7 outline-none sm:px-8 lg:px-10">
       <h1 class="sr-only">{{ t('app.title') }}</h1>
       <!-- Notification -->
       <div aria-live="polite" class="pointer-events-none fixed inset-0 z-50 flex items-end px-4 py-6 sm:p-6">

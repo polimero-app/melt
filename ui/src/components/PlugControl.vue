@@ -132,7 +132,7 @@ function confirmOff() {
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ attached }}</p>
         <p class="mt-0.5 text-xs" :class="observation && observation.connection !== 'online' ? 'text-amber-700 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'">{{ metaLine }}</p>
       </div>
-      <div class="flex flex-wrap gap-2">
+      <div class="ml-auto flex flex-wrap justify-end gap-2">
         <!-- Unknown relay shows both: a guess could hide the action the user needs. -->
         <Button v-if="observation?.relay !== 'on'" variant="secondary" :disabled="busy" :aria-label="t('plugControl.turnOnLabel', { name: plug.name })" @click="setPower('on')"><PhPower class="size-4" aria-hidden="true" /> {{ t('plugControl.on') }}</Button>
         <Button v-if="observation?.relay !== 'off'" variant="danger" :disabled="busy" :aria-label="t('plugControl.turnOffLabel', { name: plug.name })" @click="askOff"><PhPower class="size-4" aria-hidden="true" /> {{ t('plugControl.off') }}</Button>
