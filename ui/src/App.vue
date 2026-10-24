@@ -1460,6 +1460,7 @@ async function addPrinter() {
 function printerActionItems(printer: Printer): ActionMenuItem[] {
   return [
     { label: t('printersView.editPrinter'), icon: PhPencilSimple, onSelect: () => openEdit(printer) },
+    { label: t('printersView.firmware'), icon: PhCpu, onSelect: () => openFirmwareManagement(printer) },
     {
       label: t('printersView.refreshCertificate'),
       icon: PhArrowsClockwise,
@@ -3229,12 +3230,11 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Stats -->
-        <dl v-if="hasPrinters" class="mb-5 grid grid-cols-3 gap-2 sm:gap-5">
-          <Card v-for="stat in fleetStats" :key="stat.label" as="div" class="px-3 py-4 sm:p-6">
-            <dt class="truncate text-sm font-medium text-gray-500 dark:text-gray-400">{{ stat.label }}</dt>
-            <dd class="mt-1 text-3xl font-semibold tracking-tight" :class="stat.tone">{{ stat.value }}</dd>
-          </Card>
+        <dl v-if="hasPrinters" class="mb-5 flex flex-wrap gap-x-6 gap-y-1 px-4 text-sm sm:px-0">
+          <div v-for="stat in fleetStats" :key="stat.label" class="flex items-baseline gap-1.5">
+            <dt class="text-gray-500 dark:text-gray-400">{{ stat.label }}</dt>
+            <dd class="font-semibold tabular-nums" :class="stat.tone">{{ stat.value }}</dd>
+          </div>
         </dl>
 
         <!-- Loading / error states -->
@@ -3333,9 +3333,6 @@ onUnmounted(() => {
               <Button class="min-w-0 flex-1" @click="selectPrinter(printer.name)"><PhCards class="size-4" aria-hidden="true" /> {{ t('printersView.openControl') }}</Button>
               <ActionMenu :label="t('control.printerActions')" :items="printerActionItems(printer)" />
             </div>
-            <Button variant="secondary" class="mt-2 w-full" @click="openFirmwareManagement(printer)">
-              <PhInfo class="size-4" aria-hidden="true" /> {{ t('firmware.title') }}
-            </Button>
           </Card>
           <button
             type="button"

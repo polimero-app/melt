@@ -75,7 +75,8 @@ history/public flags do not add those sources to Moonraker.
 
 ## Desktop
 
-The **Printers → Firmware & software** screen shows installed, printer-advertised,
+Choose **Printers → printer's overflow menu → Firmware** to open the
+**Firmware & software** screen. It shows installed, printer-advertised,
 device-catalogue, and public-stable rails separately. History checks are
 read-only and cached with the normal firmware result. **Refresh** re-runs the
 check against the sources enabled under **Configuration → Firmware sources**, so a

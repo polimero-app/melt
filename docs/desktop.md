@@ -173,7 +173,11 @@ plus About/version/license information and diagnostics. Slicer and preset
 editing opens a side panel. English and Brazilian Portuguese are supported.
 See [configuration storage](configuration.md) for which choices persist where.
 
-**Firmware & software** opens from the printer's actions. It separates installed,
+The **Printers** page summarizes total, online and printing counts on one line.
+Each printer keeps **Open control** visible; **Firmware** lives in its overflow
+menu alongside the other maintenance actions.
+
+**Firmware & software** opens from that **Firmware** menu item. It separates installed,
 printer-advertised, device-catalogue and public-stable evidence and leads with
 the assessment. Refresh follows the saved source preference; **Also check
 Bambu.com** is an explicit one-shot opt-in. No action installs firmware.
