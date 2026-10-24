@@ -168,6 +168,30 @@ the control inventory only when `support_aux_fan` or `support_chamber_fan`
 confirms them. Heatbreak/Hotend speed remains visible as telemetry because it is
 a real reported fan even though the legacy protocol does not expose a control.
 
+## Offline HMS and print-error descriptions
+
+The bundled ha-bambulab catalogue supplies English and Brazilian Portuguese HMS
+and print-error text without a network lookup. Model-specific variants take
+priority over generic descriptions regardless of source iteration order.
+Missing translations fall back to the English message; unknown codes and
+published empty placeholders retain Melt's explicit generic explanation and
+raw identifier. Existing named explanations, severity and alert/diagnostic
+classification remain unchanged, including command-verification and AMS-refill
+notifications. The desktop accepts the API's existing snake-case error
+identifiers as well as retained camel-case payloads.
+
+Official model-specific wiki paths are preferred to the existing HMS search
+link when supplied by the pinned catalogue. These links open only when the
+operator follows them; status parsing remains offline.
+
+To update, review the pinned ha-bambulab revision in
+`scripts/update_bambu_errors.py`, run `python scripts/update_bambu_errors.py`,
+and review the generated model variants and accompanying
+`crates/melt-core/data/bambu-errors.LICENSE`.
+`python scripts/update_bambu_errors.py --check` verifies a byte-identical regeneration.
+The notice is also embedded in the generated catalogue shipped in the binary.
+Neither flattened Bambu Bar tables nor vendor application code are copied.
+
 ## Exact-model capability defaults
 
 The verified P2S baseline (`resources/printers/N7.json`, Bambu Studio revision

@@ -3,7 +3,7 @@ import type { ConnectionState } from './monitoring'
 import type { AmsDrying } from './drying'
 import type { CommandError } from './errors'
 import type { CameraPlayback } from './cameras'
-import type { HmsSeverity } from './hms'
+import type { HmsSeverity, PrinterError } from './hms'
 import type { Translate } from './errors'
 
 export type View = 'control' | 'printers' | 'cameras' | 'plugs' | 'settings' | 'files'
@@ -139,7 +139,7 @@ export type PrinterStatus = {
   timeEstimates?: { elapsedSeconds: number; remainingSeconds?: number; totalSeconds?: number }
   stage?: string
   stageCode?: number
-  errors: { code: string; message: string; rawCode?: string; recoverable?: boolean }[]
+  errors: PrinterError[]
   warnings: { code: string; message: string }[]
   fans?: Record<string, number>
   wifi?: { signalDbm: number }

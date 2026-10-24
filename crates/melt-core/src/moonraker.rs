@@ -1379,6 +1379,10 @@ pub struct Progress {
 pub struct StatusError {
     pub code: &'static str,
     pub message: String,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub translations: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guide_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1407,6 +1411,10 @@ pub enum HmsSeverity {
 pub struct HmsEvent {
     pub code: &'static str,
     pub message: String,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub translations: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guide_url: Option<String>,
     pub raw_code: String,
     pub severity: HmsSeverity,
     pub alert: bool,
@@ -2276,6 +2284,8 @@ fn map_errors(status: &BTreeMap<String, Value>, state: PrinterState) -> Vec<Stat
     vec![StatusError {
         code: "printer_error",
         message,
+        translations: BTreeMap::new(),
+        guide_url: None,
         raw_code: None,
         image_id: None,
         recoverable: None,
@@ -2577,6 +2587,8 @@ mod tests {
             vec![StatusError {
                 code: "printer_error",
                 message: "Move out of range".into(),
+                translations: BTreeMap::new(),
+                guide_url: None,
                 raw_code: None,
                 image_id: None,
                 recoverable: None,
