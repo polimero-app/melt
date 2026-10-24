@@ -21,7 +21,7 @@ installer matrix:
 | macOS amd64, arm64 | dmg |
 | Windows amd64 | msi |
 
-All jobs use the stable Rust toolchain and Bun 1.3.14. Linux installs GTK,
+All jobs use the stable Rust toolchain and Bun 1.4.4. Linux installs GTK,
 WebKitGTK, appindicator, SVG and RPM build dependencies; Windows sets the
 runner's OpenSSL locations. Jobs install locked UI dependencies, build the UI,
 install the Tauri CLI and run `cargo tauri build` with the platform bundle list.

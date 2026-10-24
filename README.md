@@ -68,7 +68,7 @@ arguments. Passing command arguments selects headless CLI mode instead.
 Source builds require Rust 1.95 or newer, Bun, and the platform dependencies
 required by Tauri 2. Printer credentials are stored through the platform
 keychain, so a usable Secret Service or desktop keychain must be available
-for authenticated profiles. CI uses Bun 1.3.14. See
+for authenticated profiles. CI uses Bun 1.4.4. See
 [development setup](docs/development.md) for native prerequisites and builds.
 
 The [nightly workflow](.github/workflows/nightly.yml) publishes dated

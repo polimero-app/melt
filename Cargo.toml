@@ -18,7 +18,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "multipart", "default-tls"] }
 url = "2"
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-openssl"] }
+keyring = { version = "4", default-features = false, features = ["v1"] }
 serde-saphyr = { version = "2.0.0", default-features = false, features = ["serialize", "deserialize"] }
 sha2 = "0.11"
 tempfile = "3"
