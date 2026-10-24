@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "p2s-monitoring-source",
+  "capturedAt": "2026-10-24T01:02:38Z",
+  "transport": "mqtt",
+  "direction": "printer-to-client",
+  "printer": {
+    "modelRaw": "Bambu Lab P2S",
+    "hardwareRevision": null,
+    "modules": { "ota": "01.01.00.00" }
+  },
+  "provenance": "source",
+  "sourceUrl": "https://github.com/greghesp/ha-bambulab/blob/0e027ff135a6d9265cb756d3e246747954c76722/custom_components/bambu_lab/pybambu/mock_data/MOCK-P2S.json",
+  "sourceRevision": "0e027ff135a6d9265cb756d3e246747954c76722",
+  "confidence": "provisional",
+  "sanitization": [
+    "Whitelisted only status shape, humidity, extruder readings and AMS inventory fields.",
+    "Omitted all serials, credentials, endpoints, task identifiers and RFID tag identifiers.",
+    "The recording date is the source-review date, not an asserted physical capture date."
+  ],
+  "assertion": "The P2S source sample reports ordinal humidity 5 alongside relative humidity 16, modern extruder snow, global tray_now and a hexadecimal spool-presence mask.",
+  "qualification": "Source-derived regression input for the shared parser; the copied Bambu Bar sample is the same Git blob, not independent hardware evidence.",
+  "removalCondition": "Supplement with consented physical captures scoped to model and module firmware, retaining any conflicting observations.",
+  "files": ["report.json", "LICENSE"]
+}

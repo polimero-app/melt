@@ -5,7 +5,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { save as saveFileDialog } from '@tauri-apps/plugin-dialog'
 import type { Locale, MessageKey } from '../i18n'
 import type { PrinterBadge } from '../monitoring'
-import { clampTarget, formatDuration, remainingTimePresentation, formatSize, formatDate } from '../formatting'
+import { clampTarget, formatAmsHumidity, formatDuration, remainingTimePresentation, formatSize, formatDate } from '../formatting'
 import {
   dryingBounds,
   dryingDefaults,
@@ -355,7 +355,7 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
     name: materialSystemLabel(driver, unit.id, t('materials.externalSpool'), materialUnitCount),
     unitId: unit.id,
     temperature: unit.temperature,
-    humidity: unit.humidityLevel,
+    humidity: formatAmsHumidity(unit.humidityPercent, unit.humidityIndex, locale),
     drying: unit.drying,
     firstFilament: unit.trays.find((tray) => tray.filamentType)?.filamentType,
     slots: unit.trays.map((tray) => {

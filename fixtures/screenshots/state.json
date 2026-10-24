@@ -48,13 +48,13 @@
       "bambu-lan": {
         "ams": {
           "units": [
-            {"id": 0, "kind": "AMS 2 Pro", "humidityLevel": "dry", "temperature": 26, "trays": [
+            {"id": 0, "kind": "AMS 2 Pro", "humidityPercent": 18, "humidityIndex": 2, "humidityLevel": "dry", "temperature": 26, "trays": [
               {"slot": 0, "filamentType": "PLA", "color": "29B8D1FF", "remainingPercent": 82, "remainingGrams": 820},
               {"slot": 1, "filamentType": "PLA", "color": "F3F4F6FF", "remainingPercent": 65, "remainingGrams": 650},
               {"slot": 2, "filamentType": "PETG", "color": "F59E0BFF", "remainingPercent": 91, "remainingGrams": 910},
               {"slot": 3, "filamentType": "PLA", "color": "222B38FF", "remainingPercent": 54, "remainingGrams": 540}
             ], "drying": {"status": "off", "active": false, "controllable": true}},
-            {"id": 128, "kind": "AMS HT", "humidityLevel": "dry", "temperature": 65, "trays": [
+            {"id": 128, "kind": "AMS HT", "humidityPercent": 12, "humidityIndex": 2, "humidityLevel": "dry", "temperature": 65, "trays": [
               {"slot": 0, "filamentType": "PETG", "color": "A9B5C6FF", "remainingPercent": 76, "remainingGrams": 760}
             ], "drying": {"status": "drying", "active": true, "minutesRemaining": 142, "setting": {"filament": "PETG", "temperatureC": 65, "hours": 6}, "controllable": true}}
           ]

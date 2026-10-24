@@ -1509,6 +1509,11 @@ pub struct AmsUnit {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub humidity_percent: Option<f64>,
+    /// Presentation scale: 1 is dry, 5 is wet, opposite to the wire index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub humidity_index: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub humidity_range: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub humidity_level: Option<&'static str>,

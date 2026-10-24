@@ -1,3 +1,5 @@
+import { translate, type Locale } from './i18n'
+
 // Thresholds are generous: the monitor polls on an interval, so a reading a
 // few seconds old is normal and should not look alarming.
 const RECENT_AFTER_SECONDS = 15
@@ -21,6 +23,16 @@ export function formatDuration(seconds: number): string {
   const minutes = Math.floor((seconds % 3600) / 60)
   if (!hours) return `${minutes}m`
   return minutes ? `${hours}h ${minutes}m` : `${hours}h`
+}
+
+export function formatAmsHumidity(percent: number | undefined, index: number | undefined, locale: Locale): string | undefined {
+  if (percent !== undefined && Number.isFinite(percent) && percent >= 0 && percent <= 100) {
+    return `${new Intl.NumberFormat(locale).format(percent)}%`
+  }
+  if (index !== undefined && Number.isInteger(index) && index >= 1 && index <= 5) {
+    return translate(locale, 'materials.humidityIndex', { index })
+  }
+  return undefined
 }
 
 export type RemainingTimePresentation =

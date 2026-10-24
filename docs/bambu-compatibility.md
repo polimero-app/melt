@@ -1,6 +1,6 @@
 # Bambu compatibility and qualification
 
-Last-updated: 2026-10-12
+Last-updated: 2026-10-23
 
 Undocumented behavior and physical-printer captures follow the
 [protocol evidence policy](bambu-protocol-evidence.md). Live observations and
@@ -167,6 +167,20 @@ without that hardware. Matching Bambu Studio, Melt includes those items in
 the control inventory only when `support_aux_fan` or `support_chamber_fan`
 confirms them. Heatbreak/Hotend speed remains visible as telemetry because it is
 a real reported fan even though the legacy protocol does not expose a control.
+
+## AMS humidity
+
+AMS humidity has two independent quantities. `humidityPercent` comes only from
+the reported `humidity_raw` relative-humidity percentage; finite values from
+0 through 100 are accepted, including fractional readings and zero.
+`humidityIndex` is a presentation scale from 1 (dry) to 5 (wet), reversing the
+printer's ordinal `humidity` field. The CLI and desktop prefer the measured
+percentage and otherwise label the ordinal scale explicitly. An ordinal index
+is never converted to an invented percentage or percentage range; the legacy
+optional `humidityRange` field is no longer populated.
+
+The source-derived P2S fixture identifies OTA `01.01.00.00` and is provisional
+evidence, not a new physical-printer qualification.
 
 ## AMS drying
 
