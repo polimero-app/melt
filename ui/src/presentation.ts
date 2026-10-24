@@ -80,6 +80,17 @@ export function printerStateMessageKey(state: string | undefined): MessageKey {
   return printerStateKeys[state ?? 'unknown'] ?? 'printerState.unknown'
 }
 
+const lightModeKeys: Record<string, MessageKey> = {
+  on: 'control.lightOn',
+  off: 'control.lightOff',
+  flashing: 'control.lightFlashing',
+  unknown: 'control.lightUnknown',
+}
+
+export function lightModeMessageKey(mode: string): MessageKey {
+  return lightModeKeys[mode] ?? 'control.lightUnknown'
+}
+
 export function isActiveJobState(state: string | undefined): boolean {
   return state === 'printing' || state === 'paused'
 }

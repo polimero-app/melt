@@ -23,4 +23,12 @@ describe("localization", () => {
     expect(translate("en", "operations.amsDrying")).toBe("changing AMS drying");
     expect(translate("pt-BR", "operations.amsDrying")).toBe("a secagem do AMS");
   });
+
+  it("localizes active diagnostics and keeps camera hints free of repository-only paths", () => {
+    expect(translate("en", "settingsView.active")).toBe("Active");
+    expect(translate("pt-BR", "settingsView.active")).toBe("Ativo");
+    for (const locale of ["en", "pt-BR"] as const) {
+      expect(translate(locale, "camerasView.connectionHint")).not.toContain("docs/");
+    }
+  });
 });

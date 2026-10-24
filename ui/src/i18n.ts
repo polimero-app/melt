@@ -298,6 +298,10 @@ export type MessageKey =
   | "control.workLight"
   | "control.chamberLight"
   | "control.auxLight"
+  | "control.lightOn"
+  | "control.lightOff"
+  | "control.lightFlashing"
+  | "control.lightUnknown"
   | "control.nozzleLeft"
   | "control.nozzleRight"
   | "control.telemetryOnly"
@@ -500,6 +504,7 @@ export type MessageKey =
   | "settingsView.storageTransport"
   | "settingsView.firmwareModules"
   | "settingsView.quirks"
+  | "settingsView.active"
   | "settingsView.none"
   | "settingsView.version"
   | "settingsView.platform"
@@ -819,7 +824,7 @@ const messages: Record<Locale, Messages> = {
     "camerasView.printers": "Linked printers",
     "camerasView.printersHint": "A linked printer can switch its camera card to this camera.",
     "camerasView.notLinked": "Not linked",
-    "camerasView.connectionHint": "Use the Camera Account from the Tapo app, not your cloud login. Turn on Third-Party Compatibility if your firmware has it, turn privacy mode off, and close other viewers if the stream limit is reached. See docs/ip-cameras.md for more.",
+    "camerasView.connectionHint": "Use the Camera Account from the Tapo app, not your cloud login. Turn on Third-Party Compatibility if your firmware has it, turn privacy mode off, and close other viewers if the stream limit is reached.",
     "camerasView.saved": "Camera saved",
     "camerasView.removed": "Camera removed",
     "camerasView.passwordNotDeleted": "Camera removed, but its password could not be deleted from the keychain.",
@@ -977,6 +982,10 @@ const messages: Record<Locale, Messages> = {
     "control.workLight": "Work light",
     "control.chamberLight": "Chamber light",
     "control.auxLight": "Aux light",
+    "control.lightOn": "On",
+    "control.lightOff": "Off",
+    "control.lightFlashing": "Flashing",
+    "control.lightUnknown": "Unknown",
     "control.nozzleLeft": "Left nozzle",
     "control.nozzleRight": "Right nozzle",
     "control.telemetryOnly": "Telemetry only",
@@ -1196,6 +1205,7 @@ const messages: Record<Locale, Messages> = {
     "settingsView.storageTransport": "Storage transport",
     "settingsView.firmwareModules": "Firmware modules",
     "settingsView.quirks": "Firmware quirks",
+    "settingsView.active": "Active",
     "settingsView.none": "None",
     "settingsView.version": "Version",
     "settingsView.platform": "Platform",
@@ -1495,7 +1505,7 @@ const messages: Record<Locale, Messages> = {
     "camerasView.printers": "Impressoras vinculadas",
     "camerasView.printersHint": "Uma impressora vinculada pode trocar o cartão da câmera para esta câmera.",
     "camerasView.notLinked": "Não vinculada",
-    "camerasView.connectionHint": "Use a Conta da Câmera do app Tapo, não o login da nuvem. Ative a Compatibilidade com Terceiros se o firmware tiver essa opção, desative o modo de privacidade e feche outros visualizadores se o limite de transmissões for atingido. Veja docs/ip-cameras.md para mais detalhes.",
+    "camerasView.connectionHint": "Use a Conta da Câmera do app Tapo, não o login da nuvem. Ative a Compatibilidade com Terceiros se o firmware tiver essa opção, desative o modo de privacidade e feche outros visualizadores se o limite de transmissões for atingido.",
     "camerasView.saved": "Câmera salva",
     "camerasView.removed": "Câmera removida",
     "camerasView.passwordNotDeleted": "Câmera removida, mas a senha não pôde ser apagada do chaveiro.",
@@ -1653,6 +1663,10 @@ const messages: Record<Locale, Messages> = {
     "control.workLight": "Luz de trabalho",
     "control.chamberLight": "Luz da câmara",
     "control.auxLight": "Luz auxiliar",
+    "control.lightOn": "Acesa",
+    "control.lightOff": "Apagada",
+    "control.lightFlashing": "Piscando",
+    "control.lightUnknown": "Desconhecida",
     "control.nozzleLeft": "Bico esquerdo",
     "control.nozzleRight": "Bico direito",
     "control.telemetryOnly": "Somente telemetria",
@@ -1872,6 +1886,7 @@ const messages: Record<Locale, Messages> = {
     "settingsView.storageTransport": "Transporte de armazenamento",
     "settingsView.firmwareModules": "Módulos de firmware",
     "settingsView.quirks": "Ajustes de firmware",
+    "settingsView.active": "Ativo",
     "settingsView.none": "Nenhum",
     "settingsView.version": "Versão",
     "settingsView.platform": "Plataforma",

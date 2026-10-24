@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { awaitsFirstSample, badgeDotClasses, badgeFillClasses, badgeSurfaceClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
+import { awaitsFirstSample, badgeDotClasses, badgeFillClasses, badgeSurfaceClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, lightModeMessageKey, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import type { PrinterBadge } from './monitoring'
+import { translate } from './i18n'
 
 const allBadges: PrinterBadge[] = ['idle', 'busy', 'error', 'connecting', 'synchronizing', 'reconnecting', 'offline', 'unknown']
 
@@ -59,6 +60,21 @@ describe('printerStateMessageKey', () => {
     expect(printerStateMessageKey('printing')).toBe('printerState.printing')
     expect(printerStateMessageKey('not-yet-supported')).toBe('printerState.unknown')
     expect(printerStateMessageKey(undefined)).toBe('printerState.unknown')
+  })
+})
+
+describe('lightModeMessageKey', () => {
+  it('localizes every light mode and falls back for unknown backend values', () => {
+    for (const [mode, english, portuguese] of [
+      ['on', 'On', 'Acesa'],
+      ['off', 'Off', 'Apagada'],
+      ['flashing', 'Flashing', 'Piscando'],
+      ['unknown', 'Unknown', 'Desconhecida'],
+      ['new-backend-value', 'Unknown', 'Desconhecida'],
+    ]) {
+      expect(translate('en', lightModeMessageKey(mode))).toBe(english)
+      expect(translate('pt-BR', lightModeMessageKey(mode))).toBe(portuguese)
+    }
   })
 })
 
