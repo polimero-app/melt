@@ -55,7 +55,7 @@ const cameraQuality = ref<Quality>('high')
 const cameraViewer = ref<InstanceType<typeof CameraViewer>>()
 const cameraFormOpen = ref(false)
 const editingCamera = ref<string>()
-const cameraDraft = ref({ name: '', host: '', username: '', password: '', rtspPort: '', timeout: '10s', printers: [] as string[] })
+const cameraDraft = ref({ name: '', host: '', username: '', password: '', rtspPort: '554', timeout: '10s', printers: [] as string[] })
 const cameraSaving = ref(false)
 const cameraFormError = ref<string>()
 
@@ -66,7 +66,7 @@ function openCameraForm(camera?: CameraSummary) {
     host: camera?.host ?? '',
     username: camera?.username ?? '',
     password: '',
-    rtspPort: camera && camera.rtspPort !== 554 ? String(camera.rtspPort) : '',
+    rtspPort: String(camera?.rtspPort ?? 554),
     timeout: camera?.timeout ?? '10s',
     printers: [...(camera?.printers ?? [])],
   }
@@ -85,7 +85,7 @@ async function saveCamera() {
     host: draft.host,
     username: draft.username,
     password: draft.password,
-    rtspPort: draft.rtspPort ? Number(draft.rtspPort) : null,
+    rtspPort: draft.rtspPort && draft.rtspPort !== '554' ? Number(draft.rtspPort) : null,
     timeout: draft.timeout,
   }
   try {
