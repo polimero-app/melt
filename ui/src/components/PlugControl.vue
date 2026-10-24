@@ -124,7 +124,7 @@ function confirmOff() {
     <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
       <div class="min-w-0">
         <div class="flex items-center gap-2">
-          <PhPlug v-if="showName" class="size-4 shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
+          <PhPlug v-if="showName" class="size-4 shrink-0 text-gray-500 dark:text-gray-400" aria-hidden="true" />
           <span v-if="showName" class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ plug.name }}</span>
           <StatusBadge v-if="observation" :status="relayBadge[observation.relay]" :label="relayLabel(observation.relay)" />
           <span v-if="observation && observation.powerWatts !== null" class="text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{{ t('plugsView.power', { watts: observation.powerWatts }) }}</span>
