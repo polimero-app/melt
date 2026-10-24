@@ -1,12 +1,15 @@
 # Screenshot samples
 
-Last-updated: 2026-10-12
+Last-updated: 2026-10-24
 
 `state.json` contains synthetic, sanitized data for the current desktop UI's
 documentation captures. Printer/camera names, serial labels, paths, module
 versions and job states are examples. Hosts use `192.0.2.0/24`; there are no
 credentials or raw hardware captures. Tray slots follow the core's zero-based
 contract and are displayed as slots 1–4 by the frontend.
+
+The `plugs` and `plugObservations` entries are sample smart plugs (hosts
+`192.0.2.40–43`) covering on, off, unreachable/stale and auth-failed states.
 
 [`scripts/capture_screenshots.py`](../../scripts/capture_screenshots.py) renders
 the built production frontend with this isolated IPC bridge. It derives

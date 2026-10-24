@@ -183,6 +183,7 @@ BRIDGE = r"""
   const fixture = __STATE__;
   const base = __BASE__;
   const commands = window.__SCREENSHOT_COMMANDS__ = [];
+  const rejected = window.__SCREENSHOT_REJECTED__ = [];
   const callbacks = new Map(); let next = 1;
   const stamp = new Date(fixture.capturedAt).getTime();
   const RealDate = Date;
@@ -209,8 +210,8 @@ BRIDGE = r"""
         case 'registered_drivers': return fixture.drivers;
         case 'get_preferences': return fixture.preferences;
         case 'camera_list': return fixture.cameras;
-        case 'plug_list': return [];
-        case 'plug_observations': return {};
+        case 'plug_list': return fixture.plugs;
+        case 'plug_observations': return fixture.plugObservations;
         case 'printer_capabilities': return {capabilities: fixture.capabilities};
         case 'cached_monitoring': case 'monitored_printers': return fixture.monitoring;
         case 'printer_status': return fixture.monitoring.find(p => p.name === name);
@@ -233,7 +234,7 @@ BRIDGE = r"""
           fixture.cameras.forEach(c => {c.selectedBy = c.selectedBy.filter(p => p !== args.printer); if(c.name === args.camera) c.selectedBy.push(args.printer);});
           return {printer: args.printer, camera: args.camera};
         }
-        default: throw new Error('Screenshot fixture refuses unsupported IPC: ' + cmd);
+        default: rejected.push(cmd); throw new Error('Screenshot fixture refuses unsupported IPC: ' + cmd);
       }
     }
   };
@@ -340,14 +341,26 @@ def capture(args):
         ("cameras.png", "cameras", False, "cameras"),
         ("camera-settings.png", "cameras", False, "camera-settings"),
         ("file-preview.png", "files", False, "preview"),
+        ("printer-control-offline.png", "control", False, "offline"),
+        ("smart-plugs.png", "plugs", False, "plugs"),
+        ("smart-plug-settings.png", "plugs", False, "plug-settings"),
+        ("smart-plug-power-off.png", "plugs", False, "plug-off"),
     ]
+    app_types = (ROOT / "ui/src/app-types.ts").read_text()
+    views = set(re.findall(r"'(\w+)'", re.search(r"export type View = (.+)", app_types).group(1)))
+    uncovered = views - {view for _, view, _, _ in definitions}
+    if uncovered:
+        raise SystemExit(f"Add screenshot scenarios for views: {', '.join(sorted(uncovered))}")
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             for filename, view, printing, kind in definitions:
                 server.printing = printing
                 context = browser.new_context(viewport={"width": WIDTH, "height": HEIGHT}, device_scale_factor=SCALE, locale="en-US", timezone_id="UTC", color_scheme="dark", reduced_motion="reduce")
-                script = BRIDGE.replace("__STATE__", json.dumps(screenshot_state(state, printing))).replace("__BASE__", json.dumps(base)).replace("__VIEW__", json.dumps(view)).replace("__CODEC__", json.dumps(media[printing][2]))
+                scenario = screenshot_state(state, printing)
+                if kind == "offline":
+                    scenario["monitoring"][0] = {"name": "workshop", "driver": "bambu-lan", "connectionState": "offline", "stale": True}
+                script = BRIDGE.replace("__STATE__", json.dumps(scenario)).replace("__BASE__", json.dumps(base)).replace("__VIEW__", json.dumps(view)).replace("__CODEC__", json.dumps(media[printing][2]))
                 context.add_init_script(script)
                 page = context.new_page()
                 page.on("pageerror", lambda error: problems.append(str(error)))
@@ -376,6 +389,25 @@ def capture(args):
                     page.get_by_role("button", name="Camera actions", exact=True).first.click()
                     page.get_by_role("menuitem", name="Edit camera", exact=True).click()
                     page.locator("#camera-form").wait_for()
+                if kind in ("idle", "cameras"):
+                    expect(page.get_by_role("button", name="Turn off bench-power", exact=True)).to_be_visible()
+                if kind == "offline":
+                    page.get_by_role("heading", name="Printer unavailable", exact=True).wait_for()
+                    expect(page.get_by_role("button", name="Turn off bench-power", exact=True)).to_be_visible()
+                if kind in ("plugs", "plug-settings", "plug-off"):
+                    expect(page.get_by_role("button", name="Smart plug actions", exact=True)).to_have_count(len(state["plugs"]))
+                    for text in ("215 W", "0 W", "Sign-in failed", "Last known: Relay on (stale) · Unreachable · Observed 11:55 AM"):
+                        expect(page.get_by_text(text, exact=True)).to_be_visible()
+                if kind == "plug-settings":
+                    page.get_by_role("button", name="Smart plug actions", exact=True).first.click()
+                    page.get_by_role("menuitem", name="Edit smart plug", exact=True).click()
+                    page.locator("#plug-form").wait_for()
+                    expect(page.locator("#plug-password")).to_have_value("")
+                if kind == "plug-off":
+                    page.get_by_role("button", name="Turn off bench-power", exact=True).click()
+                    dialog = page.get_by_role("alertdialog")
+                    expect(dialog).to_contain_text("Printers: workshop (drying), studio (printing). Cameras: workbench.")
+                    assert page.evaluate("!window.__SCREENSHOT_COMMANDS__.includes('plug_set_power')")
                 if kind in ("library", "preview"):
                     page.get_by_role("button", name="Preview cable-organizer.stl", exact=True).wait_for()
                     page.wait_for_function("Array.from(document.querySelectorAll('[aria-busy]')).every(e => e.getAttribute('aria-busy') !== 'true')")
@@ -385,8 +417,15 @@ def capture(args):
                     page.wait_for_function("document.querySelector('[role=dialog] img')?.complete && document.querySelector('[role=dialog] img')?.naturalWidth > 0")
                 page.evaluate("document.fonts.ready")
                 page.mouse.move(1590, 1090)
+                problems.extend(f"Unsupported IPC in {filename}: {cmd}" for cmd in page.evaluate("window.__SCREENSHOT_REJECTED__"))
                 if page.get_by_role("alert").count():
                     problems.extend(page.get_by_role("alert").all_text_contents())
+                if kind in ("camera-settings", "plug-settings", "plug-off", "preview"):
+                    # Modals fade/slide in; capture only once settled.
+                    page.wait_for_function("""() => Array.from(document.querySelectorAll('[id^="headlessui-dialog-panel-"]')).some(e => {
+                        const r = e.getBoundingClientRect();
+                        return r.width > 0 && r.right <= innerWidth + .5 && getComputedStyle(e).opacity === '1';
+                    })""")
                 page.screenshot(path=str(output / filename), full_page=True, animations="disabled")
                 with Image.open(output / filename) as png:
                     size = list(png.size)

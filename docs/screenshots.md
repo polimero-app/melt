@@ -1,11 +1,11 @@
 # Screenshots
 
-Last-updated: 2026-10-23
+Last-updated: 2026-10-24
 
-Nine fresh captures of the current production Vue interface, including the
+Thirteen captures of the current production Vue interface, including the
 **Printers** label, **Cameras** view, **Camera feed** selector, playback badges,
-camera settings and large file preview. The six original image paths are
-replaced with new captures; three additional views cover current features.
+camera settings, large file preview and **Smart plugs** (list, settings, power-off
+confirmation and the offline printer view with plug controls).
 
 These screenshots use sanitized sample printer/camera status, filenames,
 documentation-network addresses and illustrated media. The camera scene is
@@ -93,6 +93,33 @@ The sample contains no camera password or real credentials.
 
 ![Edit camera side panel with sample connection settings and linked printers](../screenshots/camera-settings.png)
 
+## Printer control — offline
+
+An unreachable printer keeps its smart plug controls so power can be restored.
+
+![Offline printer view with the attached smart plug controls](../screenshots/printer-control-offline.png)
+
+## Smart plugs
+
+Sample plugs cover relay on with power, relay off, unreachable (last known
+state shown as stale), sign-in failed and unattached plugs.
+
+![Smart plugs view with four sample plugs in different states](../screenshots/smart-plugs.png)
+
+## Smart plug settings
+
+Editing keeps the password blank (the saved one is retained) and shows the
+attached printers and cameras.
+
+![Edit smart plug side panel](../screenshots/smart-plug-settings.png)
+
+## Smart plug power-off confirmation
+
+Turning off lists the printers and cameras that lose power and their activity.
+The capture never confirms; it asserts no switch command was sent.
+
+![Turn off confirmation naming affected printers and cameras](../screenshots/smart-plug-power-off.png)
+
 ## Reproducing the captures
 
 Install the UI dependencies as described in [development](development.md).
@@ -122,6 +149,9 @@ To review files before replacing the repository images:
 make ui-build
 python3 scripts/capture_screenshots.py --output /tmp/melt-screenshots
 ```
+
+The script fails if any `View` in `ui/src/app-types.ts` has no scenario, or
+if the UI calls an IPC command the fixture bridge does not implement.
 
 Visually inspect every view, check the recorded playback, and retain the
 manifest alongside the images. Rebuild and recapture whenever UI source or

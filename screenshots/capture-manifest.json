@@ -1,9 +1,9 @@
 {
-  "capturedAt": "2026-10-12T14:50:16+00:00",
+  "capturedAt": "2026-10-24T03:08:00+00:00",
   "scenarioTime": "2026-10-12T12:00:00Z",
-  "sourceCommit": "d08df4764a897d3d1fc9570275db2bcee87b5c56",
-  "frontendSourceSha256": "6081da0ee83d760f68d4c4dbf5eea4f26261a766a92a79d9187de49aaba91720",
-  "fixtureSha256": "434d1719d9290c53a5ea861df4a7556419bfe311107980d49bafc3a380424542",
+  "sourceCommit": "ad4ca256c434270e01abc8dfce1f8dbea33d4f40",
+  "frontendSourceSha256": "250040cafb18205ff8c8661931751545f2c5dba0110185e937f80f1cd06baa62",
+  "fixtureSha256": "a2dc625e594dee5476bebad3856c20e47257169cd5245a8ffb82b4939a32bc56",
   "viewport": {
     "width": 1600,
     "height": 1100,
@@ -22,7 +22,7 @@
         3200,
         2200
       ],
-      "sha256": "7e53cf4edc2ae3b8b1bde12d63a75014ee56f40a7f3288289d38ce12925d2954",
+      "sha256": "bab9cf0b4c5bb3ab0c0c9fb364165291b55a3ec0477cd1d78c6873c19282859f",
       "playback": []
     },
     {
@@ -32,7 +32,7 @@
         3200,
         2200
       ],
-      "sha256": "2a76d745e889e04808ad3ec9daa60d69520cd0e9f9cc626f110f9233fc3a6b9b",
+      "sha256": "05bec95ec766286c0b3c2b6b9385f2bc362a1352b53db8ded92a3c305a2e75f1",
       "playback": []
     },
     {
@@ -42,7 +42,7 @@
         3200,
         2200
       ],
-      "sha256": "4fd53372e293c575de663997c3336af1b03350c1d19cc612edc8d80c2c0d7f3d",
+      "sha256": "6fd1e8f647c7194949fddf06f97f8dddec89cb4e518e983aa98904b573f5d98c",
       "playback": []
     },
     {
@@ -52,7 +52,7 @@
         3200,
         2200
       ],
-      "sha256": "1a3acee1c7c85e3e2e2900c719643f9352fd0403064143b2aaf2fdeb805ad42a",
+      "sha256": "584956ed46b9cc6daa3d7cff7accfc5e7c4317d17364a1a3c05569e19953ea79",
       "playback": []
     },
     {
@@ -60,9 +60,9 @@
       "view": "idle",
       "size": [
         3200,
-        2854
+        3070
       ],
-      "sha256": "32cc689e1978c882c1a3d4ef65787519d1247c95580b77ebb75f6e83a473ddf9",
+      "sha256": "5678d6c9c342dcf449653215421ded1fde07811d2540ee356fa24ce055bff448",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -72,9 +72,9 @@
       "view": "printing",
       "size": [
         3200,
-        2854
+        3070
       ],
-      "sha256": "ac987ae230d0b1510bc041f4bee7680d50a940df53b64ce9c5330cadc3c2c16c",
+      "sha256": "3d4d104314b5ac3e173fb5243d0cfd5269ccc9434372e8194cb8467baaeeffa2",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -86,7 +86,7 @@
         3200,
         2200
       ],
-      "sha256": "0c8613faa5a3a894bf885ad3e62c33dc6366a0ea10d485462946b7fc6bfbbbe5",
+      "sha256": "330d36d8d518546aa741ce901d155fec724c6c671e808a25fd705acc699920e5",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -98,7 +98,7 @@
         3200,
         2200
       ],
-      "sha256": "7a8110f74658388bec40ea40f897b0b2db639c357020d5fb15f2c715fc82b5f0",
+      "sha256": "76db04ed12f0e4f90ac505c6859a5c1deb4a9e9ce111f90aa867e3eeaf25494d",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -110,7 +110,49 @@
         3200,
         2200
       ],
-      "sha256": "ebf085449d62068d1161fcb069d81c54dadc4cfd1039ed2b8996859a7ba17ca8",
+      "sha256": "4599f1e158d2ce6b4104d53a3e32fde777a33609ec9bc6ca5ac1ed5ec9af71d6",
+      "playback": []
+    },
+    {
+      "file": "printer-control-offline.png",
+      "view": "offline",
+      "size": [
+        3200,
+        2200
+      ],
+      "sha256": "fb567371ebef59b3d76472f0bdaba206ff28bdd527eb3ac446c1d5354808002d",
+      "playback": [
+        "LIVE \u00b7 H.264"
+      ]
+    },
+    {
+      "file": "smart-plugs.png",
+      "view": "plugs",
+      "size": [
+        3200,
+        2200
+      ],
+      "sha256": "4b1859117ff402d5b0925506ac5e3fe3297f095f74768064ccd695786251cbf2",
+      "playback": []
+    },
+    {
+      "file": "smart-plug-settings.png",
+      "view": "plug-settings",
+      "size": [
+        3200,
+        2200
+      ],
+      "sha256": "51b3045fe39d03a0dd1ad99b91c89ee0f9efd31116d215ec53b20e6cddd3259d",
+      "playback": []
+    },
+    {
+      "file": "smart-plug-power-off.png",
+      "view": "plug-off",
+      "size": [
+        3200,
+        2200
+      ],
+      "sha256": "f204a8489a8144803fb1cc036cb7a876a23a09c000c220b5d4ed4eba134bf605",
       "playback": []
     }
   ]
