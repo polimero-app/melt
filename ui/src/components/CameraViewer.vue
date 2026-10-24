@@ -38,6 +38,7 @@ const canvas = ref<HTMLCanvasElement>()
 const stage = ref<HTMLElement>()
 const canvasActive = ref(false)
 const canvasLive = ref(false)
+const aspect = ref('16 / 9')
 const transport = ref<CameraTransport>()
 const loading = ref(false)
 const error = ref<string>()
@@ -84,9 +85,17 @@ watchEffect(() => {
   if (video.value) video.value.srcObject = mediaStream.value ?? null
 })
 
+watch(canvasLive, (live) => {
+  if (live && canvas.value) fit(canvas.value.width, canvas.value.height)
+})
+
 onScopeDispose(() => void stop())
 
 defineExpose({ refresh })
+
+function fit(width: number, height: number) {
+  if (width && height) aspect.value = `${width} / ${height}`
+}
 
 function message(reason: unknown) {
   return commandMessage(reason, props.t)
@@ -368,12 +377,13 @@ function toggleFullscreen() {
     </CardHeader>
     <div
       ref="stage"
-      class="relative min-h-60 overflow-hidden sm:min-h-77.5"
+      class="relative min-h-60 overflow-hidden"
       :class="hasMedia ? 'bg-black' : 'grid place-items-center bg-gray-100 dark:bg-gray-800'"
+      :style="{ aspectRatio: aspect }"
     >
-      <video v-if="peer" ref="video" :aria-label="label" class="absolute inset-0 size-full object-contain" autoplay muted playsinline />
+      <video v-if="peer" ref="video" :aria-label="label" class="absolute inset-0 size-full object-contain" autoplay muted playsinline @loadedmetadata="fit(video!.videoWidth, video!.videoHeight)" @resize="fit(video!.videoWidth, video!.videoHeight)" />
       <canvas v-else-if="canvasActive" ref="canvas" :aria-label="label" class="absolute inset-0 size-full object-contain" />
-      <img v-else-if="url" :src="url" :alt="label" width="1280" height="720" class="absolute inset-0 size-full object-contain" @error="url = undefined" />
+      <img v-else-if="url" :src="url" :alt="label" width="1280" height="720" class="absolute inset-0 size-full object-contain" @load="fit(($event.target as HTMLImageElement).naturalWidth, ($event.target as HTMLImageElement).naturalHeight)" @error="url = undefined" />
       <div v-else class="relative z-10 text-center">
         <PhWarning class="mx-auto size-8 text-yellow-600 dark:text-yellow-400" aria-hidden="true" />
         <p class="mt-3 font-medium text-gray-900 dark:text-white">{{ t('camera.unavailable') }}</p>

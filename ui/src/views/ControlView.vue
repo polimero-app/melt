@@ -950,7 +950,7 @@ onUnmounted(() => {
           </div>
         </div>
       </section>
-      <section class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+      <section class="grid items-start grid-cols-1 gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
         <CameraViewer
           ref="controlCameraViewer"
           :source="controlCameraSource"
@@ -1067,7 +1067,7 @@ onUnmounted(() => {
         </Card>
       </section>
 
-      <section class="mt-5 grid gap-5 lg:grid-cols-2 min-[1180px]:grid-cols-4">
+      <section class="mt-5 grid items-start gap-5 lg:grid-cols-2 min-[1180px]:grid-cols-4">
         <Card v-if="temperatureRows.length">
           <CardHeader :title="t('dashboard.temperature')" :icon="PhThermometerSimple">
             <span v-if="capabilities?.temperatureWrite && selectedStatus?.state !== 'idle'" class="text-xs text-gray-500 dark:text-gray-400">{{ t('control.availableWhenIdle') }}</span>
@@ -1194,7 +1194,7 @@ onUnmounted(() => {
         </Card>
       </section>
 
-      <section class="mt-5 grid gap-5 xl:grid-cols-[1.35fr_1fr]">
+      <section class="mt-5 grid items-start gap-5 xl:grid-cols-[1.35fr_1fr]">
         <!-- Table -->
         <Card v-if="capabilities?.fileList" class="overflow-hidden">
           <CardHeader :title="t('dashboard.files')" :icon="PhFolder">
