@@ -249,7 +249,6 @@ export type BambuCompatibilityDiagnostic = {
 
 export interface MaterialSlot {
   slot: string
-  trayIndex?: number
   active: boolean
   present?: boolean
   type: string

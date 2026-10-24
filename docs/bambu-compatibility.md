@@ -267,9 +267,10 @@ Manufacturer code clears `snow == 0xffff` only when the reported extruder count
 is one, so ambiguous multi-extruder `0xffff` remains unknown rather than applying
 Bambu Bar's single-printer interpretation universally.
 
-The CLI names unknown and unassigned separately. The desktop supplies an
-explicit localized summary plus a selection ring, check mark and screen-reader
-label on the matching slot. It never marks an explicitly absent slot active.
+The CLI names unknown and unassigned separately. The desktop supplies a
+selection ring, check mark and localized screen-reader label on the matching
+slot, without a separate text summary. It never marks an explicitly absent
+slot active.
 The reported path does not by itself prove physical spool or filament presence.
 
 ## AMS drying
