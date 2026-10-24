@@ -20,7 +20,9 @@ describe('sortedBy', () => {
     expect(names({ key: 'name', descending: false })).toEqual(['anchor.stl', 'benchy.3mf', 'cube.gcode'])
     expect(names({ key: 'name', descending: true })).toEqual(['cube.gcode', 'benchy.3mf', 'anchor.stl'])
     expect(names({ key: 'size', descending: true })).toEqual(['cube.gcode', 'anchor.stl', 'benchy.3mf'])
+    expect(names({ key: 'size', descending: false })).toEqual(['benchy.3mf', 'anchor.stl', 'cube.gcode'])
     expect(names({ key: 'modified', descending: true })).toEqual(['benchy.3mf', 'anchor.stl', 'cube.gcode'])
+    expect(names({ key: 'modified', descending: false })).toEqual(['cube.gcode', 'anchor.stl', 'benchy.3mf'])
   })
 
   it('leaves the source array untouched', () => {

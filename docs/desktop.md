@@ -1,6 +1,6 @@
 # Desktop guide
 
-Last-updated: 2026-10-18
+Last-updated: 2026-10-24
 
 Start the packaged `melt` executable without arguments. For a source checkout,
 use `make run` after `make ui-install`; it starts the frontend server before
@@ -17,6 +17,10 @@ save it. Editing can update the connection and profile name. Bambu credentials
 and TLS pins are verified and saved through the keychain. Moonraker discovery
 is not implemented. New address observations are suggestions requiring an
 explicit edit, never automatic endpoint changes.
+
+Printer, camera and smart plug timeout fields accept positive whole-number
+durations with `ms`, `s`, `m` or `h` units, such as `1500ms` or `10s`. Format
+hints and inline validation appear before saving.
 
 Open **Control** for a printer's job, camera, temperatures, fans, lights,
 motion, storage files and AMS inventory. The current job exposes progress,
@@ -44,6 +48,10 @@ flows. The dedicated emergency-stop button also asks for confirmation in the
 desktop and is disabled without usable status. Once confirmed, its backend
 path avoids the ordinary pooled command lock. The CLI's `emergency-stop`
 command has no confirmation prompt; the two surfaces differ here.
+
+TLS pin replacement uses the same confirmation dialog, naming the printer and
+showing the captured fingerprint for review. Neutral confirmations use the
+primary action color; destructive actions retain red.
 
 ## Cameras and feed selection
 
@@ -150,6 +158,10 @@ current folder, and view model cards with file metadata. A directory watcher
 refreshes changes made outside Melt. The library is local storage, separate
 from the printer's storage file table in Control.
 
+Name, Size and Modified table headers show sort icons; clicking the active
+header reverses the order. The library's direction button reverses its selected
+sort key. New keys default to A-Z names, largest sizes or newest modifications.
+
 Model previews support STL, OBJ, 3MF and supported ZIP contents. Clicking a
 model thumbnail opens a larger static preview with metadata and available
 print, slicer and delete actions. A loading indicator covers the larger render;
@@ -189,6 +201,8 @@ menu alongside the other maintenance actions.
 printer-advertised, device-catalogue and public-stable evidence and leads with
 the assessment. Refresh follows the saved source preference; **Also check
 Bambu.com** is an explicit one-shot opt-in. No action installs firmware.
+Only the requested action shows a spinner; both buttons stay disabled until it
+finishes to avoid overlapping refreshes.
 See [firmware evidence](firmware-updates.md) for interpretation and caches.
 
 **Configuration → About → Diagnostics** exports printer compatibility,

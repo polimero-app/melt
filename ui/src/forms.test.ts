@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
+import { isValidTimeout, printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 
 const printerDraft: PrinterDraftFields = {
   name: 'Workshop',
@@ -11,6 +11,26 @@ const printerDraft: PrinterDraftFields = {
   insecure: false,
   accessCode: '',
 }
+
+describe('isValidTimeout', () => {
+  it('matches the backend duration units and positive integer syntax', () => {
+    for (const value of ['1500ms', '10s', '2m', '1h', ' 10s ', '+10s', '001ms']) {
+      expect(isValidTimeout(value), value).toBe(true)
+    }
+    for (const value of ['', ' ', '0s', '000ms', '-1s', '1.5s', '10', '10sec', '10S', '1 s', '1m30s', 'NaNs']) {
+      expect(isValidTimeout(value), value).toBe(false)
+    }
+  })
+
+  it('rejects values that overflow the backend u64 amount or minute/hour conversion', () => {
+    for (const value of ['18446744073709551615ms', '18446744073709551615s', '307445734561825860m', '5124095576030431h']) {
+      expect(isValidTimeout(value), value).toBe(true)
+    }
+    for (const value of ['18446744073709551616ms', '18446744073709551616s', '307445734561825861m', '5124095576030432h']) {
+      expect(isValidTimeout(value), value).toBe(false)
+    }
+  })
+})
 
 describe('printerDraftsMatch', () => {
   it('detects edits to regular and sensitive profile fields', () => {
