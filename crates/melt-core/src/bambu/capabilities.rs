@@ -70,7 +70,7 @@ impl CapabilityObservations {
                     );
                 }
             }
-            if key.starts_with("support_") || key == "ipcam" {
+            if key.starts_with("support_") || known_field(key) {
                 let observation = Observed {
                     value: value.clone(),
                     source: ObservationSource::MqttStatus,
@@ -96,6 +96,10 @@ fn known_field(field: &str) -> bool {
             | "support_timelapse"
             | "support_ams_humidity"
             | "support_bed_leveling"
+            | "support_aux_fan"
+            | "support_chamber_fan"
+            | "nozzle_temp_range"
+            | "bed_temp_range"
             | "ipcam"
     )
 }

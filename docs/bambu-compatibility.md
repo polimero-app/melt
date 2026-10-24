@@ -168,6 +168,23 @@ the control inventory only when `support_aux_fan` or `support_chamber_fan`
 confirms them. Heatbreak/Hotend speed remains visible as telemetry because it is
 a real reported fan even though the legacy protocol does not expose a control.
 
+## Exact-model capability defaults
+
+The verified P2S baseline (`resources/printers/N7.json`, Bambu Studio revision
+`79df7ae309be398ed30c9f397c13c9911c2edc57`, profile `00.00.00.00`) supplies
+otherwise absent nozzle/bed bounds, auxiliary/exhaust fan support, AMS humidity,
+bed-leveling mode, flow calibration, timelapse and send-to-storage capabilities.
+The baseline is exact-model source evidence, not a claim that these are MQTT
+wire fields. Other models remain unseeded rather than inheriting family-wide
+assumptions. Additional firmware-versioned profiles need their own review.
+
+`modelDefaults` in runtime capabilities and exported diagnostics records the
+source, revision, profile version and values separately from timestamped live
+observations. Live values, including false, and retained live observations
+outrank defaults even after identity is re-resolved. Status controls and command
+confirmation use the same effective inventory; raw MQTT snapshots,
+authorization, transport negotiation and delta merging are unchanged.
+
 ## AMS humidity
 
 AMS humidity has two independent quantities. `humidityPercent` comes only from

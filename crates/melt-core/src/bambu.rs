@@ -23,6 +23,7 @@ mod firmware;
 mod hms;
 mod identity;
 mod mapping;
+mod model_defaults;
 mod names;
 mod package;
 mod presence;
@@ -54,6 +55,7 @@ pub use identity::{
     models,
 };
 pub use mapping::{FilamentAssignment, FilamentMapping, MappingStatus, reconcile_filaments};
+pub use model_defaults::ModelDefaults;
 pub use names::{JobNames, NameError, derive_job_names, validate_remote_filename};
 pub use package::{
     FilamentRequirement, PackageError, PackageIssue, PackageIssueSeverity, PlateManifest,
@@ -292,6 +294,8 @@ pub struct RuntimeCapabilities {
     pub model_conflicts: Vec<ModelConflict>,
     pub firmware: FirmwareInventory,
     pub observations: CapabilityObservations,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_defaults: Option<ModelDefaults>,
     pub model_family: ModelFamily,
     pub authorization: AuthorizationMode,
     pub authorization_resolution: AuthorizationResolution,
@@ -320,6 +324,21 @@ impl RuntimeCapabilities {
     /// Routing keys off the canonical model rather than the raw string, which
     /// may be a `model_id` such as `C12` that says nothing on its own.
     pub fn for_identity(identity: ModelIdentity) -> Self {
+        let model_defaults = ModelDefaults::for_identity(&identity);
+        let default_bool = |field| model_defaults.as_ref()?.values.get(field)?.as_bool();
+        let default_range = |field| {
+            serde_json::from_value(model_defaults.as_ref()?.values.get(field)?.clone()).ok()
+        };
+        let bed_leveling = match model_defaults
+            .as_ref()
+            .and_then(|defaults| defaults.values.get("support_bed_leveling"))
+            .and_then(serde_json::Value::as_u64)
+        {
+            Some(0) => BedLevelingSupport::Unsupported,
+            Some(1) => BedLevelingSupport::Toggle,
+            Some(2) => BedLevelingSupport::AutomaticOrToggle,
+            _ => BedLevelingSupport::Unknown,
+        };
         let model_family = identity.family;
         let (camera, storage_transport, storage_volumes, extruder_count) = match model_family {
             ModelFamily::A1 | ModelFamily::A2 => (
@@ -378,15 +397,37 @@ impl RuntimeCapabilities {
             extruder_count,
             ams_supported: (model_family != ModelFamily::Unknown).then_some(true),
             mqtt_alive_supported: None,
-            send_to_storage_supported: None,
-            flow_calibration_supported: None,
-            timelapse_supported: None,
-            ams_humidity_supported: None,
-            bed_leveling: BedLevelingSupport::Unknown,
-            nozzle_temperature_range: None,
-            bed_temperature_range: None,
+            send_to_storage_supported: default_bool("support_send_to_sd"),
+            flow_calibration_supported: default_bool("support_flow_calibration"),
+            timelapse_supported: default_bool("support_timelapse"),
+            ams_humidity_supported: default_bool("support_ams_humidity"),
+            bed_leveling,
+            nozzle_temperature_range: default_range("nozzle_temp_range"),
+            bed_temperature_range: default_range("bed_temp_range"),
             firmware_version: None,
+            model_defaults,
         }
+    }
+
+    pub(crate) fn effective_print(
+        &self,
+        print: &serde_json::Map<String, serde_json::Value>,
+    ) -> serde_json::Map<String, serde_json::Value> {
+        let mut effective: serde_json::Map<String, serde_json::Value> = self
+            .model_defaults
+            .as_ref()
+            .map(|defaults| defaults.values.clone().into_iter().collect())
+            .unwrap_or_default();
+        for (field, observed) in self
+            .observations
+            .values
+            .iter()
+            .chain(&self.observations.unknown_support_fields)
+        {
+            effective.insert(field.clone(), observed.value.clone());
+        }
+        effective.extend(print.clone());
+        effective
     }
 }
 
