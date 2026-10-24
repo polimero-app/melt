@@ -4091,7 +4091,7 @@ fn ams_data(print: &Map<String, Value>) -> Option<AmsData> {
 
 fn ams_unit(unit: &Value, remote_dry: bool, presence_bits: Option<u64>) -> AmsUnit {
     let humidity = integer(unit.get("humidity")).and_then(ams_humidity);
-    AmsUnit {
+    let mut parsed = AmsUnit {
         id: integer(unit.get("id"))
             .and_then(|value| value.try_into().ok())
             .unwrap_or_default(),
@@ -4124,10 +4124,12 @@ fn ams_unit(unit: &Value, remote_dry: bool, presence_bits: Option<u64>) -> AmsUn
                             .filter(|value| !value.is_empty()),
                         color: string(tray.get("tray_color")).filter(|value| !value.is_empty()),
                         remaining_percent: integer(tray.get("remain"))
+                            .filter(|value| (0..=100).contains(value))
                             .and_then(|value| value.try_into().ok()),
                         remaining_grams: integer(tray.get("remain_g"))
                             .filter(|value| *value >= 0)
                             .and_then(|value| value.try_into().ok()),
+                        remaining_grams_estimate: None,
                         nominal_weight_grams: integer(tray.get("tray_weight"))
                             .or_else(|| integer(tray.get("weight")))
                             .filter(|value| *value > 0)
@@ -4145,7 +4147,21 @@ fn ams_unit(unit: &Value, remote_dry: bool, presence_bits: Option<u64>) -> AmsUn
                     .collect()
             })
             .unwrap_or_default(),
+    };
+    for tray in &mut parsed.trays {
+        if tray.present != Some(false)
+            && tray.remaining_grams.is_none()
+            && tray
+                .tray_index
+                .is_some_and(|index| (0..254).contains(&index))
+            && let (Some(weight), Some(percent)) =
+                (tray.nominal_weight_grams, tray.remaining_percent)
+        {
+            tray.remaining_grams_estimate =
+                i32::try_from((i64::from(weight) * i64::from(percent) + 50) / 100).ok();
+        }
     }
+    parsed
 }
 
 /// External spool holders report outside the AMS array: `vt_tray` on the A1
@@ -4195,6 +4211,7 @@ fn virtual_tray_units(print: &Map<String, Value>) -> Vec<AmsUnit> {
                 remaining_grams: integer(tray.get("remain_g"))
                     .filter(|value| *value >= 0)
                     .and_then(|value| value.try_into().ok()),
+                remaining_grams_estimate: None,
                 nominal_weight_grams: integer(tray.get("tray_weight"))
                     .or_else(|| integer(tray.get("weight")))
                     .filter(|value| *value > 0)
@@ -5477,6 +5494,54 @@ mod tests {
             assert_eq!(unit.humidity_percent, expected, "{raw}");
             assert_eq!(unit.humidity_index, Some(4));
         }
+    }
+
+    #[test]
+    fn ams_filament_estimates_require_valid_internal_spool_quantities() {
+        for (percent, weight, reported, expected) in [
+            (json!(41), json!("1000"), Value::Null, Some(410)),
+            (json!(50), json!(333), Value::Null, Some(167)),
+            (json!(0), json!(1000), Value::Null, Some(0)),
+            (json!(100), json!(i32::MAX), Value::Null, Some(i32::MAX)),
+            (json!(50), json!(1000), json!(0), None),
+            (json!(50), json!(1000), json!(125), None),
+            (json!(50), json!(1000), json!(-1), Some(500)),
+            (json!(-1), json!(1000), Value::Null, None),
+            (json!(101), json!(1000), Value::Null, None),
+            (json!(50), json!(0), Value::Null, None),
+            (Value::Null, json!(1000), Value::Null, None),
+        ] {
+            let unit = ams_unit(
+                &json!({"id": "0", "tray": [{
+                    "id": "0", "remain": percent, "tray_weight": weight, "remain_g": reported
+                }]}),
+                false,
+                None,
+            );
+            assert_eq!(
+                unit.trays[0].remaining_grams_estimate, expected,
+                "{percent}/{weight}/{reported}"
+            );
+            if reported == json!(0) {
+                assert_eq!(unit.trays[0].remaining_grams, Some(0));
+            }
+        }
+        let unit = json!({"id": "0", "tray": [{"id": "0", "remain": 50, "tray_weight": 1000}]});
+        assert_eq!(
+            ams_unit(&unit, false, Some(0)).trays[0].remaining_grams_estimate,
+            None
+        );
+        let print = json!({"vt_tray": {"id": "254", "tray_type": "PLA", "remain": 50, "tray_weight": 1000}});
+        assert_eq!(
+            virtual_tray_units(print.as_object().unwrap())[0].trays[0].remaining_grams_estimate,
+            None
+        );
+        let external =
+            json!({"id": "254", "tray": [{"id": "0", "remain": 50, "tray_weight": 1000}]});
+        assert_eq!(
+            ams_unit(&external, false, None).trays[0].remaining_grams_estimate,
+            None
+        );
     }
 
     #[test]

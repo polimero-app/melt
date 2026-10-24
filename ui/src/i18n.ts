@@ -401,6 +401,7 @@ export type MessageKey =
   | "materials.empty"
   | "materials.unknownFilament"
   | "materials.presenceUnknown"
+  | "materials.approximate"
   | "materials.temperature"
   | "materials.colorLabel"
   | "materials.color.unknown"
@@ -1106,6 +1107,7 @@ const messages: Record<Locale, Messages> = {
     "materials.empty": "Empty",
     "materials.unknownFilament": "Unknown material",
     "materials.presenceUnknown": "Physical spool presence is unknown",
+    "materials.approximate": "Approximately",
     "materials.temperature": "Temperature",
     "materials.colorLabel": "Approximate color: {name} ({hex})",
     "materials.color.unknown": "Unknown color",
@@ -1814,6 +1816,7 @@ const messages: Record<Locale, Messages> = {
     "materials.empty": "Vazio",
     "materials.unknownFilament": "Material desconhecido",
     "materials.presenceUnknown": "Presença física do carretel desconhecida",
+    "materials.approximate": "Aproximadamente",
     "materials.temperature": "Temperatura",
     "materials.colorLabel": "Cor aproximada: {name} ({hex})",
     "materials.color.unknown": "Cor desconhecida",
