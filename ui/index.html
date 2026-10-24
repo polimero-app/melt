@@ -6,8 +6,11 @@
   <meta name="theme-color" content="#f9fafb">
   <title>Melt</title>
   <script>
-    // Match the system theme before first paint; App.vue owns it from then on.
-    document.documentElement.classList.toggle('dark', matchMedia('(prefers-color-scheme: dark)').matches)
+    // Match the saved or system theme before first paint; App.vue owns it from then on.
+    const theme = localStorage.getItem('theme')
+    const dark = theme === 'dark' || (theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+    document.documentElement.classList.toggle('dark', dark)
+    document.querySelector('meta[name="theme-color"]').setAttribute('content', dark ? '#111827' : '#f9fafb')
   </script>
 </head>
 <body class="h-full text-gray-700 antialiased dark:text-gray-300">
