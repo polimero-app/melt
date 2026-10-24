@@ -42,6 +42,8 @@ pub struct BambuCompatibilityReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub firmware_updates: Option<FirmwareUpdateReport>,
     pub capability_observations: Vec<CapabilityObservationReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_defaults: Option<bambu::ModelDefaults>,
     pub upgrade_observations: Vec<CapabilityObservationReport>,
     pub authorization: bambu::AuthorizationResolution,
     pub camera: CameraReport,
@@ -348,6 +350,7 @@ pub fn bambu_compatibility_report_with_updates(
             .collect(),
         firmware_updates: firmware_updates.cloned(),
         capability_observations: observations,
+        model_defaults: capabilities.model_defaults.clone(),
         upgrade_observations,
         authorization: capabilities.authorization_resolution.clone(),
         camera: CameraReport {

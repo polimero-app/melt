@@ -223,7 +223,7 @@ impl Client {
         let payload = pushall_payload(next_sequence());
         let report = self.exchange(access_code, fingerprint, payload, is_full_report)?;
         self.observe_runtime_status(&report);
-        let mut status = parse_status(&report)?;
+        let mut status = self.parse_status(&report)?;
         // `observe_runtime_status` has just re-run detection, so the cached
         // identity is the freshest one a status exchange can produce.
         if let Some(model) = self.detected_model_name() {
@@ -415,6 +415,15 @@ impl Client {
             .unwrap_or_else(|| self.profile.default_capabilities())
     }
 
+    fn parse_status(&self, report: &[u8]) -> Result<Status, Error> {
+        let value = serde_json::from_slice(report).map_err(|_| Error::InvalidResponse)?;
+        self.parse_status_value(&value)
+    }
+
+    fn parse_status_value(&self, report: &Value) -> Result<Status, Error> {
+        parse_status_value_with_capabilities(report, &self.effective_capabilities())
+    }
+
     /// Resolves authorization before mutating. A cold client has no cached
     /// capabilities, so without this refresh the documented `signingRequired`
     /// block would silently fall through as `Unknown` on every one-shot client
@@ -575,7 +584,7 @@ impl Client {
         let result = result.and_then(|report| {
             let bytes = report.len() as u64;
             self.observe_runtime_status(&report);
-            parse_status(&report).map(|status| (status, bytes))
+            self.parse_status(&report).map(|status| (status, bytes))
         });
         match &result {
             Ok((_, bytes)) => self.trace(
@@ -680,7 +689,7 @@ impl Client {
             report_state_is(report, &[PrinterState::Printing])
         })?;
         Ok(JobResult {
-            state: parse_status(&report)?.state,
+            state: self.parse_status(&report)?.state,
         })
     }
 
@@ -871,7 +880,7 @@ impl Client {
             fingerprint,
             gcode_payload(&lines.join("\n")),
             |report| {
-                let Ok(status) = parse_status_value(report) else {
+                let Ok(status) = self.parse_status_value(report) else {
                     return false;
                 };
                 target_matches(
@@ -889,7 +898,7 @@ impl Client {
                 )
             },
         )?;
-        let status = parse_status(&report)?;
+        let status = self.parse_status(&report)?;
         Ok(TemperatureResult {
             targets: TemperatureTargets {
                 nozzle_celsius: nozzle.filter(|_| {
@@ -942,13 +951,13 @@ impl Client {
             gcode_payload(&command)
         };
         let report = self.exchange(access_code, fingerprint, payload, |report| {
-            parse_status_value(report)
+            self.parse_status_value(report)
                 .ok()
                 .and_then(|status| status.controls.temperatures.get(item).cloned())
                 .and_then(|control| control.target_celsius)
                 .is_some_and(|reported| (reported - target).abs() < 0.5)
         })?;
-        let status = parse_status(&report)?;
+        let status = self.parse_status(&report)?;
         let kind = status
             .controls
             .temperatures
@@ -1039,9 +1048,9 @@ impl Client {
             .is_some_and(|extension| extension.airduct_fans);
         let payload = fan_command_payload(airduct, fan, speed_percent)?;
         let report = self.exchange(access_code, fingerprint, payload, |report| {
-            fan_speed_matches(report, fan, speed_percent)
+            fan_speed_matches(report, fan, speed_percent, &self.effective_capabilities())
         })?;
-        parse_status(&report)?;
+        self.parse_status(&report)?;
         Ok(FanResult {
             fan: fan.to_owned(),
             speed_percent,
@@ -1450,7 +1459,7 @@ impl Client {
             report_state_is(report, &[state])
         })?;
         Ok(JobResult {
-            state: parse_status(&report)?.state,
+            state: self.parse_status(&report)?.state,
         })
     }
 
@@ -2822,10 +2831,15 @@ fn refine_runtime_capabilities(
         capabilities.authorization_resolution = resolve_authorization(status);
         capabilities.authorization = capabilities.authorization_resolution.effective;
     }
-    let print = status
-        .and_then(|status| status.get("print"))
-        .and_then(Value::as_object);
-    if let Some(print) = print {
+    let empty = Map::new();
+    let print = capabilities.effective_print(
+        status
+            .and_then(|status| status.get("print"))
+            .and_then(Value::as_object)
+            .unwrap_or(&empty),
+    );
+    if !print.is_empty() {
+        let print = &print;
         capabilities.extruder_count =
             observed_extruder_count(print).or(capabilities.extruder_count);
         if print.contains_key("ams") {
@@ -2931,8 +2945,13 @@ fn report_state_is(report: &Value, states: &[PrinterState]) -> bool {
 /// command was dispatched from. `Status::fans` only ever carries the four
 /// legacy slot names, so an airduct key looked up there is never found and the
 /// exchange would spin until it timed out on a command the printer accepted.
-fn fan_speed_matches(report: &Value, fan: &str, speed_percent: u8) -> bool {
-    parse_status_value(report)
+fn fan_speed_matches(
+    report: &Value,
+    fan: &str,
+    speed_percent: u8,
+    capabilities: &RuntimeCapabilities,
+) -> bool {
+    parse_status_value_with_capabilities(report, capabilities)
         .ok()
         .and_then(|status| {
             status
@@ -2979,12 +2998,20 @@ fn lights_report(report: &Value) -> Option<&Vec<Value>> {
         .and_then(Value::as_array)
 }
 
-pub(crate) fn parse_status(report: &[u8]) -> Result<Status, Error> {
+#[cfg(test)]
+fn parse_status(report: &[u8]) -> Result<Status, Error> {
     let value = serde_json::from_slice(report).map_err(|_| Error::InvalidResponse)?;
     parse_status_value(&value)
 }
 
 fn parse_status_value(report: &Value) -> Result<Status, Error> {
+    parse_status_value_with_capabilities(report, &RuntimeCapabilities::default())
+}
+
+fn parse_status_value_with_capabilities(
+    report: &Value,
+    capabilities: &RuntimeCapabilities,
+) -> Result<Status, Error> {
     let print = report
         .get("print")
         .and_then(Value::as_object)
@@ -3050,7 +3077,9 @@ fn parse_status_value(report: &Value) -> Result<Status, Error> {
     let errors = status_errors(print, state, &hms);
     let fans = status_fans(print);
     let lights = lights(report);
-    let (controls, airduct_fans) = control_inventory(print, &temperatures, &fans, &lights);
+    let effective_print = capabilities.effective_print(print);
+    let (controls, airduct_fans) =
+        control_inventory(&effective_print, &temperatures, &fans, &lights);
     let extension = BambuExtension {
         // Filled in by the caller, which holds the detected identity; the
         // status report alone never names the model.
@@ -5732,18 +5761,29 @@ mod tests {
             r#"{"print":{"gcode_state":"IDLE","device":{"airduct":{"modeCur":0,"modeList":[{"modeId":0,"ctrl":[16,32],"off":[48]}],"parts":[{"id":16,"state":750,"range":65536000},{"id":48,"state":0,"range":65536000}]}}}}"#,
         )
         .unwrap();
-        assert!(fan_speed_matches(&airduct, "parts", 75));
-        assert!(!fan_speed_matches(&airduct, "parts", 40));
-        assert!(!fan_speed_matches(&airduct, "partCooling", 75));
+        let capabilities = RuntimeCapabilities::default();
+        assert!(fan_speed_matches(&airduct, "parts", 75, &capabilities));
+        assert!(!fan_speed_matches(&airduct, "parts", 40, &capabilities));
+        assert!(!fan_speed_matches(
+            &airduct,
+            "partCooling",
+            75,
+            &capabilities
+        ));
 
         // Legacy firmware still reports a 0-15 scale, so the tolerance holds.
         let legacy: Value = serde_json::from_str(
             r#"{"print":{"gcode_state":"IDLE","support_aux_fan":true,"cooling_fan_speed":"9","big_fan1_speed":"3"}}"#,
         )
         .unwrap();
-        assert!(fan_speed_matches(&legacy, "partCooling", 60));
-        assert!(fan_speed_matches(&legacy, "auxiliary", 20));
-        assert!(!fan_speed_matches(&legacy, "partCooling", 10));
+        assert!(fan_speed_matches(&legacy, "partCooling", 60, &capabilities));
+        assert!(fan_speed_matches(&legacy, "auxiliary", 20, &capabilities));
+        assert!(!fan_speed_matches(
+            &legacy,
+            "partCooling",
+            10,
+            &capabilities
+        ));
     }
 
     #[test]
@@ -6570,6 +6610,64 @@ mod tests {
         json!({"command": "get_version", "result": "success", "module": modules})
     }
 
+    #[test]
+    fn model_defaults_fill_controls_without_becoming_live_observations() {
+        let client = Client::new(Profile::new("printer.local", "22E00000000000", true).unwrap());
+        let report = br#"{"print":{"gcode_state":"IDLE","nozzle_temper":200,"bed_temper":60,"big_fan1_speed":3,"big_fan2_speed":4}}"#;
+        client.observe_runtime_status(report);
+        let status = client.parse_status(report).unwrap();
+        assert_eq!(
+            status.controls.temperatures["nozzle"].maximum_celsius,
+            Some(300.0)
+        );
+        assert_eq!(
+            status.controls.temperatures["bed"].maximum_celsius,
+            Some(110.0)
+        );
+        assert!(status.controls.fans.contains_key("auxiliary"));
+        assert!(status.controls.fans.contains_key("chamber"));
+        let capabilities = client.effective_capabilities();
+        assert!(capabilities.model_defaults.is_some());
+        assert!(
+            !capabilities
+                .observations
+                .values
+                .contains_key("support_aux_fan")
+        );
+        let raw: Value = serde_json::from_slice(report).unwrap();
+        assert!(fan_speed_matches(&raw, "auxiliary", 20, &capabilities));
+        assert!(raw["print"].get("support_aux_fan").is_none());
+
+        client.observe_runtime_status(br#"{"print":{"gcode_state":"IDLE","support_aux_fan":false,"support_chamber_fan":false,"support_ams_humidity":false,"nozzle_temp_range":[0,280]}}"#);
+        let status = client.parse_status(report).unwrap();
+        assert!(!status.controls.fans.contains_key("auxiliary"));
+        assert!(!status.controls.fans.contains_key("chamber"));
+        assert_eq!(
+            status.controls.temperatures["nozzle"].maximum_celsius,
+            Some(280.0)
+        );
+        assert_eq!(
+            client.effective_capabilities().ams_humidity_supported,
+            Some(false)
+        );
+        assert!(!fan_speed_matches(
+            &raw,
+            "auxiliary",
+            20,
+            &client.effective_capabilities()
+        ));
+        assert!(
+            RuntimeCapabilities::for_model("P2 future")
+                .model_defaults
+                .is_none()
+        );
+        assert!(
+            RuntimeCapabilities::for_model("P1S")
+                .model_defaults
+                .is_none()
+        );
+    }
+
     /// The reported bug: a profile added without `--model` canonicalized to
     /// `unknown` forever, because the defaults were derived once from the
     /// empty configured string and the live refine never revisited them.
@@ -6693,7 +6791,7 @@ mod tests {
             "",
             "",
             Some(
-                &json!({"print": {"command": "push_status", "msg": 0, "support_timelapse": true}}),
+                &json!({"print": {"command": "push_status", "msg": 0, "support_timelapse": false}}),
             ),
             None,
         );
@@ -6715,6 +6813,7 @@ mod tests {
             ]))),
         );
         assert_eq!(capabilities.identity.canonical, CanonicalModel::P2S);
+        assert_eq!(capabilities.timelapse_supported, Some(false));
         assert!(
             capabilities
                 .observations
