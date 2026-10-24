@@ -440,6 +440,25 @@ impl ConnectionPool {
         })
     }
 
+    pub fn device_action(
+        &self,
+        name: &str,
+        profile: &drivers::Profile,
+        access_code: Option<&str>,
+        tls_fingerprint: Option<&str>,
+        action: bambu::DeviceAction,
+    ) -> Result<moonraker::MotionResult, drivers::DriverError> {
+        let drivers::Profile::Bambu(profile) = profile else {
+            return Err(drivers::DriverError::UnsupportedOperation(
+                drivers::Driver::Moonraker,
+                drivers::Operation::MotionJog,
+            ));
+        };
+        self.with_bambu(name, profile, access_code, tls_fingerprint, |client| {
+            client.device_action(access_code, tls_fingerprint, action)
+        })
+    }
+
     pub fn speed_set(
         &self,
         name: &str,

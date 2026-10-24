@@ -47,7 +47,9 @@ import ModelThumbnail from '../components/ModelThumbnail.vue'
 import CameraViewer from '../components/CameraViewer.vue'
 import PlugControl from '../components/PlugControl.vue'
 import {
+  PhArrowDown,
   PhArrowsClockwise,
+  PhArrowUp,
   PhArrowsDownUp,
   PhArrowsOutCardinal,
   PhArrowSquareOut,
@@ -88,6 +90,7 @@ import type {
   Capabilities,
   TemperatureControl,
   FanControl,
+  Hotend,
   LightControl,
   StatusFault,
   MonitorEntry,
@@ -281,6 +284,58 @@ const fanMessageKeys: Record<string, MessageKey> = {
 const fanLabel = (key: string) => {
   const messageKey = fanMessageKeys[key]
   return messageKey ? t(messageKey) : key
+}
+
+const bambu = computed(() => selectedStatus.value?.extensions?.['bambu-lan'])
+const extruderCount = computed(() => bambu.value?.extruderCount ?? 1)
+const activeExtruder = computed(() => bambu.value?.activeExtruder ?? 0)
+const airduct = computed(() => bambu.value?.airduct)
+const hotendRack = computed(() => bambu.value?.hotendRack)
+const deviceBusy = ref(false)
+
+// Mirrors the printer-side guard: Studio refuses to move filament below 170 °C.
+const extruderHot = computed(() => {
+  const key = extruderCount.value === 1 ? 'nozzle' : activeExtruder.value === 0 ? 'nozzleRight' : 'nozzleLeft'
+  const celsius = selectedStatus.value?.controls?.temperatures?.[key]?.currentCelsius
+    ?? (extruderCount.value === 1 ? selectedStatus.value?.temperatures?.nozzle?.currentCelsius : undefined)
+  return (celsius ?? 0) >= 170
+})
+const extruderIdle = computed(() => ['idle', 'paused'].includes(selectedStatus.value?.state ?? ''))
+
+const airductModeKeys: Record<number, MessageKey> = {
+  0: 'control.airductCooling',
+  1: 'control.airductHeating',
+  3: 'control.airductFullCooling',
+}
+
+const rackRows = computed(() => {
+  const hotends = hotendRack.value?.hotends ?? []
+  const extruders = hotends.filter((hotend) => hotend.extruder !== undefined)
+    .sort((left, right) => (right.extruder ?? 0) - (left.extruder ?? 0))
+  const slots = Array.from({ length: 6 }, (_, slot) => ({ slot, hotend: hotends.find((hotend) => hotend.slot === slot) }))
+  return { extruders, slots }
+})
+
+const flowKeys: Record<string, MessageKey> = {
+  standard: 'control.flowStandard',
+  highFlow: 'control.flowHighFlow',
+  uFlow: 'control.flowUFlow',
+  eFlow: 'control.flowEFlow',
+}
+const materialKeys: Record<string, MessageKey> = {
+  stainlessSteel: 'control.materialStainlessSteel',
+  hardenedSteel: 'control.materialHardenedSteel',
+  tungstenCarbide: 'control.materialTungstenCarbide',
+}
+
+function hotendSummary(hotend: Hotend) {
+  if (hotend.state === 'error') return t('control.hotendError')
+  const parts = [
+    hotend.diameterMm === undefined ? undefined : `${hotend.diameterMm} mm`,
+    hotend.flow && t(flowKeys[hotend.flow]),
+    hotend.material && t(materialKeys[hotend.material]),
+  ].filter(Boolean)
+  return parts.length ? parts.join(' · ') : t('control.hotendUnknown')
 }
 
 const temperatureLabel = (key: string, control: TemperatureControl) => t(
@@ -552,6 +607,46 @@ async function sendFan(fan: string, event: Event) {
     showToast(message(reason), 'error')
     void refreshMonitoring()
   }
+}
+
+async function deviceAction(action: Record<string, unknown>, success: string) {
+  if (!activePrinter || deviceBusy.value) return
+  deviceBusy.value = true
+  try {
+    await invoke('printer_device_action', { request: { name: activePrinter.name, ...action } })
+    showToast(success)
+    void refreshMonitoring()
+  } catch (reason) {
+    showToast(message(reason), 'error')
+    void refreshMonitoring()
+  } finally {
+    deviceBusy.value = false
+  }
+}
+
+const extruderName = (extruder: number) => t(extruder === 0 ? 'control.extruderRight' : 'control.extruderLeft')
+
+function selectExtruder(extruder: number) {
+  void deviceAction({ action: 'selectExtruder', extruder }, t('control.extruderSelected', { extruder: extruderName(extruder) }))
+}
+
+function extrude(millimeters: number) {
+  void deviceAction(
+    { action: 'extrude', extruder: activeExtruder.value, millimeters },
+    t('control.extruded', { distance: `${millimeters > 0 ? '+' : ''}${millimeters} mm` }),
+  )
+}
+
+function setAirduct(mode: number, submode: number) {
+  void deviceAction({ action: 'airduct', mode, submode }, t('control.airductSet'))
+}
+
+function moveRack(action: 'rackHome' | 'rackRowA' | 'rackRowB') {
+  askConfirmation(
+    { title: 'control.rackMoveTitle', description: 'control.rackMoveDescription', confirm: 'control.rackMoveConfirm' },
+    {},
+    () => deviceAction({ action }, t('control.rackSent')),
+  )
 }
 
 async function homeAxes() {
@@ -1132,7 +1227,30 @@ onUnmounted(() => {
                 <span class="text-sm/6 text-gray-500 dark:text-gray-400">{{ fanDrafts[key] ?? value.speedPercent ?? '—' }}{{ (fanDrafts[key] ?? value.speedPercent) === undefined ? '' : '%' }}</span>
               </span>
               <input v-if="value.controllable && value.speedPercent !== undefined" :key="`${key}-${value.speedPercent}`" :value="value.speedPercent" :name="`fan-${key}`" class="h-1 w-full cursor-pointer accent-cyan-600 dark:accent-cyan-400" type="range" :min="value.minimumPercent ?? 0" :max="value.maximumPercent ?? 100" :aria-label="t('control.fanPower', { fan: fanLabel(key) })" @input="previewFan(key, $event)" @change="sendFan(key, $event)" />
-              <p v-else class="text-xs text-gray-500 dark:text-gray-400">{{ t('control.telemetryOnly') }}</p>
+              <p v-else class="text-xs text-gray-500 dark:text-gray-400"><template v-if="value.mode !== 'manual'">{{ t(value.mode === 'auto' ? 'control.fanAuto' : 'control.fanOff') }} · </template>{{ t('control.telemetryOnly') }}</p>
+            </div>
+            <div v-if="airduct" class="border-t border-gray-200 pt-4 dark:border-white/10">
+              <p id="airduct-mode-label" class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('control.airductMode') }}</p>
+              <div class="mt-2 flex flex-wrap gap-2" role="group" aria-labelledby="airduct-mode-label">
+                <Button
+                  v-for="mode in airduct.modes"
+                  :key="mode"
+                  :variant="airduct.mode === mode ? 'primary' : 'secondary'"
+                  :aria-pressed="airduct.mode === mode"
+                  :disabled="deviceBusy || selectedStatus?.state === 'printing'"
+                  :title="selectedStatus?.state === 'printing' ? t('control.airductPrinting') : undefined"
+                  @click="airduct.mode !== mode && setAirduct(mode, -1)"
+                >{{ airductModeKeys[mode] ? t(airductModeKeys[mode]) : mode }}</Button>
+              </div>
+              <div v-if="airduct.filter !== undefined && airduct.mode === 0" class="mt-3 flex items-center justify-between gap-3">
+                <label for="airduct-filter" class="grow cursor-pointer text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('control.airductFilter') }}</label>
+                <Switch
+                  id="airduct-filter"
+                  :model-value="airduct.filter"
+                  :label="t('control.airductFilter')"
+                  @update:model-value="setAirduct(airduct.mode, $event ? 1 : 0)"
+                />
+              </div>
             </div>
           </div>
         </Card>
@@ -1196,6 +1314,69 @@ onUnmounted(() => {
                 </div>
               </div>
             </div>
+            <div v-if="bambu" class="mt-4 border-t border-gray-200 pt-4 dark:border-white/10">
+              <p id="extruder-label" class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('control.extruder') }}</p>
+              <div v-if="extruderCount > 1" class="mt-2 grid grid-cols-2 gap-2" role="group" aria-labelledby="extruder-label">
+                <Button
+                  v-for="extruder in [1, 0]"
+                  :key="extruder"
+                  :variant="activeExtruder === extruder ? 'primary' : 'secondary'"
+                  :aria-pressed="activeExtruder === extruder"
+                  :disabled="deviceBusy || !extruderIdle"
+                  @click="activeExtruder !== extruder && selectExtruder(extruder)"
+                >{{ extruderName(extruder) }}</Button>
+              </div>
+              <div class="mt-2 grid grid-cols-2 gap-2">
+                <Button :disabled="deviceBusy || !extruderIdle || !extruderHot" @click="extrude(-10)"><PhArrowUp class="size-4" aria-hidden="true" />{{ t('control.retract') }}</Button>
+                <Button :disabled="deviceBusy || !extruderIdle || !extruderHot" @click="extrude(10)"><PhArrowDown class="size-4" aria-hidden="true" />{{ t('control.extrude') }}</Button>
+              </div>
+              <p v-if="!extruderHot" class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ t('control.extrudeNeedsHeat') }}</p>
+            </div>
+          </div>
+        </Card>
+
+        <Card v-if="hotendRack">
+          <CardHeader :title="t('control.hotends')" :icon="PhStack">
+            <IconButton
+              :title="t(hotendRack.reading ? 'control.rackReading' : 'control.rackReadAll')"
+              :aria-label="t(hotendRack.reading ? 'control.rackReading' : 'control.rackReadAll')"
+              :disabled="deviceBusy || hotendRack.busy || hotendRack.reading || selectedStatus?.state !== 'idle'"
+              @click="deviceAction({ action: 'rackRead' }, t('control.rackReading'))"
+            ><PhArrowsClockwise class="size-4" :class="hotendRack.reading && 'animate-spin'" aria-hidden="true" /></IconButton>
+          </CardHeader>
+          <div class="space-y-4 px-4 py-5 sm:p-6">
+            <div class="grid grid-cols-3 gap-2" role="group" :aria-label="t('control.hotends')">
+              <Button
+                v-for="[action, position, label] in ([['rackRowA', 'rowA', 'control.rackRowA'], ['rackHome', 'home', 'control.rackHome'], ['rackRowB', 'rowB', 'control.rackRowB']] as const)"
+                :key="action"
+                :variant="hotendRack.position === position ? 'primary' : 'secondary'"
+                :aria-pressed="hotendRack.position === position"
+                :disabled="deviceBusy || hotendRack.busy || selectedStatus?.state !== 'idle'"
+                @click="moveRack(action)"
+              >{{ t(label) }}</Button>
+            </div>
+            <p v-if="hotendRack.busy" class="text-xs text-gray-500 dark:text-gray-400">{{ t('control.rackBusy') }}</p>
+            <ul class="divide-y divide-gray-200 dark:divide-white/10">
+              <li v-for="hotend in rackRows.extruders" :key="`extruder-${hotend.extruder}`" class="flex items-center gap-3 py-2">
+                <span class="w-6 shrink-0 text-center font-mono text-sm font-bold text-gray-900 dark:text-white">{{ t(hotend.extruder === 0 ? 'control.hotendRightShort' : 'control.hotendLeftShort') }}</span>
+                <span class="size-3 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/20" :style="{ backgroundColor: filamentColor(hotend.color) }" aria-hidden="true" />
+                <span class="min-w-0 grow">
+                  <span class="block text-sm text-gray-900 dark:text-white">{{ hotendSummary(hotend) }}</span>
+                  <span v-if="hotend.printSeconds !== undefined" class="block text-xs text-gray-500 dark:text-gray-400">{{ t('control.hotendUsed', { duration: formatDuration(hotend.printSeconds) }) }}</span>
+                </span>
+              </li>
+              <li v-for="{ slot, hotend } in rackRows.slots" :key="`slot-${slot}`" class="flex items-center gap-3 py-2">
+                <span class="w-6 shrink-0 text-center font-mono text-sm font-bold text-gray-900 dark:text-white">{{ slot + 1 }}</span>
+                <template v-if="hotend">
+                  <span class="size-3 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/20" :style="{ backgroundColor: filamentColor(hotend.color) }" aria-hidden="true" />
+                  <span class="min-w-0 grow">
+                    <span class="block text-sm" :class="hotend.state === 'error' ? 'text-red-700 dark:text-red-400' : 'text-gray-900 dark:text-white'">{{ hotendSummary(hotend) }}</span>
+                    <span v-if="hotend.printSeconds !== undefined" class="block text-xs text-gray-500 dark:text-gray-400">{{ t('control.hotendUsed', { duration: formatDuration(hotend.printSeconds) }) }}</span>
+                  </span>
+                </template>
+                <span v-else class="grow text-sm text-gray-500 dark:text-gray-400">{{ t('control.hotendEmpty') }}</span>
+              </li>
+            </ul>
           </div>
         </Card>
       </section>

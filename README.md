@@ -38,7 +38,9 @@ Affero General Public License v3.0 only (`AGPL-3.0-only`). See
   preflight and confirmation.
 - **Printer control** — pause, resume, or cancel jobs; set safe temperature,
   fan, light, and speed targets; start or stop AMS filament drying on printers
-  whose firmware allows remote drying; home or jog axes; and issue an immediate
+  whose firmware allows remote drying; home or jog axes; select the Bambu
+  extruder, extrude or retract filament, switch air-duct mode and filter, move
+  or read the H2C hotend rack; and issue an immediate
   emergency stop where the driver supports it.
 - **Diagnostics** — export redacted compatibility information covering model
   identity, module firmware, capability provenance, authorization, negotiated

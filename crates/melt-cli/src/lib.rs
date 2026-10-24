@@ -5777,6 +5777,7 @@ mod tests {
                     reported_ip: None,
                     hms: Vec::new(),
                     airduct_fans: false,
+                    ..Default::default()
                 }),
             },
         }

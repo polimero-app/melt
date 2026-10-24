@@ -1,9 +1,9 @@
 {
-  "capturedAt": "2026-10-24T04:01:55+00:00",
+  "capturedAt": "2026-10-24T04:36:02+00:00",
   "scenarioTime": "2026-10-12T12:00:00Z",
-  "sourceCommit": "fd8ebb243015432a2b160031d603fe33a12a4c9e",
-  "frontendSourceSha256": "b3994cb0aa5c8d78db877bae9dc682de7da0d7dba06bd6103909ccdc0ecb46bb",
-  "fixtureSha256": "d774f46ce2820c94099db64221a1af70a5d82569de42642a01a746a974337393",
+  "sourceCommit": "2684e845de42902e1e0bb59ac5d3f81779831dbe",
+  "frontendSourceSha256": "7f3f56222d8a61890dd6b938b10914039817c44a60bac0ecf4edac967bd8425f",
+  "fixtureSha256": "d95dea91b6d34c92824475f2c22bbc84e84c84ba9d4d86e8ef33d5335322445c",
   "viewport": {
     "width": 1600,
     "height": 1100,
@@ -60,9 +60,9 @@
       "view": "idle",
       "size": [
         3200,
-        3500
+        4906
       ],
-      "sha256": "32b168412daafcf8ea67af082c848d651214a0c012cff985f0a0cf3711f2ea01",
+      "sha256": "9b9b3f414439ad938851730d2efd5cd33169eb5d80a67d71c0d51f8a18e2bb51",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -72,9 +72,9 @@
       "view": "printing",
       "size": [
         3200,
-        3500
+        4906
       ],
-      "sha256": "0b1a20f0ac6251b2c59b194c3898e5dbfe5dca9190f888c6b979875fc2c3b876",
+      "sha256": "099ae3ff8d5d094b93064a3c75406ffab615a90151ec67e61d078a2c2cf04c7d",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -84,9 +84,9 @@
       "view": "compact",
       "size": [
         2560,
-        3302
+        3414
       ],
-      "sha256": "de754280540fdb9b655526a2393d6215d6c3ce0d909815287d89c87e56068678",
+      "sha256": "4ba5d67807f8d4345243bcdaff9d7b5f8b96d5bdda6aa65d46a9a7ffa07d8edf",
       "playback": [
         "LIVE \u00b7 H.264"
       ]

@@ -66,6 +66,10 @@ files, and AMS/material systems for an idle printer.
 The camera card includes the built-in/external feed picker and the H.264
 playback badge. The sample also shows active AMS HT drying telemetry.
 
+The H2C sample shows Left/Right extruder selection, Retract/Extrude locked
+until the nozzle reaches 170 °C, the Cooling/Heating air-duct mode with its
+Filter switch, and the Hotends card with rack position and slot details.
+
 ![Printer control view for an idle printer](../screenshots/printer-control-idle.png)
 
 ## Printer control — printing
@@ -82,8 +86,9 @@ remain visible above locked temperatures and motion controls.
 
 The control view at a 1280 px window: printer tabs stay in the header, and a
 printer that reports only a read-only chamber reading (such as the A1 mini)
-omits the chamber row. The sample also shows an empty AMS slot as a dashed
-outline.
+omits the chamber row. Like the A1 mini, it has a single extruder, no air
+duct and no hotend rack, so only Retract/Extrude remain. The sample also shows
+an empty AMS slot as a dashed outline.
 
 ![Printer control view in a 1280 px wide window](../screenshots/printer-control-compact.png)
 

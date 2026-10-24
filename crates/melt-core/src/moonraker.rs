@@ -1627,6 +1627,63 @@ pub struct BambuExtension {
     /// selects the `set_fan` command family over legacy `M106` g-code.
     #[serde(skip_serializing_if = "is_false")]
     pub airduct_fans: bool,
+    /// Extruder currently feeding the nozzle: 0 is right, 1 is left.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_extruder: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub airduct: Option<Airduct>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hotend_rack: Option<HotendRack>,
+    /// Firmware that reports `cfg`/`fun`/`aux`/`stat` takes the
+    /// `set_extrusion_length` command; older firmware takes `G0 E` g-code.
+    #[serde(skip)]
+    pub extrusion_command: bool,
+}
+
+/// Air-duct mode selection as Bambu Studio offers it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Airduct {
+    /// 0 cooling, 1 heating, 3 full cooling.
+    pub mode: i64,
+    pub modes: Vec<i64>,
+    /// Cooling-mode filtration; absent when the printer lacks the switch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HotendRack {
+    /// `rowA`, `rowB`, `home`, or `unknown`.
+    pub position: &'static str,
+    pub busy: bool,
+    pub reading: bool,
+    pub hotends: Vec<Hotend>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Hotend {
+    /// Rack slot 0-5; absent for a hotend mounted on an extruder.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extruder: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diameter_mm: Option<f64>,
+    /// `standard`, `highFlow`, `uFlow`, or `eFlow`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flow: Option<&'static str>,
+    /// `stainlessSteel`, `hardenedSteel`, or `tungstenCarbide`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub material: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub print_seconds: Option<u64>,
+    /// `ok`, `error`, or `unknown`.
+    pub state: &'static str,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -1645,6 +1702,10 @@ impl BambuExtension {
             && self.reported_ip.is_none()
             && self.hms.is_empty()
             && !self.airduct_fans
+            && self.active_extruder.is_none()
+            && self.airduct.is_none()
+            && self.hotend_rack.is_none()
+            && !self.extrusion_command
     }
 }
 

@@ -323,6 +323,47 @@ export type MessageKey =
   | "control.speedSport"
   | "control.speedLudicrous"
   | "control.speedSet"
+  | "control.fanAuto"
+  | "control.fanOff"
+  | "control.airductMode"
+  | "control.airductCooling"
+  | "control.airductHeating"
+  | "control.airductFullCooling"
+  | "control.airductFilter"
+  | "control.airductPrinting"
+  | "control.airductSet"
+  | "control.extruder"
+  | "control.extruderLeft"
+  | "control.extruderRight"
+  | "control.extruderSelected"
+  | "control.extrude"
+  | "control.retract"
+  | "control.extruded"
+  | "control.extrudeNeedsHeat"
+  | "control.hotends"
+  | "control.rackRowA"
+  | "control.rackRowB"
+  | "control.rackHome"
+  | "control.rackBusy"
+  | "control.rackReadAll"
+  | "control.rackReading"
+  | "control.rackMoveTitle"
+  | "control.rackMoveDescription"
+  | "control.rackMoveConfirm"
+  | "control.rackSent"
+  | "control.hotendRightShort"
+  | "control.hotendLeftShort"
+  | "control.hotendEmpty"
+  | "control.hotendUnknown"
+  | "control.hotendError"
+  | "control.hotendUsed"
+  | "control.flowStandard"
+  | "control.flowHighFlow"
+  | "control.flowUFlow"
+  | "control.flowEFlow"
+  | "control.materialStainlessSteel"
+  | "control.materialHardenedSteel"
+  | "control.materialTungstenCarbide"
   | "control.emergencyStopSent"
   | "control.observedAt"
   | "control.observedAtTitle"
@@ -1038,6 +1079,47 @@ const messages: Record<Locale, Messages> = {
     "control.speedSport": "Sport",
     "control.speedLudicrous": "Ludicrous",
     "control.speedSet": "Speed profile set to {profile}",
+    "control.fanAuto": "Auto",
+    "control.fanOff": "Off",
+    "control.airductMode": "Air duct mode",
+    "control.airductCooling": "Cooling",
+    "control.airductHeating": "Heating",
+    "control.airductFullCooling": "Full cooling",
+    "control.airductFilter": "Filter",
+    "control.airductPrinting": "Mode changes are unavailable while printing",
+    "control.airductSet": "Air duct updated",
+    "control.extruder": "Extruder",
+    "control.extruderLeft": "Left",
+    "control.extruderRight": "Right",
+    "control.extruderSelected": "{extruder} extruder selected",
+    "control.extrude": "Extrude",
+    "control.retract": "Retract",
+    "control.extruded": "Filament moved {distance}",
+    "control.extrudeNeedsHeat": "Heat the nozzle to 170 °C to extrude or retract",
+    "control.hotends": "Hotends",
+    "control.rackRowA": "Row A",
+    "control.rackRowB": "Row B",
+    "control.rackHome": "Home",
+    "control.rackBusy": "Rack is moving",
+    "control.rackReadAll": "Read all hotends",
+    "control.rackReading": "Reading hotends…",
+    "control.rackMoveTitle": "Move the hotend rack?",
+    "control.rackMoveDescription": "The toolhead and hotend rack may move. Keep your hands away from the chamber.",
+    "control.rackMoveConfirm": "Move",
+    "control.rackSent": "Hotend rack command sent",
+    "control.hotendRightShort": "R",
+    "control.hotendLeftShort": "L",
+    "control.hotendEmpty": "Empty",
+    "control.hotendUnknown": "Unidentified",
+    "control.hotendError": "Hotend error",
+    "control.hotendUsed": "{duration} used",
+    "control.flowStandard": "Standard",
+    "control.flowHighFlow": "High flow",
+    "control.flowUFlow": "U-flow",
+    "control.flowEFlow": "E-flow",
+    "control.materialStainlessSteel": "Stainless steel",
+    "control.materialHardenedSteel": "Hardened steel",
+    "control.materialTungstenCarbide": "Tungsten carbide",
     "control.emergencyStopSent": "Emergency stop sent",
     "control.observedAt": "{seconds}s ago",
     "control.observedAtTitle": "Age of the last reading received from the printer",
@@ -1750,6 +1832,47 @@ const messages: Record<Locale, Messages> = {
     "control.speedSport": "Esportivo",
     "control.speedLudicrous": "Absurdo",
     "control.speedSet": "Perfil de velocidade definido como {profile}",
+    "control.fanAuto": "Automático",
+    "control.fanOff": "Desligado",
+    "control.airductMode": "Modo do duto de ar",
+    "control.airductCooling": "Resfriamento",
+    "control.airductHeating": "Aquecimento",
+    "control.airductFullCooling": "Resfriamento total",
+    "control.airductFilter": "Filtro",
+    "control.airductPrinting": "Não é possível mudar o modo durante a impressão",
+    "control.airductSet": "Duto de ar atualizado",
+    "control.extruder": "Extrusora",
+    "control.extruderLeft": "Esquerda",
+    "control.extruderRight": "Direita",
+    "control.extruderSelected": "Extrusora {extruder} selecionada",
+    "control.extrude": "Extrudar",
+    "control.retract": "Retrair",
+    "control.extruded": "Filamento movido {distance}",
+    "control.extrudeNeedsHeat": "Aqueça o bico a 170 °C para extrudar ou retrair",
+    "control.hotends": "Hotends",
+    "control.rackRowA": "Fileira A",
+    "control.rackRowB": "Fileira B",
+    "control.rackHome": "Início",
+    "control.rackBusy": "Rack em movimento",
+    "control.rackReadAll": "Ler todos os hotends",
+    "control.rackReading": "Lendo hotends…",
+    "control.rackMoveTitle": "Mover o rack de hotends?",
+    "control.rackMoveDescription": "O cabeçote e o rack de hotends podem se mover. Mantenha as mãos longe da câmara.",
+    "control.rackMoveConfirm": "Mover",
+    "control.rackSent": "Comando do rack de hotends enviado",
+    "control.hotendRightShort": "D",
+    "control.hotendLeftShort": "E",
+    "control.hotendEmpty": "Vazio",
+    "control.hotendUnknown": "Não identificado",
+    "control.hotendError": "Erro no hotend",
+    "control.hotendUsed": "{duration} de uso",
+    "control.flowStandard": "Padrão",
+    "control.flowHighFlow": "Alto fluxo",
+    "control.flowUFlow": "U-flow",
+    "control.flowEFlow": "E-flow",
+    "control.materialStainlessSteel": "Aço inoxidável",
+    "control.materialHardenedSteel": "Aço endurecido",
+    "control.materialTungstenCarbide": "Carboneto de tungstênio",
     "control.emergencyStopSent": "Parada de emergência enviada",
     "control.observedAt": "há {seconds}s",
     "control.observedAtTitle": "Idade da última leitura recebida da impressora",

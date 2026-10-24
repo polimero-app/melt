@@ -72,7 +72,7 @@ pub use quirks::{
     applicable as applicable_quirks, matching as matching_quirks, registry as quirk_registry,
     validate_registry as validate_quirk_registry,
 };
-pub use transport::{Client, Error as TransportError, JobStartOptions};
+pub use transport::{Client, DeviceAction, Error as TransportError, JobStartOptions};
 pub use workflow::{PrintPreflight, PrintStage, PrintStageEvent, preflight_print_package};
 
 pub const MQTT_PORT: u16 = 8883;

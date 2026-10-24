@@ -13,13 +13,14 @@ use std::{
 
 use crate::firmware_updates::{FirmwareUpdateIssue, FirmwareUpdateReport};
 use crate::moonraker::{
-    ActiveFilament, AmsData, AmsDrying, AmsTray, AmsUnit, BambuExtension, ControlInventory,
-    DryingRequest, DryingResult, DryingSetting, DryingStatus, Extensions, FanControl, FanKind,
-    FanMode, FanResult, FileEntry, FileEntryType, FileList, FileRoot, GcodePosition, Job,
-    JobResult, LightControl, LightKind, LightMode, LightResult, LightState, MotionResult,
-    MotionState, PrintMeta, PrinterState, Progress, SpeedResult, Status, StatusError,
-    StatusWarning, Temperature, TemperatureControl, TemperatureKind, TemperatureResult,
-    TemperatureTargets, Temperatures, TimeEstimates, Timelapse, ToolPosition, Wifi,
+    ActiveFilament, Airduct, AmsData, AmsDrying, AmsTray, AmsUnit, BambuExtension,
+    ControlInventory, DryingRequest, DryingResult, DryingSetting, DryingStatus, Extensions,
+    FanControl, FanKind, FanMode, FanResult, FileEntry, FileEntryType, FileList, FileRoot,
+    GcodePosition, Hotend, HotendRack, Job, JobResult, LightControl, LightKind, LightMode,
+    LightResult, LightState, MotionResult, MotionState, PrintMeta, PrinterState, Progress,
+    SpeedResult, Status, StatusError, StatusWarning, Temperature, TemperatureControl,
+    TemperatureKind, TemperatureResult, TemperatureTargets, Temperatures, TimeEstimates, Timelapse,
+    ToolPosition, Wifi,
 };
 use crate::trace::TraceEvent;
 use openssl::ssl::{
@@ -31,11 +32,12 @@ use thiserror::Error;
 use time::{Date, Month, OffsetDateTime, Time, format_description::well_known::Rfc3339};
 
 use super::{
-    AuthorizationMode, BedLevelingSupport, FirmwareInventory, MQTT_USERNAME, MappingStatus,
-    MqttTopics, PrintStage, PrintStageEvent, Profile, RuntimeCapabilities, StorageTransport,
-    StorageVolume, TlsPinError, fetch_public_firmware, firmware::update_report, is_pushall_payload,
-    is_valid_tls_fingerprint, merge_public_catalogue_report, preflight_print_package,
-    pushall_payload, resolve_authorization, tls_fingerprint, tunnel, verify_tls_fingerprint,
+    AuthorizationMode, BedLevelingSupport, CanonicalModel, FirmwareInventory, MQTT_USERNAME,
+    MappingStatus, MqttTopics, PrintStage, PrintStageEvent, Profile, RuntimeCapabilities,
+    StorageTransport, StorageVolume, TlsPinError, fetch_public_firmware, firmware::update_report,
+    is_pushall_payload, is_valid_tls_fingerprint, merge_public_catalogue_report,
+    preflight_print_package, pushall_payload, resolve_authorization, tls_fingerprint, tunnel,
+    verify_tls_fingerprint,
 };
 
 #[cfg(test)]
@@ -135,6 +137,23 @@ pub enum MutationClass {
     Speed,
     Drying,
 }
+
+/// Toolhead, air-duct, and hotend-rack commands from Bambu Studio's device
+/// panel. Extruder 0 is right, 1 is left.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(tag = "action", rename_all = "camelCase")]
+pub enum DeviceAction {
+    SelectExtruder { extruder: u8 },
+    Extrude { extruder: u8, millimeters: i8 },
+    Airduct { mode: i64, submode: i64 },
+    RackHome,
+    RackRowA,
+    RackRowB,
+    RackRead,
+}
+
+/// Bambu Studio refuses to move filament below this nozzle temperature.
+const EXTRUSION_MINIMUM_CELSIUS: f64 = 170.0;
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -1107,6 +1126,22 @@ impl Client {
             light: logical_light.to_owned(),
             state,
         })
+    }
+
+    pub fn device_action(
+        &self,
+        access_code: Option<&str>,
+        fingerprint: Option<&str>,
+        action: DeviceAction,
+    ) -> Result<MotionResult, Error> {
+        let class = match action {
+            DeviceAction::Airduct { .. } => MutationClass::Fan,
+            _ => MutationClass::Motion,
+        };
+        self.authorize_mutation(access_code, fingerprint, class)?;
+        let status = self.status(access_code, fingerprint)?;
+        let payload = device_action_payload(&status, action)?;
+        self.command_accepted(access_code, fingerprint, payload)
     }
 
     pub fn speed_set(
@@ -2506,6 +2541,87 @@ fn next_sequence() -> u64 {
         .map_or(1, wrap_sequence)
 }
 
+fn device_action_payload(status: &Status, action: DeviceAction) -> Result<String, Error> {
+    let extension = status.extensions.bambu_lan.as_ref();
+    let extruders = extension
+        .and_then(|extension| extension.extruder_count)
+        .unwrap_or(1);
+    let command = |mut fields: Value| {
+        fields["sequence_id"] = next_sequence_id().into();
+        json!({ "print": fields }).to_string()
+    };
+    let rack = || {
+        extension
+            .and_then(|extension| extension.hotend_rack.as_ref())
+            .ok_or(Error::Unsupported("a hotend rack on this printer"))
+    };
+    Ok(match action {
+        DeviceAction::SelectExtruder { extruder } => {
+            if extruder >= extruders {
+                return Err(Error::Unsupported("requested extruder on this printer"));
+            }
+            command(json!({ "command": "select_extruder", "extruder_index": extruder }))
+        }
+        DeviceAction::Extrude {
+            extruder,
+            millimeters,
+        } => {
+            if extruder >= extruders || millimeters == 0 || millimeters.abs() > 10 {
+                return Err(Error::InvalidMotion);
+            }
+            let key = match (extruders, extruder) {
+                (1, _) => "nozzle",
+                (_, 0) => "nozzleRight",
+                _ => "nozzleLeft",
+            };
+            let hot = status
+                .controls
+                .temperatures
+                .get(key)
+                .and_then(|control| control.current_celsius)
+                .is_some_and(|celsius| celsius >= EXTRUSION_MINIMUM_CELSIUS);
+            if !hot {
+                return Err(Error::InvalidMotion);
+            }
+            if extension.is_some_and(|extension| extension.extrusion_command) {
+                command(json!({
+                    "command": "set_extrusion_length",
+                    "extruder_index": extruder,
+                    "length": millimeters,
+                }))
+            } else {
+                gcode_payload(&format!("M83\nG0 E{millimeters}.0 F900"))
+            }
+        }
+        DeviceAction::Airduct { mode, submode } => {
+            let known = extension
+                .and_then(|extension| extension.airduct.as_ref())
+                .is_some_and(|airduct| airduct.modes.contains(&mode));
+            if !known || !(-1..=1).contains(&submode) {
+                return Err(Error::Unsupported(
+                    "requested air-duct mode on this printer",
+                ));
+            }
+            command(json!({ "command": "set_airduct", "modeId": mode, "submode": submode }))
+        }
+        DeviceAction::RackHome | DeviceAction::RackRowA | DeviceAction::RackRowB => {
+            rack()?;
+            let target = match action {
+                DeviceAction::RackRowA => 1,
+                DeviceAction::RackRowB => 2,
+                _ => 0,
+            };
+            command(json!({ "command": "nozzle_holder_ctrl", "action": target }))
+        }
+        DeviceAction::RackRead => {
+            if rack()?.busy {
+                return Err(Error::CommandRejected);
+            }
+            command(json!({ "command": "holder_nozzle_refresh", "id": 255 }))
+        }
+    })
+}
+
 fn gcode_payload(gcode: &str) -> String {
     json!({
         "print": {
@@ -3098,6 +3214,12 @@ fn parse_status_value_with_capabilities(
         reported_ip: reported_ip(print),
         hms,
         airduct_fans,
+        active_extruder: active_extruder(print),
+        airduct: airduct(print, model),
+        hotend_rack: hotend_rack(print),
+        extrusion_command: ["cfg", "fun", "aux", "stat"]
+            .iter()
+            .all(|key| print.contains_key(*key)),
     };
     Ok(Status {
         state,
@@ -3133,6 +3255,118 @@ fn observed_extruder_count(print: &Map<String, Value>) -> Option<u8> {
         .len()
         .try_into()
         .ok()
+}
+
+fn active_extruder(print: &Map<String, Value>) -> Option<u8> {
+    let state = integer(print.get("device")?.get("extruder")?.get("state"))?;
+    u8::try_from((state >> 4) & 0xf).ok()
+}
+
+/// Bambu Studio reads `fun` as a hexadecimal feature bitmap.
+fn feature_bit(print: &Map<String, Value>, bit: u32) -> bool {
+    let fun = print.get("fun");
+    fun.and_then(Value::as_str)
+        .and_then(|text| u64::from_str_radix(text.trim().trim_start_matches("0x"), 16).ok())
+        .or_else(|| fun.and_then(Value::as_u64))
+        .is_some_and(|flags| flags >> bit & 1 == 1)
+}
+
+fn airduct(print: &Map<String, Value>, model: CanonicalModel) -> Option<Airduct> {
+    let airduct = print.get("device")?.get("airduct")?;
+    let mode = integer(airduct.get("modeCur"))?;
+    // Studio lists only the first two modes on H2-class printers and never
+    // offers mode 2 (exhaust).
+    let shown = if matches!(
+        model,
+        CanonicalModel::H2D | CanonicalModel::H2DPro | CanonicalModel::H2S | CanonicalModel::H2C
+    ) {
+        2
+    } else {
+        usize::MAX
+    };
+    let modes = airduct
+        .get("modeList")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(shown)
+        .filter_map(|entry| integer(entry.get("modeId")))
+        .filter(|id| *id != 2)
+        .collect();
+    Some(Airduct {
+        mode,
+        modes,
+        filter: (mode == 0 && feature_bit(print, 46))
+            .then(|| integer(airduct.get("subMode")) == Some(1)),
+    })
+}
+
+fn hotend_rack(print: &Map<String, Value>) -> Option<HotendRack> {
+    let device = print.get("device")?;
+    let holder = device.get("holder");
+    if !feature_bit(print, 60) && holder.is_none() {
+        return None;
+    }
+    let holder = holder.unwrap_or(&Value::Null);
+    let nozzle = device.get("nozzle").unwrap_or(&Value::Null);
+    let nozzle_state = integer(nozzle.get("state")).unwrap_or(0);
+    let hotends = nozzle
+        .get("info")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let id = u8::try_from(integer(entry.get("id"))?).ok()?;
+            let (slot, extruder) = if id >> 4 == 1 {
+                (Some(id & 0xf), None)
+            } else {
+                (None, Some(id & 0xf))
+            };
+            let kind = string(entry.get("type")).unwrap_or_default();
+            let code = |range: std::ops::Range<usize>| kind.get(range).unwrap_or_default();
+            Some(Hotend {
+                slot,
+                extruder,
+                diameter_mm: number(entry.get("diameter")).filter(|value| *value > 0.0),
+                flow: match code(1..2) {
+                    "S" | "A" | "X" => Some("standard"),
+                    "H" | "E" => Some("highFlow"),
+                    "U" => Some("uFlow"),
+                    "B" => Some("eFlow"),
+                    _ => None,
+                },
+                material: match code(2..4) {
+                    "00" => Some("stainlessSteel"),
+                    "01" => Some("hardenedSteel"),
+                    "05" => Some("tungstenCarbide"),
+                    _ => match kind.as_str() {
+                        "stainless_steel" => Some("stainlessSteel"),
+                        "hardened_steel" => Some("hardenedSteel"),
+                        "tungsten_carbide" => Some("tungstenCarbide"),
+                        _ => None,
+                    },
+                },
+                color: string(entry.get("color_m")).filter(|color| !color.is_empty()),
+                print_seconds: integer(entry.get("p_t")).and_then(|value| value.try_into().ok()),
+                state: match integer(entry.get("stat")).map(|stat| (stat >> 1) & 3) {
+                    Some(1) => "error",
+                    Some(2) => "unknown",
+                    _ => "ok",
+                },
+            })
+        })
+        .collect();
+    Some(HotendRack {
+        position: match integer(holder.get("pos")) {
+            Some(1) => "rowA",
+            Some(2) => "rowB",
+            Some(3) => "home",
+            _ => "unknown",
+        },
+        busy: integer(holder.get("stat")).is_some_and(|stat| stat > 0),
+        reading: nozzle_state & 0xf == 1 || (nozzle_state >> 4) & 0xf > 0,
+        hotends,
+    })
 }
 
 fn reported_ip(print: &Map<String, Value>) -> Option<String> {
@@ -6004,6 +6238,116 @@ mod tests {
             validate_temperature_control(&status, "nozzle", 230.0),
             Err(Error::Unsupported(_))
         ));
+    }
+
+    #[test]
+    fn maps_h2c_toolhead_airduct_and_hotend_rack_controls() {
+        let status = parse_status(
+            br#"{"print":{"gcode_state":"IDLE","cfg":"0","aux":"0","stat":"0","fun":"1000400000000000","device":{"extruder":{"state":18,"info":[{"id":0,"temp":14418120},{"id":1,"temp":14090272}]},"airduct":{"modeCur":0,"subMode":1,"modeList":[{"modeId":0},{"modeId":1},{"modeId":2},{"modeId":3}],"parts":[]},"holder":{"pos":1,"stat":0},"nozzle":{"state":0,"info":[{"id":0,"diameter":0.4,"type":"XH01","stat":0,"p_t":7200,"color_m":"FF0000FF"},{"id":18,"diameter":0.6,"type":"N/A","stat":4}]}}}}"#,
+        )
+        .unwrap();
+        let extension = status.extensions.bambu_lan.as_ref().unwrap();
+        assert_eq!(extension.active_extruder, Some(1));
+        assert!(extension.extrusion_command);
+        let airduct = extension.airduct.as_ref().unwrap();
+        assert_eq!((airduct.mode, airduct.filter), (0, Some(true)));
+        assert_eq!(airduct.modes, [0, 1, 3]);
+        let print = serde_json::from_slice::<Value>(br#"{"device":{"airduct":{"modeCur":1,"modeList":[{"modeId":0},{"modeId":1},{"modeId":3}]}}}"#).unwrap();
+        let h2c = super::airduct(print.as_object().unwrap(), CanonicalModel::H2C).unwrap();
+        assert_eq!((h2c.modes, h2c.filter), (vec![0, 1], None));
+
+        let rack = extension.hotend_rack.as_ref().unwrap();
+        assert_eq!(
+            (rack.position, rack.busy, rack.reading),
+            ("rowA", false, false)
+        );
+        assert_eq!(rack.hotends[0].extruder, Some(0));
+        assert_eq!(rack.hotends[0].flow, Some("highFlow"));
+        assert_eq!(rack.hotends[0].material, Some("hardenedSteel"));
+        assert_eq!(rack.hotends[0].print_seconds, Some(7200));
+        assert_eq!(rack.hotends[1].slot, Some(2));
+        assert_eq!(rack.hotends[1].state, "unknown");
+
+        let payload = |action| {
+            let mut value: Value =
+                serde_json::from_str(&device_action_payload(&status, action).unwrap()).unwrap();
+            value["print"]
+                .as_object_mut()
+                .unwrap()
+                .remove("sequence_id");
+            value["print"].clone()
+        };
+        assert_eq!(
+            payload(DeviceAction::SelectExtruder { extruder: 1 }),
+            json!({"command":"select_extruder","extruder_index":1})
+        );
+        assert_eq!(
+            payload(DeviceAction::Extrude {
+                extruder: 0,
+                millimeters: -10
+            }),
+            json!({"command":"set_extrusion_length","extruder_index":0,"length":-10})
+        );
+        assert_eq!(
+            payload(DeviceAction::Airduct {
+                mode: 1,
+                submode: -1
+            }),
+            json!({"command":"set_airduct","modeId":1,"submode":-1})
+        );
+        assert_eq!(
+            payload(DeviceAction::RackRowB),
+            json!({"command":"nozzle_holder_ctrl","action":2})
+        );
+        assert_eq!(
+            payload(DeviceAction::RackRead),
+            json!({"command":"holder_nozzle_refresh","id":255})
+        );
+        // The left nozzle is at 31 °C, below Studio's 170 °C extrusion floor.
+        assert!(matches!(
+            device_action_payload(
+                &status,
+                DeviceAction::Extrude {
+                    extruder: 1,
+                    millimeters: 10
+                }
+            ),
+            Err(Error::InvalidMotion)
+        ));
+        assert!(
+            device_action_payload(
+                &status,
+                DeviceAction::Airduct {
+                    mode: 2,
+                    submode: -1
+                }
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a1_mini_extrudes_with_gcode_and_has_no_rack_or_airduct() {
+        let status = parse_status(
+            br#"{"print":{"gcode_state":"IDLE","nozzle_temper":200,"nozzle_target_temper":200}}"#,
+        )
+        .unwrap();
+        let payload: Value = serde_json::from_str(
+            &device_action_payload(
+                &status,
+                DeviceAction::Extrude {
+                    extruder: 0,
+                    millimeters: 10,
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(payload["print"]["param"], "M83\nG0 E10.0 F900");
+        assert!(device_action_payload(&status, DeviceAction::RackHome).is_err());
+        assert!(
+            device_action_payload(&status, DeviceAction::SelectExtruder { extruder: 1 }).is_err()
+        );
     }
 
     #[test]

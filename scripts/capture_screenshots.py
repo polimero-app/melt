@@ -141,7 +141,7 @@ def screenshot_state(base, printing):
         "stage": "printing", "stageCode": 0,
     })
     temperatures = active["controls"]["temperatures"]
-    for key, current, target in (("bed", 55, 55), ("chamber", 34, 0), ("leftNozzle", 35, 0), ("rightNozzle", 215, 215)):
+    for key, current, target in (("bed", 55, 55), ("chamber", 34, 0), ("nozzleLeft", 35, 0), ("nozzleRight", 215, 215)):
         temperatures[key].update(currentCelsius=current, targetCelsius=target)
     for key, speed in (("parts", 100), ("auxiliary", 40), ("exhaust", 30)):
         active["controls"]["fans"][key].update(speedPercent=speed, mode="manual")
@@ -362,6 +362,9 @@ def capture(args):
                 if kind == "compact":
                     # A1 mini-style printer: the chamber is a read-only reading with no target.
                     scenario["monitoring"][0]["status"]["controls"]["temperatures"]["chamber"] = {"kind": "chamber", "currentCelsius": 5, "controllable": False}
+                    # Single extruder, no air duct and no hotend rack, like the A1 mini.
+                    for key in ("extruderCount", "activeExtruder", "airduct", "hotendRack"):
+                        scenario["monitoring"][0]["status"]["extensions"]["bambu-lan"].pop(key)
                 if kind == "offline":
                     scenario["monitoring"][0] = {"name": "workshop", "driver": "bambu-lan", "connectionState": "offline", "stale": True}
                 script = BRIDGE.replace("__STATE__", json.dumps(scenario)).replace("__BASE__", json.dumps(base)).replace("__VIEW__", json.dumps(view)).replace("__CODEC__", json.dumps(media[printing][2]))
@@ -397,6 +400,15 @@ def capture(args):
                     expect(page.get_by_role("button", name=re.compile("^workshop"))).to_be_visible()
                     expect(page.get_by_role("button", name="Select printer")).to_have_count(0)
                     expect(page.get_by_text("Chamber", exact=True)).to_have_count(0)
+                if kind == "idle":
+                    expect(page.get_by_role("button", name="Row A", exact=True)).to_have_attribute("aria-pressed", "true")
+                    expect(page.get_by_role("button", name="Right", exact=True)).to_have_attribute("aria-pressed", "true")
+                    expect(page.get_by_role("button", name="Extrude", exact=True)).to_be_disabled()
+                    expect(page.get_by_role("switch", name="Filter", exact=True).or_(page.get_by_role("checkbox", name="Filter", exact=True))).to_be_checked()
+                if kind == "compact":
+                    expect(page.get_by_text("Hotends", exact=True)).to_have_count(0)
+                    expect(page.get_by_role("button", name="Left", exact=True)).to_have_count(0)
+                    expect(page.get_by_role("button", name="Extrude", exact=True)).to_be_visible()
                 if kind in ("idle", "cameras"):
                     expect(page.get_by_role("button", name="Turn off bench-power", exact=True)).to_be_visible()
                 if kind == "offline":
