@@ -36,7 +36,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
       - name: Install Linux bundle dependencies
         if: runner.os == 'Linux'
         run: |
@@ -52,7 +52,7 @@ jobs:
           echo "OPENSSL_LIB_DIR=C:/Program Files/OpenSSL/lib/VC/x64/MD" >> $env:GITHUB_ENV
           echo "OPENSSL_INCLUDE_DIR=C:/Program Files/OpenSSL/include" >> $env:GITHUB_ENV
       - if: runner.os == 'Linux'
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-deny@0.20.2
       - name: Verify automated release qualification

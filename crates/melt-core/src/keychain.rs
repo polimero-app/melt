@@ -69,10 +69,8 @@ mod tests {
         );
     }
 
-    // `keyring` silently compiles an in-memory mock store when no platform
-    // backend feature is enabled: every write appears to succeed and every
-    // secret is lost when the process exits. Guard the manifest so a dropped
-    // feature cannot quietly take the credential store away again.
+    // Keyring 4's v1 feature selects Keychain, Credential Manager and Secret
+    // Service rather than requiring us to initialize a credential store.
     #[test]
     fn keyring_enables_a_real_platform_backend_on_every_target() {
         let manifest = include_str!("../../../Cargo.toml");
@@ -80,12 +78,10 @@ mod tests {
             .lines()
             .find(|line| line.starts_with("keyring "))
             .expect("workspace manifest pins keyring");
-        for feature in ["apple-native", "windows-native", "sync-secret-service"] {
-            assert!(
-                entry.contains(feature),
-                "keyring must enable {feature:?} or secrets fall back to the mock store: {entry}"
-            );
-        }
+        assert!(
+            entry.contains("\"v1\""),
+            "keyring must enable v1 to select persistent platform stores: {entry}"
+        );
     }
 
     #[test]

@@ -6,10 +6,14 @@ Last-updated: 2026-10-18
 
 The Rust workspace uses edition 2024 and declares MSRV **1.95**, which CI's
 `msrv` job checks. Install Rust/Cargo with rustfmt and Clippy, `cargo-deny` (CI pins
-**0.20.2**; `cargo install cargo-deny --locked`), Bun (CI pins **1.3.14**), and
+**0.20.2**; `cargo install cargo-deny --locked`), Bun (CI pins **1.4.4**), and
 native Tauri 2 dependencies. The frontend uses Vue 3, TypeScript 6, Vite 8, Tailwind CSS 4,
 Headless UI, Phosphor icons and Vitest. Cargo.lock and ui/bun.lock govern
 reproducible dependency resolution; use the locked Make targets.
+
+TypeScript stays on 6 until `vue-tsc` supports TypeScript 7's new API, and
+`vek` stays on 0.14 to match `euc`'s vertex types. Keyring 4 uses its `v1`
+feature to select native persistent stores on Linux, macOS and Windows.
 
 Linux CI installs `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`,
 `libayatana-appindicator3-dev` and `librsvg2-dev`; installer builds also install
