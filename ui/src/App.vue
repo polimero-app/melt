@@ -51,6 +51,7 @@ import FilePreviewDialog from './components/FilePreviewDialog.vue'
 import CameraViewer from './components/CameraViewer.vue'
 import PlugControl from './components/PlugControl.vue'
 import {
+  PhArrowCounterClockwise,
   PhArrowsClockwise,
   PhArrowsOutCardinal,
   PhArrowLeft,
@@ -1886,7 +1887,13 @@ function removePreset(preset: TemperaturePreset) {
 }
 
 function restoreDefaultPresets() {
-  temperaturePresets.value = [...defaultPresets]
+  askConfirmation(
+    { title: 'settingsView.presetRestoreTitle', description: 'settingsView.presetRestoreDescription', confirm: 'settingsView.restorePresets' },
+    {},
+    async () => {
+      temperaturePresets.value = [...defaultPresets]
+    },
+  )
 }
 
 async function sendFan(fan: string, event: Event) {
@@ -3473,7 +3480,7 @@ onUnmounted(() => {
           </Card>
           <Card as="section" class="overflow-hidden">
             <CardHeader :title="t('settingsView.presets')" :icon="PhThermometerSimple">
-              <IconButton :title="t('settingsView.restorePresets')" :aria-label="t('settingsView.restorePresets')" @click="restoreDefaultPresets"><PhArrowsClockwise class="size-4" aria-hidden="true" /></IconButton>
+              <IconButton :title="t('settingsView.restorePresets')" :aria-label="t('settingsView.restorePresets')" @click="restoreDefaultPresets"><PhArrowCounterClockwise class="size-4" aria-hidden="true" /></IconButton>
             </CardHeader>
             <p class="px-4 pt-4 text-xs text-gray-500 sm:px-6 dark:text-gray-400">
               {{ t('settingsView.presetsDescription', { nozzle: temperatureMaximums.nozzle, bed: temperatureMaximums.bed }) }}

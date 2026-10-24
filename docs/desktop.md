@@ -171,6 +171,8 @@ and are finalized only after transfer integrity checks.
 firmware source opt-in, enabled slicers, temperature presets, theme and language,
 plus About/version/license information and diagnostics. Slicer and preset
 editing opens a side panel. English and Brazilian Portuguese are supported.
+Restoring default temperature presets requires confirmation because it replaces
+all presets, including custom ones, and cannot be undone.
 See [configuration storage](configuration.md) for which choices persist where.
 
 The **Printers** page summarizes total, online and printing counts on one line.
