@@ -1,8 +1,8 @@
 {
-  "capturedAt": "2026-10-24T03:49:05+00:00",
+  "capturedAt": "2026-10-24T03:50:24+00:00",
   "scenarioTime": "2026-10-12T12:00:00Z",
-  "sourceCommit": "b00b6d0fa25b106ef993089e8ce06601001be063",
-  "frontendSourceSha256": "974b7dfb1aece6fcf0284735a7bee568613ec675ea47d39735d12f57c11de7c3",
+  "sourceCommit": "f28a932e28849834f755da3ce9e6c2f331eaabd8",
+  "frontendSourceSha256": "90f9714ee4420ab38fcc929d4fd96c396d54319b747cbbf09999e6aa971f1513",
   "fixtureSha256": "1320e5cf55545cbe793735efb4f40aa676221b4b982570f1c876a0f987d00732",
   "viewport": {
     "width": 1600,
@@ -132,7 +132,7 @@
         3200,
         2200
       ],
-      "sha256": "8762952fd49250531e6a8e3b8e534459225d0b6e25ec042a4ef405f9ea6602b8",
+      "sha256": "02ce9641fa6492bb440cc9d62af1b48a2df43267f4c7da887f636c1984aec745",
       "playback": []
     },
     {
@@ -142,7 +142,7 @@
         3200,
         2200
       ],
-      "sha256": "1ce46f928c1acb1fb218a96f36b9a4f57e8d3c8346d1e55e9ed9bd70db52ae6f",
+      "sha256": "64df17f626f0a8e13d509ce6cd3ee06e65b36f8f6032e445900c338454db7bdb",
       "playback": []
     },
     {
@@ -152,7 +152,7 @@
         3200,
         2200
       ],
-      "sha256": "9a223f9d99c7b88e299e940238dc8fa1747623954cfdc315b4f4ad185ccd092f",
+      "sha256": "71b989c44d17f885c4ba5e9aedba7988d36836fd63bdcad077e664c77af7a3a8",
       "playback": []
     }
   ]

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { Locale } from '../i18n'
 import { commandDetail } from '../errors'
@@ -41,6 +41,15 @@ const {
   loadPlugs: () => Promise<void>
   refreshPlugs: () => Promise<PlugSummary[]>
 }>()
+
+// Set by App when a plug control elsewhere asks to edit credentials.
+const editRequest = defineModel<string>('editRequest')
+watch([editRequest, () => plugs], ([id]) => {
+  const plug = id ? plugs.find((candidate) => candidate.id === id) : undefined
+  if (!plug) return
+  openPlugForm(plug)
+  editRequest.value = undefined
+})
 
 const plugFormOpen = ref(false)
 const editingPlug = ref<PlugSummary>()

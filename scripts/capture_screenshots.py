@@ -396,7 +396,8 @@ def capture(args):
                     expect(page.get_by_role("button", name="Turn off bench-power", exact=True)).to_be_visible()
                 if kind in ("plugs", "plug-settings", "plug-off"):
                     expect(page.get_by_role("button", name="Smart plug actions", exact=True)).to_have_count(len(state["plugs"]))
-                    for text in ("215 W", "0 W", "Sign-in failed", "Last known: Relay on (stale) · Unreachable · Observed 11:55 AM"):
+                    expect(page.get_by_role("button", name="Edit credentials", exact=True)).to_be_visible()
+                    for text in ("215 W", "0 W", "Last known: Relay on (stale) · Unreachable · Observed 11:55 AM"):
                         expect(page.get_by_text(text, exact=True)).to_be_visible()
                 if kind == "plug-settings":
                     page.get_by_role("button", name="Smart plug actions", exact=True).first.click()

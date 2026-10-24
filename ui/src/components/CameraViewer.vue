@@ -41,7 +41,9 @@ const canvasLive = ref(false)
 const aspect = ref('16 / 9')
 const transport = ref<CameraTransport>()
 const loading = ref(false)
+const urlLoaded = ref(false)
 const error = ref<string>()
+watch(url, () => { urlLoaded.value = false })
 const viewerIds = new Set<string>()
 let request = 0
 let h264Playback: H264Playback | undefined
@@ -49,10 +51,11 @@ let h264Playback: H264Playback | undefined
 const label = computed(() => props.title ?? props.t('camera.title'))
 const supported = computed(() => props.canStream || props.canSnapshot)
 const hasMedia = computed(() => Boolean(peer.value || canvasLive.value || url.value))
+// An <img> source is not media until its first frame decodes.
 const state = computed(() => cameraViewState({
-  loading: loading.value,
+  loading: loading.value || Boolean(url.value && !urlLoaded.value),
   hasPeer: Boolean(peer.value),
-  hasMedia: Boolean(canvasLive.value || url.value),
+  hasMedia: Boolean(canvasLive.value || (url.value && urlLoaded.value)),
   hasStreamTransport: transport.value !== undefined,
 }))
 const stateLabel = computed(() => props.t({
@@ -383,11 +386,15 @@ function toggleFullscreen() {
     >
       <video v-if="peer" ref="video" :aria-label="label" class="absolute inset-0 size-full object-contain" autoplay muted playsinline @loadedmetadata="fit(video!.videoWidth, video!.videoHeight)" @resize="fit(video!.videoWidth, video!.videoHeight)" />
       <canvas v-else-if="canvasActive" ref="canvas" :aria-label="label" class="absolute inset-0 size-full object-contain" />
-      <img v-else-if="url" :src="url" :alt="label" width="1280" height="720" class="absolute inset-0 size-full object-contain" @load="fit(($event.target as HTMLImageElement).naturalWidth, ($event.target as HTMLImageElement).naturalHeight)" @error="url = undefined" />
+      <img v-else-if="url" :src="url" :alt="label" width="1280" height="720" class="absolute inset-0 size-full object-contain" @load="urlLoaded = true; fit(($event.target as HTMLImageElement).naturalWidth, ($event.target as HTMLImageElement).naturalHeight)" @error="url = undefined" />
+      <div v-else-if="loading" class="relative z-10 text-center text-gray-500 dark:text-gray-400" role="status">
+        <PhArrowsClockwise class="mx-auto size-8 animate-spin" aria-hidden="true" />
+        <p class="mt-3 text-sm">{{ t('camera.loading') }}</p>
+      </div>
       <div v-else class="relative z-10 text-center">
         <PhWarning class="mx-auto size-8 text-yellow-600 dark:text-yellow-400" aria-hidden="true" />
         <p class="mt-3 font-medium text-gray-900 dark:text-white">{{ t('camera.unavailable') }}</p>
-        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ error ?? t('camera.checkConnection') }}</p>
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ error ?? t(source && 'camera' in source ? 'camera.checkCameraConnection' : 'camera.checkConnection') }}</p>
         <Button v-if="supported" class="mt-4" :disabled="loading" @click="refresh"><PhArrowsClockwise class="size-4" :class="loading && 'animate-spin'" aria-hidden="true" /> {{ t('camera.refreshFeed') }}</Button>
       </div>
     </div>
