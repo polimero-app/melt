@@ -1,4 +1,16 @@
+import type { Locale } from './i18n'
+
 export type HmsSeverity = 'error' | 'warning' | 'info'
+
+export type PrinterError = {
+  code: string
+  message: string
+  rawCode?: string
+  raw_code?: string
+  recoverable?: boolean
+  translations?: Partial<Record<Locale, string>>
+  guide_url?: string
+}
 
 const HMS_GUIDE_URL = 'https://wiki.bambulab.com/en/hms/home?search='
 const HMS_CODE = /^[0-9A-F]{4}(?:-[0-9A-F]{4}){3}$/
@@ -27,7 +39,19 @@ export function hmsSeverity(rawCode: string | undefined): HmsSeverity {
   }
 }
 
-export function hmsGuideUrl(rawCode: string | undefined): string | undefined {
+export function hmsGuideUrl(rawCode: string | undefined, catalogueUrl?: string): string | undefined {
+  if (catalogueUrl?.startsWith('https://wiki.bambulab.com/en/')) return catalogueUrl
   const code = normaliseHmsCode(rawCode)
   return code ? `${HMS_GUIDE_URL}${encodeURIComponent(code)}` : undefined
+}
+
+export function presentPrinterError(entry: PrinterError, locale: Locale) {
+  const rawCode = entry.rawCode ?? entry.raw_code
+  return {
+    ...entry,
+    rawCode,
+    message: entry.translations?.[locale] ?? entry.message,
+    severity: hmsSeverity(rawCode),
+    guideUrl: hmsGuideUrl(rawCode, entry.guide_url),
+  }
 }

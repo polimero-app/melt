@@ -317,7 +317,8 @@ it switches the application id to the bundle identifier and breaks the match.
   filament metadata, settings format, and protocol parsers (AGPLv3)
 - [ha-bambulab](https://github.com/greghesp/ha-bambulab) — model-aware HMS and
   print-error catalogues, wiki links, AMS semantics, and the original P2S
-  sample and CA bundles (MIT)
+  sample and CA bundles (MIT); the bundled error data retains
+  [its upstream notice](crates/melt-core/data/bambu-errors.LICENSE)
 - [Bambu Bar](https://github.com/rolottr/bambu-bar) — a useful index of those
   upstream sources and compact LAN-monitoring presentation (MIT); its copied
   P2S sample is not an independent capture

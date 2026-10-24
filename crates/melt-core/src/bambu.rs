@@ -19,6 +19,7 @@ mod camera_manager;
 mod camera_negotiation;
 mod capabilities;
 mod discovery;
+mod error_catalogue;
 mod firmware;
 mod hms;
 mod identity;

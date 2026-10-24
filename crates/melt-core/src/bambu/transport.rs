@@ -3073,8 +3073,9 @@ fn parse_status_value_with_capabilities(
         id: synthetic_job_id(print, &name),
         name,
     });
-    let hms = super::hms::events(print);
-    let errors = status_errors(print, state, &hms);
+    let model = capabilities.identity.canonical;
+    let hms = super::hms::events(print, model);
+    let errors = status_errors(print, state, &hms, model);
     let fans = status_fans(print);
     let lights = lights(report);
     let effective_print = capabilities.effective_print(print);
@@ -3218,16 +3219,25 @@ fn status_errors(
     print: &Map<String, Value>,
     state: PrinterState,
     hms: &[crate::moonraker::HmsEvent],
+    model: super::CanonicalModel,
 ) -> Vec<StatusError> {
     let mut errors = Vec::new();
     if let Some(value) = integer(print.get("mc_print_error_code"))
         .or_else(|| integer(print.get("print_error")))
         .filter(|value| *value != 0)
     {
+        let raw_code = format!("{value:08X}");
+        let description =
+            super::error_catalogue::describe(super::error_catalogue::Kind::Print, &raw_code, model);
         errors.push(StatusError {
             code: "printer_error",
-            message: "printer reported an error".into(),
-            raw_code: Some(format!("{value:08X}")),
+            message: description
+                .message
+                .unwrap_or("printer reported an error")
+                .into(),
+            translations: description.translations,
+            guide_url: description.guide_url,
+            raw_code: Some(raw_code),
             image_id: print
                 .get("err2")
                 .and_then(|error| string(error.get("img_id")))
@@ -3239,6 +3249,8 @@ fn status_errors(
         errors.push(StatusError {
             code: event.code,
             message: event.message.clone(),
+            translations: event.translations.clone(),
+            guide_url: event.guide_url.clone(),
             raw_code: Some(event.raw_code.clone()),
             image_id: None,
             recoverable: None,
@@ -3248,6 +3260,8 @@ fn status_errors(
         errors.push(StatusError {
             code: "printer_error",
             message: "printer reported an error state".into(),
+            translations: BTreeMap::new(),
+            guide_url: None,
             raw_code: None,
             image_id: None,
             recoverable: None,
@@ -5330,6 +5344,29 @@ mod tests {
             status.errors[3].raw_code.as_deref(),
             Some("0300-9700-0001-0004")
         );
+    }
+
+    #[test]
+    fn offline_error_descriptions_use_the_fresh_model_and_preserve_policy() {
+        let client = Client::new(Profile::new("printer.local", "09400000000000", true).unwrap());
+        let report = format!(
+            r#"{{"print":{{"gcode_state":"IDLE","print_error":{},"hms":[{{"attr":{},"code":65537}}]}}}}"#,
+            0x0300_4000, 0x0300_0200
+        );
+        client.observe_runtime_status(report.as_bytes());
+        let status = client.parse_status(report.as_bytes()).unwrap();
+        assert_eq!(status.errors[0].raw_code.as_deref(), Some("03004000"));
+        assert!(status.errors[0].message.starts_with("Z axis homing failed"));
+        assert!(!status.errors[0].translations["pt-BR"].is_empty());
+        assert!(status.errors[1].message.contains("right nozzle"));
+        assert_eq!(
+            status.errors[1].raw_code.as_deref(),
+            Some("0300-0200-0001-0001")
+        );
+        assert_eq!(status.errors[1].code, "hardware_error");
+        let event = &status.extensions.bambu_lan.unwrap().hms[0];
+        assert_eq!(event.severity, crate::moonraker::HmsSeverity::Error);
+        assert!(event.alert);
     }
 
     #[test]

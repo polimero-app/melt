@@ -30,7 +30,7 @@ import {
 } from '../presentation'
 import { linkedCameras, printerSource, type CameraSummary } from '../cameras'
 import { plugsForPrinter, type PlugObservation, type PlugSummary } from '../plugs'
-import { hmsGuideUrl, hmsSeverity, type HmsSeverity } from '../hms'
+import { presentPrinterError, type HmsSeverity } from '../hms'
 import { nextSort, sortedBy, type FileSort, type SortKey, fileTypeLabel } from '../library'
 import { temperatureMaximums, type TemperaturePreset } from '../temperatures'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -224,11 +224,7 @@ const statusFaults = computed<StatusFault[]>(() => {
   const status = selectedStatus.value
   if (!status) return []
   return [
-    ...status.errors.map((entry) => ({
-      ...entry,
-      severity: hmsSeverity(entry.rawCode),
-      guideUrl: hmsGuideUrl(entry.rawCode),
-    })),
+    ...status.errors.map((entry) => presentPrinterError(entry, locale)),
     ...status.warnings.map((entry) => ({ ...entry, severity: 'warning' as const })),
   ]
 })

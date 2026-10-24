@@ -2,7 +2,12 @@ use serde_json::{Map, Value};
 
 use crate::moonraker::{HmsEvent, HmsSeverity};
 
-pub(super) fn events(print: &Map<String, Value>) -> Vec<HmsEvent> {
+use super::{
+    CanonicalModel,
+    error_catalogue::{self, Kind},
+};
+
+pub(super) fn events(print: &Map<String, Value>, model: CanonicalModel) -> Vec<HmsEvent> {
     print
         .get("hms")
         .and_then(Value::as_array)
@@ -11,7 +16,7 @@ pub(super) fn events(print: &Map<String, Value>) -> Vec<HmsEvent> {
         .filter_map(|item| {
             let attr = unsigned_word(item.get("attr"))?;
             let code = unsigned_word(item.get("code"))?;
-            (attr != 0 || code != 0).then(|| classify(attr, code))
+            (attr != 0 || code != 0).then(|| classify(attr, code, model))
         })
         .collect()
 }
@@ -20,7 +25,7 @@ fn unsigned_word(value: Option<&Value>) -> Option<u32> {
     value?.as_u64()?.try_into().ok()
 }
 
-fn classify(attr: u32, code: u32) -> HmsEvent {
+fn classify(attr: u32, code: u32, model: CanonicalModel) -> HmsEvent {
     let severity = match code >> 16 {
         1 => HmsSeverity::Error,
         2 => HmsSeverity::Warning,
@@ -35,9 +40,17 @@ fn classify(attr: u32, code: u32) -> HmsEvent {
         code & 0xffff,
     );
     let (name, message, alert) = classification(attr, code, severity);
+    let description = error_catalogue::describe(Kind::Hms, &raw_code.replace('-', ""), model);
     HmsEvent {
         code: name,
-        message: message.into(),
+        message: if name == "hardware_error" {
+            description.message.unwrap_or(message)
+        } else {
+            message
+        }
+        .into(),
+        translations: description.translations,
+        guide_url: description.guide_url,
         raw_code,
         severity,
         alert,
@@ -114,7 +127,7 @@ mod tests {
 
     fn event(attr: u32, code: u32) -> HmsEvent {
         let report = json!({ "hms": [{ "attr": attr, "code": code }] });
-        events(report.as_object().unwrap()).remove(0)
+        events(report.as_object().unwrap(), CanonicalModel::Unknown).remove(0)
     }
 
     #[test]
