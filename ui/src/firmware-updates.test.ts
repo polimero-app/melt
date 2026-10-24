@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  firmwareAssessmentClasses,
   hasAvailableUpdate,
   hasRequiredUpdate,
   updateEntryFor,
@@ -31,6 +32,15 @@ const entry: FirmwareUpdateEntry = {
 }
 
 describe('firmware update presentation', () => {
+  it('uses amber for newer releases and warnings, green for current, and gray for unknown or unsupported', () => {
+    for (const assessment of ['required', 'confirmedAvailable', 'deviceCatalogueNewer', 'publicReleaseNewer', 'conflict'] as const) {
+      expect(firmwareAssessmentClasses(assessment)).toBe('bg-amber-100 text-amber-800 dark:bg-amber-400/10 dark:text-amber-300')
+    }
+    expect(firmwareAssessmentClasses('current')).toContain('bg-emerald-100')
+    expect(firmwareAssessmentClasses('unknown')).toContain('bg-gray-100')
+    expect(firmwareAssessmentClasses('unsupported')).toContain('bg-gray-100')
+  })
+
   it('matches profiles case-insensitively and identifies actionable evidence', () => {
     expect(updateEntryFor([entry], 'workshop')).toBe(entry)
     expect(hasAvailableUpdate(entry)).toBe(true)

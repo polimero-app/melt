@@ -46,6 +46,12 @@ export type FirmwareUpdateEntry = {
   error?: { code: string; detail?: string }
 }
 
+export function firmwareAssessmentClasses(assessment: FirmwareUpdateAssessment): string {
+  if (assessment === 'current') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300'
+  if (assessment === 'unknown' || assessment === 'unsupported') return 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300'
+  return 'bg-amber-100 text-amber-800 dark:bg-amber-400/10 dark:text-amber-300'
+}
+
 export function hasAvailableUpdate(entry: FirmwareUpdateEntry | undefined) {
   return entry?.report.availability === 'available'
 }

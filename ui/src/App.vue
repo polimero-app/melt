@@ -9,13 +9,14 @@ import { clampTarget, formatDuration, remainingTimePresentation } from './format
 import { dryingBounds, dryingDefaults, dryingFault, dryingRequestValid, dryingStoppable, dryingTargetShown, type AmsDrying, type DryingStatus } from './drying'
 import { printTargetState } from './printing'
 import { printStageLabel } from './stages'
-import { awaitsFirstSample, badgeDotClasses, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
+import { awaitsFirstSample, badgeDotClasses, filamentColor, filamentFillPercent, isActiveJobState, lightModeMessageKey, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { cameraPlayback, cameraTransportLabels, linkChanges, linkedCameras, printerSource, type CameraPlayback, type CameraSummary, type Quality } from './cameras'
 import { plugsForCamera, plugsForPrinter, snapshotPlug, type PlugObservation, type PlugSummary, type PowerState } from './plugs'
 import { hmsGuideUrl, hmsSeverity, type HmsSeverity } from './hms'
 import { printerDraftsMatch, validateSlicerDraft, type PrinterDraftFields } from './forms'
 import {
+  firmwareAssessmentClasses,
   hasAvailableUpdate,
   hasRequiredUpdate,
   updateEntryFor,
@@ -652,15 +653,6 @@ const firmwareComponentLabel = (kind: FirmwareUpdateComponentKind) => t(
       ? 'firmware.accessoryFirmware'
       : 'firmware.printerSoftware',
 )
-const firmwareAvailabilityLabel = (entry: FirmwareUpdateEntry) => t(
-  entry.report.availability === 'available'
-    ? 'firmware.available'
-    : entry.report.availability === 'current'
-      ? 'firmware.current'
-      : entry.report.availability === 'unsupported'
-        ? 'firmware.unsupported'
-        : 'firmware.unknown',
-)
 const firmwareAssessmentLabel = (assessment: FirmwareUpdateAssessment) => {
   const key: MessageKey = assessment === 'required'
     ? 'firmware.assessmentRequired'
@@ -689,12 +681,9 @@ const firmwareEvidenceLabel = (role: FirmwareEvidenceRole) => {
         : 'firmware.installed'
   return t(key)
 }
-const componentHasEvidence = (component: FirmwareUpdateEntry['report']['components'][number], role: FirmwareEvidenceRole) =>
-  component.evidence?.some((evidence) => evidence.role === role) ?? false
 const firmwareEvidenceFor = (component: FirmwareUpdateEntry['report']['components'][number]) =>
   (component.evidence ?? []).filter((evidence) => evidence.role !== 'installed' && Boolean(evidence.version))
 const firmwareComparableCount = (entry: FirmwareUpdateEntry) => entry.report.components.filter((component) => firmwareEvidenceFor(component).length > 0).length
-const firmwareEvidenceRoles: FirmwareEvidenceRole[] = ['printerAdvertised', 'deviceCatalogue', 'publicStable']
 const firmwareSourceName = (source: FirmwareSourceCheck['source']) => {
   if (source === 'bambuLanInventory') return t('firmware.installed')
   if (source === 'bambuLanAdvertisement') return t('firmware.sourcePrinter')
@@ -2894,7 +2883,7 @@ onUnmounted(() => {
                     :label="lightLabel(key)"
                     @update:model-value="toggleLight(key, $event)"
                   />
-                  <span v-else class="text-xs text-gray-400 dark:text-gray-500">{{ value.mode }} · {{ t('control.telemetryOnly') }}</span>
+                  <span v-else class="text-xs text-gray-400 dark:text-gray-500">{{ t(lightModeMessageKey(value.mode)) }} · {{ t('control.telemetryOnly') }}</span>
                 </div>
               </div>
             </Card>
@@ -3115,17 +3104,6 @@ onUnmounted(() => {
 
           <Card class="overflow-hidden">
             <CardHeader :title="t('firmware.title')" :icon="PhCpu">
-              <template #suffix>
-                <span
-                  v-if="selectedFirmwareUpdate"
-                  class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium"
-                  :class="selectedFirmwareUpdate.report.availability === 'available'
-                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-400/10 dark:text-amber-300'
-                    : selectedFirmwareUpdate.report.availability === 'current'
-                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300'
-                      : 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300'"
-                >{{ firmwareAvailabilityLabel(selectedFirmwareUpdate) }}</span>
-              </template>
               <Button
                 variant="secondary"
                 :disabled="firmwareRefreshing"
@@ -3153,18 +3131,13 @@ onUnmounted(() => {
                 </p>
                 <div class="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 dark:border-white/10 dark:bg-white/5">
                   <span class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ t('firmware.assessment') }}</span>
-                  <span class="rounded-full bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800 dark:bg-cyan-400/10 dark:text-cyan-300">{{ firmwareAssessmentLabel(selectedFirmwareUpdate.report.assessment) }}</span>
+                  <span class="rounded-full px-2 py-0.5 text-xs font-semibold" :class="firmwareAssessmentClasses(selectedFirmwareUpdate.report.assessment)">{{ firmwareAssessmentLabel(selectedFirmwareUpdate.report.assessment) }}</span>
                 </div>
                 <ul v-if="selectedFirmwareUpdate.report.issues.length" class="mb-4 space-y-1 text-sm text-gray-700 dark:text-gray-300">
                   <li v-for="issue in selectedFirmwareUpdate.report.issues" :key="issue.code">{{ issue.message }}</li>
                 </ul>
                 <details class="mb-4 text-xs text-gray-500 dark:text-gray-400">
                   <summary class="cursor-pointer select-none">{{ t('firmware.evidence') }} · {{ selectedFirmwareUpdate.report.components.length }} {{ t('firmware.modules') }} · {{ firmwareComparableCount(selectedFirmwareUpdate) }} {{ t('firmware.comparable') }}</summary>
-                  <div class="mt-2 flex flex-wrap gap-2">
-                    <span v-for="role in firmwareEvidenceRoles" v-show="selectedFirmwareUpdate.report.components.some((component) => componentHasEvidence(component, role))" :key="role" class="rounded-full border border-gray-300 px-2 py-0.5 text-xs text-gray-600 dark:border-white/15 dark:text-gray-300">
-                      {{ firmwareEvidenceLabel(role) }}
-                    </span>
-                  </div>
                   <div v-if="selectedFirmwareUpdate.sources?.length" class="mt-2 flex flex-wrap gap-2">
                     <span v-for="source in selectedFirmwareUpdate.sources" :key="source.source" class="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 dark:border-white/10">
                       <span class="font-medium text-gray-700 dark:text-gray-300">{{ firmwareSourceName(source.source) }}</span>
@@ -3628,7 +3601,7 @@ onUnmounted(() => {
                   </div>
                   <div class="flex flex-wrap gap-x-1">
                     <dt class="text-gray-500 dark:text-gray-400">{{ t('settingsView.quirks') }}:</dt>
-                    <dd>{{ printer.quirks.length ? printer.quirks.map((quirk) => `${quirk.id} (${quirk.active ? 'active' : quirk.qualification})`).join(', ') : t('settingsView.none') }}</dd>
+                    <dd>{{ printer.quirks.length ? printer.quirks.map((quirk) => `${quirk.id} (${quirk.active ? t('settingsView.active') : quirk.qualification})`).join(', ') : t('settingsView.none') }}</dd>
                   </div>
                 </dl>
                 <p v-if="printer.camera.rejectedAdvertisement" class="mt-1 text-xs text-amber-700 dark:text-amber-300">{{ printer.camera.rejectedAdvertisement }}</p>
@@ -4034,7 +4007,7 @@ onUnmounted(() => {
       </form>
       <template #footer>
         <Button :disabled="cameraSaving" @click="cameraFormOpen = false">{{ t('common.cancel') }}</Button>
-        <Button variant="primary" type="submit" form="camera-form" :disabled="cameraSaving">{{ cameraSaving ? t('common.adding') : editingCamera ? t('profiles.save') : t('camerasView.add') }}</Button>
+        <Button variant="primary" type="submit" form="camera-form" :disabled="cameraSaving">{{ editingCamera ? (cameraSaving ? t('common.saving') : t('profiles.save')) : (cameraSaving ? t('common.adding') : t('camerasView.add')) }}</Button>
       </template>
     </SlideOver>
 
@@ -4086,7 +4059,7 @@ onUnmounted(() => {
       </form>
       <template #footer>
         <Button :disabled="plugSaving" @click="plugFormOpen = false">{{ t('common.cancel') }}</Button>
-        <Button variant="primary" type="submit" form="plug-form" :disabled="plugSaving">{{ plugSaving ? t('common.adding') : editingPlug ? t('profiles.save') : t('plugsView.add') }}</Button>
+        <Button variant="primary" type="submit" form="plug-form" :disabled="plugSaving">{{ editingPlug ? (plugSaving ? t('common.saving') : t('profiles.save')) : (plugSaving ? t('common.adding') : t('plugsView.add')) }}</Button>
       </template>
     </SlideOver>
 

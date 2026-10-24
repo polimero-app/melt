@@ -53,8 +53,8 @@ actions together. This capture uses an illustrated sample model preview.
 Per-printer comparison of installed module versions against printer-advertised,
 device-catalogue, and public-stable evidence.
 
-This sample deliberately separates “Public stable release is newer” from
-“Availability unknown”; it does not represent an actual release offer.
+The assessment distinguishes a newer public stable release from an update
+confirmed by the printer; a public release is not an actual release offer.
 
 ![Firmware and software comparison view for a single printer](../screenshots/firmware-software.png)
 
