@@ -255,10 +255,11 @@ const firmwareSourceOutcomeLabel = (outcome: FirmwareSourceCheck['outcome']): st
   return t(key)
 }
 
+const busyPrinters = computed(() => printers.value.filter((printer) => badgeFor(printer.name) === 'busy').length)
 const fleetStats = computed(() => [
   { label: t('printersView.totalPrinters'), value: printers.value.length, tone: 'text-gray-900 dark:text-white' },
   { label: t('printersView.online'), value: printers.value.filter((printer) => isReachable(badgeFor(printer.name))).length, tone: 'text-green-600 dark:text-green-400' },
-  { label: t('printersView.printingNow'), value: printers.value.filter((printer) => badgeFor(printer.name) === 'busy').length, tone: 'text-yellow-600 dark:text-yellow-400' },
+  { label: t('printersView.printingNow'), value: busyPrinters.value, tone: busyPrinters.value ? 'text-yellow-600 dark:text-yellow-400' : 'text-gray-900 dark:text-white' },
 ])
 
 function openFirmwareManagement(printer: Printer) {

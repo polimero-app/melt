@@ -190,6 +190,7 @@ export type MessageKey =
   | "plugsView.connection.online"
   | "plugsView.connection.unreachable"
   | "plugsView.connection.authFailed"
+  | "plugControl.editCredentials"
   | "plugsView.connection.locked"
   | "plugsView.connection.unsupported"
   | "plugControl.on"
@@ -379,6 +380,7 @@ export type MessageKey =
   | "camera.maximize"
   | "camera.unavailable"
   | "camera.checkConnection"
+  | "camera.checkCameraConnection"
   | "camera.refreshFeed"
   | "camera.restored"
   | "camera.snapshotSaved"
@@ -903,6 +905,7 @@ const messages: Record<Locale, Messages> = {
     "plugsView.connection.online": "Connected",
     "plugsView.connection.unreachable": "Unreachable",
     "plugsView.connection.authFailed": "Sign-in failed",
+    "plugControl.editCredentials": "Edit credentials",
     "plugsView.connection.locked": "Locked out",
     "plugsView.connection.unsupported": "Unsupported device",
     "plugControl.on": "Turn on",
@@ -1092,6 +1095,7 @@ const messages: Record<Locale, Messages> = {
     "camera.maximize": "Maximize camera",
     "camera.unavailable": "Camera unavailable",
     "camera.checkConnection": "Check the printer connection and try again.",
+    "camera.checkCameraConnection": "Check the camera connection and try again.",
     "camera.refreshFeed": "Refresh feed",
     "camera.restored": "Camera connection restored",
     "camera.snapshotSaved": "Snapshot saved",
@@ -1613,6 +1617,7 @@ const messages: Record<Locale, Messages> = {
     "plugsView.connection.online": "Conectada",
     "plugsView.connection.unreachable": "Inacessível",
     "plugsView.connection.authFailed": "Falha no login",
+    "plugControl.editCredentials": "Editar credenciais",
     "plugsView.connection.locked": "Bloqueada",
     "plugsView.connection.unsupported": "Dispositivo não suportado",
     "plugControl.on": "Ligar",
@@ -1802,6 +1807,7 @@ const messages: Record<Locale, Messages> = {
     "camera.maximize": "Maximizar câmera",
     "camera.unavailable": "Câmera indisponível",
     "camera.checkConnection": "Verifique a conexão da impressora e tente novamente.",
+    "camera.checkCameraConnection": "Verifique a conexão da câmera e tente novamente.",
     "camera.refreshFeed": "Atualizar transmissão",
     "camera.restored": "Conexão da câmera restabelecida",
     "camera.snapshotSaved": "Captura salva",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, inject, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { PhArrowClockwise, PhPlug, PhPower } from '@phosphor-icons/vue'
 import type { MessageKey } from '../i18n'
@@ -24,6 +24,10 @@ const props = withDefaults(defineProps<{
 
 // After a confirmed "on" the parent restarts the affected visible camera viewers.
 const emit = defineEmits<{ changed: [state: PowerState] }>()
+
+// Provided by App: opens the plug's edit form. Absent in isolated renders.
+const editCredentials = inject<((id: string) => void) | null>('editPlugCredentials', null)
+const authFailed = computed(() => props.observation?.connection === 'authFailed')
 
 const busy = ref(false)
 const confirmOpen = ref(false)
@@ -130,7 +134,7 @@ function confirmOff() {
           <span v-if="observation && observation.powerWatts !== null" class="text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{{ t('plugsView.power', { watts: observation.powerWatts }) }}</span>
         </div>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ attached }}</p>
-        <p class="mt-0.5 text-xs" :class="observation?.connection === 'authFailed' ? 'text-red-700 dark:text-red-400' : observation && observation.connection !== 'online' ? 'text-amber-700 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'">{{ metaLine }}</p>
+        <p class="mt-0.5 text-xs" :class="authFailed ? 'text-red-700 dark:text-red-400' : observation && observation.connection !== 'online' ? 'text-amber-700 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'">{{ metaLine }}<template v-if="authFailed && editCredentials"> · <button type="button" class="font-medium underline hover:no-underline" @click="editCredentials(plug.id)">{{ t('plugControl.editCredentials') }}</button></template></p>
       </div>
       <div class="ml-auto flex flex-wrap justify-end gap-2">
         <!-- Unknown relay shows both: a guess could hide the action the user needs. -->

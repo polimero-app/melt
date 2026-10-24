@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watchEffect, type Component } from 'vue'
+import { computed, onMounted, provide, onUnmounted, ref, watchEffect, type Component } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { locales, preferredLocale, translate, type Locale, type MessageKey } from './i18n'
@@ -521,6 +521,11 @@ onUnmounted(() => {
 
 const printersView = ref<InstanceType<typeof PrintersView>>()
 const filesView = ref<InstanceType<typeof FilesView>>()
+const plugEditRequest = ref<string>()
+provide('editPlugCredentials', (id: string) => {
+  plugEditRequest.value = id
+  goTo('plugs')
+})
 const viewActions = { t, message, showToast, askConfirmation }
 
 function openEdit(printer: Printer) {
@@ -775,6 +780,7 @@ function requestPrint(file: FileEntry, printer?: string) {
         :refresh-plugs="refreshPlugs"
       />
       <PlugsView
+        v-model:edit-request="plugEditRequest"
         :active="activeView === 'plugs'"
         v-bind="viewActions"
         :printers="printers"
