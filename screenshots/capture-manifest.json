@@ -1,9 +1,9 @@
 {
-  "capturedAt": "2026-10-24T03:50:24+00:00",
+  "capturedAt": "2026-10-24T03:57:45+00:00",
   "scenarioTime": "2026-10-12T12:00:00Z",
-  "sourceCommit": "f28a932e28849834f755da3ce9e6c2f331eaabd8",
-  "frontendSourceSha256": "90f9714ee4420ab38fcc929d4fd96c396d54319b747cbbf09999e6aa971f1513",
-  "fixtureSha256": "1320e5cf55545cbe793735efb4f40aa676221b4b982570f1c876a0f987d00732",
+  "sourceCommit": "d6477e6df722398e6b29643a682b29f42fc702bd",
+  "frontendSourceSha256": "25323180080e1eeb8704a7f5fa05263579cc4b288f4391218d8af2e0cb2741ae",
+  "fixtureSha256": "d774f46ce2820c94099db64221a1af70a5d82569de42642a01a746a974337393",
   "viewport": {
     "width": 1600,
     "height": 1100,
@@ -62,7 +62,7 @@
         3200,
         3576
       ],
-      "sha256": "50774fa424725cb3474f5261f2ecfb816504145b76127128400c405fcee5c1fa",
+      "sha256": "51d39b0c0108942d9da37cf3042ae391c0bf8a3f659b2149e0a6d182472c8835",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -74,7 +74,19 @@
         3200,
         3576
       ],
-      "sha256": "07ac50b113725661189cba30aaeefea684b73c6190c8b558915f1838229a836b",
+      "sha256": "efbdcc6fccfb50e0a5f06fc0ee6b4f99e5bf0ef25bd97c2b19795d0fd8c9b367",
+      "playback": [
+        "LIVE \u00b7 H.264"
+      ]
+    },
+    {
+      "file": "printer-control-compact.png",
+      "view": "compact",
+      "size": [
+        2560,
+        3302
+      ],
+      "sha256": "de754280540fdb9b655526a2393d6215d6c3ce0d909815287d89c87e56068678",
       "playback": [
         "LIVE \u00b7 H.264"
       ]

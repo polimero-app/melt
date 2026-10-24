@@ -65,7 +65,7 @@
               {"slot": 0, "trayIndex": 0, "present": true, "filamentType": "PLA", "color": "29B8D1FF", "remainingPercent": 82, "remainingGrams": 820},
               {"slot": 1, "trayIndex": 1, "present": true, "filamentType": "PLA", "color": "F3F4F6FF", "remainingPercent": 65, "remainingGrams": 650},
               {"slot": 2, "trayIndex": 2, "present": true, "filamentType": "PETG", "color": "F59E0BFF", "remainingPercent": 91, "remainingGrams": 910},
-              {"slot": 3, "trayIndex": 3, "present": true, "filamentType": "PLA", "color": "222B38FF", "remainingPercent": 54, "remainingGrams": 540}
+              {"slot": 3, "trayIndex": 3, "present": false}
             ], "drying": {"status": "off", "active": false, "controllable": true}},
             {"id": 128, "kind": "AMS HT", "humidityPercent": 12, "humidityIndex": 2, "humidityLevel": "dry", "temperature": 65, "trays": [
               {"slot": 0, "trayIndex": 128, "present": true, "filamentType": "PETG", "color": "A9B5C6FF", "remainingPercent": 76, "remainingGrams": 760}

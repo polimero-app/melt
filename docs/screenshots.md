@@ -78,6 +78,15 @@ remain visible above locked temperatures and motion controls.
 
 ![Printer control view for a printer actively printing](../screenshots/printer-control-printing.png)
 
+## Printer control — compact window
+
+The control view at a 1280 px window: printer tabs stay in the header, and a
+printer that reports only a read-only chamber reading (such as the A1 mini)
+omits the chamber row. The sample also shows an empty AMS slot as a dashed
+outline.
+
+![Printer control view in a 1280 px wide window](../screenshots/printer-control-compact.png)
+
 ## Cameras
 
 Independent camera profiles, linked printers, per-viewer High/Low quality,

@@ -237,12 +237,15 @@ const statusFaults = computed<StatusFault[]>(() => {
 // optional rather than absent.
 const temperatureRows = computed<{ key: string; value: TemperatureControl }[]>(() => {
   const controls = Object.entries(selectedStatus.value?.controls?.temperatures ?? {})
-  if (controls.length) return controls.map(([key, value]) => ({ key, value }))
   const temperatures = selectedStatus.value?.temperatures ?? {}
-  return (['nozzle', 'bed', 'chamber'] as const).flatMap((key) => {
-    const value = temperatures[key]
-    return value ? [{ key, value: { kind: key, ...value, controllable: Boolean(capabilities?.temperatureWrite) } }] : []
-  })
+  const rows = controls.length
+    ? controls.map(([key, value]) => ({ key, value }))
+    : (['nozzle', 'bed', 'chamber'] as const).flatMap((key) => {
+      const value = temperatures[key]
+      return value ? [{ key, value: { kind: key, ...value, controllable: Boolean(capabilities?.temperatureWrite) } }] : []
+    })
+  // ponytail: a chamber with no target that cannot be controlled is a mainboard reading (A1 mini), not a chamber
+  return rows.filter(({ value }) => value.kind !== 'chamber' || value.controllable || value.targetCelsius !== undefined)
 })
 
 const fanRows = computed(() => {
@@ -1325,13 +1328,17 @@ onUnmounted(() => {
                   :aria-label="`${system.name} ${material.slot}`"
                   :aria-current="material.active ? 'true' : undefined"
                   class="relative size-18 shrink-0 overflow-hidden rounded-md border"
-                  :class="material.active ? 'border-cyan-700 ring-2 ring-cyan-700 dark:border-cyan-400 dark:ring-cyan-400' : 'border-black/10 dark:border-white/15'"
-                  :style="{ backgroundColor: material.color, color: textColorFor(material.color) }"
+                  :class="[
+                    material.active ? 'border-cyan-700 ring-2 ring-cyan-700 dark:border-cyan-400 dark:ring-cyan-400' : 'border-black/10 dark:border-white/15',
+                    material.present === false && '!border-dashed !border-gray-400 text-gray-500 dark:!border-white/30 dark:text-gray-400',
+                  ]"
+                  :style="material.present === false ? undefined : { backgroundColor: material.color, color: textColorFor(material.color) }"
                   :title="material.present === undefined ? `${t('materials.presenceUnknown')}; ${material.colorLabel}` : material.colorLabel"
                 >
                   <PhCheckCircle v-if="material.active" class="absolute right-1 top-1 z-20 size-3 rounded-full bg-white text-cyan-700 dark:bg-gray-950 dark:text-cyan-400" aria-hidden="true" />
                   <span v-if="material.active" class="sr-only">{{ t('materials.active') }}</span>
                   <span
+                    v-if="material.present !== false"
                     class="absolute inset-x-0 top-0 transition-[height] duration-200"
                     :style="{ height: `${100 - material.remainingPercent}%`, backgroundColor: emptyFilamentOverlayFor(material.color) }"
                   ></span>
