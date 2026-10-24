@@ -4023,6 +4023,14 @@ fn ams_data(print: &Map<String, Value>) -> Option<AmsData> {
     // Bit 5 is Bambu Studio's `is_support_remote_dry`. P1-class firmware omits
     // `fun2` and silently ignores the command, so absence means screen-only.
     let remote_dry = fun2_bit(print, 5).unwrap_or(false);
+    let presence_bits = print
+        .get("ams")
+        .and_then(|ams| ams.get("tray_exist_bits"))
+        .and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| u64::from_str_radix(value.as_str()?.trim(), 16).ok())
+        });
     let mut units: Vec<AmsUnit> = print
         .get("ams")
         .and_then(|ams| ams.get("ams"))
@@ -4030,7 +4038,7 @@ fn ams_data(print: &Map<String, Value>) -> Option<AmsData> {
         .map(|entries| {
             entries
                 .iter()
-                .map(|unit| ams_unit(unit, remote_dry))
+                .map(|unit| ams_unit(unit, remote_dry, presence_bits))
                 .collect()
         })
         .unwrap_or_default();
@@ -4038,7 +4046,7 @@ fn ams_data(print: &Map<String, Value>) -> Option<AmsData> {
     (!units.is_empty()).then_some(AmsData { units })
 }
 
-fn ams_unit(unit: &Value, remote_dry: bool) -> AmsUnit {
+fn ams_unit(unit: &Value, remote_dry: bool, presence_bits: Option<u64>) -> AmsUnit {
     let humidity = integer(unit.get("humidity")).and_then(ams_humidity);
     AmsUnit {
         id: integer(unit.get("id"))
@@ -4062,6 +4070,7 @@ fn ams_unit(unit: &Value, remote_dry: bool) -> AmsUnit {
                         slot: integer(tray.get("id"))
                             .and_then(|value| value.try_into().ok())
                             .unwrap_or_default(),
+                        present: ams_tray_present(unit, tray, presence_bits),
                         tray_index: canonical_tray_index(unit, tray),
                         tray_info_id: string(tray.get("tray_info_idx"))
                             .filter(|value| !value.is_empty()),
@@ -4128,6 +4137,7 @@ fn virtual_tray_units(print: &Map<String, Value>) -> Vec<AmsUnit> {
             drying: None,
             trays: vec![AmsTray {
                 slot: 0,
+                present: None,
                 tray_index: integer(tray.get("id"))
                     .and_then(|value| value.try_into().ok())
                     .or(Some(254)),
@@ -4168,12 +4178,32 @@ fn canonical_tray_index(unit: &Value, tray: &Value) -> Option<i32> {
     }
     let unit_id = integer(unit.get("id"))?;
     let slot = integer(tray.get("id"))?;
-    let index = if unit_id >= 128 {
+    let index = if ams_type(unit) == Some(5) && (0..4).contains(&slot) {
+        24 + slot
+    } else if unit_id >= 128 {
         unit_id
     } else {
         unit_id.checked_mul(4)?.checked_add(slot)?
     };
     index.try_into().ok()
+}
+
+fn ams_type(unit: &Value) -> Option<u8> {
+    let info = u64::from_str_radix(unit.get("info")?.as_str()?.trim(), 16).ok()?;
+    Some((info & 0xf) as u8)
+}
+
+fn ams_tray_present(unit: &Value, tray: &Value, bits: Option<u64>) -> Option<bool> {
+    let unit_id = integer(unit.get("id"))?;
+    let slot = integer(tray.get("id"))?;
+    let bit = match (unit_id, slot, ams_type(unit)) {
+        (0..=3, 0..=3, Some(5)) => 24 + slot,
+        (0..=3, 0..=3, None | Some(1..=3)) => unit_id * 4 + slot,
+        (128..=152, 0, None | Some(4)) => 16 + unit_id - 128,
+        _ => return None,
+    };
+    let mask = 1_u64.checked_shl(bit.try_into().ok()?)?;
+    Some(bits? & mask != 0)
 }
 
 fn virtual_tray_color(tray: &Value) -> Option<String> {
@@ -5351,14 +5381,14 @@ mod tests {
         assert_eq!(unit.humidity_range, None);
 
         for wire_index in 1..=5 {
-            let unit = ams_unit(&json!({"humidity": wire_index}), false);
+            let unit = ams_unit(&json!({"humidity": wire_index}), false, None);
             assert_eq!(unit.humidity_index, Some(6 - wire_index as u8));
             assert_eq!(unit.humidity_percent, None);
             assert_eq!(unit.humidity_range, None);
         }
         for wire_index in [0, 6] {
             assert_eq!(
-                ams_unit(&json!({"humidity": wire_index}), false).humidity_index,
+                ams_unit(&json!({"humidity": wire_index}), false, None).humidity_index,
                 None
             );
         }
@@ -5377,10 +5407,65 @@ mod tests {
             (json!("infinity"), None),
             (Value::Null, None),
         ] {
-            let unit = ams_unit(&json!({"humidity": "2", "humidity_raw": raw}), false);
+            let unit = ams_unit(&json!({"humidity": "2", "humidity_raw": raw}), false, None);
             assert_eq!(unit.humidity_percent, expected, "{raw}");
             assert_eq!(unit.humidity_index, Some(4));
         }
+    }
+
+    #[test]
+    fn ams_presence_outranks_cached_material_and_firmware_variant_state() {
+        let print = json!({"ams": {"tray_exist_bits": "10001", "ams": [
+            {"id": "0", "tray": [
+                {"id": "0", "state": 9},
+                {"id": "1", "state": 11, "tray_type": "PLA", "remain": 80}
+            ]},
+            {"id": "128", "tray": [{"id": "0"}]},
+            {"id": "129", "tray": [{"id": "0"}]}
+        ]}, "vt_tray": {"id": "254", "tray_type": "PLA"}});
+        let units = ams_data(print.as_object().unwrap()).unwrap().units;
+        assert_eq!(units[0].trays[0].present, Some(true));
+        assert_eq!(units[0].trays[1].present, Some(false));
+        assert_eq!(units[0].trays[1].filament_type.as_deref(), Some("PLA"));
+        assert_eq!(units[1].trays[0].present, Some(true));
+        assert_eq!(units[2].trays[0].present, Some(false));
+        assert_eq!(units[3].trays[0].present, None);
+    }
+
+    #[test]
+    fn ams_presence_keeps_missing_malformed_and_unsupported_layouts_unknown() {
+        let unit = json!({"id": "0", "tray": [{"id": "0", "tray_type": "PLA"}]});
+        for mask in [Value::Null, json!("not-hex"), json!(-1)] {
+            let print = json!({"ams": {"tray_exist_bits": mask, "ams": [unit]}});
+            assert_eq!(
+                ams_data(print.as_object().unwrap()).unwrap().units[0].trays[0].present,
+                None
+            );
+        }
+        for (unit_id, slot, info) in [
+            (4, 0, "1"),
+            (128, 1, "4"),
+            (153, 0, "4"),
+            (0, 4, "1"),
+            (0, 0, "6"),
+        ] {
+            assert_eq!(
+                ams_tray_present(
+                    &json!({"id": unit_id, "info": info}),
+                    &json!({"id": slot}),
+                    Some(u64::MAX)
+                ),
+                None
+            );
+        }
+        let unit = json!({"id": "0", "info": "1005", "tray": [{"id": "2"}]});
+        let tray = &unit["tray"][0];
+        assert_eq!(ams_tray_present(&unit, tray, Some(1 << 26)), Some(true));
+        assert_eq!(canonical_tray_index(&unit, tray), Some(26));
+        assert_eq!(
+            ams_tray_present(&json!({"id": "152"}), &json!({"id": "0"}), Some(1 << 40)),
+            Some(true)
+        );
     }
 
     // Sanitized from a 2026-09-19 dakota capture (H2-class, fw 01.02.00.00).

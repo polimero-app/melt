@@ -182,6 +182,23 @@ optional `humidityRange` field is no longer populated.
 The source-derived P2S fixture identifies OTA `01.01.00.00` and is provisional
 evidence, not a new physical-printer qualification.
 
+## Physical AMS presence and print preflight
+
+`present` is an optional per-tray physical-presence flag read from
+`tray_exist_bits`, independently of retained filament identity, colour,
+remaining quantity and firmware-variant `state`. Missing or malformed masks
+and unsupported layouts remain unknown, not empty. The evidenced layouts
+are ordinary units 0–3 with slots 0–3, HT units 128–152 with slot 0, and
+explicit type-5 mixed AMS Lite reports. HT occupancy starts at bit 16 rather
+than bit 128; mixed Lite slots start at bit 24. External holders have no
+internal occupancy bit.
+
+Explicitly absent trays cannot satisfy preflight filament requirements even
+when their cached identity and colour match. CLI/desktop material cards show
+them as empty without stale quantities; unknown presence retains the reported
+metadata without claiming an empty slot. No universal tray-state heuristic is
+used. These source-scoped rules remain provisional hardware evidence.
+
 ## AMS drying
 
 Heater-equipped AMS units (AMS 2 Pro, AMS HT) report `dry_time` (minutes

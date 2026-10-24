@@ -398,6 +398,9 @@ export type MessageKey =
   | "materials.ready"
   | "materials.humidity"
   | "materials.humidityIndex"
+  | "materials.empty"
+  | "materials.unknownFilament"
+  | "materials.presenceUnknown"
   | "materials.temperature"
   | "materials.colorLabel"
   | "materials.color.unknown"
@@ -1100,6 +1103,9 @@ const messages: Record<Locale, Messages> = {
     "materials.ready": "Ready",
     "materials.humidity": "Humidity",
     "materials.humidityIndex": "Level {index}/5 (1 dry, 5 wet)",
+    "materials.empty": "Empty",
+    "materials.unknownFilament": "Unknown material",
+    "materials.presenceUnknown": "Physical spool presence is unknown",
     "materials.temperature": "Temperature",
     "materials.colorLabel": "Approximate color: {name} ({hex})",
     "materials.color.unknown": "Unknown color",
@@ -1805,6 +1811,9 @@ const messages: Record<Locale, Messages> = {
     "materials.ready": "Pronto",
     "materials.humidity": "Umidade",
     "materials.humidityIndex": "Nível {index}/5 (1 seco, 5 úmido)",
+    "materials.empty": "Vazio",
+    "materials.unknownFilament": "Material desconhecido",
+    "materials.presenceUnknown": "Presença física do carretel desconhecida",
     "materials.temperature": "Temperatura",
     "materials.colorLabel": "Cor aproximada: {name} ({hex})",
     "materials.color.unknown": "Cor desconhecida",

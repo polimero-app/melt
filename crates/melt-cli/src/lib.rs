@@ -1667,7 +1667,7 @@ fn human_status(name: &str, status: &moonraker::Status, detailed: bool) -> Strin
             for tray in &unit.trays {
                 let mut line = format!("    Slot {}: ", tray.slot);
                 match &tray.filament_type {
-                    Some(filament) => {
+                    Some(filament) if tray.present != Some(false) => {
                         line.push_str(&sanitize(filament));
                         if let Some(color) = &tray.color {
                             line.push_str(&format!(" {}", sanitize(color)));
@@ -1676,7 +1676,11 @@ fn human_status(name: &str, status: &moonraker::Status, detailed: bool) -> Strin
                             line.push_str(&format!(" ({remaining}%)"));
                         }
                     }
-                    None => line.push_str("(empty)"),
+                    _ => line.push_str(match tray.present {
+                        Some(false) => "(empty)",
+                        Some(true) => "(unidentified filament)",
+                        None => "(unknown)",
+                    }),
                 }
                 lines.push(line);
             }
@@ -5931,10 +5935,36 @@ mod tests {
         assert!(detailed.contains("Timelapse: off"), "{detailed}");
         assert!(
             detailed.contains(
-                "AMS:\n  Unit 0 (humidity: 25%, temp: 25.4 C):\n    Slot 0: PLA 161616FF (42%)\n    Slot 1: (empty)"
+                "AMS:\n  Unit 0 (humidity: 25%, temp: 25.4 C):\n    Slot 0: PLA 161616FF (42%)\n    Slot 1: (unknown)"
             ),
             "{detailed}"
         );
+    }
+
+    #[test]
+    fn detailed_status_distinguishes_absent_unidentified_and_unknown_trays() {
+        let mut status = sample_status();
+        let trays = &mut status
+            .extensions
+            .bambu_lan
+            .as_mut()
+            .unwrap()
+            .ams
+            .as_mut()
+            .unwrap()
+            .units[0]
+            .trays;
+        trays[0].present = Some(false);
+        trays[1].present = Some(true);
+        trays.push(moonraker::AmsTray {
+            slot: 2,
+            ..Default::default()
+        });
+        let detailed = human_status("dakota", &status, true);
+        assert!(detailed.contains("Slot 0: (empty)"));
+        assert!(detailed.contains("Slot 1: (unidentified filament)"));
+        assert!(detailed.contains("Slot 2: (unknown)"));
+        assert!(!detailed.contains("PLA 161616FF"));
     }
 
     #[test]

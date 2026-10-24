@@ -357,19 +357,21 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
     temperature: unit.temperature,
     humidity: formatAmsHumidity(unit.humidityPercent, unit.humidityIndex, locale),
     drying: unit.drying,
-    firstFilament: unit.trays.find((tray) => tray.filamentType)?.filamentType,
+    firstFilament: unit.trays.find((tray) => tray.present !== false && tray.filamentType)?.filamentType,
     slots: unit.trays.map((tray) => {
-      const color = filamentColor(tray.color)
-      const colorName = filamentColorName(tray.color)
+      const rawColor = tray.present === false ? undefined : tray.color
+      const color = filamentColor(rawColor)
+      const colorName = filamentColorName(rawColor)
       return {
         slot: unit.id >= 254 ? t('materials.slotExternal') : String(tray.slot + 1),
-        type: tray.filamentType ?? '—',
+        present: tray.present,
+        type: tray.present === false ? t('materials.empty') : tray.filamentType ?? (tray.present ? t('materials.unknownFilament') : '—'),
         color,
         colorLabel: colorName === 'materials.color.unknown'
           ? t(colorName)
           : t('materials.colorLabel', { name: t(colorName), hex: color }),
-        remainingPercent: filamentFillPercent(tray.remainingPercent),
-        remainingGrams: tray.remainingGrams,
+        remainingPercent: filamentFillPercent(tray.remainingPercent, tray.present),
+        remainingGrams: tray.present === false ? undefined : tray.remainingGrams,
       }
     }),
   }))
@@ -1312,7 +1314,7 @@ onUnmounted(() => {
                   :key="`${system.name}-${material.slot}`"
                   class="relative size-18 shrink-0 overflow-hidden rounded-md border border-black/10 dark:border-white/15"
                   :style="{ backgroundColor: material.color, color: textColorFor(material.color) }"
-                  :title="material.colorLabel"
+                  :title="material.present === undefined ? `${t('materials.presenceUnknown')}; ${material.colorLabel}` : material.colorLabel"
                 >
                   <span
                     class="absolute inset-x-0 top-0 transition-[height] duration-200"

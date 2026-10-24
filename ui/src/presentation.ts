@@ -146,7 +146,8 @@ export function filamentColorName(value: string | undefined): MessageKey {
   return lightness > 0.65 ? 'materials.color.pink' : 'materials.color.magenta'
 }
 
-export function filamentFillPercent(value: number | undefined): number {
+export function filamentFillPercent(value: number | undefined, present?: boolean): number {
+  if (present === false) return 0
   if (value === undefined || !Number.isFinite(value) || value < 0) return 100
   return Math.min(value, 100)
 }
