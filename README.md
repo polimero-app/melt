@@ -330,8 +330,6 @@ it switches the application id to the bundle identifier and breaks the match.
 Undocumented behavior from these projects is treated as scoped evidence, not
 permanent product truth. Conflicting reports stay provisional until sanitized
 physical captures qualify an exact model and module-firmware range.
-The [Bambu monitoring improvement plan](docs/superpowers/plans/2026-10-23-bambu-upstream-improvements.md)
-records the reviewed revisions, implementation scope, and evidence boundaries.
 
 ### Moonraker
 
