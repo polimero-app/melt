@@ -7,7 +7,7 @@ import { locales, preferredLocale, translate, type Locale, type MessageKey } fro
 import { monitorBadge, type ConnectionState, type PrinterBadge } from './monitoring'
 import { clampTarget, formatDuration, remainingTimePresentation } from './formatting'
 import { dryingBounds, dryingDefaults, dryingFault, dryingRequestValid, dryingStoppable, dryingTargetShown, type AmsDrying, type DryingStatus } from './drying'
-import { printTargetState } from './printing'
+import { inspectPrintFile, printTargetState, startPrintFile, type PrintFile, type PrintPackage } from './printing'
 import { printStageLabel } from './stages'
 import { awaitsFirstSample, badgeDotClasses, filamentColor, filamentFillPercent, isActiveJobState, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
@@ -285,22 +285,6 @@ type FileEntry = {
   modifiedAt?: string
 }
 
-type PrintPlate = {
-  index: number
-  name?: string
-  gcodePath: string
-  thumbnailPaths: string[]
-  estimatedSeconds?: number
-  estimatedGrams?: number
-}
-
-type PrintPackage = {
-  sourceFileName: string
-  sliced: boolean
-  plates: PrintPlate[]
-  issues: { severity: 'warning' | 'error'; code: string; message: string }[]
-}
-
 type FileList = {
   entries: FileEntry[]
 }
@@ -439,9 +423,13 @@ const libraryFilesError = ref<string>()
 const libraryPath = ref<string>()
 const libraryParent = ref<string>()
 const libraryBreadcrumbs = ref<LibraryBreadcrumb[]>([])
-const printTarget = ref<FileEntry>()
+const printTarget = ref<FileEntry & PrintFile>()
+const printPrinters = computed(() => printTarget.value?.printer
+  ? printers.value.filter((printer) => printer.name === printTarget.value?.printer)
+  : printers.value)
+const printPreparing = ref(false)
 const printBusy = ref(false)
-const currentPrintTargetState = computed(() => printTargetState(printers.value.length, printBusy.value))
+const currentPrintTargetState = computed(() => printTargetState(printPrinters.value.length, printBusy.value))
 const printStage = ref<PrintStageEvent>()
 const printPackage = ref<PrintPackage>()
 const printPlate = ref<number>()
@@ -1750,27 +1738,23 @@ const jobToastKeys: Record<'pause' | 'resume' | 'cancel', MessageKey> = {
   cancel: 'control.cancelRequested',
 }
 
-function sendJobAction(action: 'start' | 'pause' | 'resume' | 'cancel', devicePath?: string) {
+function sendJobAction(action: 'pause' | 'resume' | 'cancel') {
   if (!activePrinter.value) return
-  if (action !== 'cancel') return void runJobAction(action, devicePath)
+  if (action !== 'cancel') return void runJobAction(action)
   askConfirmation(
     { title: 'confirm.cancelTitle', description: 'confirm.cancelDescription', confirm: 'confirm.cancelConfirm' },
     { name: activePrinter.value.name },
-    () => runJobAction(action, devicePath),
+    () => runJobAction(action),
   )
 }
 
-async function runJobAction(action: 'start' | 'pause' | 'resume' | 'cancel', devicePath?: string) {
+async function runJobAction(action: 'pause' | 'resume' | 'cancel') {
   if (!activePrinter.value) return
   try {
     await invoke('printer_job_action', {
-      request: { name: activePrinter.value.name, action, devicePath, confirmed: true },
+      request: { name: activePrinter.value.name, action, confirmed: true },
     })
-    showToast(
-      action === 'start'
-        ? t('filesView.sentToPrinter', { name: devicePath?.split('/').pop() ?? '' })
-        : t(jobToastKeys[action]),
-    )
+    showToast(t(jobToastKeys[action]))
     void refreshMonitoring()
   } catch (reason) {
     showToast(message(reason), 'error')
@@ -2248,7 +2232,7 @@ function fileActionItems(file: FileEntry): ActionMenuItem[] {
     {
       label: t('dashboard.print'),
       icon: PhPlay,
-      disabled: !printers.value.length,
+      disabled: !printers.value.length || printPreparing.value || printBusy.value,
       onSelect: () => requestPrint(file),
     },
     ...enabledSlicers.value.map((slicer) => ({
@@ -2287,22 +2271,26 @@ async function openWithSlicer(file: FileEntry, slicer: string) {
   }
 }
 
-async function requestPrint(file: FileEntry) {
+async function requestPrint(file: FileEntry, printer?: string) {
+  if (printPreparing.value || printBusy.value || printTarget.value) return
+  const target = { ...file, printer }
+  printPreparing.value = true
   printPackage.value = undefined
   printPlate.value = undefined
   printDisplayName.value = file.name.replace(/\.gcode\.3mf$|\.3mf$|\.gcode$/i, '')
-  if (/\.3mf$/i.test(file.name)) {
-    try {
-      const inspected = await invoke<PrintPackage>('inspect_library_print', { request: { path: file.devicePath } })
+  try {
+    if (/\.3mf$/i.test(file.name)) {
+      const inspected = await inspectPrintFile(target)
       if (!inspected.sliced) throw new Error(t('errors.jobFileInvalid'))
       printPackage.value = inspected
       printPlate.value = inspected.plates.find((plate) => plate.gcodePath)?.index
-    } catch (reason) {
-      showToast(message(reason), 'error')
-      return
     }
+    printTarget.value = target
+  } catch (reason) {
+    showToast(message(reason), 'error')
+  } finally {
+    printPreparing.value = false
   }
-  printTarget.value = file
 }
 
 async function printToPrinter(name: string) {
@@ -2311,16 +2299,13 @@ async function printToPrinter(name: string) {
   printBusy.value = true
   printStage.value = { stage: 'inspect', percent: 0 }
   try {
-    await invoke('print_library_file', {
-      request: {
-        printer: name,
-        path: file.devicePath,
-        plate: printPlate.value,
-        displayName: printDisplayName.value || undefined,
-      },
+    await startPrintFile(file, name, {
+      plate: printPlate.value,
+      displayName: printDisplayName.value || undefined,
     })
     printTarget.value = undefined
     showToast(t('filesView.sentToPrinter', { name: file.name }))
+    void refreshMonitoring()
   } catch (reason) {
     showToast(message(reason), 'error')
   } finally {
@@ -3003,8 +2988,8 @@ onUnmounted(() => {
                             class="text-cyan-600 dark:text-cyan-400"
                             :title="t('filesView.printFile')"
                             :aria-label="t('filesView.printNamed', { name: file.name })"
-                            :disabled="!capabilities?.jobStart || selectedStatus?.state !== 'idle'"
-                            @click.stop="sendJobAction('start', file.devicePath)"
+                            :disabled="!capabilities?.jobStart || selectedStatus?.state !== 'idle' || printPreparing || printBusy"
+                            @click.stop="requestPrint(file, activePrinter?.name)"
                           ><PhPlay class="size-4" aria-hidden="true" /></IconButton>
                           <IconButton
                             v-if="capabilities?.fileDownload"
@@ -4105,8 +4090,8 @@ onUnmounted(() => {
       :close-label="t('common.closePanel')"
       @close="!printBusy && (printTarget = undefined)"
     >
-      <ul v-if="printers.length" class="divide-y divide-gray-200 dark:divide-white/10">
-        <li v-for="printer in printers" :key="printer.name" class="flex items-center justify-between gap-3 py-3">
+      <ul v-if="printPrinters.length" class="divide-y divide-gray-200 dark:divide-white/10">
+        <li v-for="printer in printPrinters" :key="printer.name" class="flex items-center justify-between gap-3 py-3">
           <span class="flex min-w-0 flex-col items-start gap-1">
             <span class="flex min-w-0 items-center gap-2">
               <span class="size-1.5 shrink-0 rounded-full ring-3" :class="badgeDotClasses[badgeFor(printer.name)]"></span>

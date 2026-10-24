@@ -745,7 +745,7 @@ struct FileUploadRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct FileDeleteRequest {
+struct PrinterFileRequest {
     name: String,
     device_path: String,
 }
@@ -2263,6 +2263,33 @@ fn inspect_library_print(
 }
 
 #[tauri::command(async)]
+fn inspect_printer_print(
+    request: PrinterFileRequest,
+) -> Result<melt_core::bambu::PrintPackage, CommandError> {
+    let printer = desktop_printer(&request.name, Operation::FileDownload)?;
+    let mut temporary =
+        tempfile::NamedTempFile::new().map_err(|_| CommandError::new("jobFileInvalid"))?;
+    drivers::download_to(
+        &printer.driver,
+        printer.access_code.as_deref(),
+        printer.tls_fingerprint.as_deref(),
+        &request.device_path,
+        temporary.as_file_mut(),
+    )
+    .map_err(|error| operation_error(error, Operation::FileDownload))?;
+    let mut package = melt_core::bambu::inspect_print_package(temporary.path())
+        .map_err(|_| CommandError::new("jobFileInvalid"))?;
+    package.source_file_name = request
+        .device_path
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    package.source = request.device_path.into();
+    Ok(package)
+}
+
+#[tauri::command(async)]
 fn print_library_file(
     request: LibraryPrintRequest,
     state: tauri::State<'_, MonitorState>,
@@ -2816,7 +2843,7 @@ fn printer_file_upload(request: FileUploadRequest) -> Result<u64, CommandError> 
 
 #[tauri::command(async)]
 fn printer_file_delete(
-    request: FileDeleteRequest,
+    request: PrinterFileRequest,
     state: tauri::State<'_, MonitorState>,
 ) -> Result<(), CommandError> {
     let printer = desktop_printer(&request.name, Operation::FileDelete)?;
@@ -4148,6 +4175,7 @@ fn main() {
             set_library_path,
             print_library_file,
             inspect_library_print,
+            inspect_printer_print,
             printer_job_action,
             printer_temperature_set,
             printer_fan_set,

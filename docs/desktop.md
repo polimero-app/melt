@@ -165,6 +165,12 @@ materials/nozzles and destination, uploads with verification and waits for
 observed print start. Printer file downloads expose progress and cancellation
 and are finalized only after transfer integrity checks.
 
+The print action in Control's printer files table opens the same dialog for
+plate and display-name selection; it never starts a print on the first click.
+Printer-stored 3MFs are downloaded temporarily for read-only inspection. Confirming
+starts the existing file on its original printer without uploading it again;
+canceling sends no print command.
+
 ## Configuration, firmware and diagnostics
 
 **Configuration** contains completion/failure/disconnection notifications,
