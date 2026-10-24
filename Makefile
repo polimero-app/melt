@@ -20,7 +20,8 @@ license-check: ## Verify license declarations and files
 	grep -Fqx 'license = "AGPL-3.0-only"' Cargo.toml
 	grep -Fq '"license": "AGPL-3.0-only"' ui/package.json
 	grep -Fq '"../../LICENSE"' crates/melt-desktop/tauri.conf.json
-	! git grep -nE 'license = "MIT"|"license": "MIT"' -- ':!Cargo.lock' ':!Makefile'
+	# Preserve upstream attribution without changing Melt's package declarations.
+	! git grep -nE 'license = "MIT"|"license": "MIT"' -- ':!Cargo.lock' ':!Makefile' ':!crates/melt-core/data/bambu-errors.json' ':!scripts/update_bambu_errors.py'
 
 contract: ## Run CLI contract tests
 	cargo test -p melt-cli --test contract_fixtures --locked
