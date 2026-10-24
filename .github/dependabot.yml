@@ -8,6 +8,10 @@ updates:
       cargo:
         patterns: ["*"]
     ignore:
+      # Keep existing native stores until a saved-credential migration is qualified.
+      - dependency-name: keyring
+        update-types:
+          - version-update:semver-major
       # Pre-1.0: webrtc and rtc minors may break the camera session API;
       # port them together. Patches still land.
       - dependency-name: webrtc
