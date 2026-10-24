@@ -1,6 +1,6 @@
 # Melt
 
-Last-updated: 2026-10-18
+Last-updated: 2026-10-23
 
 <https://melt.polimero.app>
 
@@ -309,15 +309,28 @@ it switches the application id to the bundle identifier and breaks the match.
 - [Open Bambu Networking](https://github.com/ClusterM/open-bamboo-networking)
 - [OpenBambuAPI](https://github.com/Doridian/OpenBambuAPI)
 - [BambuHelper](https://github.com/Keralots/BambuHelper)
-- [Bambuddy](https://github.com/maziggy/bambuddy)
+- [Bambuddy](https://github.com/maziggy/bambuddy) — AMS presence and humidity
+  regression cases (AGPLv3)
 - [bambulabs_api (Go)](https://github.com/torbenconto/bambulabs_api)
-- [BambuStudio](https://github.com/bambulab/BambuStudio) — the `resources/printers/*.json` model tables
-- [ha-bambulab](https://github.com/greghesp/ha-bambulab)
+- [BambuStudio](https://github.com/bambulab/BambuStudio) — firmware-versioned
+  `resources/printers` capability defaults, inherited machine profiles,
+  filament metadata, settings format, and protocol parsers (AGPLv3)
+- [ha-bambulab](https://github.com/greghesp/ha-bambulab) — model-aware HMS and
+  print-error catalogues, wiki links, AMS semantics, and the original P2S
+  sample and CA bundles (MIT)
+- [Bambu Bar](https://github.com/rolottr/bambu-bar) — a useful index of those
+  upstream sources and compact LAN-monitoring presentation (MIT); its copied
+  P2S sample is not an independent capture
+- [bambu-cli](https://github.com/tobiasbischoff/bambu-cli) — a baseline
+  MQTT/FTPS/camera reference; no license was declared at the reviewed revision,
+  so Melt does not copy its implementation
 - [Kiln](https://github.com/codeofaxel/Kiln)
 
 Undocumented behavior from these projects is treated as scoped evidence, not
 permanent product truth. Conflicting reports stay provisional until sanitized
 physical captures qualify an exact model and module-firmware range.
+The [Bambu monitoring improvement plan](docs/superpowers/plans/2026-10-23-bambu-upstream-improvements.md)
+records the reviewed revisions, implementation scope, and evidence boundaries.
 
 ### Moonraker
 
