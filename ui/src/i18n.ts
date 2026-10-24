@@ -58,6 +58,8 @@ export type MessageKey =
 | "addition.modelPending"
 | "addition.modelHint"
   | "addition.timeout"
+  | "addition.timeoutHint"
+  | "addition.timeoutInvalid"
   | "addition.accessCode"
   | "addition.accessCodeKeep"
   | "addition.insecure"
@@ -544,6 +546,8 @@ export type MessageKey =
   | "filesView.sortName"
   | "filesView.sortSize"
   | "filesView.sortModified"
+  | "filesView.sortAscending"
+  | "filesView.sortDescending"
   | "filesView.folder"
   | "filesView.moreActions"
   | "filesView.openWith"
@@ -761,6 +765,8 @@ const messages: Record<Locale, Messages> = {
     "addition.modelPending": "Identified on connection",
     "addition.modelHint": "Detected from the printer; not editable.",
     "addition.timeout": "Connection timeout",
+    "addition.timeoutHint": "Use a positive whole number followed by ms, s, m, or h, e.g. 1500ms or 10s.",
+    "addition.timeoutInvalid": "Enter a valid positive duration, e.g. 10s.",
     "addition.accessCode": "Access code",
     "addition.accessCodeKeep": "Access code (leave blank to keep existing)",
     "addition.insecure": "Accept an untrusted TLS certificate",
@@ -1264,8 +1270,10 @@ const messages: Record<Locale, Messages> = {
     "filesView.clearSearch": "Clear search",
     "filesView.sortBy": "Sort by",
     "filesView.sortName": "Name",
-    "filesView.sortSize": "Largest first",
-    "filesView.sortModified": "Newest first",
+    "filesView.sortSize": "Size",
+    "filesView.sortModified": "Modified",
+    "filesView.sortAscending": "Sort ascending",
+    "filesView.sortDescending": "Sort descending",
     "filesView.folder": "Folder",
     "filesView.moreActions": "More file actions",
     "filesView.openWith": "Open with {name}",
@@ -1461,6 +1469,8 @@ const messages: Record<Locale, Messages> = {
     "addition.modelPending": "Identificado na conexão",
     "addition.modelHint": "Detectado a partir da impressora; não editável.",
     "addition.timeout": "Tempo limite de conexão",
+    "addition.timeoutHint": "Use um número inteiro positivo seguido de ms, s, m ou h, por exemplo 1500ms ou 10s.",
+    "addition.timeoutInvalid": "Insira uma duração positiva válida, por exemplo 10s.",
     "addition.accessCode": "Código de acesso",
     "addition.accessCodeKeep": "Código de acesso (deixe em branco para manter o atual)",
     "addition.insecure": "Aceitar um certificado TLS não confiável",
@@ -1964,8 +1974,10 @@ const messages: Record<Locale, Messages> = {
     "filesView.clearSearch": "Limpar busca",
     "filesView.sortBy": "Ordenar por",
     "filesView.sortName": "Nome",
-    "filesView.sortSize": "Maiores primeiro",
-    "filesView.sortModified": "Mais recentes primeiro",
+    "filesView.sortSize": "Tamanho",
+    "filesView.sortModified": "Modificado",
+    "filesView.sortAscending": "Ordenar em ordem crescente",
+    "filesView.sortDescending": "Ordenar em ordem decrescente",
     "filesView.folder": "Pasta",
     "filesView.moreActions": "Mais ações do arquivo",
     "filesView.openWith": "Abrir com {name}",

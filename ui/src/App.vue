@@ -41,6 +41,7 @@ import StatusBadge from './components/StatusBadge.vue'
 import ActionMenu, { type ActionMenuItem } from './components/ActionMenu.vue'
 import SlideOver from './components/SlideOver.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
+import TimeoutField from './components/TimeoutField.vue'
 import Button from './components/Button.vue'
 import IconButton from './components/IconButton.vue'
 import Switch from './components/Switch.vue'
@@ -53,7 +54,9 @@ import PlugControl from './components/PlugControl.vue'
 import {
   PhArrowCounterClockwise,
   PhArrowsClockwise,
+  PhArrowsDownUp,
   PhArrowsOutCardinal,
+  PhArrowDown,
   PhArrowLeft,
   PhArrowSquareOut,
   PhArrowUp,
@@ -410,7 +413,8 @@ const printers = ref<Printer[]>([])
 const drivers = ref<Driver[]>([])
 const monitoring = ref<MonitorEntry[]>([])
 const firmwareUpdates = ref<FirmwareUpdateEntry[]>([])
-const firmwareRefreshing = ref(false)
+const firmwareRefreshSource = ref<'printer' | 'publicCatalogue'>()
+const firmwareRefreshing = computed(() => firmwareRefreshSource.value !== undefined)
 const firmwareError = ref<string>()
 const capabilities = ref<Capabilities>()
 const files = ref<FileEntry[]>([])
@@ -457,7 +461,7 @@ const tlsPrinter = ref<string>()
 const diagnostics = ref<Diagnostics>()
 const diagnosticsError = ref<string>()
 const diagnosticsLoading = ref(false)
-const pendingConfirm = ref<{ title: string; description: string; confirm: string; run: () => Promise<void> }>()
+const pendingConfirm = ref<{ title: string; description: string; confirm: string; variant: 'primary' | 'danger'; run: () => Promise<void> }>()
 const confirming = ref(false)
 const documentVisible = ref(document.visibilityState === 'visible')
 let monitorUnlisten: UnlistenFn | undefined
@@ -532,7 +536,7 @@ const toasts = computed(() => [
   ...(successToast.value ? [{ key: 'success' as const, text: successToast.value, tone: 'success' as const }] : []),
 ])
 const searchTerm = ref('')
-const sortKey = ref<SortKey>('name')
+const librarySort = ref<FileSort>({ key: 'name', descending: false })
 const stepSize = ref('1 mm')
 const feedRate = ref(50)
 const jogBusy = ref(false)
@@ -945,11 +949,13 @@ function askConfirmation(
   keys: { title: MessageKey; description: MessageKey; confirm: MessageKey },
   values: Record<string, string>,
   run: () => Promise<void>,
+  variant: 'primary' | 'danger' = 'danger',
 ) {
   pendingConfirm.value = {
     title: t(keys.title, values),
     description: t(keys.description, values),
     confirm: t(keys.confirm),
+    variant,
     run,
   }
 }
@@ -1161,7 +1167,7 @@ function clearSelection() {
 
 async function loadFirmwareUpdates(name: string, refresh = false) {
   if (firmwareRefreshing.value && refresh) return
-  if (refresh) firmwareRefreshing.value = true
+  if (refresh) firmwareRefreshSource.value = 'printer'
   firmwareError.value = undefined
   try {
     const entry = await invoke<FirmwareUpdateEntry>('printer_firmware_updates', { name, refresh })
@@ -1172,13 +1178,13 @@ async function loadFirmwareUpdates(name: string, refresh = false) {
     firmwareError.value = message(reason)
     if (refresh) showToast(firmwareError.value ?? t('firmware.checkFailed'), 'error')
   } finally {
-    if (refresh) firmwareRefreshing.value = false
+    if (refresh) firmwareRefreshSource.value = undefined
   }
 }
 
 async function loadPublicFirmwareCatalogue(name: string) {
   if (firmwareRefreshing.value) return
-  firmwareRefreshing.value = true
+  firmwareRefreshSource.value = 'publicCatalogue'
   firmwareError.value = undefined
   try {
     const entry = await invoke<FirmwareUpdateEntry>('printer_public_firmware_catalogue', { name })
@@ -1189,7 +1195,7 @@ async function loadPublicFirmwareCatalogue(name: string) {
     firmwareError.value = message(reason)
     showToast(firmwareError.value ?? t('firmware.checkFailed'), 'error')
   } finally {
-    firmwareRefreshing.value = false
+    firmwareRefreshSource.value = undefined
   }
 }
 
@@ -2008,6 +2014,7 @@ function setDrying(system: MaterialSystemView, start: boolean) {
         void refreshMonitoring()
       }
     },
+    'primary',
   )
 }
 
@@ -2219,7 +2226,7 @@ const matchesSearch = (file: FileEntry) => !normalizedSearchTerm.value || file.n
 const visibleDirectories = computed(() => libraryFiles.value.filter((file) => file.type === 'directory' && matchesSearch(file)))
 const visibleFiles = computed(() => sortedBy(
   libraryFiles.value.filter((file) => file.type === 'file' && matchesSearch(file)),
-  { key: sortKey.value, descending: naturallyDescending[sortKey.value] },
+  librarySort.value,
 ))
 const deferLibraryCards = computed(() => shouldDeferLibraryCards(visibleFiles.value.length))
 const printerSort = ref<FileSort>({ key: 'name', descending: false })
@@ -2957,6 +2964,7 @@ onUnmounted(() => {
                         <button type="button" class="flex items-center gap-1 uppercase hover:text-gray-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600 dark:hover:text-gray-200 dark:focus-visible:outline-cyan-400" @click="sortPrinterFiles('name')">
                           {{ t('filesView.name') }}
                           <PhCaretDown v-if="printerSort.key === 'name'" class="size-3" :class="!printerSort.descending && 'rotate-180'" aria-hidden="true" />
+                          <PhArrowsDownUp v-else class="size-3" aria-hidden="true" />
                         </button>
                       </th>
                       <th scope="col" class="w-20 px-2 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase dark:text-gray-400">{{ t('filesView.type') }}</th>
@@ -2964,12 +2972,14 @@ onUnmounted(() => {
                         <button type="button" class="flex items-center gap-1 uppercase hover:text-gray-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600 dark:hover:text-gray-200 dark:focus-visible:outline-cyan-400" @click="sortPrinterFiles('size')">
                           {{ t('filesView.size') }}
                           <PhCaretDown v-if="printerSort.key === 'size'" class="size-3" :class="!printerSort.descending && 'rotate-180'" aria-hidden="true" />
+                          <PhArrowsDownUp v-else class="size-3" aria-hidden="true" />
                         </button>
                       </th>
                       <th scope="col" :aria-sort="printerSortOrder('modified')" class="hidden w-48 px-2 py-3 text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase min-[1180px]:table-cell dark:text-gray-400">
                         <button type="button" class="flex items-center gap-1 uppercase hover:text-gray-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600 dark:hover:text-gray-200 dark:focus-visible:outline-cyan-400" @click="sortPrinterFiles('modified')">
                           {{ t('filesView.modified') }}
                           <PhCaretDown v-if="printerSort.key === 'modified'" class="size-3" :class="!printerSort.descending && 'rotate-180'" aria-hidden="true" />
+                          <PhArrowsDownUp v-else class="size-3" aria-hidden="true" />
                         </button>
                       </th>
                       <th scope="col" class="w-24 px-4 py-3 text-right text-xs font-medium tracking-wide whitespace-nowrap text-gray-500 uppercase sm:px-6 dark:text-gray-400">{{ t('filesView.actions') }}</th>
@@ -3110,12 +3120,12 @@ onUnmounted(() => {
                 variant="secondary"
                 :disabled="firmwareRefreshing"
                 @click="loadFirmwareUpdates(firmwarePrinter.name, true)"
-              ><PhArrowsClockwise class="size-4" :class="firmwareRefreshing && 'animate-spin'" aria-hidden="true" /> {{ t('firmware.checkAgain') }}</Button>
+              ><PhArrowsClockwise class="size-4" :class="firmwareRefreshSource === 'printer' && 'animate-spin'" aria-hidden="true" /> {{ t('firmware.checkAgain') }}</Button>
               <Button
                 variant="secondary"
                 :disabled="firmwareRefreshing || !firmwarePrinterModel"
                 @click="loadPublicFirmwareCatalogue(firmwarePrinter.name)"
-              ><PhGlobe class="size-4" :class="firmwareRefreshing && 'animate-spin'" aria-hidden="true" /> {{ t('firmware.checkPublicCatalogue') }}</Button>
+              ><PhGlobe class="size-4" :class="firmwareRefreshSource === 'publicCatalogue' && 'animate-spin'" aria-hidden="true" /> {{ t('firmware.checkPublicCatalogue') }}</Button>
             </CardHeader>
             <div class="px-4 py-5 sm:p-6" :aria-busy="firmwareRefreshing">
               <div v-if="!selectedFirmwareUpdate" class="flex items-start gap-3 text-sm text-gray-500 dark:text-gray-400" role="status">
@@ -3676,7 +3686,8 @@ onUnmounted(() => {
           <div class="ml-auto grid grid-cols-1">
             <select
               name="file-sort"
-              v-model="sortKey"
+              v-model="librarySort.key"
+              @change="librarySort.descending = naturallyDescending[librarySort.key]"
               :aria-label="t('filesView.sortBy')"
               class="col-start-1 row-start-1 w-auto appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800"
             >
@@ -3686,6 +3697,14 @@ onUnmounted(() => {
             </select>
             <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-2 size-4 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
           </div>
+          <IconButton
+            :title="t(librarySort.descending ? 'filesView.sortAscending' : 'filesView.sortDescending')"
+            :aria-label="t(librarySort.descending ? 'filesView.sortAscending' : 'filesView.sortDescending')"
+            @click="librarySort = nextSort(librarySort, librarySort.key)"
+          >
+            <PhArrowDown v-if="librarySort.descending" class="size-4" aria-hidden="true" />
+            <PhArrowUp v-else class="size-4" aria-hidden="true" />
+          </IconButton>
           <!-- Input with leading icon -->
           <div class="grid grid-cols-1">
             <input
@@ -3945,10 +3964,7 @@ onUnmounted(() => {
             <input id="printer-model" name="printer-model" :value="detectedModelName" readonly aria-readonly="true" :placeholder="t('addition.modelPending')" class="mt-2 block w-full cursor-default rounded-md bg-gray-50 px-3 py-1.5 text-base text-gray-500 outline-1 -outline-offset-1 outline-gray-300 sm:text-sm/6 dark:bg-white/5 dark:text-gray-400 dark:outline-white/10" />
             <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ t('addition.modelHint') }}</p>
           </div>
-          <div>
-            <label for="printer-timeout" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.timeout') }}</label>
-            <input id="printer-timeout" name="printer-timeout" v-model="draft.timeout" required class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
-          </div>
+          <TimeoutField id="printer-timeout" v-model="draft.timeout" :t="t" />
           <div>
             <label for="printer-access-code" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ editingPrinter ? t('addition.accessCodeKeep') : t('addition.accessCode') }}</label>
             <input id="printer-access-code" name="printer-access-code" v-model="draft.accessCode" type="password" autocomplete="new-password" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
@@ -3989,10 +4005,7 @@ onUnmounted(() => {
             <label for="camera-rtsp-port" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('camerasView.rtspPort') }}</label>
             <input id="camera-rtsp-port" v-model="cameraDraft.rtspPort" type="number" min="1" max="65535" placeholder="554" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
           </div>
-          <div>
-            <label for="camera-timeout" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.timeout') }}</label>
-            <input id="camera-timeout" v-model="cameraDraft.timeout" required class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
-          </div>
+          <TimeoutField id="camera-timeout" v-model="cameraDraft.timeout" :t="t" />
         </div>
         <fieldset v-if="printers.length">
           <legend class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('camerasView.printers') }}</legend>
@@ -4033,10 +4046,7 @@ onUnmounted(() => {
           <label for="plug-password" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ editingPlug ? t('plugsView.passwordKeep') : t('plugsView.password') }}</label>
           <input id="plug-password" v-model="plugDraft.password" type="password" :required="!editingPlug" autocomplete="new-password" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
         </div>
-        <div>
-          <label for="plug-timeout" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('addition.timeout') }}</label>
-          <input id="plug-timeout" v-model="plugDraft.timeout" required class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
-        </div>
+        <TimeoutField id="plug-timeout" v-model="plugDraft.timeout" :t="t" />
         <fieldset v-if="printers.length">
           <legend class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('plugsView.printers') }}</legend>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('plugsView.attachmentsHint') }}</p>
@@ -4065,14 +4075,19 @@ onUnmounted(() => {
       </template>
     </SlideOver>
 
-    <SlideOver :open="tlsOpen" :title="t('printersView.refreshCertificate')" :description="t('tls.confirmDescription')" :close-label="t('common.closePanel')" @close="!tlsRefreshing && (tlsOpen = false)">
+    <ConfirmDialog
+      :open="tlsOpen"
+      :title="t('tls.confirmTitle', { name: tlsPrinter ?? '' })"
+      :description="t('tls.confirmDescription')"
+      :confirm-label="tlsRefreshing ? t('common.sending') : t('tls.confirm')"
+      :cancel-label="t('common.cancel')"
+      :busy="tlsRefreshing"
+      @close="!tlsRefreshing && (tlsOpen = false)"
+      @confirm="refreshTls"
+    >
       <code v-if="tlsFingerprint" class="block rounded-md bg-gray-100 p-3 font-mono text-xs break-all text-gray-900 dark:bg-white/10 dark:text-white">{{ tlsFingerprint }}</code>
       <p v-if="tlsError" class="mt-4 text-sm text-red-600 dark:text-red-400" role="alert">{{ tlsError }}</p>
-      <template #footer>
-        <Button :disabled="tlsRefreshing" @click="tlsOpen = false">{{ t('common.cancel') }}</Button>
-        <Button variant="danger" :disabled="tlsRefreshing" @click="refreshTls">{{ tlsRefreshing ? t('common.sending') : t('tls.confirm') }}</Button>
-      </template>
-    </SlideOver>
+    </ConfirmDialog>
 
     <SlideOver
       :open="printTarget !== undefined"
@@ -4187,6 +4202,7 @@ onUnmounted(() => {
       :description="pendingConfirm?.description"
       :confirm-label="confirming ? t('common.sending') : pendingConfirm?.confirm ?? ''"
       :cancel-label="t('common.cancel')"
+      :confirm-variant="pendingConfirm?.variant"
       :busy="confirming"
       @close="!confirming && (pendingConfirm = undefined)"
       @confirm="runConfirmation"

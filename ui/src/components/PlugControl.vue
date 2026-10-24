@@ -147,6 +147,7 @@ function confirmOff() {
       :description="confirmation"
       :confirm-label="t('plugControl.off')"
       :cancel-label="t('common.cancel')"
+      confirm-variant="danger"
       @close="confirmOpen = false"
       @confirm="confirmOff"
     />
