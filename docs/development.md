@@ -12,8 +12,9 @@ Headless UI, Phosphor icons and Vitest. Cargo.lock and ui/bun.lock govern
 reproducible dependency resolution; use the locked Make targets.
 
 TypeScript stays on 6 until `vue-tsc` supports TypeScript 7's new API, and
-`vek` stays on 0.14 to match `euc`'s vertex types. Keyring 4 uses its `v1`
-feature to select native persistent stores on Linux, macOS and Windows.
+`vek` stays on 0.14 to match `euc`'s vertex types. Keyring stays on 3.x with
+its existing native backends until saved-credential compatibility is qualified
+on Linux, macOS and Windows for 4.x.
 
 Linux CI installs `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`,
 `libayatana-appindicator3-dev` and `librsvg2-dev`; installer builds also install
