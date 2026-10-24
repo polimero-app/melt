@@ -20,6 +20,7 @@ fn package_configuration_keeps_the_native_artifact_and_cli_contracts() {
     );
     assert_eq!(config["app"]["windows"][0]["minWidth"], 1280);
     assert_eq!(config["app"]["windows"][0]["minHeight"], 800);
+    assert_eq!(config["app"]["windows"][0]["maximized"], true);
 
     // A declared but missing icon only fails on the macOS/Windows release
     // runners, so resolve every path here instead. Order matters: Tauri embeds
