@@ -2738,13 +2738,12 @@ onUnmounted(() => {
                   </div>
                   <div class="min-w-0">
                     <p
-                      class="line-clamp-2 break-all font-mono text-sm font-semibold text-gray-900 dark:text-white"
+                      class="line-clamp-2 wrap-anywhere font-mono text-sm font-semibold text-gray-900 dark:text-white"
                       :title="selectedStatus?.job?.name"
                       translate="no"
                     >{{ selectedStatus?.job?.name ?? t('dashboard.noJob') }}</p>
                     <p class="mt-1 font-mono text-xs text-gray-500 dark:text-gray-400">
-                      {{ t(printerStateMessageKey(selectedStatus?.state)) }}
-                      <span v-if="currentStageLabel"> · {{ currentStageLabel }}</span>
+                      {{ currentStageLabel ?? t(printerStateMessageKey(selectedStatus?.state)) }}
                       <span v-if="selectedStatus?.printMeta?.plateIndex !== undefined">
                         · {{ t(plateLabel(selectedStatus.printMeta.plateIndex, selectedStatus.printMeta.plateCount).key, plateLabel(selectedStatus.printMeta.plateIndex, selectedStatus.printMeta.plateCount).values) }}
                       </span>
@@ -2991,7 +2990,7 @@ onUnmounted(() => {
                       :key="file.devicePath"
                       class="hover:bg-gray-50 dark:hover:bg-white/5"
                     >
-                      <td class="max-w-0 px-4 py-4 font-mono text-sm font-medium text-gray-900 sm:px-6 dark:text-white" :title="file.name" translate="no"><span class="line-clamp-2 break-all">{{ file.name }}</span></td>
+                      <td class="max-w-0 px-4 py-4 font-mono text-sm font-medium text-gray-900 sm:px-6 dark:text-white" :title="file.name" translate="no"><span class="line-clamp-2 wrap-anywhere">{{ file.name }}</span></td>
                       <td class="px-2 py-4 text-sm whitespace-nowrap">
                         <span class="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 dark:bg-gray-400/10 dark:text-gray-400">{{ fileTypeLabel(file) }}</span>
                       </td>
@@ -3513,7 +3512,7 @@ onUnmounted(() => {
                 <div class="flex min-w-0 grow flex-col">
                   <span class="truncate text-sm/6 font-medium text-gray-900 dark:text-white">{{ preset.name }}</span>
                   <span class="font-mono text-xs text-gray-500 dark:text-gray-400">
-                    {{ t('settingsView.presetNozzle') }} {{ preset.nozzleCelsius }} <span aria-hidden="true">·</span> {{ t('settingsView.presetBed') }} {{ preset.bedCelsius }}
+                    {{ t('dashboard.nozzle') }} {{ preset.nozzleCelsius }} °C <span aria-hidden="true">·</span> {{ t('dashboard.bed') }} {{ preset.bedCelsius }} °C
                   </span>
                 </div>
                 <IconButton
@@ -3803,7 +3802,7 @@ onUnmounted(() => {
             </component>
             <div class="flex items-start gap-3 px-4 py-5 sm:p-6">
               <div class="min-w-0 flex-1">
-                <h3 class="line-clamp-2 break-all text-sm font-medium text-gray-900 dark:text-white" :title="file.name" translate="no">{{ file.name }}</h3>
+                <h3 class="line-clamp-2 wrap-anywhere text-sm font-medium text-gray-900 dark:text-white" :title="file.name" translate="no">{{ file.name }}</h3>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ formatSize(file.sizeBytes) }} · {{ formatDate(file.modifiedAt) }}</p>
               </div>
               <ActionMenu v-if="fileActionItems(file).length" class="-mt-2 -mr-2" :label="t('filesView.moreActions')" :items="fileActionItems(file)" />
