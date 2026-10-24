@@ -9,7 +9,7 @@ import { clampTarget, formatDuration, remainingTimePresentation } from './format
 import { dryingBounds, dryingDefaults, dryingFault, dryingRequestValid, dryingStoppable, dryingTargetShown, type AmsDrying, type DryingStatus } from './drying'
 import { inspectPrintFile, printTargetState, startPrintFile, type PrintFile, type PrintPackage } from './printing'
 import { printStageLabel } from './stages'
-import { awaitsFirstSample, badgeDotClasses, filamentColor, filamentFillPercent, isActiveJobState, lightModeMessageKey, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
+import { awaitsFirstSample, badgeDotClasses, filamentColor, filamentColorName, filamentFillPercent, isActiveJobState, lightModeMessageKey, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import { commandDetail, commandMessage, type CommandError } from './errors'
 import { cameraPlayback, cameraTransportLabels, linkChanges, linkedCameras, printerSource, type CameraPlayback, type CameraSummary, type Quality } from './cameras'
 import { plugsForCamera, plugsForPrinter, snapshotPlug, type PlugObservation, type PlugSummary, type PowerState } from './plugs'
@@ -343,6 +343,7 @@ interface MaterialSlot {
   slot: string
   type: string
   color: string
+  colorLabel: string
   remainingPercent: number
   remainingGrams?: number
 }
@@ -882,13 +883,20 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
     humidity: unit.humidityLevel,
     drying: unit.drying,
     firstFilament: unit.trays.find((tray) => tray.filamentType)?.filamentType,
-    slots: unit.trays.map((tray) => ({
-      slot: unit.id >= 254 ? t('materials.slotExternal') : String(tray.slot + 1),
-      type: tray.filamentType ?? '—',
-      color: filamentColor(tray.color),
-      remainingPercent: filamentFillPercent(tray.remainingPercent),
-      remainingGrams: tray.remainingGrams,
-    })),
+    slots: unit.trays.map((tray) => {
+      const color = filamentColor(tray.color)
+      const colorName = filamentColorName(tray.color)
+      return {
+        slot: unit.id >= 254 ? t('materials.slotExternal') : String(tray.slot + 1),
+        type: tray.filamentType ?? '—',
+        color,
+        colorLabel: colorName === 'materials.color.unknown'
+          ? t(colorName)
+          : t('materials.colorLabel', { name: t(colorName), hex: color }),
+        remainingPercent: filamentFillPercent(tray.remainingPercent),
+        remainingGrams: tray.remainingGrams,
+      }
+    }),
   }))
 })
 const cameras = ref<CameraSummary[]>([])
@@ -2439,7 +2447,7 @@ onUnmounted(() => {
               :aria-current="activeView === 'control' && activePrinter?.name === printer.name ? 'page' : undefined"
               @click="selectPrinter(printer.name)"
             >
-              <span class="size-1.5 shrink-0 rounded-full ring-3" :class="badgeDotClasses[badgeFor(printer.name)]"></span>{{ printer.name }}
+              <span class="size-1.5 shrink-0 rounded-full ring-3" :class="badgeDotClasses[badgeFor(printer.name)]" aria-hidden="true"></span>{{ printer.name }}
               <span class="sr-only">{{ statusLabel(badgeFor(printer.name)) }}</span>
             </button>
           </div>
@@ -2661,7 +2669,7 @@ onUnmounted(() => {
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
                   <p class="font-medium">{{ fault.message }}</p>
-                  <span class="rounded-full border border-current/20 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide opacity-80">{{ t(faultSeverityKeys[fault.severity]) }}</span>
+                  <span class="rounded-full border border-current/20 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide opacity-80">{{ t(faultSeverityKeys[fault.severity]) }}</span>
                 </div>
                 <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                   <p class="font-mono opacity-75">
@@ -2777,7 +2785,7 @@ onUnmounted(() => {
                   ><PhStop class="size-4" aria-hidden="true" /> {{ t('common.cancel') }}</Button>
                 </div>
                 <div v-if="capabilities?.speedControl" class="mt-4">
-                  <label for="speed-profile" class="block text-sm/6 font-light text-gray-900 dark:text-white">{{ t('control.speedProfile') }}</label>
+                  <label for="speed-profile" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('control.speedProfile') }}</label>
                   <div class="mt-2 grid grid-cols-1">
                     <select
                       id="speed-profile"
@@ -2804,10 +2812,10 @@ onUnmounted(() => {
               <CardHeader :title="t('dashboard.temperature')" :icon="PhThermometerSimple">
                 <span v-if="capabilities?.temperatureWrite && selectedStatus?.state !== 'idle'" class="text-xs text-gray-500 dark:text-gray-400">{{ t('control.availableWhenIdle') }}</span>
               </CardHeader>
-              <div class="font-light space-y-4 px-4 py-5 sm:p-6">
+              <div class="space-y-4 px-4 py-5 sm:p-6">
                 <div v-for="row in temperatureRows" :key="row.key" class="flex items-center justify-between gap-3">
                   <div class="min-w-0">
-                    <p class="text-sm/6 font-light text-gray-900 dark:text-white">{{ temperatureLabel(row.key, row.value) }}</p>
+                    <p class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ temperatureLabel(row.key, row.value) }}</p>
                     <p class="font-mono text-sm text-gray-500 dark:text-gray-400"><span class="font-bold">{{ row.value.currentCelsius === undefined ? '—' : formatTemperature(row.value.currentCelsius) }}</span> °C <span aria-hidden="true">/</span> <span class="font-bold">{{ row.value.targetCelsius === undefined ? '—' : formatTemperature(row.value.targetCelsius) }}</span> °C</p>
                   </div>
                   <div v-if="capabilities?.temperatureWrite && row.value.controllable" class="flex shrink-0 items-center gap-1">
@@ -2831,7 +2839,7 @@ onUnmounted(() => {
 
                 <!-- Material presets: set every controllable heater in one action. -->
                 <div v-if="presetsAvailable" class="border-t border-gray-200 pt-4 dark:border-white/10">
-                  <p id="preset-group-label" class="text-sm/6 font-light text-gray-900 dark:text-white">{{ t('control.presets') }}</p>
+                  <p id="preset-group-label" class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('control.presets') }}</p>
                   <div class="mt-2 flex flex-wrap gap-2" role="group" aria-labelledby="preset-group-label">
                     <Button
                       v-for="preset in temperaturePresets"
@@ -2851,10 +2859,10 @@ onUnmounted(() => {
 
             <Card v-if="fanRows.length">
               <CardHeader :title="t('control.fans')" :icon="PhFan" />
-              <div class="font-light space-y-4 px-4 py-5 sm:p-6">
+              <div class="space-y-4 px-4 py-5 sm:p-6">
                 <div v-for="[key, value] in fanRows" :key="key" class="block">
                   <span class="mb-2 flex justify-between">
-                    <span class="text-sm/6 font-light text-gray-900 dark:text-white">{{ fanLabel(key) }}</span>
+                    <span class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ fanLabel(key) }}</span>
                     <span class="text-sm/6 text-gray-500 dark:text-gray-400">{{ fanDrafts[key] ?? value.speedPercent ?? '—' }}{{ (fanDrafts[key] ?? value.speedPercent) === undefined ? '' : '%' }}</span>
                   </span>
                   <input v-if="value.controllable && value.speedPercent !== undefined" :key="`${key}-${value.speedPercent}`" :value="value.speedPercent" :name="`fan-${key}`" class="h-1 w-full cursor-pointer accent-cyan-600 dark:accent-cyan-400" type="range" :min="value.minimumPercent ?? 0" :max="value.maximumPercent ?? 100" :aria-label="t('control.fanPower', { fan: fanLabel(key) })" @input="previewFan(key, $event)" @change="sendFan(key, $event)" />
@@ -2865,9 +2873,9 @@ onUnmounted(() => {
 
             <Card v-if="lightRows.length">
               <CardHeader :title="t('control.lights')" :icon="PhSun" />
-              <div class="font-light space-y-4 px-4 py-5 sm:p-6">
+              <div class="space-y-4 px-4 py-5 sm:p-6">
                 <div v-for="[key, value] in lightRows" :key="key" class="flex items-center justify-between gap-3">
-                  <label :for="`light-${key}`" class="grow cursor-pointer text-sm/6 font-light text-gray-900 dark:text-white">{{ lightLabel(key) }}</label>
+                  <label :for="`light-${key}`" class="grow cursor-pointer text-sm/6 font-medium text-gray-900 dark:text-white">{{ lightLabel(key) }}</label>
                   <Switch
                     v-if="capabilities?.lightControl && value.controllable"
                     :id="`light-${key}`"
@@ -2884,7 +2892,7 @@ onUnmounted(() => {
               <CardHeader :title="t('dashboard.motion')" :icon="PhArrowsOutCardinal">
                 <span v-if="selectedStatus?.state !== 'idle'" class="text-xs text-gray-500 dark:text-gray-400">{{ t('control.availableWhenIdle') }}</span>
               </CardHeader>
-              <div class="font-light px-4 py-5 sm:p-6">
+              <div class="px-4 py-5 sm:p-6">
                 <div class="mb-4 flex min-h-27 items-center justify-center gap-8">
                   <div class="grid grid-cols-3 grid-rows-3 gap-1">
                     <IconButton variant="outline" class="col-start-2 row-start-1" :disabled="jogDisabled" :aria-label="t('control.jogAxis', { axis: 'Y+' })" @click="jog('y', 1)">Y+</IconButton>
@@ -2900,7 +2908,7 @@ onUnmounted(() => {
                 </div>
                 <div class="grid grid-cols-2 gap-2">
                   <div>
-                    <label for="step-size" class="block text-sm/6 font-light text-gray-900 dark:text-white">{{ t('control.stepSize') }}</label>
+                    <label for="step-size" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('control.stepSize') }}</label>
                     <div class="mt-2 grid grid-cols-1">
                       <select id="step-size" name="step-size" v-model="stepSize" class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
                         <option>0.1 mm</option>
@@ -2911,7 +2919,7 @@ onUnmounted(() => {
                     </div>
                   </div>
                   <div>
-                    <label for="feed-rate" class="block text-sm/6 font-light text-gray-900 dark:text-white">{{ t('control.feedRate') }}</label>
+                    <label for="feed-rate" class="block text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('control.feedRate') }}</label>
                     <div class="mt-2 grid grid-cols-1">
                       <select id="feed-rate" name="feed-rate" v-model="feedRate" class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 disabled:opacity-50 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
                         <option :value="25">25 mm/s</option>
@@ -3049,6 +3057,7 @@ onUnmounted(() => {
                       :key="`${system.name}-${material.slot}`"
                       class="relative size-18 shrink-0 overflow-hidden rounded-md border border-black/10 dark:border-white/15"
                       :style="{ backgroundColor: material.color, color: textColorFor(material.color) }"
+                      :title="material.colorLabel"
                     >
                       <span
                         class="absolute inset-x-0 top-0 transition-[height] duration-200"
@@ -3057,6 +3066,7 @@ onUnmounted(() => {
                       <span class="relative z-10 flex h-full flex-col items-center justify-center gap-1 p-1 text-center font-mono">
                         <span class="text-xs font-bold">{{ material.slot }}</span>
                         <span v-if="material.type !== '—'" class="text-[10px] font-semibold tracking-wide uppercase wrap-anywhere">{{ material.type }}</span>
+                        <span class="sr-only">{{ material.colorLabel }}</span>
                         <span v-if="material.remainingGrams !== undefined" class="text-[10px] font-medium">{{ material.remainingGrams }} g</span>
                       </span>
                     </div>
@@ -3146,20 +3156,20 @@ onUnmounted(() => {
                     <div class="min-w-0">
                       <div class="flex flex-wrap items-center gap-2">
                         <p class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ component.label }}</p>
-                        <span v-if="component.required" class="rounded-full bg-amber-100 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-400/10 dark:text-amber-300">{{ t('firmware.required') }}</span>
+                        <span v-if="component.required" class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-400/10 dark:text-amber-300">{{ t('firmware.required') }}</span>
                       </div>
                       <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ firmwareComponentLabel(component.kind) }}</p>
                     </div>
                     <div class="min-w-0 rounded-md bg-gray-50 px-3 py-2 dark:bg-white/5">
                       <div class="flex items-baseline justify-between gap-3">
-                        <span class="text-[0.65rem] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ t('firmware.installed') }}</span>
+                        <span class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ t('firmware.installed') }}</span>
                         <span class="truncate font-mono text-sm text-gray-800 dark:text-gray-200" :title="component.currentVersion">{{ component.currentVersion || '—' }}</span>
                       </div>
                       <div v-if="firmwareEvidenceFor(component).length" class="mt-2 flex flex-wrap gap-1.5">
                         <span
                           v-for="evidence in firmwareEvidenceFor(component)"
                           :key="`${evidence.role}-${evidence.version}`"
-                          class="inline-flex items-center gap-1 rounded border px-2 py-1 text-[0.65rem]"
+                          class="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs"
                           :class="evidence.role === 'printerAdvertised'
                             ? 'border-amber-300/60 bg-amber-100/60 text-amber-800 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-300'
                             : evidence.role === 'deviceCatalogue'

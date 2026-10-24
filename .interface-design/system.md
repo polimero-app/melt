@@ -15,6 +15,8 @@ The interface signature is status freshness. A printer's last observed machine s
 - Depth: use quiet borders and subtle same-hue surface shifts. Avoid dramatic shadows or large elevation jumps.
 - Spacing: use a 4 px base grid. Prefer existing Tailwind spacing increments and symmetrical component padding.
 - Typography: Inter carries interface hierarchy and prose. Hack carries printer identifiers, paths, measurements, and other telemetry.
+- Control-card labels use medium weight without inherited light-weight body text; fault severity and firmware metadata chips use at least `text-xs` (12 px).
+- Filament swatches expose a localized approximate color name and exact RGB hex in both a tooltip and screen-reader text. Missing or invalid colors are labeled unknown, not as the visual placeholder gray.
 - Structure: graphite and steel neutrals organize surfaces. Cyan identifies actions and selection, not connectivity.
 - Semantic color: green means a confirmed live sample; amber means retained data while reconnecting; red means no usable status or a terminal fault; muted gray means not yet observed or unknown.
 - Dark mode: keep semantic colors slightly desaturated with translucent backgrounds and low-emphasis borders.
