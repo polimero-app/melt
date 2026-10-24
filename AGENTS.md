@@ -15,3 +15,11 @@ Refresh the after captures whenever subsequent edits change the visible UI.
 If capture or upload is blocked, report the blocker and leave the PR in draft
 until the images are attached; do not claim the visual evidence is complete.
 Changes with no visible UI effect do not require screenshots.
+
+## Keep screenshots current
+
+When a new screen is added or existing UI changes, update
+`scripts/capture_screenshots.py` (scenarios, bridge IPC) and
+`fixtures/screenshots/state.json`, run `make screenshots`, and commit the
+refreshed `screenshots/*.png` and `capture-manifest.json`. Keep
+`docs/screenshots.md` in sync. The script fails if a view has no scenario.

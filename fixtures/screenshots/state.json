@@ -13,6 +13,18 @@
     {"name": "workbench", "id": "0123456789abcdef0123456789abcdef", "driver": "tapo", "host": "192.0.2.20", "username": "camera-demo", "rtspPort": 554, "timeout": "10s", "printers": ["workshop", "studio"], "selectedBy": ["studio"]},
     {"name": "enclosure", "id": "fedcba9876543210fedcba9876543210", "driver": "tapo", "host": "192.0.2.21", "username": "camera-demo", "rtspPort": 554, "timeout": "10s", "printers": ["klipper"], "selectedBy": ["klipper"]}
   ],
+  "plugs": [
+    {"id": "11111111111111111111111111111111", "name": "bench-power", "driver": "tapo", "host": "192.0.2.40", "username": "operator@example.invalid", "timeout": "10s", "printers": ["workshop", "studio"], "cameras": ["workbench"], "updated": "sample-1"},
+    {"id": "22222222222222222222222222222222", "name": "enclosure-power", "driver": "tapo", "host": "192.0.2.41", "username": "operator@example.invalid", "timeout": "10s", "printers": ["klipper"], "cameras": ["enclosure"], "updated": "sample-2"},
+    {"id": "33333333333333333333333333333333", "name": "spare-power", "driver": "tapo", "host": "192.0.2.42", "username": "operator@example.invalid", "timeout": "10s", "printers": [], "cameras": [], "updated": "sample-3"},
+    {"id": "44444444444444444444444444444444", "name": "shelf-power", "driver": "tapo", "host": "192.0.2.43", "username": "operator@example.invalid", "timeout": "10s", "printers": [], "cameras": [], "updated": "sample-4"}
+  ],
+  "plugObservations": {
+    "11111111111111111111111111111111": {"relay": "on", "connection": "online", "last": {"state": "on", "observedAt": "2026-10-12T12:00:00Z"}, "device": null, "powerWatts": 215},
+    "22222222222222222222222222222222": {"relay": "off", "connection": "online", "last": {"state": "off", "observedAt": "2026-10-12T12:00:00Z"}, "device": null, "powerWatts": 0},
+    "33333333333333333333333333333333": {"relay": "unknown", "connection": "unreachable", "last": {"state": "on", "observedAt": "2026-10-12T11:55:00Z"}, "device": null, "powerWatts": null},
+    "44444444444444444444444444444444": {"relay": "unknown", "connection": "authFailed", "last": null, "device": null, "powerWatts": null}
+  },
   "preferences": {
     "notifications": {"completion": true, "failure": true, "disconnection": true},
     "slicers": [
