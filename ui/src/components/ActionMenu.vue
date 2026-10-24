@@ -25,11 +25,11 @@ const groups = computed(() =>
 <template>
   <Menu as="div" class="relative inline-block text-left">
     <MenuButton
-      class="inline-grid size-11 shrink-0 place-items-center rounded-md text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-white"
+      class="inline-grid size-11 shrink-0 place-items-center rounded-md text-gray-700 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-200 dark:hover:bg-white/10 dark:hover:text-white"
       :title="label"
       :aria-label="label"
     >
-      <PhDotsThree class="size-5" aria-hidden="true" />
+      <PhDotsThree weight="bold" class="size-5" aria-hidden="true" />
     </MenuButton>
     <transition
       enter-active-class="transition ease-out duration-100"

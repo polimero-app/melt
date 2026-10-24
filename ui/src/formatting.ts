@@ -50,14 +50,15 @@ export function clampTarget(maximum: number, next: number): number {
 
 export function formatSize(sizeBytes: number | undefined, locale: string) {
   if (sizeBytes === undefined || sizeBytes < 0) return '—'
-  const unit = sizeBytes < 1024 ? 'byte' : sizeBytes < 1024 * 1024 ? 'kilobyte' : 'megabyte'
-  const divisor = unit === 'byte' ? 1 : unit === 'kilobyte' ? 1024 : 1024 * 1024
+  // Intl spells the byte unit out ("16 byte"), so it is formatted by hand.
+  if (sizeBytes < 1024) return `${new Intl.NumberFormat(locale).format(sizeBytes)} B`
+  const unit = sizeBytes < 1024 * 1024 ? 'kilobyte' : 'megabyte'
   return new Intl.NumberFormat(locale, {
     style: 'unit',
     unit,
     unitDisplay: 'short',
-    maximumFractionDigits: unit === 'byte' ? 0 : 1,
-  }).format(sizeBytes / divisor)
+    maximumFractionDigits: 1,
+  }).format(sizeBytes / (unit === 'kilobyte' ? 1024 : 1024 * 1024))
 }
 
 export function formatDate(value: string | undefined, locale: string) {

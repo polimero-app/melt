@@ -78,7 +78,8 @@ describe('temperature target clamping', () => {
   it('preserves file metadata formatting and the selected locale across views', () => {
     expect(formatSize(undefined, 'en')).toBe('—')
     expect(formatSize(-1, 'en')).toBe('—')
-    expect(formatSize(0, 'en')).toBe('0 byte')
+    expect(formatSize(0, 'en')).toBe('0 B')
+    expect(formatSize(16, 'en')).toBe('16 B')
     expect(formatSize(1536, 'en')).toBe('1.5 kB')
     expect(formatSize(1536, 'pt-BR')).toBe('1,5 kB')
     expect(formatDate(undefined, 'en')).toBe('—')

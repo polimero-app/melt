@@ -13,7 +13,7 @@ import Button from '../components/Button.vue'
 import Card from '../components/Card.vue'
 import CameraViewer from '../components/CameraViewer.vue'
 import PlugControl from '../components/PlugControl.vue'
-import { PhPencilSimple, PhPlus, PhTrash, PhVideoCamera } from '@phosphor-icons/vue'
+import { PhCaretDown, PhPencilSimple, PhPlus, PhTrash, PhVideoCamera } from '@phosphor-icons/vue'
 import type { Printer, ViewActions } from '../app-types'
 
 const {
@@ -182,10 +182,13 @@ function plugChanged(plug: PlugSummary) {
         @snapshot-saved="showToast(t('camera.snapshotSaved'))"
       >
         <template #controls>
-          <select v-model="cameraQuality" :aria-label="t('camerasView.quality')" class="rounded-md bg-white py-1.5 pl-2 text-xs font-medium text-gray-700 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-gray-200 dark:outline-white/10 dark:*:bg-gray-800">
+          <div class="grid grid-cols-1">
+          <select v-model="cameraQuality" :aria-label="t('camerasView.quality')" class="col-start-1 row-start-1 appearance-none rounded-md bg-white py-1.5 pr-7 pl-2 text-xs font-medium text-gray-700 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-gray-200 dark:outline-white/10 dark:*:bg-gray-800">
             <option value="high">{{ t('camerasView.qualityHigh') }}</option>
             <option value="low">{{ t('camerasView.qualityLow') }}</option>
           </select>
+          <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-1.5 size-4 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
+          </div>
         </template>
       </CameraViewer>
       <div v-if="plugsForCamera(viewedCamera.name, plugs).length" class="space-y-3 rounded-lg border border-gray-200 px-4 py-3 dark:border-white/10">

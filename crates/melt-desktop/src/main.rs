@@ -709,12 +709,17 @@ fn default_library_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, Com
     Ok(dir)
 }
 
-/// Breadcrumb trail from the filesystem root down to `path`, letting the UI
-/// jump to any ancestor without the frontend having to parse OS-specific
-/// path separators itself.
-fn library_breadcrumbs(path: &std::path::Path) -> Vec<LibraryBreadcrumb> {
+/// Breadcrumb trail down to `path`, letting the UI jump to any ancestor
+/// without the frontend having to parse OS-specific path separators itself.
+/// It starts at the library folder when `path` is inside it, otherwise at the
+/// filesystem root.
+fn library_breadcrumbs(
+    path: &std::path::Path,
+    library_dir: &std::path::Path,
+) -> Vec<LibraryBreadcrumb> {
     let mut breadcrumbs: Vec<LibraryBreadcrumb> = path
         .ancestors()
+        .take_while(|ancestor| !path.starts_with(library_dir) || ancestor.starts_with(library_dir))
         .map(|ancestor| LibraryBreadcrumb {
             name: ancestor
                 .file_name()
@@ -2196,11 +2201,12 @@ fn library_files(
         })
     });
     watch_library_dir(&app, &absolute);
+    let library_dir = default_library_dir(&app)?;
     Ok(LibraryListResponse {
         parent: absolute
             .parent()
             .map(|parent| parent.to_string_lossy().into_owned()),
-        breadcrumbs: library_breadcrumbs(&absolute),
+        breadcrumbs: library_breadcrumbs(&absolute, &library_dir),
         path: absolute.to_string_lossy().into_owned(),
         entries,
     })
@@ -4240,6 +4246,26 @@ mod renderer_tests {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn breadcrumbs_start_at_library_folder() {
+        use std::path::Path;
+        let names = |path, lib| {
+            super::library_breadcrumbs(Path::new(path), Path::new(lib))
+                .into_iter()
+                .map(|crumb| crumb.name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names("/home/u/Documents/Melt/a/b", "/home/u/Documents/Melt"),
+            ["Melt", "a", "b"]
+        );
+        assert_eq!(
+            names("/home/u/Documents/Melt", "/home/u/Documents/Melt"),
+            ["Melt"]
+        );
+        assert_eq!(names("/tmp/x", "/home/u/Documents/Melt"), ["/", "tmp", "x"]);
+    }
+
     use std::{
         io::{BufRead, BufReader, Write},
         net::TcpListener,

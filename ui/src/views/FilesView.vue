@@ -13,6 +13,7 @@ import ActionMenu, { type ActionMenuItem } from '../components/ActionMenu.vue'
 import SlideOver from '../components/SlideOver.vue'
 import Button from '../components/Button.vue'
 import IconButton from '../components/IconButton.vue'
+import MiddleEllipsis from '../components/MiddleEllipsis.vue'
 import Card from '../components/Card.vue'
 import ModelThumbnail from '../components/ModelThumbnail.vue'
 import FilePreviewDialog from '../components/FilePreviewDialog.vue'
@@ -76,9 +77,9 @@ const modelTones: Record<ModelTone, { preview: string; shape: string }> = {
     preview: 'bg-linear-135 from-amber-100 to-slate-200 dark:from-amber-950 dark:to-slate-900',
     shape: 'h-20 w-25 rounded-l-[40%] rounded-r-[12%] bg-amber-400/75 shadow-[18px_18px_0_var(--color-amber-800)]',
   },
-  rose: {
-    preview: 'bg-linear-135 from-rose-100 to-slate-200 dark:from-rose-950 dark:to-slate-900',
-    shape: 'h-25 w-17.5 rounded-t-[50%] rounded-b-[12%] bg-rose-400/75 shadow-[15px_17px_0_var(--color-rose-800)]',
+  slate: {
+    preview: 'bg-linear-135 from-slate-200 to-slate-300 dark:from-slate-800 dark:to-slate-900',
+    shape: 'h-25 w-17.5 rounded-t-[50%] rounded-b-[12%] bg-slate-400/75 shadow-[15px_17px_0_var(--color-slate-600)]',
   },
   violet: {
     preview: 'bg-linear-135 from-violet-100 to-slate-200 dark:from-violet-950 dark:to-slate-900',
@@ -93,7 +94,7 @@ const mediaTones: Record<FileEntry['mediaType'], ModelTone> = {
   model: 'cyan',
   timelapse: 'violet',
   video: 'amber',
-  other: 'rose',
+  other: 'slate',
 }
 
 const libraryFilesLoading = ref(false)
@@ -415,7 +416,7 @@ defineExpose({ refresh: () => loadLibraryFiles(libraryPath.value), requestPrint,
         @click="navigateToDirectory(directory.devicePath)"
       >
         <PhFolder class="size-7 text-cyan-600 dark:text-cyan-400" aria-hidden="true" />
-        <span class="mt-3 block truncate text-sm font-medium text-gray-900 dark:text-white" :title="directory.name" translate="no">{{ directory.name }}</span>
+        <MiddleEllipsis class="mt-3 text-sm font-medium text-gray-900 dark:text-white" :text="directory.name" :title="directory.name" translate="no" />
         <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('filesView.folder') }}</span>
         <span v-if="directory.modifiedAt" class="mt-1 block text-xs whitespace-nowrap text-gray-500 dark:text-gray-400">{{ formatDate(directory.modifiedAt, locale) }}</span>
       </button>
