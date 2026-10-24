@@ -523,7 +523,7 @@ defineExpose({ openEdit })
                     <p class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ component.label }}</p>
                     <span v-if="component.required" class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-400/10 dark:text-amber-300">{{ t('firmware.required') }}</span>
                   </div>
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ firmwareComponentLabel(component.kind) }}</p>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ component.label === firmwareComponentLabel(component.kind) ? component.id : firmwareComponentLabel(component.kind) }}</p>
                 </div>
                 <div class="min-w-0 rounded-md bg-gray-50 px-3 py-2 dark:bg-white/5">
                   <div class="flex items-baseline justify-between gap-3">

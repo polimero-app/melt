@@ -1,9 +1,9 @@
 {
-  "capturedAt": "2026-10-24T03:08:00+00:00",
+  "capturedAt": "2026-10-24T03:38:24+00:00",
   "scenarioTime": "2026-10-12T12:00:00Z",
-  "sourceCommit": "ad4ca256c434270e01abc8dfce1f8dbea33d4f40",
-  "frontendSourceSha256": "250040cafb18205ff8c8661931751545f2c5dba0110185e937f80f1cd06baa62",
-  "fixtureSha256": "a2dc625e594dee5476bebad3856c20e47257169cd5245a8ffb82b4939a32bc56",
+  "sourceCommit": "78d0c682bc0a1f662a662d2245a96fc8b277d4e8",
+  "frontendSourceSha256": "d18764ed90959198fa8fed3ce53f96c46e70e1a8660799008087dd72178c2aa3",
+  "fixtureSha256": "1320e5cf55545cbe793735efb4f40aa676221b4b982570f1c876a0f987d00732",
   "viewport": {
     "width": 1600,
     "height": 1100,
@@ -22,7 +22,7 @@
         3200,
         2200
       ],
-      "sha256": "bab9cf0b4c5bb3ab0c0c9fb364165291b55a3ec0477cd1d78c6873c19282859f",
+      "sha256": "e655e2d5fb2d6754ce5e69cb3e4cf1c1568e95c8cd16a4ddb781f1c090f8b8d9",
       "playback": []
     },
     {
@@ -32,7 +32,7 @@
         3200,
         2200
       ],
-      "sha256": "05bec95ec766286c0b3c2b6b9385f2bc362a1352b53db8ded92a3c305a2e75f1",
+      "sha256": "660ce10da20cca661dd799a9848f1082e39cdc3d5d9f99816af88c9b1ae7b5e6",
       "playback": []
     },
     {
@@ -42,7 +42,7 @@
         3200,
         2200
       ],
-      "sha256": "6fd1e8f647c7194949fddf06f97f8dddec89cb4e518e983aa98904b573f5d98c",
+      "sha256": "d5280861515190efd03daf1cfce53ccd0328bc9eea384ad41ad72f74d1aef71e",
       "playback": []
     },
     {
@@ -52,7 +52,7 @@
         3200,
         2200
       ],
-      "sha256": "584956ed46b9cc6daa3d7cff7accfc5e7c4317d17364a1a3c05569e19953ea79",
+      "sha256": "219c2cd4cdbc01d568f4445ae7f7460bba5b2859c3234367870c67110dcf3641",
       "playback": []
     },
     {
@@ -62,7 +62,7 @@
         3200,
         3070
       ],
-      "sha256": "5678d6c9c342dcf449653215421ded1fde07811d2540ee356fa24ce055bff448",
+      "sha256": "eeec1e7b118a9a7e5767e1de7e0ff8fada98279cfe221d3999b7e3516dc744b9",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -74,7 +74,7 @@
         3200,
         3070
       ],
-      "sha256": "3d4d104314b5ac3e173fb5243d0cfd5269ccc9434372e8194cb8467baaeeffa2",
+      "sha256": "09cdb66c9af53f32b7f70c5f7d4a0ef7bd932a8951eba660c839c745a198a8a2",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -86,7 +86,7 @@
         3200,
         2200
       ],
-      "sha256": "330d36d8d518546aa741ce901d155fec724c6c671e808a25fd705acc699920e5",
+      "sha256": "e0360526db2214a2b2c2069a12315cebf2c314c0588f47aa2ed2b27a57e3e2d0",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -98,7 +98,7 @@
         3200,
         2200
       ],
-      "sha256": "76db04ed12f0e4f90ac505c6859a5c1deb4a9e9ce111f90aa867e3eeaf25494d",
+      "sha256": "7c8aeeab7249b787d1c6075523b268024e9cec9f3c6f53473a159334f1666b0d",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -110,7 +110,7 @@
         3200,
         2200
       ],
-      "sha256": "4599f1e158d2ce6b4104d53a3e32fde777a33609ec9bc6ca5ac1ed5ec9af71d6",
+      "sha256": "0745fd7041bb5bfab0ddeeca5b5068b234f0628921105cf439aa00e098a9438f",
       "playback": []
     },
     {
@@ -132,7 +132,7 @@
         3200,
         2200
       ],
-      "sha256": "4b1859117ff402d5b0925506ac5e3fe3297f095f74768064ccd695786251cbf2",
+      "sha256": "609c73c9ba36e50cd8d5669e08d7238e3f3c102fcd5b08883d821d423121dc7e",
       "playback": []
     },
     {
@@ -142,7 +142,7 @@
         3200,
         2200
       ],
-      "sha256": "51b3045fe39d03a0dd1ad99b91c89ee0f9efd31116d215ec53b20e6cddd3259d",
+      "sha256": "8433fab330892a6ca9406e8b88f0cf2a0485ba17a1d6bed0619c5855effade64",
       "playback": []
     },
     {
@@ -152,7 +152,7 @@
         3200,
         2200
       ],
-      "sha256": "f204a8489a8144803fb1cc036cb7a876a23a09c000c220b5d4ed4eba134bf605",
+      "sha256": "940200767e0e07b59c365fd72741ce3d1d906e6b45be88d07ab2844c329dc079",
       "playback": []
     }
   ]

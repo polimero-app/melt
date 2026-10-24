@@ -9,7 +9,7 @@ import type { Translate } from './errors'
 
 export type View = 'control' | 'printers' | 'cameras' | 'plugs' | 'settings' | 'files'
 
-export type ModelTone = 'cyan' | 'amber' | 'rose' | 'violet'
+export type ModelTone = 'cyan' | 'amber' | 'slate' | 'violet'
 
 export type AppInfo = {
   version: string

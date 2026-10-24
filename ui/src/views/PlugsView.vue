@@ -140,7 +140,6 @@ function removePlug(name: string) {
         <div class="min-w-0 flex-1">
           <span class="block truncate text-sm font-semibold text-gray-900 dark:text-white">{{ plug.name }}</span>
           <span class="mt-0.5 block truncate font-mono text-xs text-gray-500 dark:text-gray-400">{{ plug.host }}</span>
-          <span class="mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400">{{ plug.username }}</span>
           <PlugControl class="mt-2" :plug="plug" :observation="plugObservations[plug.id]" :activity="plugActivity" :refresh="refreshPlugs" :t="t" :locale="locale" :show-name="false" />
         </div>
         <ActionMenu :label="t('plugsView.actions')" :items="plugActionItems(plug)" />

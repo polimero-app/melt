@@ -24,6 +24,7 @@ import {
   PhCaretDown,
   PhDesktop,
   PhBellRinging,
+  PhGitBranch,
   PhInfo,
   PhPlus,
   PhSun,
@@ -265,7 +266,7 @@ async function runDiagnostics() {
         </div>
       </Card>
       <Card as="section" class="overflow-hidden">
-        <CardHeader :title="t('settingsView.firmwareSources')" :icon="PhInfo" />
+        <CardHeader :title="t('settingsView.firmwareSources')" :icon="PhGitBranch" />
         <label for="public-firmware-catalogue" class="flex cursor-pointer items-center justify-between gap-3 px-4 py-5 hover:bg-gray-50 sm:px-6 dark:hover:bg-white/5">
           <span class="flex grow flex-col">
             <span class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ t('settingsView.publicFirmwareCatalogue') }}</span>
