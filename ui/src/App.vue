@@ -2458,6 +2458,7 @@ onUnmounted(() => {
               @click="selectPrinter(printer.name)"
             >
               <span class="size-1.5 shrink-0 rounded-full ring-3" :class="badgeDotClasses[badgeFor(printer.name)]"></span>{{ printer.name }}
+              <span class="sr-only">{{ statusLabel(badgeFor(printer.name)) }}</span>
             </button>
           </div>
           <div
