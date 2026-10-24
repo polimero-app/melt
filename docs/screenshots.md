@@ -1,6 +1,6 @@
 # Screenshots
 
-Last-updated: 2026-10-12
+Last-updated: 2026-10-23
 
 Nine fresh captures of the current production Vue interface, including the
 **Printers** label, **Cameras** view, **Camera feed** selector, playback badges,
@@ -126,3 +126,55 @@ python3 scripts/capture_screenshots.py --output /tmp/melt-screenshots
 Visually inspect every view, check the recorded playback, and retain the
 manifest alongside the images. Rebuild and recapture whenever UI source or
 dependencies change.
+
+## Required UI PR evidence
+
+Every PR that changes visible UI must include freshly captured **Before**
+and **After** images in its description. This includes changes to layout,
+styling, text, assets, and interactive states, regardless of which source
+files implement the change. Changes with no visible UI effect are exempt.
+Agents must follow this procedure as required by [AGENTS.md](../AGENTS.md).
+
+1. Identify the affected views and states. Use the existing capture helper
+   and sanitized fixtures; extend its scenarios if they do not exercise the
+   change. Never use real printer/camera data or credentials.
+2. Capture **Before** from the merge-base of the PR head and its actual
+   target branch, in a separate disposable checkout. Do not reset or switch
+   the working checkout or reuse its `ui/dist`. Install the prerequisites
+   above, then run from the baseline checkout:
+
+   ```sh
+   make ui-install ui-build
+   python3 scripts/capture_screenshots.py --output /tmp/melt-pr-before
+   ```
+
+3. Capture **After** from the checkout containing the final changes:
+
+   ```sh
+   make ui-install ui-build
+   python3 scripts/capture_screenshots.py --output /tmp/melt-pr-after
+   ```
+
+   Use unique output directories outside both checkouts for each PR. Keep
+   the fixture scenario, viewport, theme, locale, and browser version
+   consistent between captures. For a new view, capture its predecessor or
+   entry point as the baseline and explain that no direct equivalent existed.
+4. Inspect the relevant image pairs to confirm they show the intended change
+   without unexpected errors or layout regressions. Keep each
+   `capture-manifest.json` with its images and record the baseline commit and
+   after source commit/hash in the PR description. Recapture after any
+   subsequent edits that affect the visible UI.
+5. Upload the relevant PNGs to GitHub using the agent's available attachment
+   support and embed the returned image URLs under **Before** and **After**
+   headings in the PR description, labeled by view/state. Preserve the rest
+   of the description. A PR comment, local file path, artifact download link,
+   or existing gallery image is not a substitute for these inline images.
+
+If attachment tooling is unavailable, ask the author to drag the PNGs into
+the PR description in GitHub's editor. If capture or upload fails, report
+the exact blocker and keep the PR in draft until the evidence is attached.
+Do not commit comparison images to the repository unless updating the
+documentation gallery is part of the requested change.
+
+This is a contribution requirement, not an automated CI gate. The synthetic
+browser captures do not replace native desktop or live-hardware checks.
