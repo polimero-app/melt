@@ -961,10 +961,13 @@ onUnmounted(() => {
           @snapshot-saved="showToast(t('camera.snapshotSaved'))"
         >
           <template v-if="controlCameras.length" #controls>
-            <select :value="controlCameraName" :aria-label="t('camerasView.feed')" class="rounded-md bg-white py-1.5 pl-2 text-xs font-medium text-gray-700 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-gray-200 dark:outline-white/10 dark:*:bg-gray-800" @change="selectControlFeed(($event.target as HTMLSelectElement).value)">
-              <option value="">{{ t('camerasView.builtInFeed') }}</option>
-              <option v-for="camera in controlCameras" :key="camera.id" :value="camera.name">{{ camera.name }}</option>
-            </select>
+            <div class="grid grid-cols-1">
+              <select :value="controlCameraName" :aria-label="t('camerasView.feed')" class="col-start-1 row-start-1 appearance-none rounded-md bg-white py-1.5 pr-7 pl-2 text-xs font-medium text-gray-700 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 dark:bg-white/5 dark:text-gray-200 dark:outline-white/10 dark:*:bg-gray-800" @change="selectControlFeed(($event.target as HTMLSelectElement).value)">
+                <option value="">{{ t('camerasView.builtInFeed') }}</option>
+                <option v-for="camera in controlCameras" :key="camera.id" :value="camera.name">{{ camera.name }}</option>
+              </select>
+              <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-2 size-3.5 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
+            </div>
           </template>
         </CameraViewer>
 
@@ -1076,7 +1079,7 @@ onUnmounted(() => {
             <div v-for="row in temperatureRows" :key="row.key" class="flex items-center justify-between gap-3">
               <div class="min-w-0">
                 <p class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ temperatureLabel(row.key, row.value) }}</p>
-                <p class="font-mono text-sm text-gray-500 dark:text-gray-400"><span class="font-bold">{{ row.value.currentCelsius === undefined ? '—' : formatTemperature(row.value.currentCelsius) }}</span> °C <span aria-hidden="true">/</span> <span class="font-bold">{{ row.value.targetCelsius === undefined ? '—' : formatTemperature(row.value.targetCelsius) }}</span> °C</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400"><span class="font-mono font-bold">{{ row.value.currentCelsius === undefined ? '—' : formatTemperature(row.value.currentCelsius) }}</span> °C <span aria-hidden="true">/</span> <span class="font-mono font-bold">{{ row.value.targetCelsius === undefined ? '—' : formatTemperature(row.value.targetCelsius) }}</span> °C</p>
               </div>
               <div v-if="capabilities?.temperatureWrite && row.value.controllable" class="flex shrink-0 items-center gap-1">
                 <IconButton variant="outline" class="!size-8 !min-h-0 !min-w-0" :disabled="selectedStatus?.state !== 'idle'" :aria-label="t('control.decreaseTemp', { sensor: temperatureLabel(row.key, row.value) })" @click="adjustTemperature(row.key, row.value, -5)"><PhMinus class="size-3.5" aria-hidden="true" /></IconButton>
