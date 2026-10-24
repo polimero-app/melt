@@ -22,7 +22,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from PIL import Image, ImageDraw, ImageFont
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "fixtures/screenshots/state.json"
@@ -314,8 +314,18 @@ def capture(args):
                 page.goto(base, wait_until="load")
                 page.get_by_role("navigation", name="Workspace navigation", exact=True).wait_for()
                 page.get_by_role("button", name="Printers", exact=True).wait_for()
+                if kind == "fleet":
+                    summary = page.locator("dl").filter(has=page.get_by_text("Total printers", exact=True))
+                    expect(summary.locator("dd")).to_have_text(["3", "3", "1"])
+                    assert summary.bounding_box()["height"] <= 24, "Fleet counts must fit on one line"
+                    cards = page.get_by_role("article")
+                    expect(cards.get_by_role("button", name="Open control", exact=True)).to_have_count(len(state["printers"]))
+                    expect(cards.get_by_role("button", name=re.compile("Firmware"))).to_have_count(0)
                 if kind == "firmware":
-                    page.get_by_role("button", name="Firmware & software", exact=True).first.click()
+                    page.get_by_role("button", name="Printer actions", exact=True).first.click()
+                    expect(page.get_by_role("menuitem", name="Firmware", exact=True)).to_have_count(1)
+                    page.get_by_role("menuitem", name="Firmware", exact=True).click()
+                    expect(page.get_by_role("heading", name="workshop", exact=True)).to_be_visible()
                     page.get_by_text("Public stable release is newer", exact=True).wait_for()
                     page.locator("summary").click()
                 if kind in ("idle", "printing", "cameras", "camera-settings"):

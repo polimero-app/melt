@@ -444,6 +444,7 @@ export type MessageKey =
   | "printersView.discoveredHost"
   | "printersView.useDiscoveredHost"
   | "printersView.editPrinter"
+  | "printersView.firmware"
   | "printersView.tlsVerification"
   | "printersView.openControl"
   | "printersView.refreshCertificate"
@@ -1116,6 +1117,7 @@ const messages: Record<Locale, Messages> = {
     "printersView.discoveredHost": "Discovered host (not applied)",
     "printersView.useDiscoveredHost": "Use this address",
     "printersView.editPrinter": "Edit printer",
+    "printersView.firmware": "Firmware",
     "printersView.tlsVerification": "TLS verification",
     "printersView.openControl": "Open control",
     "printersView.refreshCertificate": "Refresh certificate",
@@ -1791,6 +1793,7 @@ const messages: Record<Locale, Messages> = {
     "printersView.discoveredHost": "Host descoberto (não aplicado)",
     "printersView.useDiscoveredHost": "Usar este endereço",
     "printersView.editPrinter": "Editar impressora",
+    "printersView.firmware": "Firmware",
     "printersView.tlsVerification": "Verificação TLS",
     "printersView.openControl": "Abrir controle",
     "printersView.refreshCertificate": "Atualizar certificado",
