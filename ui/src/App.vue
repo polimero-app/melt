@@ -3257,7 +3257,7 @@ onUnmounted(() => {
           <Button class="mt-6" variant="primary" :disabled="!drivers.length" @click="openAddition"><PhBroadcast class="size-4" aria-hidden="true" /> {{ t('printersView.scan') }}</Button>
         </div>
 
-        <div v-else class="grid gap-5 grid-cols-[repeat(auto-fit,minmax(280px,1fr))]">
+        <div v-else class="grid gap-5 grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
           <Card v-for="printer in printers" :key="printer.name" as="article" class="px-4 py-5 sm:p-6">
             <div class="flex items-start justify-between">
               <div class="flex items-center gap-3">
