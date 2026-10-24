@@ -17,6 +17,7 @@ import {
 } from '../drying'
 import { printStageLabel } from '../stages'
 import {
+  activeFilamentMatches,
   awaitsFirstSample,
   filamentColor,
   filamentColorName,
@@ -51,6 +52,7 @@ import {
   PhArrowSquareOut,
   PhBroadcast,
   PhCaretDown,
+  PhCheckCircle,
   PhCheckSquareOffset,
   PhCube,
   PhDownloadSimple,
@@ -343,12 +345,17 @@ const dryingBlockedKey = (reason: string) => dryingBlockedMessageKeys[reason] ??
 
 // Material inventory currently travels in the shared Bambu-shaped extension;
 // its user-facing terminology still follows the selected printer's driver.
+const materialInventory = computed(() => selectedStatus.value?.extensions?.['bambu-lan']?.ams)
+const activeFilament = computed(() => materialInventory.value?.activeFilament)
 const materialSystems = computed<MaterialSystemView[]>(() => {
-  const units = selectedStatus.value?.extensions?.['bambu-lan']?.ams?.units ?? []
+  const units = materialInventory.value?.units ?? []
   const driver = activePrinter?.driver ?? ''
   const materialUnitCount = units.filter((unit) => unit.id < 254).length
+  const externalUnitCount = units.filter((unit) => unit.id >= 254).length
   return units.map((unit) => ({
-    name: materialSystemLabel(driver, unit.id, t('materials.externalSpool'), materialUnitCount),
+    name: unit.id >= 254 && externalUnitCount > 1
+      ? t('materials.externalHolder', { id: unit.id })
+      : materialSystemLabel(driver, unit.id, t('materials.externalSpool'), materialUnitCount),
     unitId: unit.id,
     temperature: unit.temperature,
     humidity: formatAmsHumidity(unit.humidityPercent, unit.humidityIndex, locale),
@@ -360,6 +367,8 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
       const colorName = filamentColorName(rawColor)
       return {
         slot: unit.id >= 254 ? t('materials.slotExternal') : String(tray.slot + 1),
+        trayIndex: tray.trayIndex,
+        active: tray.present !== false && activeFilamentMatches(activeFilament.value, unit.id, tray.trayIndex, externalUnitCount),
         present: tray.present,
         type: tray.present === false ? t('materials.empty') : tray.filamentType ?? (tray.present ? t('materials.unknownFilament') : '—'),
         color,
@@ -372,6 +381,23 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
       }
     }),
   }))
+})
+const activeFilamentSummary = computed(() => {
+  const selection = activeFilament.value
+  if (!selection) return t('materials.activeUnknown')
+  if (selection.state === 'none') return t('materials.noFilament')
+  if (selection.state === 'external') {
+    return selection.unitId === undefined
+      ? t('materials.externalSpool')
+      : materialSystems.value.find((system) => system.unitId === selection.unitId)?.name
+        ?? t('materials.externalHolder', { id: selection.unitId })
+  }
+  if (selection.state === 'tray') {
+    const system = materialSystems.value.find((system) => system.slots.some((slot) => slot.trayIndex === selection.trayIndex))
+    const slot = system?.slots.find((slot) => slot.trayIndex === selection.trayIndex)
+    return system && slot ? `${system.name} / ${slot.slot}` : t('materials.activeTrayIndex', { index: selection.trayIndex })
+  }
+  return t('materials.activeUnknown')
 })
 
 const controlCameras = computed(() => activePrinter ? linkedCameras(activePrinter.name, cameras) : [])
@@ -1283,12 +1309,15 @@ onUnmounted(() => {
           </div>
         </Card>
 
-        <Card v-if="materialSystems.length">
+        <Card v-if="materialSystems.length || activeFilament">
           <CardHeader :title="t('materials.title')" :icon="PhStack">
             <ActionMenu v-if="dryingMenuItems.length" :label="t('drying.actions')" :items="dryingMenuItems" />
           </CardHeader>
+          <div class="border-b border-gray-200 px-4 py-3 text-xs text-gray-500 sm:px-6 dark:border-white/10 dark:text-gray-400">
+            {{ t('materials.activeFilament') }}: <span class="font-mono text-gray-900 dark:text-white">{{ activeFilamentSummary }}</span>
+          </div>
           <div class="divide-y divide-gray-200 dark:divide-white/10">
-            <div v-for="system in materialSystems" :key="system.name" class="px-4 py-5 sm:px-6">
+            <div v-for="system in materialSystems" :key="system.unitId" class="px-4 py-5 sm:px-6">
               <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <span class="text-sm/6 font-medium text-gray-900 dark:text-white">{{ system.name }}</span>
                 <div v-if="system.temperature !== undefined || system.humidity !== undefined" class="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
@@ -1309,10 +1338,16 @@ onUnmounted(() => {
                 <div
                   v-for="material in system.slots"
                   :key="`${system.name}-${material.slot}`"
-                  class="relative size-18 shrink-0 overflow-hidden rounded-md border border-black/10 dark:border-white/15"
+                  role="group"
+                  :aria-label="`${system.name} ${material.slot}`"
+                  :aria-current="material.active ? 'true' : undefined"
+                  class="relative size-18 shrink-0 overflow-hidden rounded-md border"
+                  :class="material.active ? 'border-cyan-700 ring-2 ring-cyan-700 dark:border-cyan-400 dark:ring-cyan-400' : 'border-black/10 dark:border-white/15'"
                   :style="{ backgroundColor: material.color, color: textColorFor(material.color) }"
                   :title="material.present === undefined ? `${t('materials.presenceUnknown')}; ${material.colorLabel}` : material.colorLabel"
                 >
+                  <PhCheckCircle v-if="material.active" class="absolute right-1 top-1 z-20 size-3 rounded-full bg-white text-cyan-700 dark:bg-gray-950 dark:text-cyan-400" aria-hidden="true" />
+                  <span v-if="material.active" class="sr-only">{{ t('materials.active') }}</span>
                   <span
                     class="absolute inset-x-0 top-0 transition-[height] duration-200"
                     :style="{ height: `${100 - material.remainingPercent}%`, backgroundColor: emptyFilamentOverlayFor(material.color) }"

@@ -174,6 +174,7 @@ mod tests {
     #[test]
     fn matches_same_material_by_color_without_reusing_trays() {
         let inventory = AmsData {
+            active_filament: None,
             units: vec![AmsUnit {
                 trays: vec![tray(0, "GFA00", "FF0000FF"), tray(1, "GFA00", "00FF00FF")],
                 ..Default::default()
@@ -190,6 +191,7 @@ mod tests {
     #[test]
     fn reports_ambiguous_and_missing_requirements() {
         let inventory = AmsData {
+            active_filament: None,
             units: vec![AmsUnit {
                 trays: vec![tray(0, "GFA00", "FFFFFFFF"), tray(1, "GFA00", "FFFFFFFF")],
                 ..Default::default()
@@ -209,6 +211,7 @@ mod tests {
         let mut matching = tray(0, "GFA00", "FFFFFFFF");
         matching.present = Some(false);
         let mut inventory = AmsData {
+            active_filament: None,
             units: vec![AmsUnit {
                 trays: vec![matching],
                 ..Default::default()
@@ -231,6 +234,7 @@ mod tests {
         selected.filaments[0].nozzle_index = Some(1);
         selected.filaments[1].nozzle_index = Some(0);
         let inventory = AmsData {
+            active_filament: None,
             units: vec![AmsUnit {
                 trays: vec![tray(0, "GFA00", "FFFFFFFF"), tray(1, "GFB00", "000000FF")],
                 ..Default::default()

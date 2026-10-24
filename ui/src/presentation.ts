@@ -146,6 +146,19 @@ export function filamentColorName(value: string | undefined): MessageKey {
   return lightness > 0.65 ? 'materials.color.pink' : 'materials.color.magenta'
 }
 
+export type ActiveFilament =
+  | { state: 'none' }
+  | { state: 'tray'; trayIndex: number }
+  | { state: 'external'; unitId?: number }
+
+export function activeFilamentMatches(active: ActiveFilament | undefined, unitId: number, trayIndex: number | undefined, externalUnitCount: number): boolean {
+  if (active?.state === 'tray') return active.trayIndex === trayIndex
+  if (active?.state === 'external' && unitId >= 254) {
+    return active.unitId === unitId || (active.unitId === undefined && externalUnitCount === 1)
+  }
+  return false
+}
+
 export function filamentFillPercent(value: number | undefined, present?: boolean): number {
   if (present === false) return 0
   if (value === undefined || !Number.isFinite(value) || value < 0) return 100

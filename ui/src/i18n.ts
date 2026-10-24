@@ -402,6 +402,11 @@ export type MessageKey =
   | "materials.unknownFilament"
   | "materials.presenceUnknown"
   | "materials.approximate"
+  | "materials.activeFilament"
+  | "materials.activeUnknown"
+  | "materials.noFilament"
+  | "materials.activeTrayIndex"
+  | "materials.externalHolder"
   | "materials.temperature"
   | "materials.colorLabel"
   | "materials.color.unknown"
@@ -1108,6 +1113,11 @@ const messages: Record<Locale, Messages> = {
     "materials.unknownFilament": "Unknown material",
     "materials.presenceUnknown": "Physical spool presence is unknown",
     "materials.approximate": "Approximately",
+    "materials.activeFilament": "Active filament",
+    "materials.activeUnknown": "Unknown",
+    "materials.noFilament": "None selected",
+    "materials.activeTrayIndex": "Tray index {index}",
+    "materials.externalHolder": "External spool ({id})",
     "materials.temperature": "Temperature",
     "materials.colorLabel": "Approximate color: {name} ({hex})",
     "materials.color.unknown": "Unknown color",
@@ -1817,6 +1827,11 @@ const messages: Record<Locale, Messages> = {
     "materials.unknownFilament": "Material desconhecido",
     "materials.presenceUnknown": "Presença física do carretel desconhecida",
     "materials.approximate": "Aproximadamente",
+    "materials.activeFilament": "Filamento ativo",
+    "materials.activeUnknown": "Desconhecido",
+    "materials.noFilament": "Nenhum selecionado",
+    "materials.activeTrayIndex": "Índice do compartimento {index}",
+    "materials.externalHolder": "Carretel externo ({id})",
     "materials.temperature": "Temperatura",
     "materials.colorLabel": "Cor aproximada: {name} ({hex})",
     "materials.color.unknown": "Cor desconhecida",

@@ -4,6 +4,7 @@ import type { AmsDrying } from './drying'
 import type { CommandError } from './errors'
 import type { CameraPlayback } from './cameras'
 import type { HmsSeverity, PrinterError } from './hms'
+import type { ActiveFilament } from './presentation'
 import type { Translate } from './errors'
 
 export type View = 'control' | 'printers' | 'cameras' | 'plugs' | 'settings' | 'files'
@@ -150,7 +151,7 @@ export type PrinterStatus = {
     fans?: Record<string, FanControl>
     lights?: Record<string, LightControl>
   }
-  extensions?: { 'bambu-lan'?: { ams?: { units: AmsUnitStatus[] } } }
+  extensions?: { 'bambu-lan'?: { ams?: { units: AmsUnitStatus[]; activeFilament?: ActiveFilament } } }
 }
 
 export type StatusFault = {
@@ -248,6 +249,8 @@ export type BambuCompatibilityDiagnostic = {
 
 export interface MaterialSlot {
   slot: string
+  trayIndex?: number
+  active: boolean
   present?: boolean
   type: string
   color: string

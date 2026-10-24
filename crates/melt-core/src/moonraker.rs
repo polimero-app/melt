@@ -1574,10 +1574,26 @@ pub struct AmsDrying {
     pub controllable: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum ActiveFilament {
+    None,
+    Tray {
+        #[serde(rename = "trayIndex")]
+        tray_index: i32,
+    },
+    External {
+        #[serde(rename = "unitId", skip_serializing_if = "Option::is_none")]
+        unit_id: Option<u32>,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AmsData {
     pub units: Vec<AmsUnit>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_filament: Option<ActiveFilament>,
 }
 
 /// Driver-specific status payload. Mirrors the Go `extensions["bambu-lan"]`

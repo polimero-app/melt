@@ -38,6 +38,15 @@ Each behavior commit includes focused regression checks, directly dependent
 call-site/type changes, and maintained compatibility documentation. Shared
 evidence is introduced with the first behavior that exercises it.
 
+## Implementation outcome
+
+All six scoped behaviors are implemented in the shared core, CLI and desktop.
+New manufacturer defaults are limited to the verified P2S/N7 profile, not the
+whole supported model list. Source fixtures and executable regressions remain
+provisional evidence; this work does not add physical-printer qualification.
+The maintained compatibility guide records the implemented encodings,
+precedence rules and deliberately unknown states.
+
 ## Reviewed sources
 
 | Source | Pinned revision | Use |

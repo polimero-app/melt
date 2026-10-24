@@ -250,6 +250,28 @@ percentages, missing weights, explicitly absent trays and external holders
 produce no estimate. The desktop and detailed CLI mark estimates with `~`;
 the desktop also supplies a localized screen-reader approximation label.
 
+## Active filament path
+
+`activeFilament` distinguishes a reported internal tray, an external holder,
+and an explicitly unassigned path. An omitted field means unknown. Modern
+reports select `device.extruder.info` by the extruder ID in `state` bits 4–7,
+not by array position; its `snow` supplies the unit/slot pair. Ordinary,
+HT and explicit mixed-Lite paths reuse the inventory's canonical tray indices.
+Unknown/duplicate active IDs and invalid assignments do not fall back to a
+different nozzle or a retained legacy value.
+
+Legacy reports fall back to `ams.tray_now`: 254 means external and 255 means
+unassigned. A legacy external selection does not identify one holder when
+multiple external holders exist; modern reports preserve unit 254 versus 255.
+Manufacturer code clears `snow == 0xffff` only when the reported extruder count
+is one, so ambiguous multi-extruder `0xffff` remains unknown rather than applying
+Bambu Bar's single-printer interpretation universally.
+
+The CLI names unknown and unassigned separately. The desktop supplies an
+explicit localized summary plus a selection ring, check mark and screen-reader
+label on the matching slot. It never marks an explicitly absent slot active.
+The reported path does not by itself prove physical spool or filament presence.
+
 ## AMS drying
 
 Heater-equipped AMS units (AMS 2 Pro, AMS HT) report `dry_time` (minutes
