@@ -675,6 +675,8 @@ export type MessageKey =
   | "settingsView.removeNamedPreset"
   | "settingsView.noPresets"
   | "settingsView.restorePresets"
+  | "settingsView.presetRestoreTitle"
+  | "settingsView.presetRestoreDescription"
   | "settingsView.presetNameRequired"
   | "settingsView.presetNameTooLong"
   | "settingsView.presetNozzleInvalid"
@@ -1174,6 +1176,8 @@ const messages: Record<Locale, Messages> = {
     "settingsView.removeNamedPreset": "Remove preset {name}",
     "settingsView.noPresets": "No presets configured.",
     "settingsView.restorePresets": "Restore defaults",
+    "settingsView.presetRestoreTitle": "Restore default presets?",
+    "settingsView.presetRestoreDescription": "This replaces all your presets with the defaults and deletes any custom presets. This cannot be undone. Printer targets already set are unaffected.",
     "settingsView.presetNameRequired": "Enter a material name.",
     "settingsView.presetNameTooLong": "Use {max} characters or fewer.",
     "settingsView.presetNozzleInvalid": "Enter a whole number between 0 and {max}.",
@@ -1855,6 +1859,8 @@ const messages: Record<Locale, Messages> = {
     "settingsView.removeNamedPreset": "Remover predefinição {name}",
     "settingsView.noPresets": "Nenhuma predefinição configurada.",
     "settingsView.restorePresets": "Restaurar padrões",
+    "settingsView.presetRestoreTitle": "Restaurar predefinições padrão?",
+    "settingsView.presetRestoreDescription": "Isso substitui todas as suas predefinições pelas padrão e exclui as personalizadas. Essa ação não pode ser desfeita. Alvos já definidos na impressora não são afetados.",
     "settingsView.presetNameRequired": "Informe um nome de material.",
     "settingsView.presetNameTooLong": "Use no máximo {max} caracteres.",
     "settingsView.presetNozzleInvalid": "Informe um número inteiro entre 0 e {max}.",
