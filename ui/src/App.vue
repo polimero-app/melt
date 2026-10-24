@@ -3749,7 +3749,7 @@ onUnmounted(() => {
           <Button :disabled="libraryFilesLoading" @click="loadLibraryFiles(libraryPath)">{{ t('common.retry') }}</Button>
         </div>
 
-        <div v-if="visibleDirectories.length" class="mb-5 grid gap-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
+        <div v-if="visibleDirectories.length" class="mb-5 grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))]">
           <button
             v-for="directory in visibleDirectories"
             :key="directory.devicePath"
@@ -3759,12 +3759,13 @@ onUnmounted(() => {
           >
             <PhFolder class="size-7 text-cyan-600 dark:text-cyan-400" aria-hidden="true" />
             <span class="mt-3 block truncate text-sm font-medium text-gray-900 dark:text-white" :title="directory.name" translate="no">{{ directory.name }}</span>
-                    <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('filesView.folderModified', { date: formatDate(directory.modifiedAt) }) }}</span>
+            <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('filesView.folder') }}</span>
+            <span v-if="directory.modifiedAt" class="mt-1 block text-xs whitespace-nowrap text-gray-500 dark:text-gray-400">{{ formatDate(directory.modifiedAt) }}</span>
           </button>
         </div>
 
         <!-- Grid list -->
-        <div class="grid gap-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
+        <div class="grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))]">
           <Card
             v-for="file in visibleFiles"
             :key="file.devicePath"
@@ -3801,12 +3802,15 @@ onUnmounted(() => {
               ><PhMagnifyingGlassPlus class="size-8 text-white" aria-hidden="true" /></span>
               <span class="absolute right-3 bottom-2.5 text-[10px] font-bold text-gray-500 uppercase dark:text-slate-300/45">.{{ fileTypeLabel(file).toLowerCase() }}</span>
             </component>
-            <div class="flex items-start gap-3 px-4 py-5 sm:p-6">
-              <div class="min-w-0 flex-1">
-                <h3 class="line-clamp-2 wrap-anywhere text-sm font-medium text-gray-900 dark:text-white" :title="file.name" translate="no">{{ file.name }}</h3>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ formatSize(file.sizeBytes) }} · {{ formatDate(file.modifiedAt) }}</p>
+            <div class="px-4 py-5 sm:p-6">
+              <div class="flex items-start gap-3">
+                <h3 class="min-w-0 flex-1 line-clamp-2 wrap-anywhere text-sm font-medium text-gray-900 dark:text-white" :title="file.name" translate="no">{{ file.name }}</h3>
+                <ActionMenu v-if="fileActionItems(file).length" class="-mt-2 -mr-2" :label="t('filesView.moreActions')" :items="fileActionItems(file)" />
               </div>
-              <ActionMenu v-if="fileActionItems(file).length" class="-mt-2 -mr-2" :label="t('filesView.moreActions')" :items="fileActionItems(file)" />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                <span class="block">{{ formatSize(file.sizeBytes) }}</span>
+                <span class="mt-1 block whitespace-nowrap">{{ formatDate(file.modifiedAt) }}</span>
+              </p>
             </div>
           </Card>
           <div v-if="!visibleDirectories.length && !visibleFiles.length" class="col-span-full mx-4 flex min-h-65 flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-center sm:mx-0 dark:border-white/15">
@@ -4123,15 +4127,18 @@ onUnmounted(() => {
       <div v-if="printPackage" class="mt-5 space-y-4 border-t border-gray-200 pt-4 dark:border-white/10">
         <label class="block text-sm font-medium text-gray-700 dark:text-gray-200">
           {{ t('filesView.displayName') }}
-          <input v-model="printDisplayName" name="print-display-name" maxlength="99" autocomplete="off" class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-white/15 dark:bg-white/5 dark:text-white" />
+          <input v-model="printDisplayName" name="print-display-name" maxlength="99" autocomplete="off" class="mt-2 block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10" />
         </label>
         <label class="block text-sm font-medium text-gray-700 dark:text-gray-200">
           {{ t('filesView.plate') }}
-          <select v-model="printPlate" name="print-plate" class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-white/15 dark:bg-gray-900 dark:text-white">
-            <option v-for="plate in printPackage.plates.filter((candidate) => candidate.gcodePath)" :key="plate.index" :value="plate.index">
-              {{ plate.name || `${t('filesView.plate')} ${plate.index}` }}
-            </option>
-          </select>
+          <div class="mt-2 grid grid-cols-1">
+            <select v-model="printPlate" name="print-plate" class="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white py-1.5 pr-8 pl-3 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10 dark:*:bg-gray-800">
+              <option v-for="plate in printPackage.plates.filter((candidate) => candidate.gcodePath)" :key="plate.index" :value="plate.index">
+                {{ plate.name || `${t('filesView.plate')} ${plate.index}` }}
+              </option>
+            </select>
+            <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-2 size-5 self-center justify-self-end text-gray-500 sm:size-4 dark:text-gray-400" aria-hidden="true" />
+          </div>
         </label>
       </div>
       <div v-if="currentPrintTargetState === 'busy'" class="mt-4 space-y-2">
@@ -4176,7 +4183,7 @@ onUnmounted(() => {
               inputmode="numeric"
               :min="dryingBounds(dryingForm.unitId)?.min"
               :max="dryingBounds(dryingForm.unitId)?.max"
-              class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-white/15 dark:bg-white/5 dark:text-white"
+              class="block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10"
             />
             <span class="shrink-0 text-gray-500 dark:text-gray-400">°C</span>
           </div>
@@ -4190,7 +4197,7 @@ onUnmounted(() => {
               inputmode="numeric"
               min="1"
               max="24"
-              class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-white/15 dark:bg-white/5 dark:text-white"
+              class="block w-full rounded-md bg-white px-3 py-1.5 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-white/10"
             />
             <span class="shrink-0 text-gray-500 dark:text-gray-400">h</span>
           </div>

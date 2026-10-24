@@ -521,7 +521,7 @@ export type MessageKey =
   | "filesView.sortName"
   | "filesView.sortSize"
   | "filesView.sortModified"
-  | "filesView.folderModified"
+  | "filesView.folder"
   | "filesView.moreActions"
   | "filesView.openWith"
   | "filesView.deleteTitle"
@@ -1057,7 +1057,7 @@ const messages: Record<Locale, Messages> = {
     "camera.transport.webrtc": "Playing the H.264 video over WebRTC.",
     "camera.transport.webcodecs": "Playing the H.264 video using WebCodecs.",
     "camera.transport.mjpeg": "Playing the video as a series of JPEG images.",
-    "materials.title": "Filament Spools & Material Systems",
+    "materials.title": "Filament spools & material systems",
     "materials.externalSpool": "External spool",
     "materials.slotExternal": "EXT",
     "materials.active": "Active",
@@ -1216,7 +1216,7 @@ const messages: Record<Locale, Messages> = {
     "filesView.sortName": "Name",
     "filesView.sortSize": "Largest first",
     "filesView.sortModified": "Newest first",
-    "filesView.folderModified": "Folder · {date}",
+    "filesView.folder": "Folder",
     "filesView.moreActions": "More file actions",
     "filesView.openWith": "Open with {name}",
     "filesView.deleteTitle": "Delete {name}?",
@@ -1891,7 +1891,7 @@ const messages: Record<Locale, Messages> = {
     "filesView.sortName": "Nome",
     "filesView.sortSize": "Maiores primeiro",
     "filesView.sortModified": "Mais recentes primeiro",
-    "filesView.folderModified": "Pasta · {date}",
+    "filesView.folder": "Pasta",
     "filesView.moreActions": "Mais ações do arquivo",
     "filesView.openWith": "Abrir com {name}",
     "filesView.deleteTitle": "Excluir {name}?",
