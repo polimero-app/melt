@@ -396,6 +396,23 @@ export type MessageKey =
   | "materials.ready"
   | "materials.humidity"
   | "materials.temperature"
+  | "materials.colorLabel"
+  | "materials.color.unknown"
+  | "materials.color.black"
+  | "materials.color.white"
+  | "materials.color.gray"
+  | "materials.color.red"
+  | "materials.color.orange"
+  | "materials.color.yellow"
+  | "materials.color.green"
+  | "materials.color.lime"
+  | "materials.color.cyan"
+  | "materials.color.teal"
+  | "materials.color.blue"
+  | "materials.color.purple"
+  | "materials.color.magenta"
+  | "materials.color.pink"
+  | "materials.color.brown"
   | "drying.actions"
   | "drying.dry"
   | "drying.start"
@@ -1076,6 +1093,23 @@ const messages: Record<Locale, Messages> = {
     "materials.ready": "Ready",
     "materials.humidity": "Humidity",
     "materials.temperature": "Temperature",
+    "materials.colorLabel": "Approximate color: {name} ({hex})",
+    "materials.color.unknown": "Unknown color",
+    "materials.color.black": "Black",
+    "materials.color.white": "White",
+    "materials.color.gray": "Gray",
+    "materials.color.red": "Red",
+    "materials.color.orange": "Orange",
+    "materials.color.yellow": "Yellow",
+    "materials.color.green": "Green",
+    "materials.color.lime": "Lime",
+    "materials.color.cyan": "Cyan",
+    "materials.color.teal": "Teal",
+    "materials.color.blue": "Blue",
+    "materials.color.purple": "Purple",
+    "materials.color.magenta": "Magenta",
+    "materials.color.pink": "Pink",
+    "materials.color.brown": "Brown",
     "drying.actions": "Drying actions",
     "drying.dry": "Dry…",
     "drying.start": "Start drying",
@@ -1759,6 +1793,23 @@ const messages: Record<Locale, Messages> = {
     "materials.ready": "Pronto",
     "materials.humidity": "Umidade",
     "materials.temperature": "Temperatura",
+    "materials.colorLabel": "Cor aproximada: {name} ({hex})",
+    "materials.color.unknown": "Cor desconhecida",
+    "materials.color.black": "Preto",
+    "materials.color.white": "Branco",
+    "materials.color.gray": "Cinza",
+    "materials.color.red": "Vermelho",
+    "materials.color.orange": "Laranja",
+    "materials.color.yellow": "Amarelo",
+    "materials.color.green": "Verde",
+    "materials.color.lime": "Verde-lima",
+    "materials.color.cyan": "Ciano",
+    "materials.color.teal": "Verde-azulado",
+    "materials.color.blue": "Azul",
+    "materials.color.purple": "Roxo",
+    "materials.color.magenta": "Magenta",
+    "materials.color.pink": "Rosa",
+    "materials.color.brown": "Marrom",
     "drying.actions": "Ações de secagem",
     "drying.dry": "Secar…",
     "drying.start": "Iniciar secagem",

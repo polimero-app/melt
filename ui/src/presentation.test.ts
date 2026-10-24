@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { awaitsFirstSample, badgeDotClasses, badgeFillClasses, badgeSurfaceClasses, cameraViewState, filamentColor, filamentFillPercent, isActiveJobState, lightModeMessageKey, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
+import { awaitsFirstSample, badgeDotClasses, badgeFillClasses, badgeSurfaceClasses, cameraViewState, filamentColor, filamentColorName, filamentFillPercent, isActiveJobState, lightModeMessageKey, materialSystemLabel, plateLabel, printerStateMessageKey, serialNumberDisplay, shouldRunCamera } from './presentation'
 import type { PrinterBadge } from './monitoring'
 import { translate } from './i18n'
 
@@ -122,6 +122,51 @@ describe('filamentColor', () => {
     expect(filamentColor('00000000')).toBe('#9CA3AF')
     expect(filamentColor('not-a-color')).toBe('#9CA3AF')
     expect(filamentColor(undefined)).toBe('#9CA3AF')
+  })
+})
+
+describe('filamentColorName', () => {
+  it('names basic colors and nearby RGB/RGBA shades in both locales', () => {
+    for (const [hex, english, portuguese] of [
+      ['000000', 'Black', 'Preto'],
+      ['FFFFFFFF', 'White', 'Branco'],
+      ['808080', 'Gray', 'Cinza'],
+      ['FF0000', 'Red', 'Vermelho'],
+      ['FF8000', 'Orange', 'Laranja'],
+      ['F6DA5AFF', 'Yellow', 'Amarelo'],
+      ['008000', 'Green', 'Verde'],
+      ['80FF00', 'Lime', 'Verde-lima'],
+      ['00FFFF', 'Cyan', 'Ciano'],
+      ['008080', 'Teal', 'Verde-azulado'],
+      ['0000FF', 'Blue', 'Azul'],
+      ['800080', 'Purple', 'Roxo'],
+      ['FF00FF', 'Magenta', 'Magenta'],
+      ['FFC0CB', 'Pink', 'Rosa'],
+      ['964B00', 'Brown', 'Marrom'],
+      [' #ff0000ff ', 'Red', 'Vermelho'],
+      ['#7c3aed', 'Purple', 'Roxo'],
+      ['B0D4FF', 'Blue', 'Azul'],
+      ['90EE90', 'Green', 'Verde'],
+      ['161616FF', 'Black', 'Preto'],
+      ['9CA3AF', 'Gray', 'Cinza'],
+    ]) {
+      const key = filamentColorName(hex)
+      expect(translate('en', key)).toBe(english)
+      expect(translate('pt-BR', key)).toBe(portuguese)
+    }
+    expect(translate('en', 'materials.colorLabel', { name: 'Yellow', hex: filamentColor('F6DA5AFF') }))
+      .toBe('Approximate color: Yellow (#F6DA5A)')
+    expect(translate('pt-BR', 'materials.colorLabel', { name: 'Amarelo', hex: filamentColor('F6DA5AFF') }))
+      .toBe('Cor aproximada: Amarelo (#F6DA5A)')
+  })
+
+  it('does not announce the placeholder gray as a known filament color', () => {
+    for (const value of [undefined, '', '00000000', 'not-a-color', '#123', '123456789']) {
+      expect(filamentColorName(value)).toBe('materials.color.unknown')
+      expect(filamentColor(value)).toBe('#9CA3AF')
+    }
+    expect(translate('en', filamentColorName(undefined))).toBe('Unknown color')
+    expect(translate('pt-BR', filamentColorName(undefined))).toBe('Cor desconhecida')
   })
 })
 

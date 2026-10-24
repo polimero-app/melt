@@ -108,10 +108,42 @@ export function serialNumberDisplay(serial: string, revealed: boolean): string {
   return revealed ? serial : '••••••••'
 }
 
-export function filamentColor(value: string | undefined): string {
+function normalizedFilamentColor(value: string | undefined): string | undefined {
   const hex = value?.trim().replace(/^#/, '')
-  if (!hex || !/^(?:[\da-f]{6}|[\da-f]{8})$/i.test(hex) || hex.toUpperCase() === '00000000') return '#9CA3AF'
+  if (!hex || !/^(?:[\da-f]{6}|[\da-f]{8})$/i.test(hex) || hex.toUpperCase() === '00000000') return undefined
   return `#${hex.slice(0, 6).toUpperCase()}`
+}
+
+export function filamentColor(value: string | undefined): string {
+  return normalizedFilamentColor(value) ?? '#9CA3AF'
+}
+
+export function filamentColorName(value: string | undefined): MessageKey {
+  const hex = normalizedFilamentColor(value)
+  if (!hex) return 'materials.color.unknown'
+  const red = parseInt(hex.slice(1, 3), 16)
+  const green = parseInt(hex.slice(3, 5), 16)
+  const blue = parseInt(hex.slice(5, 7), 16)
+  const max = Math.max(red, green, blue)
+  const min = Math.min(red, green, blue)
+  const delta = max - min
+  if (max < 40) return 'materials.color.black'
+  if (min > 230) return 'materials.color.white'
+  if (delta < 25) return 'materials.color.gray'
+  const hue = 60 * (max === red
+    ? ((green - blue) / delta + 6) % 6
+    : max === green ? (blue - red) / delta + 2 : (red - green) / delta + 4)
+  const lightness = (max + min) / 510
+  // ponytail: broad hue families, not vendor color names; keep the exact hex in the UI.
+  if (hue < 15 || hue >= 345) return lightness > 0.65 ? 'materials.color.pink' : 'materials.color.red'
+  if (hue < 45) return lightness < 0.45 ? 'materials.color.brown' : 'materials.color.orange'
+  if (hue < 70) return 'materials.color.yellow'
+  if (hue < 100) return 'materials.color.lime'
+  if (hue < 165) return 'materials.color.green'
+  if (hue < 195) return max < 180 ? 'materials.color.teal' : 'materials.color.cyan'
+  if (hue < 255) return 'materials.color.blue'
+  if (hue < 290 || max < 180) return 'materials.color.purple'
+  return lightness > 0.65 ? 'materials.color.pink' : 'materials.color.magenta'
 }
 
 export function filamentFillPercent(value: number | undefined): number {
