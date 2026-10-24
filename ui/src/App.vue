@@ -566,7 +566,7 @@ function requestPrint(file: FileEntry, printer?: string) {
             </select>
             <PhCaretDown class="pointer-events-none col-start-1 row-start-1 mr-3 size-4 self-center justify-self-end text-gray-500 dark:text-gray-400" aria-hidden="true" />
           </div>
-          <div v-if="printers.length && !usePrinterMenu" class="hidden items-center space-x-8 pr-8 min-[1400px]:flex">
+          <div v-if="printers.length && !usePrinterMenu" class="hidden items-center space-x-8 pr-8 lg:flex">
             <button
               v-for="printer in printers"
               :key="printer.name"
@@ -584,8 +584,8 @@ function requestPrint(file: FileEntry, printer?: string) {
           </div>
           <div
             v-if="printers.length"
-            class="hidden items-center pr-4 lg:flex min-[1400px]:pr-8"
-            :class="!usePrinterMenu && 'min-[1400px]:hidden'"
+            class="hidden items-center pr-8 lg:flex"
+            :class="!usePrinterMenu && 'lg:hidden'"
           >
             <!-- A native option renders text only, so this mirrors the tab
                  strip's status dot through a listbox instead of naming the

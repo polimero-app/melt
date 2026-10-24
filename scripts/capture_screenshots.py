@@ -338,6 +338,7 @@ def capture(args):
         ("firmware-software.png", "printers", False, "firmware"),
         ("printer-control-idle.png", "control", False, "idle"),
         ("printer-control-printing.png", "control", True, "printing"),
+        ("printer-control-compact.png", "control", False, "compact"),
         ("cameras.png", "cameras", False, "cameras"),
         ("camera-settings.png", "cameras", False, "camera-settings"),
         ("file-preview.png", "files", False, "preview"),
@@ -356,8 +357,11 @@ def capture(args):
             browser = playwright.chromium.launch(headless=True)
             for filename, view, printing, kind in definitions:
                 server.printing = printing
-                context = browser.new_context(viewport={"width": WIDTH, "height": HEIGHT}, device_scale_factor=SCALE, locale="en-US", timezone_id="UTC", color_scheme="dark", reduced_motion="reduce")
+                context = browser.new_context(viewport={"width": 1280 if kind == "compact" else WIDTH, "height": HEIGHT}, device_scale_factor=SCALE, locale="en-US", timezone_id="UTC", color_scheme="dark", reduced_motion="reduce")
                 scenario = screenshot_state(state, printing)
+                if kind == "compact":
+                    # A1 mini-style printer: the chamber is a read-only reading with no target.
+                    scenario["monitoring"][0]["status"]["controls"]["temperatures"]["chamber"] = {"kind": "chamber", "currentCelsius": 5, "controllable": False}
                 if kind == "offline":
                     scenario["monitoring"][0] = {"name": "workshop", "driver": "bambu-lan", "connectionState": "offline", "stale": True}
                 script = BRIDGE.replace("__STATE__", json.dumps(scenario)).replace("__BASE__", json.dumps(base)).replace("__VIEW__", json.dumps(view)).replace("__CODEC__", json.dumps(media[printing][2]))
@@ -389,6 +393,10 @@ def capture(args):
                     page.get_by_role("button", name="Camera actions", exact=True).first.click()
                     page.get_by_role("menuitem", name="Edit camera", exact=True).click()
                     page.locator("#camera-form").wait_for()
+                if kind == "compact":
+                    expect(page.get_by_role("button", name=re.compile("^workshop"))).to_be_visible()
+                    expect(page.get_by_role("button", name="Select printer")).to_have_count(0)
+                    expect(page.get_by_text("Chamber", exact=True)).to_have_count(0)
                 if kind in ("idle", "cameras"):
                     expect(page.get_by_role("button", name="Turn off bench-power", exact=True)).to_be_visible()
                 if kind == "offline":
