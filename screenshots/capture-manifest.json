@@ -1,8 +1,8 @@
 {
-  "capturedAt": "2026-10-24T03:44:13+00:00",
+  "capturedAt": "2026-10-24T03:21:11+00:00",
   "scenarioTime": "2026-10-12T12:00:00Z",
-  "sourceCommit": "5a2bd485ea505b6760aee2d37917684204d56cce",
-  "frontendSourceSha256": "53036eb31dd431ea5ca70f79c99e3c7e5bcdef65ce5a5fac821fd3453c2abda4",
+  "sourceCommit": "78d0c682bc0a1f662a662d2245a96fc8b277d4e8",
+  "frontendSourceSha256": "f811faa211cedbb7d4ed995b3cf708128bba42f6d41270cd508ca63b8b092f8e",
   "fixtureSha256": "1320e5cf55545cbe793735efb4f40aa676221b4b982570f1c876a0f987d00732",
   "viewport": {
     "width": 1600,
@@ -22,7 +22,7 @@
         3200,
         2200
       ],
-      "sha256": "e655e2d5fb2d6754ce5e69cb3e4cf1c1568e95c8cd16a4ddb781f1c090f8b8d9",
+      "sha256": "7923065630144816e5d88c86f0a3a70b8bb5782be77f959498c183a296b9af3d",
       "playback": []
     },
     {
@@ -32,7 +32,7 @@
         3200,
         2200
       ],
-      "sha256": "660ce10da20cca661dd799a9848f1082e39cdc3d5d9f99816af88c9b1ae7b5e6",
+      "sha256": "05bec95ec766286c0b3c2b6b9385f2bc362a1352b53db8ded92a3c305a2e75f1",
       "playback": []
     },
     {
@@ -42,7 +42,7 @@
         3200,
         2200
       ],
-      "sha256": "4cc81d0f04b9b34df3bfdeedbe63b50df772e1f9bc3bf69d3d2a4bdf28ac3721",
+      "sha256": "da09351fe232d235248891d16b5d7036329de89229eae4b4fffeab1707f57e25",
       "playback": []
     },
     {
@@ -52,7 +52,7 @@
         3200,
         2200
       ],
-      "sha256": "219c2cd4cdbc01d568f4445ae7f7460bba5b2859c3234367870c67110dcf3641",
+      "sha256": "584956ed46b9cc6daa3d7cff7accfc5e7c4317d17364a1a3c05569e19953ea79",
       "playback": []
     },
     {
@@ -60,9 +60,9 @@
       "view": "idle",
       "size": [
         3200,
-        3576
+        3070
       ],
-      "sha256": "b6321e4eab726b3f48785169e80945a0e4bd4cad45b937ec273e95de0900b41b",
+      "sha256": "550d907f87ea536ee81749a0701a261ac4a3425f0b769aefd62cb21e5ba4224d",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -72,9 +72,9 @@
       "view": "printing",
       "size": [
         3200,
-        3576
+        3070
       ],
-      "sha256": "284f88148e5c23754e7c8ad5ec6e02fd5c02b49d4514e5dab842568cdef1e9d6",
+      "sha256": "6f94983fb1e7d6a5be3dcafb36a1ab04840ba504ebd8263406237188f9f48d67",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -86,7 +86,7 @@
         3200,
         2200
       ],
-      "sha256": "4d79abb9d4617ccc5e0e9e54b85ee8673a4ec3eb83e37b6c622e722dd9854269",
+      "sha256": "b0b81ecee8293fdf9624e09f7e76f8784e7bc72b6dc8a1f749b4b1e5f785ae5a",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -98,7 +98,7 @@
         3200,
         2200
       ],
-      "sha256": "24c0c690e811411b07261e26dc23592f18d79acbf87a99f79f8413d9a7fbde3c",
+      "sha256": "24bdb9f89e00348c6c16341fc30ccb4a7ec849f2014472561e472f381f8adf25",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -110,7 +110,7 @@
         3200,
         2200
       ],
-      "sha256": "b4ff331c93a5cd3566d3ff5f389bd31ed273324f46072446eacf928c394ef02f",
+      "sha256": "08af4c0439feb696fcfab32f42e2beb2a2c1f37f74c2617e9b164249d621c081",
       "playback": []
     },
     {
@@ -120,7 +120,7 @@
         3200,
         2200
       ],
-      "sha256": "5e8d3f676aba066adc6a3e2e2a176246c7d4bb8a21442b58223d07b8d5082c91",
+      "sha256": "fb567371ebef59b3d76472f0bdaba206ff28bdd527eb3ac446c1d5354808002d",
       "playback": [
         "LIVE \u00b7 H.264"
       ]
@@ -132,7 +132,7 @@
         3200,
         2200
       ],
-      "sha256": "b92954567fefb03f51c41605b976f389b88bc193f2841723062d32db07f70f9a",
+      "sha256": "14ec2ca52dc570fcfb8590ff3a2a7bf24733ff35844a69a4c116db3ee7e8495f",
       "playback": []
     },
     {
@@ -142,7 +142,7 @@
         3200,
         2200
       ],
-      "sha256": "f33c02cd3159161e1b088c60ac96858f50619818d4f978977323cebb8dbb766e",
+      "sha256": "b2d63046c905fabf58fa6961bd0a1c48abb4c62e0368892202c85b470b1331d9",
       "playback": []
     },
     {
@@ -152,7 +152,7 @@
         3200,
         2200
       ],
-      "sha256": "94078c5dc0a51b4e3778c6b450287df2c6a28c12853a9986de023e4c4e46539c",
+      "sha256": "56746c528ad6a2828347e66627a178484485c9f88feb15494b339d88aacaeb93",
       "playback": []
     }
   ]

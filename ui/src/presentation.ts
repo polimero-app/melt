@@ -14,7 +14,8 @@ export const badgeDotClasses: Record<PrinterBadge, string> = {
   idle: 'bg-green-500 ring-green-500/10 dark:bg-green-400 dark:ring-green-400/10',
   busy: 'bg-yellow-500 ring-yellow-500/10 dark:bg-yellow-400 dark:ring-yellow-400/10',
   error: 'bg-red-600 ring-red-600/20 dark:bg-red-500 dark:ring-red-500/20',
-  reconnecting: 'bg-amber-500 ring-amber-500/10 dark:bg-amber-400 dark:ring-amber-400/10',
+  // Hollow pulsing ring: shape, not only hue, separates it from filled gold `busy`.
+  reconnecting: 'animate-pulse bg-transparent ring-amber-500 motion-reduce:animate-none dark:ring-amber-400',
   connecting: 'bg-gray-400 ring-gray-400/10 dark:bg-gray-500 dark:ring-gray-500/10',
   synchronizing: 'bg-gray-400 ring-gray-400/10 dark:bg-gray-500 dark:ring-gray-500/10',
   offline: 'bg-red-500 ring-red-500/10 dark:bg-red-400 dark:ring-red-400/10',

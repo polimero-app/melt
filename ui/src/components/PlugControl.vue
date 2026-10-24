@@ -130,7 +130,7 @@ function confirmOff() {
           <span v-if="observation && observation.powerWatts !== null" class="text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{{ t('plugsView.power', { watts: observation.powerWatts }) }}</span>
         </div>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ attached }}</p>
-        <p class="mt-0.5 text-xs" :class="observation && observation.connection !== 'online' ? 'text-amber-700 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'">{{ metaLine }}</p>
+        <p class="mt-0.5 text-xs" :class="observation?.connection === 'authFailed' ? 'text-red-700 dark:text-red-400' : observation && observation.connection !== 'online' ? 'text-amber-700 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'">{{ metaLine }}</p>
       </div>
       <div class="ml-auto flex flex-wrap justify-end gap-2">
         <!-- Unknown relay shows both: a guess could hide the action the user needs. -->

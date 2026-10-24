@@ -458,11 +458,11 @@ defineExpose({ refresh: () => loadLibraryFiles(libraryPath.value), requestPrint,
             v-if="isModelFile(file)"
             class="pointer-events-none absolute inset-0 grid place-items-center bg-gray-950/45 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
           ><PhMagnifyingGlassPlus class="size-8 text-white" aria-hidden="true" /></span>
-          <span class="absolute right-3 bottom-2.5 text-[10px] font-bold text-gray-500 uppercase dark:text-slate-300/45">.{{ fileTypeLabel(file).toLowerCase() }}</span>
+          <span class="absolute right-3 bottom-2.5 text-xs font-bold text-gray-700 uppercase dark:text-slate-200">.{{ fileTypeLabel(file).toLowerCase() }}</span>
         </component>
         <div class="px-4 py-5 sm:p-6">
           <div class="flex items-start gap-3">
-            <h3 class="min-w-0 flex-1 line-clamp-2 wrap-anywhere text-sm font-medium text-gray-900 dark:text-white" :title="file.name" translate="no">{{ file.name }}</h3>
+            <h3 class="min-w-0 flex-1 text-sm font-medium text-gray-900 dark:text-white" :title="file.name" translate="no"><MiddleEllipsis :text="file.name" /></h3>
             <ActionMenu v-if="fileActionItems(file).length" class="-mt-2 -mr-2" :label="t('filesView.moreActions')" :items="fileActionItems(file)" />
           </div>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
