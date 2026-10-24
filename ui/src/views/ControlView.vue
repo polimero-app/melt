@@ -367,7 +367,6 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
       const colorName = filamentColorName(rawColor)
       return {
         slot: unit.id >= 254 ? t('materials.slotExternal') : String(tray.slot + 1),
-        trayIndex: tray.trayIndex,
         active: tray.present !== false && activeFilamentMatches(activeFilament.value, unit.id, tray.trayIndex, externalUnitCount),
         present: tray.present,
         type: tray.present === false ? t('materials.empty') : tray.filamentType ?? (tray.present ? t('materials.unknownFilament') : '—'),
@@ -381,23 +380,6 @@ const materialSystems = computed<MaterialSystemView[]>(() => {
       }
     }),
   }))
-})
-const activeFilamentSummary = computed(() => {
-  const selection = activeFilament.value
-  if (!selection) return t('materials.activeUnknown')
-  if (selection.state === 'none') return t('materials.noFilament')
-  if (selection.state === 'external') {
-    return selection.unitId === undefined
-      ? t('materials.externalSpool')
-      : materialSystems.value.find((system) => system.unitId === selection.unitId)?.name
-        ?? t('materials.externalHolder', { id: selection.unitId })
-  }
-  if (selection.state === 'tray') {
-    const system = materialSystems.value.find((system) => system.slots.some((slot) => slot.trayIndex === selection.trayIndex))
-    const slot = system?.slots.find((slot) => slot.trayIndex === selection.trayIndex)
-    return system && slot ? `${system.name} / ${slot.slot}` : t('materials.activeTrayIndex', { index: selection.trayIndex })
-  }
-  return t('materials.activeUnknown')
 })
 
 const controlCameras = computed(() => activePrinter ? linkedCameras(activePrinter.name, cameras) : [])
@@ -1309,13 +1291,10 @@ onUnmounted(() => {
           </div>
         </Card>
 
-        <Card v-if="materialSystems.length || activeFilament">
+        <Card v-if="materialSystems.length">
           <CardHeader :title="t('materials.title')" :icon="PhStack">
             <ActionMenu v-if="dryingMenuItems.length" :label="t('drying.actions')" :items="dryingMenuItems" />
           </CardHeader>
-          <div class="border-b border-gray-200 px-4 py-3 text-xs text-gray-500 sm:px-6 dark:border-white/10 dark:text-gray-400">
-            {{ t('materials.activeFilament') }}: <span class="font-mono text-gray-900 dark:text-white">{{ activeFilamentSummary }}</span>
-          </div>
           <div class="divide-y divide-gray-200 dark:divide-white/10">
             <div v-for="system in materialSystems" :key="system.unitId" class="px-4 py-5 sm:px-6">
               <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
