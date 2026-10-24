@@ -151,7 +151,33 @@ export type PrinterStatus = {
     fans?: Record<string, FanControl>
     lights?: Record<string, LightControl>
   }
-  extensions?: { 'bambu-lan'?: { ams?: { units: AmsUnitStatus[]; activeFilament?: ActiveFilament } } }
+  extensions?: {
+    'bambu-lan'?: {
+      ams?: { units: AmsUnitStatus[]; activeFilament?: ActiveFilament }
+      extruderCount?: number
+      activeExtruder?: number
+      airduct?: { mode: number; modes: number[]; filter?: boolean }
+      hotendRack?: HotendRack
+    }
+  }
+}
+
+export type Hotend = {
+  slot?: number
+  extruder?: number
+  diameterMm?: number
+  flow?: 'standard' | 'highFlow' | 'uFlow' | 'eFlow'
+  material?: 'stainlessSteel' | 'hardenedSteel' | 'tungstenCarbide'
+  color?: string
+  printSeconds?: number
+  state: 'ok' | 'error' | 'unknown'
+}
+
+export type HotendRack = {
+  position: 'rowA' | 'rowB' | 'home' | 'unknown'
+  busy: boolean
+  reading: boolean
+  hotends: Hotend[]
 }
 
 export type StatusFault = {

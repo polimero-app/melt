@@ -168,6 +168,18 @@ the control inventory only when `support_aux_fan` or `support_chamber_fan`
 confirms them. Heatbreak/Hotend speed remains visible as telemetry because it is
 a real reported fan even though the legacy protocol does not expose a control.
 
+Toolhead controls follow Bambu Studio. `select_extruder` switches between the
+right (0) and left (1) extruder; the active one is `device.extruder.state`
+bits 4-7. Extrude and retract move ±10 mm only when the active nozzle reads at
+least 170 °C: printers reporting `cfg`, `fun`, `aux` and `stat` use
+`set_extrusion_length`, others receive `M83` / `G0 E±10 F900`. `set_airduct`
+switches mode (submode -1) or toggles the filter (submode 1/0, shown when
+`fun` bit 46 is set); Exhaust is never offered and O-series models list only
+Cooling and Heating. The H2C rack (`fun` bit 60 or `device.holder`) uses
+`nozzle_holder_ctrl` actions 0/1/2 for Home/Row A/Row B and
+`holder_nozzle_refresh` with id 255 to read every hotend. Hotend serial and
+firmware details come from `get_version` and are not shown.
+
 ## Offline HMS and print-error descriptions
 
 The bundled ha-bambulab catalogue supplies English and Brazilian Portuguese HMS

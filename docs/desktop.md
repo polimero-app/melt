@@ -43,6 +43,14 @@ checks run again in Rust; a disabled control cannot be enabled by changing the
 frontend. AMS drying controls appear only for a heater-equipped unit whose
 printer advertises remote drying. See [Bambu compatibility](bambu-compatibility.md).
 
+Bambu printers add an **Extruder** section to Motion: Left/Right selection on
+dual-nozzle models, plus 10 mm Retract and Extrude when idle or paused and the
+active nozzle is at least 170 °C. Printers reporting an air duct show its
+Cooling/Heating mode (locked while printing) and the Filter switch. Printers
+with an induction hotend rack (H2C) get a **Hotends** card: move Row A, Home
+or Row B after confirming the movement warning, read all hotends, and review
+each nozzle and rack slot's diameter, flow, material and usage time.
+
 Print cancellation, destructive actions and print dispatch use confirmation
 flows. The dedicated emergency-stop button also asks for confirmation in the
 desktop and is disabled without usable status. Once confirmed, its backend

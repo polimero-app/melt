@@ -42,8 +42,8 @@
       "temperatures": {
         "bed": {"kind": "bed", "currentCelsius": 25, "targetCelsius": 0, "maximumCelsius": 120, "controllable": true},
         "chamber": {"kind": "chamber", "currentCelsius": 28, "targetCelsius": 0, "maximumCelsius": 65, "controllable": true},
-        "leftNozzle": {"kind": "nozzle", "position": "left", "currentCelsius": 26, "targetCelsius": 0, "maximumCelsius": 350, "controllable": true},
-        "rightNozzle": {"kind": "nozzle", "position": "right", "currentCelsius": 26, "targetCelsius": 0, "maximumCelsius": 350, "controllable": true}
+        "nozzleLeft": {"kind": "nozzle", "position": "left", "currentCelsius": 26, "targetCelsius": 0, "maximumCelsius": 350, "controllable": true},
+        "nozzleRight": {"kind": "nozzle", "position": "right", "currentCelsius": 26, "targetCelsius": 0, "maximumCelsius": 350, "controllable": true}
       },
       "fans": {
         "parts": {"kind": "parts", "speedPercent": 0, "mode": "manual", "controllable": true},
@@ -58,6 +58,17 @@
     },
     "extensions": {
       "bambu-lan": {
+        "extruderCount": 2,
+        "activeExtruder": 0,
+        "airduct": {"mode": 0, "modes": [0, 1], "filter": true},
+        "hotendRack": {"position": "rowA", "busy": false, "reading": false, "hotends": [
+          {"extruder": 0, "diameterMm": 0.4, "flow": "highFlow", "material": "hardenedSteel", "color": "29B8D1", "printSeconds": 412200, "state": "ok"},
+          {"extruder": 1, "diameterMm": 0.4, "flow": "standard", "material": "hardenedSteel", "color": "F59E0B", "printSeconds": 96300, "state": "ok"},
+          {"slot": 0, "diameterMm": 0.4, "flow": "standard", "material": "stainlessSteel", "color": "F3F4F6", "printSeconds": 28800, "state": "ok"},
+          {"slot": 1, "diameterMm": 0.6, "flow": "highFlow", "material": "hardenedSteel", "printSeconds": 7200, "state": "ok"},
+          {"slot": 3, "diameterMm": 0.2, "flow": "standard", "material": "stainlessSteel", "state": "ok"},
+          {"slot": 4, "state": "unknown"}
+        ]},
         "ams": {
           "activeFilament": {"state": "tray", "trayIndex": 2},
           "units": [

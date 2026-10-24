@@ -585,6 +585,14 @@ struct AmsDryingRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DeviceActionRequest {
+    name: String,
+    #[serde(flatten)]
+    action: melt_core::bambu::DeviceAction,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SpeedRequest {
     name: String,
     speed_profile: String,
@@ -2703,6 +2711,35 @@ fn printer_ams_drying_set(
 }
 
 #[tauri::command(async)]
+fn printer_device_action(
+    request: DeviceActionRequest,
+    state: tauri::State<'_, MonitorState>,
+) -> Result<moonraker::MotionResult, CommandError> {
+    use melt_core::bambu::DeviceAction;
+    use moonraker::PrinterState::{Error, Idle, Paused, Printing};
+    let (operation, states): (_, &[_]) = match request.action {
+        DeviceAction::Airduct { .. } => (Operation::FanSet, &[Idle, Printing, Paused, Error]),
+        DeviceAction::SelectExtruder { .. } | DeviceAction::Extrude { .. } => {
+            (Operation::MotionJog, &[Idle, Paused])
+        }
+        _ => (Operation::MotionJog, &[Idle]),
+    };
+    let (generation, printer) = pooled_desktop_printer(&state, &request.name, operation)?;
+    ensure_state(&state, generation, &printer, states, operation)?;
+    let result = current_pool_operation(&state, generation, operation, |pool| {
+        pool.device_action(
+            &request.name,
+            &printer.driver,
+            printer.access_code.as_deref(),
+            printer.tls_fingerprint.as_deref(),
+            request.action,
+        )
+    });
+    invalidate(&state, &request.name);
+    result
+}
+
+#[tauri::command(async)]
 fn printer_speed_set(
     request: SpeedRequest,
     state: tauri::State<'_, MonitorState>,
@@ -4190,6 +4227,7 @@ fn main() {
             printer_light_set,
             printer_ams_drying_set,
             printer_speed_set,
+            printer_device_action,
             printer_file_download,
             cancel_file_transfer,
             printer_file_upload,
