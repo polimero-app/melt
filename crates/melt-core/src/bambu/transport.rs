@@ -3774,13 +3774,13 @@ fn firmware_version(print: &Map<String, Value>) -> Option<String> {
     string(print.get("ota_version")).filter(|value| !value.is_empty())
 }
 
-fn ams_humidity(index: i64) -> Option<(&'static str, &'static str)> {
+fn ams_humidity(index: i64) -> Option<(u8, &'static str)> {
     match index {
-        1 => Some(("< 10%", "very dry")),
-        2 => Some(("10-20%", "dry")),
-        3 => Some(("20-30%", "moderate")),
-        4 => Some(("30-40%", "slightly humid")),
-        5 => Some(("> 40%", "humid")),
+        5 => Some((1, "very dry")),
+        4 => Some((2, "dry")),
+        3 => Some((3, "moderate")),
+        2 => Some((4, "slightly humid")),
+        1 => Some((5, "humid")),
         _ => None,
     }
 }
@@ -4045,7 +4045,10 @@ fn ams_unit(unit: &Value, remote_dry: bool) -> AmsUnit {
             .and_then(|value| value.try_into().ok())
             .unwrap_or_default(),
         kind: string(unit.get("ams_type")).filter(|value| !value.is_empty()),
-        humidity_range: humidity.map(|(range, _)| range),
+        humidity_percent: number(unit.get("humidity_raw"))
+            .filter(|value| (0.0..=100.0).contains(value)),
+        humidity_index: humidity.map(|(index, _)| index),
+        humidity_range: None,
         humidity_level: humidity.map(|(_, level)| level),
         temperature: number(unit.get("temp")).filter(|value| *value > 0.0),
         drying: ams_drying(unit, remote_dry),
@@ -4117,6 +4120,8 @@ fn virtual_tray_units(print: &Map<String, Value>) -> Vec<AmsUnit> {
                 .and_then(|value| value.try_into().ok())
                 .unwrap_or(254),
             kind: Some("external".into()),
+            humidity_percent: None,
+            humidity_index: None,
             humidity_range: None,
             humidity_level: None,
             temperature: None,
@@ -5331,6 +5336,51 @@ mod tests {
             Some("2024-06-19T00:00:00Z")
         );
         assert_eq!(ftp_modified_at("Foo", "19", "2024"), None);
+    }
+
+    #[test]
+    fn ams_humidity_keeps_measurements_separate_from_ordinal_levels() {
+        let status = parse_status(include_bytes!(
+            "../../../../fixtures/bambu/mqtt/p2s-monitoring/report.json"
+        ))
+        .unwrap();
+        let unit = &status.extensions.bambu_lan.unwrap().ams.unwrap().units[0];
+        assert_eq!(unit.humidity_percent, Some(16.0));
+        assert_eq!(unit.humidity_index, Some(1));
+        assert_eq!(unit.humidity_level, Some("very dry"));
+        assert_eq!(unit.humidity_range, None);
+
+        for wire_index in 1..=5 {
+            let unit = ams_unit(&json!({"humidity": wire_index}), false);
+            assert_eq!(unit.humidity_index, Some(6 - wire_index as u8));
+            assert_eq!(unit.humidity_percent, None);
+            assert_eq!(unit.humidity_range, None);
+        }
+        for wire_index in [0, 6] {
+            assert_eq!(
+                ams_unit(&json!({"humidity": wire_index}), false).humidity_index,
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn ams_humidity_preserves_zero_fractional_and_unknown_readings() {
+        for (raw, expected) in [
+            (json!(0), Some(0.0)),
+            (json!("0"), Some(0.0)),
+            (json!("16.5"), Some(16.5)),
+            (json!(100), Some(100.0)),
+            (json!(-1), None),
+            (json!(101), None),
+            (json!("NaN"), None),
+            (json!("infinity"), None),
+            (Value::Null, None),
+        ] {
+            let unit = ams_unit(&json!({"humidity": "2", "humidity_raw": raw}), false);
+            assert_eq!(unit.humidity_percent, expected, "{raw}");
+            assert_eq!(unit.humidity_index, Some(4));
+        }
     }
 
     // Sanitized from a 2026-09-19 dakota capture (H2-class, fw 01.02.00.00).

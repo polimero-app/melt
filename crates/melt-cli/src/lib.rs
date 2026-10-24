@@ -1630,8 +1630,10 @@ fn human_status(name: &str, status: &moonraker::Status, detailed: bool) -> Strin
         lines.push("AMS:".into());
         for unit in &ams.units {
             let mut parts = Vec::new();
-            if let (Some(range), Some(level)) = (unit.humidity_range, unit.humidity_level) {
-                parts.push(format!("humidity: {range} [{level}]"));
+            if let Some(percent) = unit.humidity_percent {
+                parts.push(format!("humidity: {percent}%"));
+            } else if let (Some(index), Some(level)) = (unit.humidity_index, unit.humidity_level) {
+                parts.push(format!("humidity: {level} (level {index}/5, dry to wet)"));
             }
             if let Some(temperature) = unit.temperature {
                 parts.push(format!("temp: {temperature:.1} C"));
@@ -5718,7 +5720,8 @@ mod tests {
                     ams: Some(moonraker::AmsData {
                         units: vec![moonraker::AmsUnit {
                             id: 0,
-                            humidity_range: Some("20-30%"),
+                            humidity_percent: Some(25.0),
+                            humidity_index: Some(3),
                             humidity_level: Some("moderate"),
                             temperature: Some(25.4),
                             trays: vec![
@@ -5812,6 +5815,8 @@ mod tests {
             .as_mut()
             .unwrap();
         ams.units[0].humidity_range = None;
+        ams.units[0].humidity_percent = None;
+        ams.units[0].humidity_index = None;
         ams.units[0].humidity_level = None;
         ams.units[0].temperature = None;
         ams.units[0].drying = Some(moonraker::AmsDrying {
@@ -5879,6 +5884,8 @@ mod tests {
             .as_mut()
             .unwrap();
         ams.units[0].humidity_range = None;
+        ams.units[0].humidity_percent = None;
+        ams.units[0].humidity_index = None;
         ams.units[0].humidity_level = None;
         ams.units[0].temperature = None;
         ams.units[0].drying = Some(moonraker::AmsDrying {
@@ -5924,10 +5931,43 @@ mod tests {
         assert!(detailed.contains("Timelapse: off"), "{detailed}");
         assert!(
             detailed.contains(
-                "AMS:\n  Unit 0 (humidity: 20-30% [moderate], temp: 25.4 C):\n    Slot 0: PLA 161616FF (42%)\n    Slot 1: (empty)"
+                "AMS:\n  Unit 0 (humidity: 25%, temp: 25.4 C):\n    Slot 0: PLA 161616FF (42%)\n    Slot 1: (empty)"
             ),
             "{detailed}"
         );
+    }
+
+    #[test]
+    fn detailed_status_does_not_present_a_humidity_index_as_a_percentage() {
+        let mut status = sample_status();
+        let unit = &mut status
+            .extensions
+            .bambu_lan
+            .as_mut()
+            .unwrap()
+            .ams
+            .as_mut()
+            .unwrap()
+            .units[0];
+        unit.humidity_percent = None;
+        unit.humidity_index = Some(1);
+        unit.humidity_level = Some("very dry");
+        let detailed = human_status("dakota", &status, true);
+        assert!(detailed.contains("humidity: very dry (level 1/5, dry to wet)"));
+
+        status
+            .extensions
+            .bambu_lan
+            .as_mut()
+            .unwrap()
+            .ams
+            .as_mut()
+            .unwrap()
+            .units[0]
+            .humidity_percent = Some(0.0);
+        let detailed = human_status("dakota", &status, true);
+        assert!(detailed.contains("humidity: 0%"));
+        assert!(!detailed.contains("level 1/5"));
     }
 
     #[test]

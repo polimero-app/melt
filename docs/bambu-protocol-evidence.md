@@ -1,6 +1,6 @@
 # Bambu protocol evidence policy
 
-Last-updated: 2026-10-12
+Last-updated: 2026-10-23
 
 Melt treats undocumented printer behavior as qualified evidence, not as a
 permanent product truth. This policy covers identity aliases, capabilities,
@@ -35,13 +35,21 @@ symlinked artifacts, undeclared files and self/unknown conflict references.
 
 ## Checked-in evidence
 
-There is currently one Bambu manifest:
+The original executable Bambu manifest is
 `tunnel-6000-upload-frag-id`, under
 `fixtures/bambu/tunnel-6000/upload-frag-id`. It is `executable-test` evidence
 with `qualified` confidence, tied to upstream revision
 `7f8ba03057f394e844a6a336414425786d0a68c1`. It demonstrates top-level upload
 `frag_id` and typed/sequence-correlated replies using a synthetic device and
 zeroed bytes. It does not qualify a physical printer or a firmware range.
+
+`mqtt/p2s-monitoring` retains a whitelisted subset of ha-bambulab's P2S sample at
+revision `0e027ff135a6d9265cb756d3e246747954c76722`. Its OTA inventory identifies
+`01.01.00.00`; the subset records humidity, extruder and AMS fields without
+serials, credentials, endpoints or tag identifiers. This is provisional
+`source` evidence, not an independently collected physical capture. Bambu Bar
+copies the same upstream report and must not be counted as corroborating
+capture evidence. The upstream MIT notice accompanies the subset.
 
 `make bambu-evidence-check` validates manifests and sanitization. The transcript
 is also exercised by the core unit test

@@ -397,6 +397,7 @@ export type MessageKey =
   | "materials.active"
   | "materials.ready"
   | "materials.humidity"
+  | "materials.humidityIndex"
   | "materials.temperature"
   | "materials.colorLabel"
   | "materials.color.unknown"
@@ -1098,6 +1099,7 @@ const messages: Record<Locale, Messages> = {
     "materials.active": "Active",
     "materials.ready": "Ready",
     "materials.humidity": "Humidity",
+    "materials.humidityIndex": "Level {index}/5 (1 dry, 5 wet)",
     "materials.temperature": "Temperature",
     "materials.colorLabel": "Approximate color: {name} ({hex})",
     "materials.color.unknown": "Unknown color",
@@ -1802,6 +1804,7 @@ const messages: Record<Locale, Messages> = {
     "materials.active": "Ativo",
     "materials.ready": "Pronto",
     "materials.humidity": "Umidade",
+    "materials.humidityIndex": "Nível {index}/5 (1 seco, 5 úmido)",
     "materials.temperature": "Temperatura",
     "materials.colorLabel": "Cor aproximada: {name} ({hex})",
     "materials.color.unknown": "Cor desconhecida",

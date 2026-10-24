@@ -121,6 +121,8 @@ export type AmsUnitStatus = {
   id: number
   kind?: string
   humidityRange?: string
+  humidityPercent?: number
+  humidityIndex?: number
   humidityLevel?: string
   temperature?: number
   trays: AmsTrayStatus[]

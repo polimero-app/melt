@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampTarget, formatDate, formatDuration, formatSize, relativeAge, remainingTimePresentation } from './formatting'
+import { clampTarget, formatAmsHumidity, formatDate, formatDuration, formatSize, relativeAge, remainingTimePresentation } from './formatting'
 
 describe('relative age', () => {
   const now = Date.parse('2026-08-04T12:00:30.000Z')
@@ -50,6 +50,22 @@ describe('remaining time presentation', () => {
 
   it('keeps positive estimates as formatted durations', () => {
     expect(remainingTimePresentation(45)).toEqual({ kind: 'duration', duration: '< 1m' })
+  })
+})
+
+describe('AMS humidity presentation', () => {
+  it('prefers a measured percentage, including zero and fractional readings', () => {
+    expect(formatAmsHumidity(0, 5, 'en')).toBe('0%')
+    expect(formatAmsHumidity(16.5, 1, 'en')).toBe('16.5%')
+    expect(formatAmsHumidity(16.5, 1, 'pt-BR')).toBe('16,5%')
+  })
+
+  it('labels the ordinal scale without inventing a percentage', () => {
+    expect(formatAmsHumidity(undefined, 1, 'en')).toBe('Level 1/5 (1 dry, 5 wet)')
+    expect(formatAmsHumidity(undefined, 5, 'pt-BR')).toBe('Nível 5/5 (1 seco, 5 úmido)')
+    expect(formatAmsHumidity(undefined, undefined, 'en')).toBeUndefined()
+    expect(formatAmsHumidity(-1, 0, 'en')).toBeUndefined()
+    expect(formatAmsHumidity(Number.NaN, 6, 'en')).toBeUndefined()
   })
 })
 
