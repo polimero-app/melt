@@ -36,7 +36,7 @@ rtc = { version = "0.21.1", default-features = false }
 png = "0.18"
 # Pinned: TPAP support is weeks old; upgrade deliberately. Keep the debug,
 # python and json-schema features off.
-tapo = { version = "=0.11.1", default-features = false }
+tapo = { version = "=0.12.0", default-features = false }
 
 # Desktop commands are sync `#[tauri::command(async)]` handlers, so their
 # blocking I/O runs on Tauri's tokio workers. reqwest::blocking panics there
