@@ -51,7 +51,8 @@ actions together. This capture uses an illustrated sample model preview.
 ## Firmware & software
 
 Per-printer comparison of installed module versions against printer-advertised,
-device-catalogue, and public-stable evidence.
+device-catalogue, and public-stable evidence. Module serial numbers are
+masked until revealed with the eye toggle.
 
 The assessment distinguishes a newer public stable release from an update
 confirmed by the printer; a public release is not an actual release offer.

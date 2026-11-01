@@ -26,6 +26,7 @@ export type FirmwareUpdateComponent = {
   availableVersion?: string
   availability: FirmwareUpdateAvailability
   required: boolean
+  serial?: string
   evidence?: FirmwareVersionEvidence[]
 }
 

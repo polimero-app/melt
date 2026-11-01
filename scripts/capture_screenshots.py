@@ -160,16 +160,17 @@ def screenshot_state(base, printing):
             continue
         source = "bambuMqtt" if p["driver"] == "bambu-lan" else "moonrakerUpdateManager"
         components = []
-        for module, label, current, target in (
-            ("ota", "Printer firmware", "01.02.00.00", "01.03.00.00"),
-            ("mc", "Motion controller", "00.02.10.06", None),
-            ("ams/0", "AMS 2 Pro", "00.01.06.20", None),
-            ("ams/128", "AMS HT", "00.01.06.20", None),
+        # Fake module serials; `ota` reports none, as on real printers.
+        for module, label, current, target, serial in (
+            ("ota", "Printer firmware", "01.02.00.00", "01.03.00.00", None),
+            ("mc", "Motion controller", "00.02.10.06", None, "SAMPLEMC0000001"),
+            ("ams/0", "AMS 2 Pro", "00.01.06.20", None, "SAMPLEAMS000001"),
+            ("ams/128", "AMS HT", "00.01.06.20", None, "SAMPLEAMS000002"),
         ):
             evidence = [{"source": "bambuLanInventory", "role": "installed", "version": current, "required": False}]
             if target:
                 evidence.append({"source": "bambuPublicCatalogue", "role": "publicStable", "version": target, "required": False})
-            components.append({"id": module, "label": label, "kind": "printerFirmware" if module == "ota" else "accessoryFirmware", "currentVersion": current, "availability": "unknown", "required": False, "evidence": evidence})
+            components.append({"id": module, "label": label, "kind": "printerFirmware" if module == "ota" else "accessoryFirmware", "currentVersion": current, "availability": "unknown", "required": False, "evidence": evidence, **({"serial": serial} if serial else {})})
         data["firmware"].append({
             "profile": p["name"], "driver": p["driver"], "checkedAt": data["capturedAt"], "stale": False,
             "sources": [{"source": s, "checkedAt": data["capturedAt"], "outcome": "empty" if s in ("bambuLanHistory", "bambuLanAdvertisement") else "success", "stale": False} for s in ("bambuLanInventory", "bambuLanAdvertisement", "bambuLanHistory", "bambuPublicCatalogue")],

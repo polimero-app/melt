@@ -188,6 +188,12 @@ pub fn update_report(status: &Value, inventory: &FirmwareInventory) -> FirmwareU
                 available_version: None,
                 availability: FirmwareUpdateAvailability::Unknown,
                 required: false,
+                serial: module
+                    .serial
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|serial| super::validate_serial(serial).is_ok())
+                    .map(str::to_owned),
                 evidence: if version.is_empty() {
                     Vec::new()
                 } else {
@@ -452,6 +458,7 @@ fn merge_public_target(
             available_version: None,
             availability: FirmwareUpdateAvailability::Unknown,
             required: false,
+            serial: None,
             evidence: Vec::new(),
         });
     component.evidence.push(FirmwareVersionEvidence {
@@ -515,6 +522,7 @@ fn merge_catalogue_target(
             available_version: None,
             availability: FirmwareUpdateAvailability::Unknown,
             required: false,
+            serial: None,
             evidence: Vec::new(),
         });
     let _ = required;
@@ -597,6 +605,7 @@ fn merge_target(
             available_version: None,
             availability: FirmwareUpdateAvailability::Unknown,
             required: false,
+            serial: None,
             evidence: Vec::new(),
         });
     component.required |= required;
@@ -714,6 +723,28 @@ mod tests {
         assert_eq!(inventory.modules[0].project, None);
         let report = update_report(&json!({}), &inventory);
         assert_eq!(report.components[0].label, "ams_f1/0");
+    }
+
+    /// Modules without their own board (`ota`, `xm`) report `"sn": ""`;
+    /// that is absence, not a serial worth showing.
+    #[test]
+    fn update_report_carries_module_serials_and_drops_blank_ones() {
+        let inventory = FirmwareInventory::from_version_info(&json!({"module": [
+            {"name":"ota","sw_ver":"01.08.00.00","sn":""},
+            {"name":"n3f/0","sw_ver":"00.00.06.40","sn":" 19C06A552504488 "}
+        ]}));
+        let report = update_report(&json!({}), &inventory);
+        let serial = |id: &str| {
+            report
+                .components
+                .iter()
+                .find(|component| component.id == id)
+                .unwrap()
+                .serial
+                .as_deref()
+        };
+        assert_eq!(serial("n3f/0"), Some("19C06A552504488"));
+        assert_eq!(serial("ota"), None);
     }
 
     #[test]

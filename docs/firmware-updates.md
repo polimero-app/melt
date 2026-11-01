@@ -35,6 +35,13 @@ and versions and 128-byte labels. Unknown modules stay visible when useful
 version evidence exists. Issues describe malformed, conflicting or unavailable
 sources without copying raw credentials or network payloads.
 
+Bambu components carry an optional `serial` taken from the module's own `sn`
+in `get_version` (for example an AMS unit or the motion controller). Blank or
+invalid values are omitted rather than truncated. The desktop masks module
+serials behind the same reveal toggle as the printer serial and hides one that
+equals the printer's own. `melt firmware check --output json` includes them; the
+shareable compatibility report never does.
+
 ## CLI
 
 The default is LAN-only and preserves the existing behavior:

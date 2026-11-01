@@ -87,6 +87,10 @@ pub struct FirmwareUpdateComponent {
     pub available_version: Option<String>,
     pub availability: FirmwareUpdateAvailability,
     pub required: bool,
+    /// Hardware serial the module reports for itself (Bambu `get_version`
+    /// `sn`). Identifying, so the UI masks it and shareable reports drop it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub serial: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<FirmwareVersionEvidence>,
 }
@@ -320,6 +324,7 @@ mod tests {
             available_version: None,
             availability,
             required: false,
+            serial: None,
             evidence: Vec::new(),
         }
     }
