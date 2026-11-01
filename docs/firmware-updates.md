@@ -35,6 +35,15 @@ and versions and 128-byte labels. Unknown modules stay visible when useful
 version evidence exists. Issues describe malformed, conflicting or unavailable
 sources without copying raw credentials or network payloads.
 
+A Bambu component's `label` is the module's `product_name` (for example
+`AMS 2 Pro (1)`, `Air Pump`), then `project_name`, then its code. Most boards
+send neither, so the desktop names known codes itself — `ap`/`ap2`/`rv1126`
+main board, `mc` motion controller, `mc-sub` motion sub-controller, `th`
+toolhead, `ext` extension board, `ahb` AMS hub, `wtm` hotend, `wtm*/N` rack
+hotend `N − 15`, and `ams`, `ams_f1`, `n3f`, `n3s` units numbered from 1 — and
+shows the raw code beneath. Unconfirmed codes (`tm`, `smc`, `ixmj`, `xm`) keep
+their code as the name.
+
 Bambu components carry an optional `serial` taken from the module's own `sn`
 in `get_version` (for example an AMS unit or the motion controller). Blank or
 invalid values are omitted rather than truncated. The desktop masks module

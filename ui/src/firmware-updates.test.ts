@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   firmwareAssessmentClasses,
+  firmwareModuleName,
   hasAvailableUpdate,
   hasRequiredUpdate,
   updateEntryFor,
@@ -50,5 +51,35 @@ describe('firmware update presentation', () => {
   it('keeps missing versions visibly unknown', () => {
     expect(versionRail({ ...entry.report.components[0], currentVersion: undefined, availableVersion: undefined }))
       .toEqual({ installed: '—', advertised: '—', deviceCatalogue: '—', publicStable: '—', hasTarget: false })
+  })
+})
+
+describe('firmwareModuleName', () => {
+  // Module lists captured from real H2C/H2D get_version replies.
+  it.each([
+    ['ota', 'printer', undefined],
+    ['ap', 'mainBoard', undefined],
+    ['ap2', 'mainBoard', undefined],
+    ['rv1126', 'mainBoard', undefined],
+    ['mc', 'motionController', undefined],
+    ['mc-sub', 'motionSubController', undefined],
+    ['th', 'toolhead', undefined],
+    ['ext', 'extensionBoard', undefined],
+    ['ahb', 'amsHub', undefined],
+    ['wtm', 'hotend', undefined],
+    ['wtm/16', 'rackHotend', 1],
+    ['wtm/19', 'rackHotend', 4],
+    ['wtm2/20', 'rackHotend', 5],
+    ['ams/0', 'ams', 1],
+    ['ams_f1/0', 'amsLite', 1],
+    ['n3f/1', 'ams2Pro', 2],
+    ['n3s/128', 'amsHt', 1],
+    ['N3S/129', 'amsHt', 2],
+  ])('names %s', (id, key, unit) => {
+    expect(firmwareModuleName(id)).toEqual({ key, unit })
+  })
+
+  it.each(['tm', 'smc', 'ixmj', 'xm', 'pc', 'wtm/x', 'ams/', 'n3s/12'])('leaves %s to the printer label', (id) => {
+    expect(firmwareModuleName(id)).toBeUndefined()
   })
 })

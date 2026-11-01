@@ -172,7 +172,11 @@ pub fn update_report(status: &Value, inventory: &FirmwareInventory) -> FirmwareU
         if id.is_empty() {
             continue;
         }
-        let label_source = module.project.as_deref().unwrap_or(&module.name);
+        let label_source = module
+            .product
+            .as_deref()
+            .or(module.project.as_deref())
+            .unwrap_or(&module.name);
         let (label, label_truncated) =
             bounded_provider_text(label_source, MAX_COMPONENT_LABEL_BYTES);
         let (version, version_truncated) =
@@ -723,6 +727,24 @@ mod tests {
         assert_eq!(inventory.modules[0].project, None);
         let report = update_report(&json!({}), &inventory);
         assert_eq!(report.components[0].label, "ams_f1/0");
+    }
+
+    /// Modern firmware names accessories only through `product_name`
+    /// (H2D: `pc` → "Air Pump"); it outranks the legacy `project_name`.
+    #[test]
+    fn update_report_labels_modules_with_their_product_name() {
+        let inventory = FirmwareInventory::from_version_info(&json!({"module": [
+            {"name":"pc","product_name":"Air Pump","project_name":"legacy"},
+            {"name":"mc","product_name":"","project_name":"Motion"},
+            {"name":"tm","product_name":""}
+        ]}));
+        let report = update_report(&json!({}), &inventory);
+        let labels = report
+            .components
+            .iter()
+            .map(|component| (component.id.as_str(), component.label.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(labels, [("mc", "Motion"), ("pc", "Air Pump"), ("tm", "tm")]);
     }
 
     /// Modules without their own board (`ota`, `xm`) report `"sn": ""`;

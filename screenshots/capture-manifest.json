@@ -1,8 +1,8 @@
 {
-  "capturedAt": "2026-11-01T23:19:46+00:00",
+  "capturedAt": "2026-11-01T23:30:33+00:00",
   "scenarioTime": "2026-10-12T12:00:00Z",
-  "sourceCommit": "2684e845de42902e1e0bb59ac5d3f81779831dbe",
-  "frontendSourceSha256": "ede20b3b0e9a6b926abb96f5adfc8decf689b7d1b9a4016a1606dc17bc50a77b",
+  "sourceCommit": "3e9e0a455dc04d0c08bbed5d74bc9897d76a7a38",
+  "frontendSourceSha256": "3dc06c599e5b9a9b0ab179cc892742e9dcf1dfeff306a2cb1c6a10615811dbda",
   "fixtureSha256": "d774f46ce2820c94099db64221a1af70a5d82569de42642a01a746a974337393",
   "viewport": {
     "width": 1600,
@@ -50,9 +50,9 @@
       "view": "firmware",
       "size": [
         3200,
-        2200
+        2826
       ],
-      "sha256": "6c9f2af6961935b8f0ac0f1cbe360a373ad6126d78e7764e8c70aeafaa933167",
+      "sha256": "0f4e5152942cd6e409f4f81efc11acb6aa9aa84389a3cb02f464d61e0a559e31",
       "playback": []
     },
     {
