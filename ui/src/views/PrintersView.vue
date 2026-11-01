@@ -14,6 +14,7 @@ import {
   type FirmwareEvidenceRole,
   type FirmwareSourceCheck,
   type FirmwareUpdateAssessment,
+  type FirmwareUpdateComponent,
   type FirmwareUpdateComponentKind,
   type FirmwareUpdateEntry,
 } from '../firmware-updates'
@@ -164,6 +165,12 @@ function openEdit(printer: Printer) {
 
 function serialIsRevealed(name: string) {
   return revealedSerials.value.has(name)
+}
+
+// A module that reports the printer's own serial adds nothing on top of the
+// printer card, so only distinct module serials are shown.
+function componentSerial(component: FirmwareUpdateComponent): string | undefined {
+  return component.serial && component.serial !== firmwarePrinter.value?.serial ? component.serial : undefined
 }
 
 function toggleSerial(name: string) {
@@ -482,6 +489,16 @@ defineExpose({ openEdit })
             :disabled="firmwareRefreshing || !firmwarePrinterModel"
             @click="loadPublicFirmwareCatalogue(firmwarePrinter.name)"
           ><PhGlobe class="size-4" :class="firmwareRefreshSource === 'publicCatalogue' && 'animate-spin'" aria-hidden="true" /> {{ t('firmware.checkPublicCatalogue') }}</Button>
+          <IconButton
+            v-if="selectedFirmwareUpdate?.report.components.some((component) => componentSerial(component))"
+            :title="t(serialIsRevealed(firmwarePrinter.name) ? 'printersView.hideSerialNamed' : 'printersView.showSerialNamed', { name: firmwarePrinter.name })"
+            :aria-label="t(serialIsRevealed(firmwarePrinter.name) ? 'printersView.hideSerialNamed' : 'printersView.showSerialNamed', { name: firmwarePrinter.name })"
+            :aria-pressed="serialIsRevealed(firmwarePrinter.name)"
+            @click="toggleSerial(firmwarePrinter.name)"
+          >
+            <PhEyeSlash v-if="serialIsRevealed(firmwarePrinter.name)" class="size-4" aria-hidden="true" />
+            <PhEye v-else class="size-4" aria-hidden="true" />
+          </IconButton>
         </CardHeader>
         <div class="px-4 py-5 sm:p-6" :aria-busy="firmwareRefreshing">
           <div v-if="!selectedFirmwareUpdate" class="flex items-start gap-3 text-sm text-gray-500 dark:text-gray-400" role="status">
@@ -530,6 +547,13 @@ defineExpose({ openEdit })
                   <div class="flex items-baseline justify-between gap-3">
                     <span class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ t('firmware.installed') }}</span>
                     <span class="truncate font-mono text-sm text-gray-800 dark:text-gray-200" :title="component.currentVersion">{{ component.currentVersion || '—' }}</span>
+                  </div>
+                  <div v-if="componentSerial(component)" class="mt-1 flex items-baseline justify-between gap-3">
+                    <span class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ t('addition.serial') }}</span>
+                    <span class="truncate font-mono text-sm text-gray-800 dark:text-gray-200" aria-live="polite">
+                      <span class="sr-only">{{ serialIsRevealed(firmwarePrinter.name) ? componentSerial(component) : t('printersView.serialHidden') }}</span>
+                      <span aria-hidden="true">{{ serialNumberDisplay(componentSerial(component) ?? '', serialIsRevealed(firmwarePrinter.name)) }}</span>
+                    </span>
                   </div>
                   <div v-if="firmwareEvidenceFor(component).length" class="mt-2 flex flex-wrap gap-1.5">
                     <span

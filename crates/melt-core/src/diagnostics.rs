@@ -348,7 +348,14 @@ pub fn bambu_compatibility_report_with_updates(
                 hardware: module.hardware.clone(),
             })
             .collect(),
-        firmware_updates: firmware_updates.cloned(),
+        // The compatibility report is meant to be shared; module serials stay
+        // on the printer page.
+        firmware_updates: firmware_updates.cloned().map(|mut report| {
+            for component in &mut report.components {
+                component.serial = None;
+            }
+            report
+        }),
         capability_observations: observations,
         model_defaults: capabilities.model_defaults.clone(),
         upgrade_observations,
@@ -660,5 +667,48 @@ mod tests {
         assert!(json.contains("\"modelSource\":\"serialPrefix\""));
         assert!(!json.contains("SECRETSERIAL"));
         assert!(!json.contains("01P"));
+    }
+
+    /// The desktop shows per-module serials on the printer page, but the
+    /// compatibility report is made to be shared, so it never carries them.
+    #[test]
+    fn the_compatibility_report_drops_module_serials() {
+        use crate::firmware_updates::{
+            FirmwareUpdateAvailability, FirmwareUpdateComponent, FirmwareUpdateComponentKind,
+            FirmwareUpdateSource,
+        };
+        let updates = FirmwareUpdateReport::from_components(
+            FirmwareUpdateSource::BambuMqtt,
+            vec![FirmwareUpdateComponent {
+                id: "n3f/0".into(),
+                label: "n3f/0".into(),
+                kind: FirmwareUpdateComponentKind::AccessoryFirmware,
+                current_version: Some("00.00.06.40".into()),
+                available_version: None,
+                availability: FirmwareUpdateAvailability::Unknown,
+                required: false,
+                serial: Some("19C06A552504488".into()),
+                evidence: Vec::new(),
+            }],
+            Vec::new(),
+        );
+        assert!(updates.components[0].serial.is_some());
+
+        let report = bambu_compatibility_report_with_updates(
+            1,
+            &RuntimeCapabilities::for_identity(Default::default()),
+            &CameraSelection {
+                preferred: bambu::CameraTransport::Unknown,
+                source: bambu::CameraSelectionSource::Unknown,
+                rejected_advertisement: None,
+                quirk_ids: Vec::new(),
+            },
+            true,
+            None,
+            Some(&updates),
+        );
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("00.00.06.40"));
+        assert!(!json.contains("19C06A552504488"));
     }
 }

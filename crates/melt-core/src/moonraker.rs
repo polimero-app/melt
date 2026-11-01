@@ -1096,6 +1096,7 @@ fn moonraker_update_report(result: &Value) -> FirmwareUpdateReport {
             available_version: available_version.clone(),
             availability,
             required: false,
+            serial: None,
             evidence: [
                 current_version
                     .as_ref()

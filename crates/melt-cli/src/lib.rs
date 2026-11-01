@@ -6162,6 +6162,7 @@ mod tests {
                 available_version: Some("2.0".into()),
                 availability: FirmwareUpdateAvailability::Available,
                 required: true,
+                serial: None,
                 evidence: Vec::new(),
             }],
             vec![FirmwareUpdateIssue {
@@ -6227,6 +6228,7 @@ mod tests {
                     available_version: None,
                     availability,
                     required: false,
+                    serial: None,
                     evidence: Vec::new(),
                 }],
                 Vec::new(),
