@@ -341,6 +341,19 @@ export type MessageKey =
   | "firmware.klipperScope"
   | "firmware.printerFirmware"
   | "firmware.accessoryFirmware"
+  | "firmware.module.printer"
+  | "firmware.module.mainBoard"
+  | "firmware.module.motionController"
+  | "firmware.module.motionSubController"
+  | "firmware.module.toolhead"
+  | "firmware.module.extensionBoard"
+  | "firmware.module.amsHub"
+  | "firmware.module.hotend"
+  | "firmware.module.rackHotend"
+  | "firmware.module.ams"
+  | "firmware.module.amsLite"
+  | "firmware.module.ams2Pro"
+  | "firmware.module.amsHt"
   | "firmware.printerSoftware"
   | "firmware.installed"
   | "firmware.advertised"
@@ -1056,6 +1069,19 @@ const messages: Record<Locale, Messages> = {
     "firmware.klipperScope": "This checks Klipper software through Moonraker. Controller-board firmware is not checked.",
     "firmware.printerFirmware": "Main firmware",
     "firmware.accessoryFirmware": "Accessory firmware",
+    "firmware.module.printer": "Printer firmware",
+    "firmware.module.mainBoard": "Main board",
+    "firmware.module.motionController": "Motion controller",
+    "firmware.module.motionSubController": "Motion sub-controller",
+    "firmware.module.toolhead": "Toolhead",
+    "firmware.module.extensionBoard": "Extension board",
+    "firmware.module.amsHub": "AMS hub",
+    "firmware.module.hotend": "Hotend",
+    "firmware.module.rackHotend": "Rack hotend {unit}",
+    "firmware.module.ams": "AMS ({unit})",
+    "firmware.module.amsLite": "AMS lite ({unit})",
+    "firmware.module.ams2Pro": "AMS 2 Pro ({unit})",
+    "firmware.module.amsHt": "AMS HT ({unit})",
     "firmware.printerSoftware": "Printer software",
     "firmware.installed": "Installed",
     "firmware.advertised": "Advertised",
@@ -1768,6 +1794,19 @@ const messages: Record<Locale, Messages> = {
     "firmware.klipperScope": "Esta verificação cobre o software Klipper via Moonraker. O firmware da placa controladora não é verificado.",
     "firmware.printerFirmware": "Firmware principal",
     "firmware.accessoryFirmware": "Firmware de acessório",
+    "firmware.module.printer": "Firmware da impressora",
+    "firmware.module.mainBoard": "Placa principal",
+    "firmware.module.motionController": "Controlador de movimento",
+    "firmware.module.motionSubController": "Subcontrolador de movimento",
+    "firmware.module.toolhead": "Cabeçote",
+    "firmware.module.extensionBoard": "Placa de extensão",
+    "firmware.module.amsHub": "Hub do AMS",
+    "firmware.module.hotend": "Hotend",
+    "firmware.module.rackHotend": "Hotend do rack {unit}",
+    "firmware.module.ams": "AMS ({unit})",
+    "firmware.module.amsLite": "AMS lite ({unit})",
+    "firmware.module.ams2Pro": "AMS 2 Pro ({unit})",
+    "firmware.module.amsHt": "AMS HT ({unit})",
     "firmware.printerSoftware": "Software da impressora",
     "firmware.installed": "Instalado",
     "firmware.advertised": "Anunciado",

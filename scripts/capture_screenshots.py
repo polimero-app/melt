@@ -160,12 +160,17 @@ def screenshot_state(base, printing):
             continue
         source = "bambuMqtt" if p["driver"] == "bambu-lan" else "moonrakerUpdateManager"
         components = []
-        # Fake module serials; `ota` reports none, as on real printers.
+        # Module codes and printer labels as an H2C reports them (labels come
+        # from product_name, else the code); serials are fake, `ota` has none.
         for module, label, current, target, serial in (
-            ("ota", "Printer firmware", "01.02.00.00", "01.03.00.00", None),
-            ("mc", "Motion controller", "00.02.10.06", None, "SAMPLEMC0000001"),
-            ("ams/0", "AMS 2 Pro", "00.01.06.20", None, "SAMPLEAMS000001"),
-            ("ams/128", "AMS HT", "00.01.06.20", None, "SAMPLEAMS000002"),
+            ("ota", "Bambu Lab H2C", "01.02.00.00", "01.03.00.00", None),
+            ("ap2", "ap2", "00.00.32.14", None, None),
+            ("mc", "mc", "00.02.10.06", None, "SAMPLEMC0000001"),
+            ("th", "th", "00.01.04.11", None, "SAMPLETH0000001"),
+            ("n3f/0", "AMS 2 Pro (1)", "00.01.06.20", None, "SAMPLEAMS000001"),
+            ("n3s/128", "AMS HT (1)", "00.01.06.20", None, "SAMPLEAMS000002"),
+            ("wtm/16", "WTM", "00.00.05.02", None, "SAMPLEWTM000001"),
+            ("tm", "tm", "00.00.02.07", None, None),
         ):
             evidence = [{"source": "bambuLanInventory", "role": "installed", "version": current, "required": False}]
             if target:

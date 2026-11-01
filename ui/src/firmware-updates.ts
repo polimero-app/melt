@@ -77,3 +77,35 @@ export function versionRail(component: FirmwareUpdateComponent) {
     hasTarget: Boolean(component.availableVersion),
   }
 }
+
+export type FirmwareModuleKey =
+  | 'printer' | 'mainBoard' | 'motionController' | 'motionSubController' | 'toolhead'
+  | 'extensionBoard' | 'amsHub' | 'hotend' | 'rackHotend' | 'ams' | 'amsLite' | 'ams2Pro' | 'amsHt'
+
+// Bambu `get_version` module codes. Most boards send an empty product_name, so
+// the code is all there is. Evidence: BambuStudio DevNozzleSystem (`wtm`
+// toolhead hotend, `wtm*/N` rack slot N-0x10), UpgradePanel (`ext` "Extension
+// Board"), AMS product names (`n3f/1` = "AMS 2 Pro (2)", `n3s/128` = "AMS HT
+// (1)"). ponytail: `tm`, `smc`, `ixmj`, `xm` are unverified, so they keep their
+// raw code; add them here once their role is confirmed.
+const FIXED_MODULES: Record<string, FirmwareModuleKey> = {
+  ota: 'printer', ap: 'mainBoard', ap2: 'mainBoard', rv1126: 'mainBoard',
+  mc: 'motionController', 'mc-sub': 'motionSubController', th: 'toolhead',
+  ext: 'extensionBoard', ahb: 'amsHub', wtm: 'hotend',
+}
+// family → [key, first unit id]; the printer numbers units from 1.
+const UNIT_MODULES: Record<string, [FirmwareModuleKey, number]> = {
+  ams: ['ams', 0], ams_f1: ['amsLite', 0], n3f: ['ams2Pro', 0], n3s: ['amsHt', 128],
+}
+
+export function firmwareModuleName(id: string): { key: FirmwareModuleKey; unit?: number } | undefined {
+  const code = id.toLowerCase()
+  if (FIXED_MODULES[code]) return { key: FIXED_MODULES[code], unit: undefined }
+  const match = /^([a-z0-9_]+)\/(\d+)$/.exec(code)
+  if (!match) return undefined
+  const [, family, raw] = match
+  const index = Number(raw)
+  if (/^wtm\d*$/.test(family)) return index >= 0x10 ? { key: 'rackHotend', unit: index - 0x0f } : undefined
+  const unit = UNIT_MODULES[family]
+  return unit && index >= unit[1] ? { key: unit[0], unit: index - unit[1] + 1 } : undefined
+}

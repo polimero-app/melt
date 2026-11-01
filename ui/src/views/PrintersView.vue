@@ -8,6 +8,7 @@ import { serialNumberDisplay } from '../presentation'
 import { printerDraftsMatch, type PrinterDraftFields } from '../forms'
 import {
   firmwareAssessmentClasses,
+  firmwareModuleName,
   hasAvailableUpdate,
   hasRequiredUpdate,
   updateEntryFor,
@@ -205,6 +206,13 @@ const firmwareComponentLabel = (kind: FirmwareUpdateComponentKind) => t(
       ? 'firmware.accessoryFirmware'
       : 'firmware.printerSoftware',
 )
+
+// Friendly name for a module code, else the printer's own label (an
+// accessory's product_name such as "Air Pump"), else the raw code.
+const firmwareModuleTitle = (component: FirmwareUpdateComponent) => {
+  const name = firmwareModuleName(component.id)
+  return name ? t(`firmware.module.${name.key}`, { unit: name.unit ?? '' }) : component.label
+}
 
 const firmwareAssessmentLabel = (assessment: FirmwareUpdateAssessment) => {
   const key: MessageKey = assessment === 'required'
@@ -538,10 +546,11 @@ defineExpose({ openEdit })
               >
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
-                    <p class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ component.label }}</p>
+                    <p class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ firmwareModuleTitle(component) }}</p>
                     <span v-if="component.required" class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-400/10 dark:text-amber-300">{{ t('firmware.required') }}</span>
                   </div>
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ component.label === firmwareComponentLabel(component.kind) ? component.id : firmwareComponentLabel(component.kind) }}</p>
+                  <p v-if="firmwareModuleTitle(component) !== component.id" class="mt-1 font-mono text-xs text-gray-500 dark:text-gray-400">{{ component.id }}</p>
+                  <p v-else class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ firmwareComponentLabel(component.kind) }}</p>
                 </div>
                 <div class="min-w-0 rounded-md bg-gray-50 px-3 py-2 dark:bg-white/5">
                   <div class="flex items-baseline justify-between gap-3">
