@@ -464,7 +464,7 @@ defineExpose({ refresh: () => loadLibraryFiles(libraryPath.value), requestPrint,
         <div class="p-3">
           <div class="flex items-start gap-3">
             <h3 class="min-w-0 flex-1 text-sm font-medium text-gray-900 dark:text-white" :title="file.name" translate="no"><MiddleEllipsis :text="file.name" /></h3>
-            <ActionMenu v-if="fileActionItems(file).length" class="-my-3 -mr-3" :label="t('filesView.moreActions')" :items="fileActionItems(file)" />
+            <ActionMenu v-if="fileActionItems(file).length" class="-my-2 -mr-2 [&>button]:size-9" :label="t('filesView.moreActions')" :items="fileActionItems(file)" />
           </div>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
             <span class="block">{{ formatSize(file.sizeBytes, locale) }}</span>
