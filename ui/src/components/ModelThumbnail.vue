@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { decodeBase64, loadPreview } from '../preview'
+import { loadPreview } from '../preview'
 
 const props = defineProps<{ path: string; sizeBytes?: number; modifiedAt?: string; alt: string; unavailableLabel: string }>()
 const container = ref<HTMLDivElement>()
@@ -10,34 +10,29 @@ const loading = ref(false)
 const loadedKey = ref('')
 let observer: IntersectionObserver | undefined
 
-async function drawPng(bytes: Uint8Array) {
+// A data: URL, not a blob: one — the desktop CSP's img-src allows data: only,
+// and a blocked blob: image fails every thumbnail.
+async function drawPng(base64: string) {
   const element = canvas.value
   if (!element) return false
   const image = new Image()
-  const png = new ArrayBuffer(bytes.byteLength)
-  new Uint8Array(png).set(bytes)
-  const url = URL.createObjectURL(new Blob([png], { type: 'image/png' }))
-  try {
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve()
-      image.onerror = () => reject(new Error('Invalid thumbnail'))
-      image.src = url
-    })
-    const context = element.getContext('2d')
-    if (!context) return false
-    const width = 640
-    const height = 360
-    element.width = width
-    element.height = height
-    context.clearRect(0, 0, width, height)
-    const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight)
-    const drawWidth = image.naturalWidth * scale
-    const drawHeight = image.naturalHeight * scale
-    context.drawImage(image, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight)
-    return true
-  } finally {
-    URL.revokeObjectURL(url)
-  }
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve()
+    image.onerror = () => reject(new Error('Invalid thumbnail'))
+    image.src = `data:image/png;base64,${base64}`
+  })
+  const context = element.getContext('2d')
+  if (!context) return false
+  const width = 640
+  const height = 360
+  element.width = width
+  element.height = height
+  context.clearRect(0, 0, width, height)
+  const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight)
+  const drawWidth = image.naturalWidth * scale
+  const drawHeight = image.naturalHeight * scale
+  context.drawImage(image, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight)
+  return true
 }
 
 // Set while a load is in flight. Aborting it tells the preview queue this
@@ -57,9 +52,8 @@ async function load() {
       sizeBytes: props.sizeBytes,
       modifiedAt: props.modifiedAt,
     }, { signal: current.signal })
-    const bytes = decodeBase64(preview.data)
     if (preview.kind === 'png') {
-      if (!await drawPng(bytes)) throw new Error('Invalid thumbnail')
+      if (!await drawPng(preview.data)) throw new Error('Invalid thumbnail')
       loadedKey.value = key
       return
     }
