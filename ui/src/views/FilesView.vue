@@ -461,10 +461,10 @@ defineExpose({ refresh: () => loadLibraryFiles(libraryPath.value), requestPrint,
           <!-- A translucent strip keeps the label legible over any thumbnail colour. -->
           <span class="pointer-events-none absolute inset-x-0 bottom-0 bg-gray-950/50 px-3 py-1 text-right text-xs font-bold text-white uppercase backdrop-blur-sm">.{{ fileTypeLabel(file).toLowerCase() }}</span>
         </component>
-        <div class="px-4 py-5 sm:p-6">
+        <div class="p-3">
           <div class="flex items-start gap-3">
             <h3 class="min-w-0 flex-1 text-sm font-medium text-gray-900 dark:text-white" :title="file.name" translate="no"><MiddleEllipsis :text="file.name" /></h3>
-            <ActionMenu v-if="fileActionItems(file).length" class="-mt-2 -mr-2" :label="t('filesView.moreActions')" :items="fileActionItems(file)" />
+            <ActionMenu v-if="fileActionItems(file).length" class="-my-3 -mr-3" :label="t('filesView.moreActions')" :items="fileActionItems(file)" />
           </div>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
             <span class="block">{{ formatSize(file.sizeBytes, locale) }}</span>
