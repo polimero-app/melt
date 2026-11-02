@@ -40,7 +40,7 @@ const groups = computed(() =>
       leave-to-class="transform opacity-0 scale-95"
     >
       <MenuItems
-        class="absolute right-0 z-30 mt-2 w-56 origin-top-right divide-y divide-gray-100 rounded-md bg-white shadow-lg outline-1 outline-black/5 dark:divide-white/10 dark:bg-gray-800 dark:shadow-none dark:-outline-offset-1 dark:outline-white/10"
+        class="absolute right-0 z-30 mt-2 w-max min-w-48 origin-top-right divide-y divide-gray-100 rounded-md bg-white shadow-lg outline-1 outline-black/5 dark:divide-white/10 dark:bg-gray-800 dark:shadow-none dark:-outline-offset-1 dark:outline-white/10"
       >
         <div v-for="(group, index) in groups" :key="index" class="py-1">
           <MenuItem v-for="item in group" :key="item.label" v-slot="{ active }">
