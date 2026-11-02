@@ -2954,11 +2954,25 @@ fn library_file_preview(
         .next()
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if !matches!(extension.as_str(), "3mf" | "stl" | "obj" | "zip") {
+    if !matches!(extension.as_str(), "3mf" | "stl" | "obj" | "zip" | "gcode") {
         return Err(CommandError::new("thumbnailUnsupported"));
     }
     let _permit = RENDER_SEMAPHORE.acquire();
     let absolute = resolve_absolute_path(&request.path)?;
+    // ponytail: only the slicer's embedded thumbnail; rendering toolpaths
+    // ourselves is a separate feature, add it if thumbnail-less G-code is common.
+    if extension == "gcode" {
+        let file =
+            std::fs::File::open(&absolute).map_err(|_| CommandError::new("libraryUnavailable"))?;
+        let thumbnail = preview::extract_gcode_thumbnail(file)
+            .ok_or_else(|| CommandError::new("thumbnailUnsupported"))?;
+        let preview = FilePreviewResponse {
+            kind: "png",
+            data: STANDARD.encode(thumbnail),
+        };
+        cache_preview(&state, &cache_key, &preview, size == preview::GRID_SIZE);
+        return Ok(preview);
+    }
     if extension == "zip" {
         let archive =
             std::fs::File::open(&absolute).map_err(|_| CommandError::new("libraryUnavailable"))?;

@@ -207,7 +207,7 @@ const visibleFiles = computed(() => sortedBy(
 
 const deferLibraryCards = computed(() => shouldDeferLibraryCards(visibleFiles.value.length))
 const enabledSlicers = computed(() => slicers.filter((slicer) => slicer.enabled))
-const isModelFile = (file: FileEntry) => /\.(3mf|stl|obj|zip)$/i.test(file.name)
+const isModelFile = (file: FileEntry) => /\.(3mf|stl|obj|zip|gcode)$/i.test(file.name)
 const previewFile = ref<FileEntry>()
 
 function fileActionItems(file: FileEntry): ActionMenuItem[] {
