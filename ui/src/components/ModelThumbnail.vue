@@ -4,36 +4,14 @@ import { loadPreview } from '../preview'
 
 const props = defineProps<{ path: string; sizeBytes?: number; modifiedAt?: string; alt: string; unavailableLabel: string }>()
 const container = ref<HTMLDivElement>()
-const canvas = ref<HTMLCanvasElement>()
+// An <img>, not a <canvas>: the library grid uses content-visibility: auto,
+// and WebKit drops a skipped canvas's bitmap with nothing to redraw it from.
+// An image re-decodes from its src whenever it scrolls back into view.
+const src = ref('')
 const failed = ref(false)
 const loading = ref(false)
 const loadedKey = ref('')
 let observer: IntersectionObserver | undefined
-
-// A data: URL, not a blob: one — the desktop CSP's img-src allows data: only,
-// and a blocked blob: image fails every thumbnail.
-async function drawPng(base64: string) {
-  const element = canvas.value
-  if (!element) return false
-  const image = new Image()
-  await new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve()
-    image.onerror = () => reject(new Error('Invalid thumbnail'))
-    image.src = `data:image/png;base64,${base64}`
-  })
-  const context = element.getContext('2d')
-  if (!context) return false
-  const width = 640
-  const height = 360
-  element.width = width
-  element.height = height
-  context.clearRect(0, 0, width, height)
-  const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight)
-  const drawWidth = image.naturalWidth * scale
-  const drawHeight = image.naturalHeight * scale
-  context.drawImage(image, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight)
-  return true
-}
 
 // Set while a load is in flight. Aborting it tells the preview queue this
 // card no longer wants the render, so work still queued for it is dropped.
@@ -53,7 +31,7 @@ async function load() {
       modifiedAt: props.modifiedAt,
     }, { signal: current.signal })
     if (preview.kind === 'png') {
-      if (!await drawPng(preview.data)) throw new Error('Invalid thumbnail')
+      src.value = `data:image/png;base64,${preview.data}`
       loadedKey.value = key
       return
     }
@@ -99,7 +77,7 @@ onBeforeUnmount(() => {
 })
 
 // The same path with a new size or mtime is a different file, so it must
-// redraw rather than keep the pixels already on the canvas.
+// redraw rather than keep showing the old image.
 function previewIdentity() {
   return JSON.stringify([props.path, props.sizeBytes, props.modifiedAt])
 }
@@ -107,6 +85,7 @@ function previewIdentity() {
 watch(previewIdentity, () => {
   cancelLoad()
   loadedKey.value = ''
+  src.value = ''
   failed.value = false
   scheduleLoad()
 })
@@ -117,12 +96,12 @@ watch(previewIdentity, () => {
        stops claiming to be one and the fallback text is read instead. -->
   <div
     ref="container"
-    class="relative grid place-items-center overflow-hidden"
+    class="relative grid aspect-video place-items-center overflow-hidden"
     :role="failed ? undefined : 'img'"
     :aria-label="failed ? undefined : alt"
     :aria-busy="loading"
   >
-    <canvas ref="canvas" class="size-full object-contain" aria-hidden="true" />
+    <img v-if="src && !failed" :src="src" alt="" class="absolute inset-0 size-full object-cover" aria-hidden="true" @error="failed = true" />
     <span v-if="failed" class="absolute inset-0 grid place-items-center text-xs font-medium text-cyan-900/60 dark:text-cyan-100/60">{{ props.unavailableLabel }}</span>
   </div>
 </template>
