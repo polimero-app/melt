@@ -458,7 +458,8 @@ defineExpose({ refresh: () => loadLibraryFiles(libraryPath.value), requestPrint,
             v-if="isModelFile(file)"
             class="pointer-events-none absolute inset-0 grid place-items-center bg-gray-950/45 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
           ><PhMagnifyingGlassPlus class="size-8 text-white" aria-hidden="true" /></span>
-          <span class="absolute right-3 bottom-2.5 text-xs font-bold text-gray-700 uppercase dark:text-slate-200">.{{ fileTypeLabel(file).toLowerCase() }}</span>
+          <!-- A translucent strip keeps the label legible over any thumbnail colour. -->
+          <span class="pointer-events-none absolute inset-x-0 bottom-0 bg-gray-950/50 px-3 py-1 text-right text-xs font-bold text-white uppercase backdrop-blur-sm">.{{ fileTypeLabel(file).toLowerCase() }}</span>
         </component>
         <div class="px-4 py-5 sm:p-6">
           <div class="flex items-start gap-3">
