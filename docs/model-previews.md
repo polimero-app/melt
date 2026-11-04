@@ -30,10 +30,14 @@ STEP/IGES/BREP and all resin formats (including SL1/SL1S) are excluded.
 
 ## Current support
 
-At the start of this sequence, local files support STL, OBJ, 3MF, the first
+Local files support STL, OBJ, 3MF, the first
 supported model in ZIP, and PNG thumbnails in a G-code comment header.
 Printer-hosted previews support STL, OBJ and 3MF. Large local 3MFs can use an
 embedded thumbnail without loading the entire archive into memory.
+3MF thumbnails follow the package thumbnail relationship first, then prefer
+thumbnail-named images and plate 1 before arbitrary images. Known helper masks
+are excluded. Invalid candidates are skipped. PNG and JPEG previews are fully
+decoded under resource limits; JPEG is normalized to PNG.
 
 ## Validation and evidence
 
@@ -48,4 +52,7 @@ format decoding. Neither establishes native-OS or live-printer qualification.
 ## Progress
 
 - Planning: complete. Baseline: `b2e8d5e09dd5c6824853d155e7f27a0e5f66cad6`.
-- Chunks 1–7: pending.
+- Chunk 1: complete. Preview tests (15) and thumbnail regressions (5) pass.
+  Baseline screenshots captured from the disposable checkout into
+  `/tmp/melt-previews-before-images` (14 views).
+- Chunks 2–7: pending.

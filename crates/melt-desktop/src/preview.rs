@@ -6,6 +6,10 @@ use std::{
 use euc::{DepthStrategy, Pipeline, buffer::Buffer2d, rasterizer};
 use vek::{Mat4, Vec3, Vec4};
 
+mod archive;
+mod images;
+pub use archive::extract_3mf_thumbnail;
+
 type Point = [f32; 3];
 type Triangle = [Point; 3];
 
