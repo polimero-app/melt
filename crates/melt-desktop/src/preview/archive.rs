@@ -3,6 +3,7 @@ use quick_xml::{Reader, events::Event};
 use std::io::{Read, Seek};
 
 pub(super) const MAX_RELATIONSHIP_BYTES: usize = 1 << 20;
+pub(super) const MAX_IMAGE_CANDIDATES: usize = 256;
 const MAX_ARCHIVE_ENTRIES: usize = 100_000;
 
 pub(super) fn open<R: Read + Seek>(reader: R) -> Result<zip::ZipArchive<R>, PreviewError> {
@@ -19,13 +20,16 @@ pub(super) fn read<R: Read + Seek>(
     limit: usize,
 ) -> Result<Vec<u8>, PreviewError> {
     let name = package_path("", name)?;
-    let index = zip
-        .file_names()
-        .position(|candidate| {
-            candidate.is_ok_and(|candidate| candidate.eq_ignore_ascii_case(&name))
-        })
-        .ok_or(PreviewError::InvalidModel)?;
+    let index = find_index(zip, &name).ok_or(PreviewError::InvalidModel)?;
     read_index(zip, index, limit)
+}
+
+fn find_index<R: Read + Seek>(zip: &zip::ZipArchive<R>, name: &str) -> Option<usize> {
+    zip.index_for_name(name).or_else(|| {
+        zip.file_names().position(|candidate| {
+            candidate.is_ok_and(|candidate| candidate.eq_ignore_ascii_case(name))
+        })
+    })
 }
 
 pub(super) fn read_index<R: Read + Seek>(
@@ -39,15 +43,34 @@ pub(super) fn read_index<R: Read + Seek>(
     if entry.size() > limit as u64 {
         return Err(PreviewError::TooLarge);
     }
-    let mut bytes = Vec::with_capacity(entry.size() as usize);
+    let declared = entry.size() as usize;
+    let mut bytes = Vec::with_capacity(declared);
     entry
-        .take(limit as u64 + 1)
+        .take(declared as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| PreviewError::InvalidModel)?;
-    if bytes.len() > limit {
+    if bytes.len() > declared {
         return Err(PreviewError::TooLarge);
     }
     Ok(bytes)
+}
+
+/// Charge declared output even when decompression/CRC validation fails.
+pub(super) fn read_budgeted<R: Read + Seek>(
+    zip: &mut zip::ZipArchive<R>,
+    index: usize,
+    limit: usize,
+    budget: &mut usize,
+) -> Result<Vec<u8>, PreviewError> {
+    let declared = zip
+        .by_index(index)
+        .map_err(|_| PreviewError::InvalidModel)?
+        .size();
+    if declared > limit.min(*budget) as u64 {
+        return Err(PreviewError::TooLarge);
+    }
+    *budget -= declared as usize;
+    read_index(zip, index, declared as usize)
 }
 
 /// Resolve package-relative references without ever accessing the filesystem.
@@ -123,14 +146,24 @@ pub(super) fn relationships(xml: &[u8], suffix: &str) -> Result<Vec<String>, Pre
 /// and finally arbitrary images, excluding known slicer helper masks.
 pub fn extract_3mf_thumbnail(reader: impl Read + Seek) -> Option<Vec<u8>> {
     let mut zip = open(reader).ok()?;
-    let mut candidates = read(&mut zip, "_rels/.rels", MAX_RELATIONSHIP_BYTES)
+    let relationships = read(&mut zip, "_rels/.rels", MAX_RELATIONSHIP_BYTES)
         .ok()
         .and_then(|xml| relationships(&xml, "/thumbnail").ok())
         .unwrap_or_default();
-    let mut fallback: Vec<(u8, String)> = zip
-        .file_names()
-        .filter_map(Result::ok)
+    let mut candidates: Vec<usize> = relationships
+        .into_iter()
+        .take(MAX_IMAGE_CANDIDATES)
         .filter_map(|name| {
+            package_path("", &name)
+                .ok()
+                .and_then(|name| find_index(&zip, &name))
+        })
+        .collect();
+    let mut fallback: Vec<(u8, usize)> = zip
+        .file_names()
+        .enumerate()
+        .filter_map(|(index, name)| name.ok().map(|name| (index, name)))
+        .filter_map(|(index, name)| {
             let lower = name.to_ascii_lowercase();
             if ![".png", ".jpg", ".jpeg"]
                 .iter()
@@ -150,13 +183,14 @@ pub fn extract_3mf_thumbnail(reader: impl Read + Seek) -> Option<Vec<u8>> {
             } else {
                 3
             };
-            Some((rank, name.into_owned()))
+            Some((rank, index))
         })
         .collect();
     fallback.sort_by_key(|(rank, _)| *rank);
-    candidates.extend(fallback.into_iter().map(|(_, name)| name));
-    for name in candidates {
-        if let Ok(bytes) = read(&mut zip, &name, MAX_PREVIEW_BYTES)
+    candidates.extend(fallback.into_iter().map(|(_, index)| index));
+    let mut budget = 64 << 20;
+    for index in candidates.into_iter().take(MAX_IMAGE_CANDIDATES) {
+        if let Ok(bytes) = read_budgeted(&mut zip, index, MAX_PREVIEW_BYTES, &mut budget)
             && let Ok(png) = images::normalize(&bytes)
         {
             return Some(png);
@@ -190,5 +224,29 @@ mod tests {
             package_path("3D/root.model", "Objects/part.model").unwrap(),
             "3D/Objects/part.model"
         );
+    }
+
+    #[test]
+    fn failed_crc_checks_still_consume_the_archive_budget() {
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file("bad.png", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"eight123").unwrap();
+        let mut bytes = zip.finish().unwrap().into_inner();
+        let offset = open(Cursor::new(&bytes))
+            .unwrap()
+            .by_index(0)
+            .unwrap()
+            .data_start()
+            .unwrap() as usize;
+        bytes[offset] ^= 1;
+        let mut zip = open(Cursor::new(bytes)).unwrap();
+        let mut budget = 8;
+        assert!(read_budgeted(&mut zip, 0, MAX_PREVIEW_BYTES, &mut budget).is_err());
+        assert_eq!(budget, 0);
+        assert!(matches!(
+            read_budgeted(&mut zip, 0, MAX_PREVIEW_BYTES, &mut budget),
+            Err(PreviewError::TooLarge)
+        ));
     }
 }

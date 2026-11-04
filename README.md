@@ -33,7 +33,7 @@ Affero General Public License v3.0 only (`AGPL-3.0-only`). See
   quality, with native H.264 WebRTC/WebCodecs playback, snapshots, MJPEG
   fallback, bounded fan-out, and reconnect behavior.
 - **File and print workflow** — browse printer storage, upload and download
-  files, preview supported models, inspect sliced 3MF packages, reconcile
+  files, preview [40 local model/project formats](docs/model-previews.md), inspect sliced 3MF packages, reconcile
   filament/nozzle assignments, select a plate, and start a print only after
   preflight and confirmation.
 - **Printer control** — pause, resume, or cancel jobs; set safe temperature,

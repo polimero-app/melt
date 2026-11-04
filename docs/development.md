@@ -1,6 +1,6 @@
 # Development and architecture
 
-Last-updated: 2026-10-23
+Last-updated: 2026-11-03
 
 ## Prerequisites and first build
 
@@ -105,6 +105,13 @@ commands run on Tauri workers. The workspace dev profile disables reqwest's
 debug assertion for its blocking client so development firmware/Moonraker
 commands can run on those workers; this is an implementation constraint, not
 permission to run blocking I/O in the UI.
+
+Preview loaders live in `crates/melt-desktop/src/preview/`; their supported
+extensions share `ui/src/preview-formats.json` with the file library. Add valid,
+malformed and bounded-resource fixtures when extending a loader, update
+[the format guide](model-previews.md), and refresh screenshot evidence for
+visible changes. Desktop bundle resources preserve the adapted ModelThumbs
+MIT notice alongside Melt's license.
 
 ## Build and verification targets
 

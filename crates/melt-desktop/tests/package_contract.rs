@@ -16,8 +16,20 @@ fn package_configuration_keeps_the_native_artifact_and_cli_contracts() {
     assert_eq!(env!("CARGO_PKG_LICENSE"), "AGPL-3.0-only");
     assert_eq!(
         config["bundle"]["resources"],
-        serde_json::json!(["../../LICENSE"])
+        serde_json::json!([
+            "../../LICENSE",
+            "../../THIRD_PARTY_NOTICES.md",
+            "../../LICENSES/model-thumbs-MIT.txt"
+        ])
     );
+    for resource in config["bundle"]["resources"].as_array().unwrap() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(resource.as_str().unwrap());
+        assert!(
+            path.is_file(),
+            "missing license resource: {}",
+            path.display()
+        );
+    }
     assert_eq!(config["app"]["windows"][0]["minWidth"], 1280);
     assert_eq!(config["app"]["windows"][0]["minHeight"], 800);
     assert_eq!(config["app"]["windows"][0]["maximized"], true);

@@ -1,6 +1,6 @@
 # Desktop guide
 
-Last-updated: 2026-10-24
+Last-updated: 2026-11-03
 
 Start the packaged `melt` executable without arguments. For a source checkout,
 use `make run` after `make ui-install`; it starts the frontend server before

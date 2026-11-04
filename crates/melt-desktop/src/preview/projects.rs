@@ -36,12 +36,10 @@ fn zip_inner<R: Read + Seek>(
         .collect();
     let mut best = None;
     let mut best_area = 0;
-    for index in candidates.drain(..) {
-        let limit = (*budget).min(MAX_PREVIEW_BYTES);
-        let Ok(bytes) = archive::read_index(&mut zip, index, limit) else {
+    for index in candidates.drain(..).take(archive::MAX_IMAGE_CANDIDATES) {
+        let Ok(bytes) = archive::read_budgeted(&mut zip, index, MAX_PREVIEW_BYTES, budget) else {
             continue;
         };
-        *budget -= bytes.len();
         if let Ok(png) = images::normalize(&bytes) {
             let area = images::png_area(&png);
             if area > best_area {
@@ -67,12 +65,10 @@ fn zip_inner<R: Read + Seek>(
             }
         }
         designs.sort_by_key(|a| std::cmp::Reverse(a.0));
-        for (_, index) in designs {
-            let Ok(bytes) = archive::read_index(&mut zip, index, (*budget).min(MAX_MODEL_BYTES))
-            else {
+        for (_, index) in designs.into_iter().take(archive::MAX_IMAGE_CANDIDATES) {
+            let Ok(bytes) = archive::read_budgeted(&mut zip, index, MAX_MODEL_BYTES, budget) else {
                 continue;
             };
-            *budget -= bytes.len();
             if let Ok(png) = zip_inner(Cursor::new(bytes), "f3d", depth + 1, budget) {
                 return Ok(png);
             }
@@ -139,5 +135,32 @@ mod tests {
             small
         );
         assert!(zip_thumbnail(Cursor::new(zip(&[("texture.png", &small)])), "ufp").is_err());
+        assert_eq!(
+            zip_thumbnail(
+                Cursor::new(zip(&[("Metadata/thumbnail.png", &small)])),
+                "ufp"
+            )
+            .unwrap(),
+            small
+        );
+    }
+
+    #[test]
+    fn reads_lightburn_xml_thumbnail_and_rejects_missing_or_invalid_images() {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        let png = super::super::encode_png(&[20, 80, 120], (1, 1)).unwrap();
+        let xml = format!(
+            "<LightBurnProject><Thumbnail Source='{}'/></LightBurnProject>",
+            STANDARD.encode(&png)
+        );
+        assert_eq!(
+            super::super::from_bytes("lbrn2", xml.as_bytes(), (64, 36)).unwrap(),
+            png
+        );
+        assert!(lightburn(b"<LightBurnProject/>").is_err());
+        assert!(
+            lightburn(b"<LightBurnProject><Thumbnail Source='invalid'/></LightBurnProject>")
+                .is_err()
+        );
     }
 }
