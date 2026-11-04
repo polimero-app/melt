@@ -272,16 +272,9 @@ fn parse_obj(bytes: &[u8]) -> Vec<Triangle> {
     for line in source.lines() {
         let mut parts = line.split_whitespace();
         match parts.next() {
-            Some("v") => {
-                let point = [
-                    parts.next().and_then(|value| value.parse().ok()),
-                    parts.next().and_then(|value| value.parse().ok()),
-                    parts.next().and_then(|value| value.parse().ok()),
-                ];
-                if let [Some(x), Some(y), Some(z)] = point {
-                    vertices.push([x, y, z]);
-                }
-            }
+            // A rejected vertex still takes its index, so later faces keep
+            // pointing at the right neighbours and simply skip the bad one.
+            Some("v") => vertices.push(text_point(&mut parts)),
             Some("f") => {
                 let indices: Vec<_> = parts
                     .filter_map(|part| part.split('/').next())
@@ -296,7 +289,7 @@ fn parse_obj(bytes: &[u8]) -> Vec<Triangle> {
                     })
                     .collect();
                 for index in 1..indices.len().saturating_sub(1) {
-                    if let (Some(&a), Some(&b), Some(&c)) = (
+                    if let (Some(&Some(a)), Some(&Some(b)), Some(&Some(c))) = (
                         vertices.get(indices[0]),
                         vertices.get(indices[index]),
                         vertices.get(indices[index + 1]),
@@ -346,22 +339,25 @@ fn parse_stl(bytes: &[u8]) -> Vec<Triangle> {
             .next()
             .is_some_and(|value| value.eq_ignore_ascii_case("vertex"))
         {
-            let point = [
-                parts.next().and_then(|value| value.parse().ok()),
-                parts.next().and_then(|value| value.parse().ok()),
-                parts.next().and_then(|value| value.parse().ok()),
-            ];
-            if let [Some(x), Some(y), Some(z)] = point {
-                points.push([x, y, z]);
-            }
+            points.push(text_point(&mut parts));
         }
     }
     points
         .as_chunks::<3>()
         .0
         .iter()
-        .map(|chunk| [chunk[0], chunk[1], chunk[2]])
+        .filter_map(|&[a, b, c]| Some([a?, b?, c?]))
         .collect()
+}
+
+/// Parses three coordinates, rejecting `inf`/`nan` (which `f32::from_str`
+/// accepts) the same way the binary STL reader does.
+fn text_point<'a>(parts: &mut impl Iterator<Item = &'a str>) -> Option<Point> {
+    let mut point = [0.0; 3];
+    for coordinate in &mut point {
+        *coordinate = parts.next()?.parse().ok().filter(|v: &f32| v.is_finite())?;
+    }
+    Some(point)
 }
 
 #[repr(C)]
@@ -689,6 +685,15 @@ mod tests {
         let obj = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
         let png = rasterize("obj", obj.as_bytes(), GRID_SIZE).unwrap();
         assert!(!png.is_empty());
+    }
+
+    #[test]
+    fn skips_non_finite_text_coordinates_like_binary_stl() {
+        let obj = "v 0 0 0\nv 1 0 0\nv 0 1 0\nv inf 0 0\nv nan 0 0\nf 1 2 3\nf 1 2 4\nf 1 2 5\n";
+        assert_eq!(parse_obj(obj.as_bytes()).len(), 1);
+        let stl = "solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex inf 0 0\nvertex 0 nan 0\nendloop\nendfacet\nendsolid t\n";
+        assert_eq!(parse_stl(stl.as_bytes()).len(), 1);
+        assert!(rasterize("obj", obj.as_bytes(), (64, 36)).is_ok());
     }
 
     /// The preview dialog shows the render several times the size of the grid
