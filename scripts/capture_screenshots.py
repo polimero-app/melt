@@ -427,7 +427,7 @@ def capture(args):
                     page.get_by_role("button", name="Preview cable-organizer.stl", exact=True).wait_for()
                     page.wait_for_function("Array.from(document.querySelectorAll('[aria-busy]')).every(e => e.getAttribute('aria-busy') !== 'true')")
                 if kind == "library":
-                    for name in ("desk-tray.FCStd", "mounting-bracket.f3d", "planter.bgcode"):
+                    for name in ("desk-tray.FCStd", "mounting-bracket.f3d", "planter.bgcode", "spool-holder.glb"):
                         page.get_by_role("button", name=f"Preview {name}", exact=True).wait_for()
                 if kind == "preview":
                     page.get_by_role("button", name="Preview cable-organizer.stl", exact=True).click()
