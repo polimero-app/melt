@@ -9,7 +9,7 @@ use std::{
     sync::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicU8, Ordering},
-        mpsc::{self, SyncSender},
+        mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
     },
     time::{Duration, Instant},
 };
@@ -17,7 +17,13 @@ use std::{
 const STARTING: u8 = 1;
 const READY: u8 = 2;
 const DISABLED: u8 = 3;
-const WAIT: Duration = Duration::from_secs(2);
+/// A draw the worker has started must finish within this; queue time and
+/// device start-up don't count against it.
+const DRAW_WAIT: Duration = Duration::from_secs(2);
+/// Cold Vulkan/driver loads can take seconds; a forced-GPU caller waits this
+/// long for the device before giving up on it.
+const INIT_WAIT: Duration = Duration::from_secs(30);
+const POLL: Duration = Duration::from_millis(50);
 const MAX_VERTEX_BYTES: u64 = 192 << 20;
 
 pub(super) enum Scene {
@@ -31,10 +37,12 @@ struct Frame {
 struct Job {
     scene: Scene,
     size: (usize, usize),
+    picked: Arc<OnceLock<Instant>>,
     reply: SyncSender<Result<Frame, String>>,
 }
 struct Shared {
     phase: AtomicU8,
+    created: Instant,
     status: Mutex<RendererStatus>,
 }
 struct Service {
@@ -62,6 +70,7 @@ impl Service {
         status.state = "initializing".to_owned();
         let shared = Arc::new(Shared {
             phase: AtomicU8::new(STARTING),
+            created: Instant::now(),
             status: Mutex::new(status),
         });
         let owner = shared.clone();
@@ -87,6 +96,7 @@ impl Service {
                             if owner.phase.load(Ordering::Acquire) == DISABLED {
                                 break;
                             }
+                            let _ = job.picked.set(Instant::now());
                             let (result, timings) =
                                 profiling::capture(|| renderer.draw(&job.scene, job.size));
                             let result = result.map(|rgb| Frame { rgb, timings });
@@ -148,20 +158,17 @@ pub(super) fn draw(
         Scene::Points(_) => "draw.gpu.points",
     };
     let (sender, receiver) = mpsc::sync_channel(1);
+    let picked = Arc::new(OnceLock::new());
     service
         .sender
         .try_send(Job {
             scene,
             size,
+            picked: picked.clone(),
             reply: sender,
         })
         .map_err(|_| "GPU queue busy or unavailable".to_owned())?;
-    let frame = receiver.recv_timeout(WAIT).map_err(|_| {
-        service
-            .shared
-            .fail("GPU response timed out or worker stopped".to_owned());
-        "GPU unavailable".to_owned()
-    })??;
+    let frame = await_frame(&service.shared, &receiver, &picked, (DRAW_WAIT, INIT_WAIT))?;
     for timing in frame.timings {
         profiling::append(timing);
     }
@@ -170,6 +177,37 @@ pub(super) fn draw(
         elapsed_us: started.elapsed().as_micros().min(u64::MAX as u128) as u64,
     });
     Ok(frame.rgb)
+}
+
+/// Waits for a reply, disabling the worker only for a draw that hangs once
+/// started or a device that never comes up. A job still queued behind a
+/// hung draw ends when that draw's caller disables the worker.
+fn await_frame(
+    shared: &Shared,
+    receiver: &Receiver<Result<Frame, String>>,
+    picked: &OnceLock<Instant>,
+    (draw_wait, init_wait): (Duration, Duration),
+) -> Result<Frame, String> {
+    loop {
+        match receiver.recv_timeout(POLL) {
+            Ok(result) => return result,
+            Err(RecvTimeoutError::Disconnected) => {
+                shared.fail("GPU worker stopped".to_owned());
+                return Err("GPU unavailable".to_owned());
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+        let timeout = match (picked.get(), shared.phase.load(Ordering::Acquire)) {
+            (Some(start), _) if start.elapsed() > draw_wait => "GPU draw timed out",
+            (None, DISABLED) => return Err("GPU renderer disabled".to_owned()),
+            (None, STARTING) if shared.created.elapsed() > init_wait => {
+                "GPU initialization timed out"
+            }
+            _ => continue,
+        };
+        shared.fail(timeout.to_owned());
+        return Err("GPU unavailable".to_owned());
+    }
 }
 
 #[repr(C)]
@@ -650,12 +688,95 @@ mod tests {
         assert!(gpu.as_chunks::<3>().0.iter().any(|p| *p != [10, 40, 58]));
     }
 
+    fn shared(phase: u8) -> Shared {
+        Shared {
+            phase: AtomicU8::new(phase),
+            created: Instant::now(),
+            status: Mutex::new(RendererStatus::initial()),
+        }
+    }
+
+    fn frame() -> Result<Frame, String> {
+        Ok(Frame {
+            rgb: vec![1, 2, 3],
+            timings: Vec::new(),
+        })
+    }
+
+    /// Slow device start-up or a busy queue must not turn a healthy GPU off
+    /// for the session; only a draw that hangs after pickup does.
+    #[test]
+    fn times_out_only_draws_that_hang_after_pickup() {
+        let limits = (Duration::from_millis(100), Duration::from_millis(400));
+        for (name, phase, pick, reply_after, ok, disabled) in [
+            (
+                "queued past the draw limit",
+                READY,
+                false,
+                Some(250),
+                true,
+                false,
+            ),
+            (
+                "warming past the draw limit",
+                STARTING,
+                false,
+                Some(250),
+                true,
+                false,
+            ),
+            ("drawn within the limit", READY, true, Some(20), true, false),
+            ("hangs after pickup", READY, true, None, false, true),
+            ("device never comes up", STARTING, false, None, false, true),
+            (
+                "worker disabled while queued",
+                DISABLED,
+                false,
+                None,
+                false,
+                true,
+            ),
+        ] {
+            let shared = shared(phase);
+            let picked = OnceLock::new();
+            if pick {
+                picked.set(Instant::now()).unwrap();
+            }
+            let (sender, receiver) = mpsc::sync_channel(1);
+            let started = Instant::now();
+            let (result, elapsed) = std::thread::scope(|scope| {
+                if let Some(ms) = reply_after {
+                    scope.spawn(move || {
+                        std::thread::sleep(Duration::from_millis(ms));
+                        let _ = sender.send(frame());
+                    });
+                } else {
+                    // Keep the sender alive so the wait can only end by timing out.
+                    scope.spawn(move || {
+                        std::thread::sleep(Duration::from_millis(600));
+                        drop(sender);
+                    });
+                }
+                let result = await_frame(&shared, &receiver, &picked, limits);
+                (result, started.elapsed())
+            });
+            assert_eq!(result.is_ok(), ok, "{name}: {:?}", result.err());
+            assert_eq!(
+                shared.phase.load(Ordering::Acquire) == DISABLED,
+                disabled,
+                "{name}"
+            );
+            assert!(elapsed < Duration::from_millis(550), "{name}: {elapsed:?}");
+        }
+    }
+
     /// Run explicitly on a real adapter; ordinary CI exercises the CPU path.
     #[test]
     #[ignore = "requires a native hardware GPU; select with MELT_PREVIEW_ADAPTER"]
     fn hardware_fidelity_reuse_concurrency_and_device_loss() {
         let shared = Arc::new(Shared {
             phase: AtomicU8::new(STARTING),
+            created: Instant::now(),
             status: Mutex::new(RendererStatus::initial()),
         });
         let mut renderer = Renderer::new(&shared, false).expect("hardware adapter");

@@ -204,8 +204,9 @@ production preview library. Step 2 is complete: the optional, default-enabled
 Vulkan/Metal/DX12 and no window or embedded renderer. Devices, pipelines, upload
 buffers and up to two render/readback targets are reused. The queue holds two
 jobs; callers fall back to CPU when busy, unavailable or unsuccessful. Device
-errors disable the worker for the session. GPU waits have a two-second caller
-deadline; targets are bounded to 1920×1080 and uploads to 192 MiB.
+errors disable the worker for the session. A draw has two seconds from when the
+worker picks it up, so time queued or spent bringing the device up does not
+count; a forced-GPU caller waits up to 30 seconds for initialization. Targets are bounded to 1920×1080 and uploads to 192 MiB.
 
 Step 3 is complete. All six measured workloads benefit from warm hardware, so
 automatic mode starts warming on the first generated preview, renders on CPU
