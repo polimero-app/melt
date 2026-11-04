@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
-    io::{Cursor, Read, Write},
+    io::{Read, Write},
     net::{TcpListener, TcpStream},
     sync::{
         Arc, Condvar, LazyLock, Mutex,
@@ -2948,73 +2948,15 @@ fn library_file_preview(
     if let Some(preview) = lookup_preview_cache(&state, &cache_key) {
         return Ok(preview);
     }
-    let extension = request
-        .path
-        .rsplit('.')
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if !matches!(extension.as_str(), "3mf" | "stl" | "obj" | "zip" | "gcode") {
-        return Err(CommandError::new("thumbnailUnsupported"));
-    }
     let _permit = RENDER_SEMAPHORE.acquire();
     let absolute = resolve_absolute_path(&request.path)?;
-    // ponytail: only the slicer's embedded thumbnail; rendering toolpaths
-    // ourselves is a separate feature, add it if thumbnail-less G-code is common.
-    if extension == "gcode" {
-        let file =
-            std::fs::File::open(&absolute).map_err(|_| CommandError::new("libraryUnavailable"))?;
-        let thumbnail = preview::extract_gcode_thumbnail(file)
-            .ok_or_else(|| CommandError::new("thumbnailUnsupported"))?;
-        let preview = FilePreviewResponse {
-            kind: "png",
-            data: STANDARD.encode(thumbnail),
-        };
-        cache_preview(&state, &cache_key, &preview, size == preview::GRID_SIZE);
-        return Ok(preview);
-    }
-    if extension == "zip" {
-        let archive =
-            std::fs::File::open(&absolute).map_err(|_| CommandError::new("libraryUnavailable"))?;
-        let (model_extension, bytes) = preview::first_model_in_zip(archive).map_err(|error| {
-            CommandError::new(match error {
-                preview::PreviewError::TooLarge => "thumbnailTooLarge",
-                _ => "thumbnailInvalid",
-            })
-        })?;
-        return render_preview(&model_extension, bytes, cache_key, &state, size);
-    }
-    // A local file is seekable, so a 3mf's embedded thumbnail (present on
-    // nearly every slicer-exported file) can be read directly from disk
-    // without loading the whole model into memory first.
-    if extension == "3mf"
-        && let Some(thumbnail) = std::fs::File::open(&absolute)
-            .ok()
-            .and_then(extract_3mf_thumbnail)
-    {
-        let preview = FilePreviewResponse {
-            kind: "png",
-            data: STANDARD.encode(thumbnail),
-        };
-        cache_preview(&state, &cache_key, &preview, size == preview::GRID_SIZE);
-        return Ok(preview);
-    }
-    // Check the size before reading so an oversized model never lands in
-    // memory; `take` also bounds a file that grows after the metadata check.
-    let file =
-        std::fs::File::open(&absolute).map_err(|_| CommandError::new("libraryUnavailable"))?;
-    let length = file
-        .metadata()
-        .map_err(|_| CommandError::new("libraryUnavailable"))?
-        .len();
-    if length > preview::MAX_MODEL_BYTES as u64 {
-        return Err(CommandError::new("thumbnailTooLarge"));
-    }
-    let mut bytes = Vec::with_capacity(length as usize);
-    file.take(preview::MAX_MODEL_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| CommandError::new("libraryUnavailable"))?;
-    render_preview(&extension, bytes, cache_key, &state, size)
+    let png = preview::local_preview(&absolute, size).map_err(preview_error)?;
+    let response = FilePreviewResponse {
+        kind: "png",
+        data: STANDARD.encode(png),
+    };
+    cache_preview(&state, &cache_key, &response, size == preview::GRID_SIZE);
+    Ok(response)
 }
 
 /// Bounds concurrent thumbnail work (disk-cache reads and CPU-heavy
@@ -3128,8 +3070,17 @@ fn write_disk_preview_cache(cache_key: &str, preview: &FilePreviewResponse) {
     }
 }
 
+#[cfg(test)]
 fn extract_3mf_thumbnail(reader: impl Read + std::io::Seek) -> Option<Vec<u8>> {
     preview::extract_3mf_thumbnail(reader)
+}
+
+fn preview_error(error: preview::PreviewError) -> CommandError {
+    CommandError::new(match error {
+        preview::PreviewError::TooLarge => "thumbnailTooLarge",
+        preview::PreviewError::Unsupported => "thumbnailUnsupported",
+        _ => "thumbnailInvalid",
+    })
 }
 
 /// Renders (and caches) a model thumbnail from already-in-memory file bytes,
@@ -3145,56 +3096,13 @@ fn render_preview(
     state: &PreviewState,
     size: (usize, usize),
 ) -> Result<FilePreviewResponse, CommandError> {
-    // Large renders are session-scoped: a 1920x1080 PNG is 1-3 MB against
-    // roughly 50 KB for a grid thumbnail, and the on-disk cache has no
-    // eviction policy to keep a big library from filling the disk.
-    let persist = size == preview::GRID_SIZE;
-    if extension == "3mf" {
-        // A slicer's baked-in thumbnail is its own render, with plate,
-        // filament colours and supports. Our flat-shaded rasterization would
-        // be sharper at the large size and a worse picture, so the embedded
-        // one wins at every size.
-        if let Some(thumbnail) = extract_3mf_thumbnail(Cursor::new(&bytes)) {
-            let preview = FilePreviewResponse {
-                kind: "png",
-                data: STANDARD.encode(thumbnail),
-            };
-            cache_preview(state, &cache_key, &preview, persist);
-            return Ok(preview);
-        }
-        if bytes.len() > preview::MAX_MODEL_BYTES {
-            return Err(CommandError::new("thumbnailTooLarge"));
-        }
-        let png = preview::rasterize_3mf(&bytes, size).map_err(|error| {
-            CommandError::new(match error {
-                preview::PreviewError::TooLarge => "thumbnailTooLarge",
-                _ => "thumbnailInvalid",
-            })
-        })?;
-        let preview = FilePreviewResponse {
-            kind: "png",
-            data: STANDARD.encode(png),
-        };
-        cache_preview(state, &cache_key, &preview, persist);
-        return Ok(preview);
-    }
-    if matches!(extension, "stl" | "obj") {
-        if bytes.len() > preview::MAX_MODEL_BYTES {
-            return Err(CommandError::new("thumbnailTooLarge"));
-        }
-        let png = preview::rasterize(extension, &bytes, size)
-            .map_err(|_| CommandError::new("thumbnailInvalid"))?;
-        let preview = FilePreviewResponse {
-            kind: "png",
-            data: STANDARD.encode(png),
-        };
-        cache_preview(state, &cache_key, &preview, persist);
-        return Ok(preview);
-    }
-    Ok(FilePreviewResponse {
-        kind: "model",
-        data: STANDARD.encode(bytes),
-    })
+    let png = preview::from_bytes(extension, &bytes, size).map_err(preview_error)?;
+    let response = FilePreviewResponse {
+        kind: "png",
+        data: STANDARD.encode(png),
+    };
+    cache_preview(state, &cache_key, &response, size == preview::GRID_SIZE);
+    Ok(response)
 }
 
 #[tauri::command(async)]

@@ -7,9 +7,12 @@ use euc::{DepthStrategy, Pipeline, buffer::Buffer2d, rasterizer};
 use vek::{Mat4, Vec3, Vec4};
 
 mod archive;
+mod gcode;
 mod images;
 mod model3mf;
+mod projects;
 pub use archive::extract_3mf_thumbnail;
+pub use gcode::extract_gcode_thumbnail;
 
 type Point = [f32; 3];
 type Triangle = [Point; 3];
@@ -30,9 +33,91 @@ const MAX_PREVIEW_PIXELS: u64 = 16_000_000;
 
 #[derive(Debug)]
 pub enum PreviewError {
+    Unsupported,
     InvalidModel,
     TooLarge,
     Png,
+}
+
+pub fn supports(extension: &str) -> bool {
+    static EXTENSIONS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+        serde_json::from_str(include_str!("../../../ui/src/preview-formats.json"))
+            .expect("checked-in preview format inventory")
+    });
+    EXTENSIONS.iter().any(|supported| supported == extension)
+}
+
+/// Read seekable embedded previews before applying the whole-model limit.
+pub fn local_preview(
+    path: &std::path::Path,
+    size: (usize, usize),
+) -> Result<Vec<u8>, PreviewError> {
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !supports(&extension) {
+        return Err(PreviewError::Unsupported);
+    }
+    let file = std::fs::File::open(path).map_err(|_| PreviewError::InvalidModel)?;
+    match extension.as_str() {
+        "gcode" | "gco" | "bgcode" => {
+            return extract_gcode_thumbnail(file).ok_or(PreviewError::Unsupported);
+        }
+        "ufp" | "fcstd" | "f3d" | "f3z" => return projects::zip_thumbnail(file, &extension),
+        "zip" => {
+            let (ext, bytes) = first_model_in_zip(file)?;
+            return from_bytes(&ext, &bytes, size);
+        }
+        "3mf" => {
+            if let Some(png) = extract_3mf_thumbnail(file) {
+                return Ok(png);
+            }
+        }
+        _ => {}
+    }
+    let file = std::fs::File::open(path).map_err(|_| PreviewError::InvalidModel)?;
+    if file
+        .metadata()
+        .map_err(|_| PreviewError::InvalidModel)?
+        .len()
+        > MAX_MODEL_BYTES as u64
+    {
+        return Err(PreviewError::TooLarge);
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_MODEL_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| PreviewError::InvalidModel)?;
+    from_bytes(&extension, &bytes, size)
+}
+
+pub fn from_bytes(
+    extension: &str,
+    bytes: &[u8],
+    size: (usize, usize),
+) -> Result<Vec<u8>, PreviewError> {
+    if extension == "3mf"
+        && let Some(png) = extract_3mf_thumbnail(std::io::Cursor::new(bytes))
+    {
+        return Ok(png);
+    }
+    if bytes.len() > MAX_MODEL_BYTES {
+        return Err(PreviewError::TooLarge);
+    }
+    match extension {
+        "3mf" => rasterize_3mf(bytes, size),
+        "stl" | "obj" => rasterize(extension, bytes, size),
+        "gcode" | "gco" | "bgcode" => {
+            extract_gcode_thumbnail(std::io::Cursor::new(bytes)).ok_or(PreviewError::Unsupported)
+        }
+        "ufp" | "fcstd" | "f3d" | "f3z" => {
+            projects::zip_thumbnail(std::io::Cursor::new(bytes), extension)
+        }
+        "lbrn" | "lbrn2" => projects::lightburn(bytes),
+        _ => Err(PreviewError::Unsupported),
+    }
 }
 
 /// Returns the first supported model stored in a ZIP, preserving archive
@@ -55,7 +140,7 @@ pub fn first_model_in_zip(reader: impl Read + Seek) -> Result<(String, Vec<u8>),
             .next()
             .unwrap_or_default()
             .to_ascii_lowercase();
-        if !matches!(extension.as_str(), "3mf" | "stl" | "obj") {
+        if extension == "zip" || !supports(&extension) {
             continue;
         }
         if entry.size() > MAX_MODEL_BYTES as u64 {
@@ -396,45 +481,6 @@ fn encode_png(rgb: &[u8], (width, height): (usize, usize)) -> Result<Vec<u8>, Pr
     Ok(output)
 }
 
-/// The largest PNG thumbnail a slicer embedded in a G-code header as
-/// `; thumbnail begin WxH len` … `; thumbnail end` base64 comment blocks.
-/// Scanning stops at the first command line, so a multi-GB toolpath is never
-/// read past its header; `MAX_PREVIEW_BYTES` bounds a header that never ends.
-/// Other encodings (`thumbnail_JPG`, `thumbnail_QOI`) are skipped.
-pub fn extract_gcode_thumbnail(reader: impl Read) -> Option<Vec<u8>> {
-    use base64::{Engine, engine::general_purpose::STANDARD};
-    use std::io::BufRead;
-    let mut best: Option<Vec<u8>> = None;
-    let mut block: Option<String> = None;
-    let header = std::io::BufReader::new(reader.take(MAX_PREVIEW_BYTES as u64));
-    for line in header.lines() {
-        let line = line.ok()?;
-        let line = line.trim();
-        let Some(comment) = line.strip_prefix(';') else {
-            if line.is_empty() {
-                continue;
-            }
-            break;
-        };
-        let comment = comment.trim();
-        if comment.starts_with("thumbnail begin") {
-            block = Some(String::new());
-        } else if comment == "thumbnail end" {
-            if let Some(png) = block.take().and_then(|data| STANDARD.decode(data).ok())
-                && validate_png(&png)
-                && best
-                    .as_ref()
-                    .is_none_or(|current| png.len() > current.len())
-            {
-                best = Some(png);
-            }
-        } else if let Some(data) = block.as_mut() {
-            data.push_str(comment);
-        }
-    }
-    best
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,13 +542,13 @@ mod tests {
                 None,
             ),
             (
-                "blocks after the first command are not scanned",
+                "blocks after commands are scanned within the bounded window",
                 format!("G28\n{}", gcode_thumbnail_block("thumbnail", &small)),
-                None,
+                Some(small.clone()),
             ),
         ] {
             assert_eq!(
-                extract_gcode_thumbnail(gcode.as_bytes()),
+                extract_gcode_thumbnail(Cursor::new(gcode.as_bytes())),
                 expected,
                 "{name}"
             );

@@ -3079,6 +3079,7 @@ dependencies = [
  "async-trait",
  "base64 0.23.1",
  "euc",
+ "flate2",
  "image",
  "melt-cli",
  "melt-core",

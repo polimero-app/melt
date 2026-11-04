@@ -162,8 +162,9 @@ Name, Size and Modified table headers show sort icons; clicking the active
 header reverses the order. The library's direction button reverses its selected
 sort key. New keys default to A-Z names, largest sizes or newest modifications.
 
-Model previews support STL, OBJ, 3MF and supported ZIP contents. G-code shows
-the PNG thumbnail its slicer embedded in the header, when present. Clicking a
+Model previews support STL, OBJ, 3MF and supported ZIP contents. G-code/GCO and
+BGCode show stored PNG/JPEG/QOI thumbnails. UFP, FreeCAD, Fusion and LightBurn
+projects show their stored previews when present. Clicking a
 model thumbnail opens a larger static preview with metadata and available
 print, slicer and delete actions. A loading indicator covers the larger render;
 preview failure does not make the source file unprintable or undownloadable.

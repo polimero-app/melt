@@ -1,3 +1,13 @@
+import previewExtensions from './preview-formats.json'
+
+const previewFormats = new Set(previewExtensions)
+
+/** Shared with the Rust loader; preview support does not imply printability. */
+export function supportsPreview(name: string): boolean {
+  const dot = name.lastIndexOf('.')
+  return dot > 0 && previewFormats.has(name.slice(dot + 1).toLowerCase())
+}
+
 export const LARGE_LIBRARY_THRESHOLD = 50
 
 export function shouldDeferLibraryCards(fileCount: number): boolean {

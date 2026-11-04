@@ -1,6 +1,6 @@
 # Screenshot samples
 
-Last-updated: 2026-10-24
+Last-updated: 2026-11-03
 
 `state.json` contains synthetic, sanitized data for the current desktop UI's
 documentation captures. Printer/camera names, serial labels, paths, module
@@ -30,3 +30,7 @@ keeps visible dates and telemetry freshness stable; the manifest separately
 records when captures were made.
 
 See [the gallery and reproduction instructions](../../docs/screenshots.md).
+
+The file-library scenario includes FreeCAD, Fusion and BGCode cards alongside
+STL models. The capture asserts their preview controls are available. Model
+images remain synthetic illustrations; Rust tests verify the actual decoders.
