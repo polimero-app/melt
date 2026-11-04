@@ -39,6 +39,14 @@ thumbnail-named images and plate 1 before arbitrary images. Known helper masks
 are excluded. Invalid candidates are skipped. PNG and JPEG previews are fully
 decoded under resource limits; JPEG is normalized to PNG.
 
+3MF geometry resolves the root model through package relationships, follows
+production-extension part references inside the archive, selects build items,
+and composes component/build transforms. Nonprintable build items are skipped.
+Files omitting the build section fall back to resource objects. Cycles, missing
+objects, malformed XML, invalid indices and nonfinite coordinates are rejected.
+The aggregate XML budget is 128 MiB; assembly traversal is limited to 32 levels,
+100,000 instance visits and two million output triangles.
+
 ## Validation and evidence
 
 Format loaders need representative valid, malformed and oversized input tests.
@@ -55,4 +63,6 @@ format decoding. Neither establishes native-OS or live-printer qualification.
 - Chunk 1: complete. Preview tests (15) and thumbnail regressions (5) pass.
   Baseline screenshots captured from the disposable checkout into
   `/tmp/melt-previews-before-images` (14 views).
-- Chunks 2–7: pending.
+- Chunk 2: complete. All 18 preview tests and desktop Clippy pass, including
+  cross-part transforms, build selection, cycles and malformed inputs.
+- Chunks 3–7: pending.

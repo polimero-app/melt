@@ -8,6 +8,7 @@ use vek::{Mat4, Vec3, Vec4};
 
 mod archive;
 mod images;
+mod model3mf;
 pub use archive::extract_3mf_thumbnail;
 
 type Point = [f32; 3];
@@ -107,65 +108,8 @@ pub fn rasterize(
 }
 
 pub fn rasterize_3mf(bytes: &[u8], size: (usize, usize)) -> Result<Vec<u8>, PreviewError> {
-    let mut archive =
-        zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_| PreviewError::InvalidModel)?;
-    let model = archive
-        .by_name("3D/3dmodel.model")
-        .map_err(|_| PreviewError::InvalidModel)?;
-    if model.size() > MAX_MODEL_XML_BYTES {
-        return Err(PreviewError::TooLarge);
-    }
-    // The declared size comes from the archive and can lie, so bound the
-    // actual read too.
-    let mut source = String::new();
-    model
-        .take(MAX_MODEL_XML_BYTES + 1)
-        .read_to_string(&mut source)
-        .map_err(|_| PreviewError::InvalidModel)?;
-    if source.len() as u64 > MAX_MODEL_XML_BYTES {
-        return Err(PreviewError::TooLarge);
-    }
-    let mut triangles = Vec::new();
-    for mesh in source.split("<mesh").skip(1) {
-        let section = mesh.split("</mesh>").next().unwrap_or(mesh);
-        let vertices: Vec<Point> = section
-            .split("<vertex")
-            .skip(1)
-            .filter_map(|tag| {
-                Some([
-                    xml_attribute(tag, "x")?.parse().ok()?,
-                    xml_attribute(tag, "y")?.parse().ok()?,
-                    xml_attribute(tag, "z")?.parse().ok()?,
-                ])
-            })
-            .collect();
-        for tag in section.split("<triangle").skip(1) {
-            let indexes = [
-                xml_attribute(tag, "v1"),
-                xml_attribute(tag, "v2"),
-                xml_attribute(tag, "v3"),
-            ];
-            let [Some(a), Some(b), Some(c)] = indexes.map(|index| index?.parse::<usize>().ok())
-            else {
-                continue;
-            };
-            if let (Some(&a), Some(&b), Some(&c)) =
-                (vertices.get(a), vertices.get(b), vertices.get(c))
-            {
-                triangles.push([a, b, c]);
-            }
-        }
-    }
-    if triangles.is_empty() {
-        return Err(PreviewError::InvalidModel);
-    }
+    let triangles = model3mf::load(bytes)?;
     encode_png(&render(&triangles, size), size)
-}
-
-fn xml_attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
-    let marker = format!("{name}=\"");
-    let start = tag.find(&marker)? + marker.len();
-    Some(&tag[start..tag[start..].find('"')? + start])
 }
 
 fn parse_obj(bytes: &[u8]) -> Vec<Triangle> {

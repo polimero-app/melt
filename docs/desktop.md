@@ -168,7 +168,9 @@ model thumbnail opens a larger static preview with metadata and available
 print, slicer and delete actions. A loading indicator covers the larger render;
 preview failure does not make the source file unprintable or undownloadable.
 Embedded previews are preferred, and bounded software rendering handles models
-without them. Preview queues and memory/disk caches avoid repeated work.
+without them. 3MF geometry includes component/build transforms and Bambu/Orca
+references to model parts inside the package; stored PNG/JPEG thumbnails follow
+package relationships. See [model previews](model-previews.md) for limits. Preview queues and memory/disk caches avoid repeated work.
 
 Configure enabled slicers under Configuration and open a model with the
 selected executable. Melt launches local slicer processes; it is not a slicer.
