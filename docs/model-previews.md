@@ -3,8 +3,9 @@
 Last-updated: 2026-11-03
 
 Melt generates static previews locally. Embedded images are preferred; models
-without one use the desktop mesh/point renderer, with CPU fallback. Preview support does not imply that
-a file can be printed directly or opened by every configured slicer.
+without one use the desktop mesh/point renderer, with CPU fallback. Preview
+support does not imply that a file can be printed directly or opened by every
+configured slicer.
 
 ## Implementation sequence
 
@@ -211,7 +212,7 @@ during initialization, and uses the shared worker once ready. It creates no GPU
 device for cache hits or embedded images. This amortizes initialization across
 uncached previews; an occasional single thumbnail may gain nothing. Cached
 CPU images remain valid and are not regenerated just to change renderer.
-Step 4 qualification is in progress. `MELT_PREVIEW_RENDERER`
+Step 4 qualification is complete on Linux. `MELT_PREVIEW_RENDERER`
 accepts `auto` (default), `cpu` and `gpu`; explicit GPU mode still falls back on
 failure. `MELT_PREVIEW_ADAPTER` optionally selects an adapter by name substring.
 Automatic selection prefers integrated hardware and excludes CPU adapters;
@@ -263,9 +264,11 @@ has not been measured.
 
 The [machine-readable results](benchmarks/2026-11-03-preview-gpu.json) include
 adapter identities, cold samples, actual per-sample renderer and image hashes.
-AMD's six final PNGs are pixel-identical to the CPU reference. NVIDIA has minor
-point-cloud edge differences; mesh PNGs match. Asymmetric geometry/depth tests
-also pass with a 0.1% allowance for material pixel differences across backends.
+Final comparisons differ at no more than eight materially different pixels in
+any 1920×1080 image; grid comparisons have no material differences. Minor mesh
+rounding and point-cloud edge differences are tolerated across adapters/runs.
+Asymmetric geometry/depth tests also pass with a 0.1% allowance for material
+pixel differences across backends.
 No antialiasing, camera, material or format changes were introduced.
 
 Reproduce the GPU runs with `--renderer gpu --require-hardware --iterations 7`,
@@ -281,3 +284,24 @@ For fallback qualification, select an intentionally missing adapter and pass
 `--renderer gpu --allow-fallback`; all six output PNGs matched the CPU reference
 byte for byte. `MELT_PREVIEW_PROFILE=1` logs stage timings locally. `draw.gpu.*`
 includes queue/wait time and its `gpu.*` child stages; do not sum both.
+Automatic mode also rejects the tested llvmpipe software Vulkan adapter and
+uses CPU for every sample.
+
+Final checks: 555 workspace tests and 175 UI tests pass; one hardware-only test
+is ignored in the ordinary suite and passes when explicitly run on each native
+Vulkan adapter. CPU-only preview tests (44), CPU-only desktop Clippy, workspace
+formatting/Clippy/build, license checks and dependency policy pass. The existing
+dependency graph still reports duplicate/yanked-version warnings. UI build
+retains its existing large-chunk warning. These do not fail the checks.
+
+The 14-view documentation gallery was refreshed with the standard illustrated
+fixtures. Actual-renderer comparison captures use the same sanitized fixture
+and the new `--preview-bench` option: before at `/tmp/melt-gpu-before-final`
+(UI checkout `4b00a05`, CPU images), after at `/tmp/melt-gpu-after-final` (AMD
+hardware images). The updated capture helper and fixture metadata were copied
+into the disposable baseline checkout so both captures use the same media
+mapping. The library and large-preview pairs were visually reviewed; other
+views are unchanged. Each manifest records benchmark report/image hashes and
+the actual renderer/adapter. These are local evidence; no PR or uploaded PR
+attachments were created. Native Metal/DX12, power consumption and live-printer
+qualification remain outside the completed Linux checks.

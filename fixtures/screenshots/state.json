@@ -1,5 +1,6 @@
 {
   "capturedAt": "2026-10-12T12:00:00Z",
+  "previewBenchCases": {"cable-organizer.stl": "small-mesh", "calibration-cube.xyz": "point-cloud", "spool-holder.glb": "dense-mesh"},
   "printers": [
     {"name": "workshop", "driver": "bambu-lan", "host": "192.0.2.10", "serial": "SANITIZED_WORKSHOP", "model": "H2C", "detectedModel": "Bambu Lab H2C", "timeout": "10s", "insecure": false},
     {"name": "studio", "driver": "bambu-lan", "host": "192.0.2.11", "serial": "SANITIZED_STUDIO", "model": "P1S", "detectedModel": "Bambu Lab P1S", "timeout": "10s", "insecure": false},

@@ -296,6 +296,25 @@ def capture(args):
     if not (dist / "index.html").is_file():
         raise SystemExit("Build the current frontend with make ui-build first.")
     state = json.loads(FIXTURES.read_text())
+    benchmark_media = {}
+    benchmark_evidence = None
+    if args.preview_bench:
+        directory = args.preview_bench.resolve()
+        report_path = directory / "report.json"
+        report = json.loads(report_path.read_text())
+        benchmark_evidence = {"reportSha256": hashlib.sha256(report_path.read_bytes()).hexdigest(), "requestedRenderer": report["renderer"], "gpu": report["gpu"], "images": []}
+        for name, case in state["previewBenchCases"].items():
+            for label, size in (("grid", [640, 360]), ("large", [1920, 1080])):
+                result = next(result for result in report["results"] if result["case"] == case and result["size"] == size)
+                path = directory / f"{case}-{label}.png"
+                with Image.open(path) as image:
+                    if image.format != "PNG" or list(image.size) != size:
+                        raise SystemExit(f"Invalid benchmark preview: {path}")
+                    image.load()
+                data = path.read_bytes()
+                benchmark_media[name, label == "large"] = data
+                # The benchmark saves the first sample's image, not a warm sample.
+                benchmark_evidence["images"].append({"name": name, "case": case, "size": size, "actualRenderer": result["samples"][0]["renderer"], "sha256": hashlib.sha256(data).hexdigest()})
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     media = {}
@@ -316,7 +335,10 @@ def capture(args):
             if path.path == "/__preview":
                 from urllib.parse import parse_qs
                 query = parse_qs(path.query)
-                image = model_image(query["name"][0], query.get("large") == ["true"])
+                name, large = query["name"][0], query.get("large") == ["true"]
+                image = benchmark_media.get((Path(name).name, large))
+                if image is None:
+                    image = model_image(name, large)
                 body = json.dumps({"kind": "png", "data": base64.b64encode(image).decode()}).encode()
                 self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
             elif path.path in ("/__h264", "/__mjpeg", "/__camera.jpg"):
@@ -468,6 +490,9 @@ def capture(args):
             source.update(str(file.relative_to(ROOT)).encode()); source.update(file.read_bytes())
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     manifest = {"capturedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"), "scenarioTime": state["capturedAt"], "sourceCommit": commit, "frontendSourceSha256": source.hexdigest(), "fixtureSha256": hashlib.sha256(FIXTURES.read_bytes()).hexdigest(), "viewport": {"width": WIDTH, "height": HEIGHT, "deviceScaleFactor": SCALE}, "locale": "en-US", "timezone": "UTC", "theme": "dark", "renderer": "Playwright Chromium", "data": "Sanitized synthetic IPC and camera/model media; no live hardware or user configuration", "captures": captures}
+    if benchmark_evidence:
+        manifest["previewBenchmark"] = benchmark_evidence
+        manifest["data"] = "Sanitized IPC/camera fixtures; generated reference geometry previews from the recorded benchmark; other previews illustrated"
     (output / "capture-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"Saved {len(captures)} screenshots and capture-manifest.json to {output}")
 
@@ -475,4 +500,5 @@ def capture(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "screenshots")
+    parser.add_argument("--preview-bench", type=Path, help="Use actual preview_bench PNGs for reference geometry mapped in the fixture; record adapter, actual renderer and image hashes")
     capture(parser.parse_args())
