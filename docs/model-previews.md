@@ -30,8 +30,16 @@ STEP/IGES/BREP and all resin formats (including SL1/SL1S) are excluded.
 
 ## Current support
 
-Local files support STL, OBJ, 3MF, the first
-supported model in ZIP, and PNG thumbnails in a G-code comment header.
+Local files support STL, OBJ, 3MF, and the first supported preview file in ZIP.
+G-code/GCO scan the first 4 MiB and last 1 MiB for PNG, JPEG or QOI comment
+thumbnails and choose by decoded pixel area. BGCode supports version 1 embedded
+PNG/JPEG/QOI blocks, uncompressed or zlib/DEFLATE compressed; Heatshrink blocks
+are skipped. Toolpath blocks are never decompressed.
+
+UFP, FreeCAD (`.FCStd`), Fusion (`.f3d`/`.f3z`) and LightBurn (`.lbrn`/`.lbrn2`)
+use stored previews. F3Z searches nested F3D designs, largest first, with one
+level of nesting. ZIP image extraction has a cumulative 64 MiB budget. Files
+with no stored image remain unavailable; these formats are not geometry loaders.
 Printer-hosted previews support STL, OBJ and 3MF. Large local 3MFs can use an
 embedded thumbnail without loading the entire archive into memory.
 3MF thumbnails follow the package thumbnail relationship first, then prefer
@@ -65,4 +73,7 @@ format decoding. Neither establishes native-OS or live-printer qualification.
   `/tmp/melt-previews-before-images` (14 views).
 - Chunk 2: complete. All 18 preview tests and desktop Clippy pass, including
   cross-part transforms, build selection, cycles and malformed inputs.
-- Chunks 3–7: pending.
+- Chunk 3: complete. All 22 preview tests, 175 UI tests, desktop Clippy and
+  the production UI build pass. Refreshed all 14 gallery captures; visually
+  checked the mixed-format library.
+- Chunks 4–7: pending.

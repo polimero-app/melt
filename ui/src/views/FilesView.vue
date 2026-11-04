@@ -8,7 +8,7 @@ import type { PrinterBadge } from '../monitoring'
 import { formatSize, formatDate } from '../formatting'
 import { inspectPrintFile, printTargetState, startPrintFile, type PrintFile, type PrintPackage } from '../printing'
 import { badgeDotClasses } from '../presentation'
-import { naturallyDescending, nextSort, shouldDeferLibraryCards, sortedBy, type FileSort, fileTypeLabel } from '../library'
+import { naturallyDescending, nextSort, shouldDeferLibraryCards, sortedBy, type FileSort, fileTypeLabel, supportsPreview } from '../library'
 import ActionMenu, { type ActionMenuItem } from '../components/ActionMenu.vue'
 import SlideOver from '../components/SlideOver.vue'
 import Button from '../components/Button.vue'
@@ -207,7 +207,7 @@ const visibleFiles = computed(() => sortedBy(
 
 const deferLibraryCards = computed(() => shouldDeferLibraryCards(visibleFiles.value.length))
 const enabledSlicers = computed(() => slicers.filter((slicer) => slicer.enabled))
-const isModelFile = (file: FileEntry) => /\.(3mf|stl|obj|zip|gcode)$/i.test(file.name)
+const isModelFile = (file: FileEntry) => supportsPreview(file.name)
 const previewFile = ref<FileEntry>()
 
 function fileActionItems(file: FileEntry): ActionMenuItem[] {

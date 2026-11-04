@@ -2,6 +2,14 @@ use super::{MAX_PREVIEW_BYTES, MAX_PREVIEW_DIMENSION, MAX_PREVIEW_PIXELS, Previe
 use image::ImageReader;
 use std::io::Cursor;
 
+pub(super) fn png_area(png: &[u8]) -> u64 {
+    if !super::validate_png(png) {
+        return 0;
+    }
+    u64::from(u32::from_be_bytes(png[16..20].try_into().unwrap()))
+        * u64::from(u32::from_be_bytes(png[20..24].try_into().unwrap()))
+}
+
 /// Decode before accepting an embedded image. All consumers and caches receive
 /// bounded PNG data, regardless of the source encoding.
 pub(super) fn normalize(bytes: &[u8]) -> Result<Vec<u8>, PreviewError> {

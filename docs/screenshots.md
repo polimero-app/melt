@@ -1,8 +1,8 @@
 # Screenshots
 
-Last-updated: 2026-10-24
+Last-updated: 2026-11-03
 
-Thirteen captures of the current production Vue interface, including the
+Fourteen captures of the current production Vue interface, including the
 **Printers** label, **Cameras** view, **Camera feed** selector, playback badges,
 camera settings, large file preview and **Smart plugs** (list, settings, power-off
 confirmation and the offline printer view with plug controls).
@@ -39,7 +39,7 @@ presets, appearance, and version/license information.
 Browsing a directory of model files with size and modified date, ready to
 organize, slice, or print.
 
-![Current File library view with sample STL thumbnails, folder navigation, sorting and search](../screenshots/file-library.png)
+![Current File library view with sample STL, FreeCAD, Fusion and BGCode thumbnails, folder navigation, sorting and search](../screenshots/file-library.png)
 
 ## File preview
 

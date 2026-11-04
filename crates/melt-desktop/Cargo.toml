@@ -37,3 +37,4 @@ sha2.workspace = true
 notify = "8.2.0"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "qoi", "bmp"] }
 quick-xml = "0.42"
+flate2 = "1"

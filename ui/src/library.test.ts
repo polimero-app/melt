@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fileTypeLabel, LARGE_LIBRARY_THRESHOLD, nextSort, shouldDeferLibraryCards, sortedBy } from './library'
+import { supportsPreview, fileTypeLabel, LARGE_LIBRARY_THRESHOLD, nextSort, shouldDeferLibraryCards, sortedBy } from './library'
 
 describe('shouldDeferLibraryCards', () => {
   it('defers rendering only after the large-library threshold', () => {
@@ -49,5 +49,16 @@ describe('nextSort', () => {
     expect(fileTypeLabel({ name: 'model.gcode.3mf', type: 'file' })).toBe('3MF')
     expect(fileTypeLabel({ name: 'README', type: 'file' })).toBe('FILE')
     expect(fileTypeLabel({ name: '.hidden', type: 'file' })).toBe('FILE')
+  })
+})
+
+describe('supportsPreview', () => {
+  it('recognizes supported preview formats without enabling excluded formats', () => {
+    for (const name of ['part.stl', 'part.gcode.3mf', 'part.FCStd', 'part.f3z', 'part.bgcode', 'part.lbrn2']) {
+      expect(supportsPreview(name)).toBe(true)
+    }
+    for (const name of ['part.step', 'part.iges', 'part.brep', 'part.ctb', 'part.sl1', 'part.sl1s', 'part.goo', 'README']) {
+      expect(supportsPreview(name)).toBe(false)
+    }
   })
 })
