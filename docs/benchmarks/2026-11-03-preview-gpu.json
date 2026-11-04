@@ -1,0 +1,509 @@
+{
+  "date": "2026-11-03",
+  "host": "Ryzen 9 7950X; Linux x86_64; Mesa 26.2.6; NVIDIA driver 615.78.08",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (Arch Linux rust 1:1.99.1-1)",
+  "profile": "release",
+  "method": "Seven uncached samples per case/size in one process per renderer; median excludes the first sample of every case/size. PNG encoding, geometry loading/preparation and readback included. Synthetic models; no cache hits.",
+  "adapters": {
+    "cpu": {
+      "adapter": null,
+      "backend": null,
+      "deviceType": null,
+      "hardware": false,
+      "initializationMs": null,
+      "reason": null,
+      "state": "uninitialized"
+    },
+    "amd": {
+      "adapter": "AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)",
+      "backend": "Vulkan",
+      "deviceType": "IntegratedGpu",
+      "hardware": true,
+      "initializationMs": 130.039214,
+      "reason": null,
+      "state": "ready"
+    },
+    "nvidia": {
+      "adapter": "NVIDIA GeForce RTX 3070",
+      "backend": "Vulkan",
+      "deviceType": "DiscreteGpu",
+      "hardware": true,
+      "initializationMs": 152.297027,
+      "reason": null,
+      "state": "ready"
+    },
+    "auto": {
+      "adapter": "AMD Ryzen 9 7950X 16-Core Processor (RADV RAPHAEL_MENDOCINO)",
+      "backend": "Vulkan",
+      "deviceType": "IntegratedGpu",
+      "hardware": true,
+      "initializationMs": 88.411217,
+      "reason": null,
+      "state": "ready"
+    }
+  },
+  "results": [
+    {
+      "case": "small-mesh",
+      "size": [
+        640,
+        360
+      ],
+      "items": 12,
+      "inputBytes": 684,
+      "renderers": {
+        "cpu": {
+          "medianMs": 8.775,
+          "firstMs": 8.961,
+          "actualRenderers": [
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu"
+          ]
+        },
+        "amd": {
+          "medianMs": 1.118,
+          "firstMs": 133.622,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ],
+          "fidelity": {
+            "foregroundIoU": 1.0,
+            "foregroundMeanAbsoluteChannelError": 0.0,
+            "materiallyDifferentPixelFraction": 0.0,
+            "cpuPngSha256": "f12b483441418c40ccc21828a14875ce3d0af69124aa17af7d703538d2d3d7b0",
+            "gpuPngSha256": "f12b483441418c40ccc21828a14875ce3d0af69124aa17af7d703538d2d3d7b0"
+          }
+        },
+        "nvidia": {
+          "medianMs": 1.529,
+          "firstMs": 160.332,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ],
+          "fidelity": {
+            "foregroundIoU": 1.0,
+            "foregroundMeanAbsoluteChannelError": 0.0,
+            "materiallyDifferentPixelFraction": 0.0,
+            "cpuPngSha256": "f12b483441418c40ccc21828a14875ce3d0af69124aa17af7d703538d2d3d7b0",
+            "gpuPngSha256": "f12b483441418c40ccc21828a14875ce3d0af69124aa17af7d703538d2d3d7b0"
+          }
+        },
+        "auto": {
+          "medianMs": 7.564,
+          "firstMs": 8.568,
+          "actualRenderers": [
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu"
+          ]
+        }
+      }
+    },
+    {
+      "case": "small-mesh",
+      "size": [
+        1920,
+        1080
+      ],
+      "items": 12,
+      "inputBytes": 684,
+      "renderers": {
+        "cpu": {
+          "medianMs": 65.781,
+          "firstMs": 78.347,
+          "actualRenderers": [
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu"
+          ]
+        },
+        "amd": {
+          "medianMs": 9.817,
+          "firstMs": 8.692,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ],
+          "fidelity": {
+            "foregroundIoU": 0.999997732485434,
+            "foregroundMeanAbsoluteChannelError": 0.0002652992042157631,
+            "materiallyDifferentPixelFraction": 1.9290123456790124e-06,
+            "cpuPngSha256": "668ac79c0d1656c34c519fab2452496ca03c2bb8a455c01fa1a088ae891306bb",
+            "gpuPngSha256": "08a2c6668250fa1c34dd1cb3a2679be92a05a36b3c477c4918c15e3acd18d98c"
+          }
+        },
+        "nvidia": {
+          "medianMs": 6.674,
+          "firstMs": 8.74,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ],
+          "fidelity": {
+            "foregroundIoU": 0.999997732485434,
+            "foregroundMeanAbsoluteChannelError": 0.0002652992042157631,
+            "materiallyDifferentPixelFraction": 1.9290123456790124e-06,
+            "cpuPngSha256": "668ac79c0d1656c34c519fab2452496ca03c2bb8a455c01fa1a088ae891306bb",
+            "gpuPngSha256": "08a2c6668250fa1c34dd1cb3a2679be92a05a36b3c477c4918c15e3acd18d98c"
+          }
+        },
+        "auto": {
+          "medianMs": 7.084,
+          "firstMs": 69.113,
+          "actualRenderers": [
+            "cpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ]
+        }
+      }
+    },
+    {
+      "case": "dense-mesh",
+      "size": [
+        640,
+        360
+      ],
+      "items": 65536,
+      "inputBytes": 3276884,
+      "renderers": {
+        "cpu": {
+          "medianMs": 22.22,
+          "firstMs": 27.204,
+          "actualRenderers": [
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu"
+          ]
+        },
+        "amd": {
+          "medianMs": 18.456,
+          "firstMs": 21.262,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ],
+          "fidelity": {
+            "foregroundIoU": 1.0,
+            "foregroundMeanAbsoluteChannelError": 0.00017581157327014937,
+            "materiallyDifferentPixelFraction": 0.0,
+            "cpuPngSha256": "6bba9dc79e114cbb774dabc9f7d079faa709c7d1f67763eef1956627b8cba6dc",
+            "gpuPngSha256": "09b3302cc72d0884a2cb8e2e32ed3ab6d2dd6c7a79cd691779f0f94d3c703ffb"
+          }
+        },
+        "nvidia": {
+          "medianMs": 18.315,
+          "firstMs": 22.812,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ],
+          "fidelity": {
+            "foregroundIoU": 1.0,
+            "foregroundMeanAbsoluteChannelError": 0.00017581157327014937,
+            "materiallyDifferentPixelFraction": 0.0,
+            "cpuPngSha256": "6bba9dc79e114cbb774dabc9f7d079faa709c7d1f67763eef1956627b8cba6dc",
+            "gpuPngSha256": "09b3302cc72d0884a2cb8e2e32ed3ab6d2dd6c7a79cd691779f0f94d3c703ffb"
+          }
+        },
+        "auto": {
+          "medianMs": 17.988,
+          "firstMs": 22.615,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ]
+        }
+      }
+    },
+    {
+      "case": "dense-mesh",
+      "size": [
+        1920,
+        1080
+      ],
+      "items": 65536,
+      "inputBytes": 3276884,
+      "renderers": {
+        "cpu": {
+          "medianMs": 81.349,
+          "firstMs": 79.103,
+          "actualRenderers": [
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu"
+          ]
+        },
+        "amd": {
+          "medianMs": 36.418,
+          "firstMs": 34.05,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ],
+          "fidelity": {
+            "foregroundIoU": 1.0,
+            "foregroundMeanAbsoluteChannelError": 9.467767211949945e-05,
+            "materiallyDifferentPixelFraction": 9.645061728395062e-07,
+            "cpuPngSha256": "332545fa92e79cf4e125c101f33b8c37ca5ed83cd536b5a5330a877e4dc9ddcd",
+            "gpuPngSha256": "f89a8a96e626242cd7a7101f78900b286b10a7367547509f67b68d10ee6d3e3b"
+          }
+        },
+        "nvidia": {
+          "medianMs": 36.494,
+          "firstMs": 36.909,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ],
+          "fidelity": {
+            "foregroundIoU": 1.0,
+            "foregroundMeanAbsoluteChannelError": 9.557936423492326e-05,
+            "materiallyDifferentPixelFraction": 9.645061728395062e-07,
+            "cpuPngSha256": "332545fa92e79cf4e125c101f33b8c37ca5ed83cd536b5a5330a877e4dc9ddcd",
+            "gpuPngSha256": "8ab1f333613540eb47572d837dc4e95234963e7d9ae8f94a27f838006ba94e76"
+          }
+        },
+        "auto": {
+          "medianMs": 34.077,
+          "firstMs": 34.061,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ]
+        }
+      }
+    },
+    {
+      "case": "point-cloud",
+      "size": [
+        640,
+        360
+      ],
+      "items": 1000000,
+      "inputBytes": 12000108,
+      "renderers": {
+        "cpu": {
+          "medianMs": 24.254,
+          "firstMs": 26.679,
+          "actualRenderers": [
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu"
+          ]
+        },
+        "amd": {
+          "medianMs": 18.506,
+          "firstMs": 22.205,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ],
+          "fidelity": {
+            "foregroundIoU": 1.0,
+            "foregroundMeanAbsoluteChannelError": 0.0,
+            "materiallyDifferentPixelFraction": 0.0,
+            "cpuPngSha256": "587deacd38194aff4625606fea48714427c39b8718ac28084e0004022b8dd453",
+            "gpuPngSha256": "587deacd38194aff4625606fea48714427c39b8718ac28084e0004022b8dd453"
+          }
+        },
+        "nvidia": {
+          "medianMs": 18.454,
+          "firstMs": 20.821,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ],
+          "fidelity": {
+            "foregroundIoU": 1.0,
+            "foregroundMeanAbsoluteChannelError": 0.0,
+            "materiallyDifferentPixelFraction": 0.0,
+            "cpuPngSha256": "587deacd38194aff4625606fea48714427c39b8718ac28084e0004022b8dd453",
+            "gpuPngSha256": "587deacd38194aff4625606fea48714427c39b8718ac28084e0004022b8dd453"
+          }
+        },
+        "auto": {
+          "medianMs": 19.996,
+          "firstMs": 24.033,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ]
+        }
+      }
+    },
+    {
+      "case": "point-cloud",
+      "size": [
+        1920,
+        1080
+      ],
+      "items": 1000000,
+      "inputBytes": 12000108,
+      "renderers": {
+        "cpu": {
+          "medianMs": 64.517,
+          "firstMs": 63.624,
+          "actualRenderers": [
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu",
+            "cpu"
+          ]
+        },
+        "amd": {
+          "medianMs": 29.093,
+          "firstMs": 29.178,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ],
+          "fidelity": {
+            "foregroundIoU": 1.0,
+            "foregroundMeanAbsoluteChannelError": 0.0,
+            "materiallyDifferentPixelFraction": 0.0,
+            "cpuPngSha256": "fba6ebcb2dd9eb40786dfc735c4b02a9198abbf8109005e243f9ecb4013b9a22",
+            "gpuPngSha256": "fba6ebcb2dd9eb40786dfc735c4b02a9198abbf8109005e243f9ecb4013b9a22"
+          }
+        },
+        "nvidia": {
+          "medianMs": 24.034,
+          "firstMs": 24.515,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ],
+          "fidelity": {
+            "foregroundIoU": 0.999985987136191,
+            "foregroundMeanAbsoluteChannelError": 0.0016219889858890462,
+            "materiallyDifferentPixelFraction": 3.858024691358025e-06,
+            "cpuPngSha256": "fba6ebcb2dd9eb40786dfc735c4b02a9198abbf8109005e243f9ecb4013b9a22",
+            "gpuPngSha256": "3e310c6e344e6132f9c461df8ee8984b753b28c40837c93dd14fc5b45f121725"
+          }
+        },
+        "auto": {
+          "medianMs": 29.627,
+          "firstMs": 31.037,
+          "actualRenderers": [
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu",
+            "gpu"
+          ]
+        }
+      }
+    }
+  ]
+}

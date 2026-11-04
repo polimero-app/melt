@@ -205,8 +205,13 @@ jobs; callers fall back to CPU when busy, unavailable or unsuccessful. Device
 errors disable the worker for the session. GPU waits have a two-second caller
 deadline; targets are bounded to 1920×1080 and uploads to 192 MiB.
 
-The initial automatic policy tries large previews and warms in the background;
-steps 3–4 will finalize that policy and qualification. `MELT_PREVIEW_RENDERER`
+Step 3 is complete. All six measured workloads benefit from warm hardware, so
+automatic mode starts warming on the first generated preview, renders on CPU
+during initialization, and uses the shared worker once ready. It creates no GPU
+device for cache hits or embedded images. This amortizes initialization across
+uncached previews; an occasional single thumbnail may gain nothing. Cached
+CPU images remain valid and are not regenerated just to change renderer.
+Step 4 qualification is in progress. `MELT_PREVIEW_RENDERER`
 accepts `auto` (default), `cpu` and `gpu`; explicit GPU mode still falls back on
 failure. `MELT_PREVIEW_ADAPTER` optionally selects an adapter by name substring.
 Automatic selection prefers integrated hardware and excludes CPU adapters;
@@ -232,14 +237,47 @@ sphere (100 mm radius) and a million-point cloud, at both production sizes.
 Use `MELT_PREVIEW_PROFILE=1` to print local stage timings to stderr during normal
 preview work. Cache hits and embedded images do not run the geometry stages.
 
-Initial CPU baseline on the development Ryzen 9 7950X, optimized build, median
-of three uncached renders (milliseconds; no GPU claims):
+Final end-to-end results on the development Ryzen 9 7950X, optimized build,
+milliseconds. Each cell is the median of six warm uncached renders after one
+first sample per case/size. Geometry loading, normals/projection, GPU upload,
+readback and PNG encoding are included. These are synthetic inputs, not an
+application-wide speedup or a compatibility claim for other GPUs.
 
-| Dataset | Grid total | Large total | Large CPU draw |
+| Dataset / size | CPU | AMD integrated | NVIDIA RTX 3070 |
 | --- | ---: | ---: | ---: |
-| Small mesh | 8.00 | 59.35 | 55.72 |
-| Dense mesh | 22.57 | 80.68 | 52.37 |
-| Point cloud | 25.73 | 63.74 | 48.47 |
+| Small mesh / grid | 8.77 | 1.12 | 1.53 |
+| Small mesh / large | 65.78 | 9.82 | 6.67 |
+| Dense mesh / grid | 22.22 | 18.46 | 18.32 |
+| Dense mesh / large | 81.35 | 36.42 | 36.49 |
+| Point cloud / grid | 24.25 | 18.51 | 18.45 |
+| Point cloud / large | 64.52 | 29.09 | 24.03 |
 
-These measurements justify testing GPU rasterization, particularly for large
-previews. Dense-mesh normal preparation and PNG encoding remain significant.
+Fresh-process initialization was 130 ms (AMD) and 152 ms (NVIDIA) in the final
+forced-GPU runs; earlier runs reached 155/232 ms. Automatic mode used CPU during
+its 88 ms background initialization, then GPU from the second large render on.
+Dense-mesh normal preparation and PNG encoding remain significant. GPU work
+adds driver/device memory use and native dependencies, and does not accelerate
+stored-image extraction or cache hits. The integrated adapter is preferred to
+avoid waking a discrete GPU when integrated hardware is available; power use
+has not been measured.
+
+The [machine-readable results](benchmarks/2026-11-03-preview-gpu.json) include
+adapter identities, cold samples, actual per-sample renderer and image hashes.
+AMD's six final PNGs are pixel-identical to the CPU reference. NVIDIA has minor
+point-cloud edge differences; mesh PNGs match. Asymmetric geometry/depth tests
+also pass with a 0.1% allowance for material pixel differences across backends.
+No antialiasing, camera, material or format changes were introduced.
+
+Reproduce the GPU runs with `--renderer gpu --require-hardware --iterations 7`,
+optionally selecting `MELT_PREVIEW_ADAPTER=AMD` or `NVIDIA`. Run `--renderer auto`
+to observe background warmup; the JSON distinguishes real GPU use from fallback.
+Run the explicit hardware regression with:
+
+```sh
+cargo test -p melt-desktop --lib hardware_fidelity -- --ignored --nocapture
+```
+
+For fallback qualification, select an intentionally missing adapter and pass
+`--renderer gpu --allow-fallback`; all six output PNGs matched the CPU reference
+byte for byte. `MELT_PREVIEW_PROFILE=1` logs stage timings locally. `draw.gpu.*`
+includes queue/wait time and its `gpu.*` child stages; do not sum both.
