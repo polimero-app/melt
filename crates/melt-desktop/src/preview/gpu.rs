@@ -145,13 +145,7 @@ pub(super) fn draw(
         return Err("GPU target exceeds preview limits".to_owned());
     }
     let service = SERVICE.get_or_init(|| Service::start(mode == RenderMode::Gpu));
-    match service.shared.phase.load(Ordering::Acquire) {
-        DISABLED => return Err("GPU renderer disabled".to_owned()),
-        STARTING if mode == RenderMode::Auto => {
-            return Err("GPU renderer warming in background".to_owned());
-        }
-        _ => {}
-    }
+    admit(&service.shared, mode)?;
     let started = Instant::now();
     let stage = match &scene {
         Scene::Mesh(_) => "draw.gpu.mesh",
@@ -177,6 +171,21 @@ pub(super) fn draw(
         elapsed_us: started.elapsed().as_micros().min(u64::MAX as u128) as u64,
     });
     Ok(frame.rgb)
+}
+
+/// Whether `mode` may use the worker now. The first caller fixes whether a
+/// software adapter is allowed, so Auto also checks what was actually picked.
+fn admit(shared: &Shared, mode: RenderMode) -> Result<(), String> {
+    let auto = mode == RenderMode::Auto;
+    match shared.phase.load(Ordering::Acquire) {
+        DISABLED => Err("GPU renderer disabled".to_owned()),
+        STARTING if auto => Err("GPU renderer warming in background".to_owned()),
+        // Forced GPU may diagnose llvmpipe; Auto's tuned CPU path beats it.
+        READY if auto && !shared.status.lock().is_ok_and(|status| status.hardware) => {
+            Err("software adapter; automatic mode uses CPU".to_owned())
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Waits for a reply, disabling the worker only for a draw that hangs once
@@ -701,6 +710,26 @@ mod tests {
             rgb: vec![1, 2, 3],
             timings: Vec::new(),
         })
+    }
+
+    #[test]
+    fn automatic_mode_never_uses_a_software_adapter() {
+        for (hardware, mode, admitted) in [
+            (false, RenderMode::Auto, false),
+            (false, RenderMode::Gpu, true),
+            (true, RenderMode::Auto, true),
+            (true, RenderMode::Gpu, true),
+        ] {
+            let shared = shared(READY);
+            shared.status.lock().unwrap().hardware = hardware;
+            assert_eq!(
+                admit(&shared, mode).is_ok(),
+                admitted,
+                "hardware {hardware}, {mode:?}"
+            );
+        }
+        assert!(admit(&shared(STARTING), RenderMode::Auto).is_err());
+        assert!(admit(&shared(DISABLED), RenderMode::Gpu).is_err());
     }
 
     /// Slow device start-up or a busy queue must not turn a healthy GPU off
