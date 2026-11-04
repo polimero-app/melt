@@ -180,3 +180,19 @@ Both directories retain capture manifests. The only changed images are the file
 library and the preview-dialog backdrop. All 14 gallery views were reviewed.
 Comparison captures are local evidence; no PR or uploaded PR attachments have
 been created by this implementation sequence.
+
+## GPU renderer implementation sequence
+
+1. Separate geometry preparation from drawing, add opt-in stage timings and a
+   reproducible CPU benchmark for small/dense meshes and large point clouds.
+2. Add a lazy shared `wgpu` offscreen renderer, reuse devices/pipelines/targets,
+   and retain CPU rendering after adapter, device, validation or readback failure.
+3. Compare cold and warm end-to-end timings and image fidelity; select an
+   automatic policy from evidence and keep explicit CPU/GPU diagnostic overrides.
+4. Qualify fallback, concurrency, resource bounds, package/dependency policy,
+   documentation and visual evidence. GPU screenshots must identify the actual
+   adapter; a software Vulkan adapter does not establish hardware performance.
+
+GPU work applies to generated mesh/point images. Embedded images, decoding,
+normal preparation, PNG encoding and existing preview caches remain independent.
+GPU implementation and qualification are in progress.
