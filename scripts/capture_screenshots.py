@@ -54,7 +54,13 @@ def model_image(name, large=False):
 
     draw.ellipse((190 * scale, 220 * scale, 460 * scale, 290 * scale), fill="#0e1d2b")
     color = "#35b4ce"
-    if "cube" in name:
+    if name.lower().endswith((".xyz", ".pts", ".asc", ".pcd", ".las", ".e57")):
+        for z in range(0, 71, 7):
+            for x in range(-35, 36, 7):
+                for y in (-35, 35):
+                    px, py = point(x, y, z)
+                    draw.ellipse((px - 2 * scale, py - 2 * scale, px + 2 * scale, py + 2 * scale), fill=color)
+    elif "cube" in name:
         box(-35, -35, 0, 70, 70, 70, color)
     elif "tray" in name:
         box(-65, -42, 0, 130, 84, 5, color)
@@ -427,7 +433,7 @@ def capture(args):
                     page.get_by_role("button", name="Preview cable-organizer.stl", exact=True).wait_for()
                     page.wait_for_function("Array.from(document.querySelectorAll('[aria-busy]')).every(e => e.getAttribute('aria-busy') !== 'true')")
                 if kind == "library":
-                    for name in ("desk-tray.FCStd", "mounting-bracket.f3d", "planter.bgcode", "spool-holder.glb"):
+                    for name in ("desk-tray.FCStd", "mounting-bracket.f3d", "planter.bgcode", "spool-holder.glb", "calibration-cube.xyz"):
                         page.get_by_role("button", name=f"Preview {name}", exact=True).wait_for()
                 if kind == "preview":
                     page.get_by_role("button", name="Preview cable-organizer.stl", exact=True).click()

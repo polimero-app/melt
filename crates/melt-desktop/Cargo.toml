@@ -41,3 +41,5 @@ flate2 = "1"
 gltf = { version = "1.4", default-features = false, features = ["utils", "names"] }
 ply-rs = "0.1"
 roxmltree = "0.20"
+las = "0.11"
+e57 = "0.11"

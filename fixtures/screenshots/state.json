@@ -85,7 +85,7 @@
     "entries": [
       {"name": "Calibration", "root": "local", "path": "/samples/Models/Calibration", "devicePath": "/samples/Models/Calibration", "type": "directory", "mediaType": "other"},
       {"name": "cable-organizer.stl", "root": "local", "path": "/samples/Models/cable-organizer.stl", "devicePath": "/samples/Models/cable-organizer.stl", "type": "file", "mediaType": "model", "sizeBytes": 1782914, "modifiedAt": "2026-10-12T10:30:00Z"},
-      {"name": "calibration-cube.stl", "root": "local", "path": "/samples/Models/calibration-cube.stl", "devicePath": "/samples/Models/calibration-cube.stl", "type": "file", "mediaType": "model", "sizeBytes": 184932, "modifiedAt": "2026-10-10T09:45:00Z"},
+      {"name": "calibration-cube.xyz", "root": "local", "path": "/samples/Models/calibration-cube.xyz", "devicePath": "/samples/Models/calibration-cube.xyz", "type": "file", "mediaType": "model", "sizeBytes": 184932, "modifiedAt": "2026-10-10T09:45:00Z"},
       {"name": "desk-tray.FCStd", "root": "local", "path": "/samples/Models/desk-tray.FCStd", "devicePath": "/samples/Models/desk-tray.FCStd", "type": "file", "mediaType": "model", "sizeBytes": 3576492, "modifiedAt": "2026-10-11T15:20:00Z"},
       {"name": "mounting-bracket.f3d", "root": "local", "path": "/samples/Models/mounting-bracket.f3d", "devicePath": "/samples/Models/mounting-bracket.f3d", "type": "file", "mediaType": "model", "sizeBytes": 872049, "modifiedAt": "2026-10-11T11:12:00Z"},
       {"name": "planter.bgcode", "root": "local", "path": "/samples/Models/planter.bgcode", "devicePath": "/samples/Models/planter.bgcode", "type": "file", "mediaType": "model", "sizeBytes": 2173879, "modifiedAt": "2026-10-09T13:40:00Z"},
