@@ -450,16 +450,16 @@ pub(super) fn load_bytes(extension: &str, data: &[u8]) -> Result<Vec<u8>, Previe
 }
 
 pub(super) fn load_file(path: &Path, extension: &str) -> Result<Vec<u8>, PreviewError> {
-    let mut file = std::fs::File::open(path).map_err(|_| PreviewError::InvalidModel)?;
+    let mut file = std::fs::File::open(path).map_err(|_| PreviewError::Unavailable)?;
     let mut magic = [0; 8];
     let count = file
         .read(&mut magic)
-        .map_err(|_| PreviewError::InvalidModel)?;
-    file.rewind().map_err(|_| PreviewError::InvalidModel)?;
+        .map_err(|_| PreviewError::Unavailable)?;
+    file.rewind().map_err(|_| PreviewError::Unavailable)?;
     if count == 8 && magic == CFB_MAGIC {
         if file
             .metadata()
-            .map_err(|_| PreviewError::InvalidModel)?
+            .map_err(|_| PreviewError::Unavailable)?
             .len()
             > 512 << 20
         {

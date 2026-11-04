@@ -383,10 +383,10 @@ fn pcd(bytes: &[u8]) -> Result<Vec<Point>, PreviewError> {
 }
 
 pub(super) fn load_file(path: &Path, extension: &str) -> Result<Vec<Point>, PreviewError> {
-    let file = std::fs::File::open(path).map_err(|_| PreviewError::InvalidModel)?;
+    let file = std::fs::File::open(path).map_err(|_| PreviewError::Unavailable)?;
     if file
         .metadata()
-        .map_err(|_| PreviewError::InvalidModel)?
+        .map_err(|_| PreviewError::Unavailable)?
         .len()
         > MAX_SCAN_BYTES
     {

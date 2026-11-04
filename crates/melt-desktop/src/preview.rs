@@ -46,6 +46,8 @@ pub enum PreviewError {
     InvalidModel,
     TooLarge,
     Png,
+    /// The local file could not be opened or inspected.
+    Unavailable,
 }
 
 /// Reads at most `limit` bytes, failing with TooLarge rather than truncating,
@@ -105,19 +107,19 @@ pub fn local_preview(
             size,
         );
     }
-    let mut file = std::fs::File::open(path).map_err(|_| PreviewError::InvalidModel)?;
+    let mut file = std::fs::File::open(path).map_err(|_| PreviewError::Unavailable)?;
     if let Some(preview) = from_reader(extension, &file, size) {
         return preview;
     }
     if file
         .metadata()
-        .map_err(|_| PreviewError::InvalidModel)?
+        .map_err(|_| PreviewError::Unavailable)?
         .len()
         > MAX_MODEL_BYTES as u64
     {
         return Err(PreviewError::TooLarge);
     }
-    file.rewind().map_err(|_| PreviewError::InvalidModel)?;
+    file.rewind().map_err(|_| PreviewError::Unavailable)?;
     let bytes = read_bounded(file, MAX_MODEL_BYTES)?;
     from_loaded(extension, &bytes, Some(path), size)
 }
@@ -821,6 +823,22 @@ mod tests {
         let (extension, bytes) = first_model_in_zip(Cursor::new(buffer)).unwrap();
         assert_eq!(extension, "obj");
         assert_eq!(bytes, first);
+    }
+
+    /// A library file deleted or locked after listing is the library's
+    /// problem, not the model's.
+    #[test]
+    fn reports_missing_local_files_as_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["gone.stl", "gone.3mf", "gone.xyz", "gone.blend", "gone.gcode"] {
+            assert!(
+                matches!(
+                    local_preview(&dir.path().join(name), GRID_SIZE),
+                    Err(PreviewError::Unavailable)
+                ),
+                "{name}"
+            );
+        }
     }
 
     #[test]

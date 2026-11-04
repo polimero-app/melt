@@ -3081,6 +3081,7 @@ fn preview_error(error: preview::PreviewError) -> CommandError {
     CommandError::new(match error {
         preview::PreviewError::TooLarge => "thumbnailTooLarge",
         preview::PreviewError::Unsupported => "thumbnailUnsupported",
+        preview::PreviewError::Unavailable => "libraryUnavailable",
         _ => "thumbnailInvalid",
     })
 }
