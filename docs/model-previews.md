@@ -195,4 +195,30 @@ been created by this implementation sequence.
 
 GPU work applies to generated mesh/point images. Embedded images, decoding,
 normal preparation, PNG encoding and existing preview caches remain independent.
-GPU implementation and qualification are in progress.
+Step 1 is complete: geometry preparation and CPU drawing are separate, stage
+timings are available without recording filenames, and the benchmark reuses the
+production preview library. Steps 2–4 are in progress.
+
+Run an uncached synthetic benchmark with:
+
+```sh
+cargo run -p melt-desktop --release --example preview_bench -- \
+  --output /tmp/melt-preview-bench --iterations 3
+```
+
+It writes JSON stage timings and PNGs for a 12-triangle cube, a 65,536-triangle
+sphere (100 mm radius) and a million-point cloud, at both production sizes.
+Use `MELT_PREVIEW_PROFILE=1` to print local stage timings to stderr during normal
+preview work. Cache hits and embedded images do not run the geometry stages.
+
+Initial CPU baseline on the development Ryzen 9 7950X, optimized build, median
+of three uncached renders (milliseconds; no GPU claims):
+
+| Dataset | Grid total | Large total | Large CPU draw |
+| --- | ---: | ---: | ---: |
+| Small mesh | 8.00 | 59.35 | 55.72 |
+| Dense mesh | 22.57 | 80.68 | 52.37 |
+| Point cloud | 25.73 | 63.74 | 48.47 |
+
+These measurements justify testing GPU rasterization, particularly for large
+previews. Dense-mesh normal preparation and PNG encoding remain significant.

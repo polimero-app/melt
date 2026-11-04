@@ -14,6 +14,7 @@ mod mesh;
 mod model3mf;
 mod native;
 mod points;
+pub mod profiling;
 mod projects;
 mod scene;
 pub use archive::extract_3mf_thumbnail;
@@ -70,7 +71,11 @@ pub fn local_preview(
         "blend" | "blend1" | "3dm" | "skp" | "sldprt" | "sldasm" | "slddrw" | "ipt" | "iam"
         | "ipn" | "idw" => return native::load_file(path, &extension),
         "xyz" | "pts" | "asc" | "pcd" | "las" | "e57" => {
-            return points::render(&points::load_file(path, &extension)?, size);
+            let points = {
+                let _span = profiling::span("load.geometry");
+                points::load_file(path, &extension)?
+            };
+            return points::render(&points, size);
         }
         "gcode" | "gco" | "bgcode" => {
             return extract_gcode_thumbnail(file).ok_or(PreviewError::Unsupported);
@@ -101,7 +106,11 @@ pub fn local_preview(
         .read_to_end(&mut bytes)
         .map_err(|_| PreviewError::InvalidModel)?;
     if matches!(extension.as_str(), "gltf" | "glb") {
-        return render_triangles(scene::gltf(&bytes, Some(path))?, size);
+        let triangles = {
+            let _span = profiling::span("load.geometry");
+            scene::gltf(&bytes, Some(path))?
+        };
+        return render_triangles(triangles, size);
     }
     from_bytes(&extension, &bytes, size)
 }
@@ -123,7 +132,11 @@ pub fn from_bytes(
         "blend" | "blend1" | "3dm" | "skp" | "sldprt" | "sldasm" | "slddrw" | "ipt" | "iam"
         | "ipn" | "idw" => native::load_bytes(extension, bytes),
         "xyz" | "pts" | "asc" | "pcd" | "las" | "e57" => {
-            points::render(&points::load_bytes(extension, bytes)?, size)
+            let points = {
+                let _span = profiling::span("load.geometry");
+                points::load_bytes(extension, bytes)?
+            };
+            points::render(&points, size)
         }
         "3mf" => rasterize_3mf(bytes, size),
         "stl" | "obj" | "amf" | "off" | "ply" | "glb" | "gltf" | "dae" | "wrl" | "vrml" | "x3d"
@@ -201,30 +214,40 @@ pub fn rasterize(
     size: (usize, usize),
 ) -> Result<Vec<u8>, PreviewError> {
     if extension == "ply" {
-        let (vertices, triangles) = mesh::ply(bytes)?;
+        let (vertices, triangles) = {
+            let _span = profiling::span("load.geometry");
+            mesh::ply(bytes)?
+        };
         return if triangles.is_empty() {
             points::render(&vertices, size)
         } else {
             render_triangles(triangles, size)
         };
     }
-    let triangles = match extension {
-        "obj" => parse_obj(bytes),
-        "stl" => parse_stl(bytes),
-        "amf" => mesh::amf(bytes)?,
-        "off" => mesh::off(bytes)?,
-        "glb" | "gltf" => scene::gltf(bytes, None)?,
-        "dae" => scene::dae(bytes)?,
-        "wrl" | "vrml" => legacy::vrml(bytes)?,
-        "x3d" => legacy::x3d(bytes)?,
-        "3ds" => legacy::studio3ds(bytes)?,
-        _ => Vec::new(),
+    let triangles = {
+        let _span = profiling::span("load.geometry");
+        match extension {
+            "obj" => parse_obj(bytes),
+            "stl" => parse_stl(bytes),
+            "amf" => mesh::amf(bytes)?,
+            "off" => mesh::off(bytes)?,
+            "glb" | "gltf" => scene::gltf(bytes, None)?,
+            "dae" => scene::dae(bytes)?,
+            "wrl" | "vrml" => legacy::vrml(bytes)?,
+            "x3d" => legacy::x3d(bytes)?,
+            "3ds" => legacy::studio3ds(bytes)?,
+            _ => Vec::new(),
+        }
     };
     render_triangles(triangles, size)
 }
 
 pub fn rasterize_3mf(bytes: &[u8], size: (usize, usize)) -> Result<Vec<u8>, PreviewError> {
-    render_triangles(model3mf::load(bytes)?, size)
+    let triangles = {
+        let _span = profiling::span("load.geometry");
+        model3mf::load(bytes)?
+    };
+    render_triangles(triangles, size)
 }
 
 fn render_triangles(
@@ -235,7 +258,8 @@ fn render_triangles(
     if triangles.is_empty() || triangles.len() > mesh::MAX_TRIANGLES {
         return Err(PreviewError::InvalidModel);
     }
-    encode_png(&render(&triangles, size), size)
+    let prepared = prepare_mesh(&triangles, size)?;
+    encode_png(&draw_mesh_cpu(&prepared, size), size)
 }
 
 fn parse_obj(bytes: &[u8]) -> Vec<Triangle> {
@@ -338,8 +362,14 @@ fn parse_stl(bytes: &[u8]) -> Vec<Triangle> {
 }
 
 struct MeshVertex {
-    position: Vec3<f32>,
-    normal: Vec3<f32>,
+    position: [f32; 3],
+    normal: [f32; 3],
+}
+
+struct PreparedMesh {
+    vertices: Vec<MeshVertex>,
+    mvp: Mat4<f32>,
+    light_dir: Vec3<f32>,
 }
 
 struct MeshPipeline {
@@ -354,8 +384,8 @@ impl Pipeline for MeshPipeline {
 
     #[inline(always)]
     fn vert(&self, vertex: &Self::Vertex) -> ([f32; 4], Self::VsOut) {
-        let clip = self.mvp * Vec4::from_point(vertex.position);
-        (clip.into_array(), vertex.normal)
+        let clip = self.mvp * Vec4::from_point(Vec3::from(vertex.position));
+        (clip.into_array(), Vec3::from(vertex.normal))
     }
 
     #[inline(always)]
@@ -457,8 +487,15 @@ fn smooth_normal(
 /// hand-rolled bounding-box computation had a correctness bug that silently
 /// turned every render into a near full-canvas fill and pegged a CPU core
 /// on real meshes.
-fn render(triangles: &[Triangle], (width, height): (usize, usize)) -> Vec<u8> {
-    let normals = normal_clusters(triangles);
+fn prepare_mesh(
+    triangles: &[Triangle],
+    (width, height): (usize, usize),
+) -> Result<PreparedMesh, PreviewError> {
+    let normals = {
+        let _span = profiling::span("prepare.normals");
+        normal_clusters(triangles)
+    };
+    let _span = profiling::span("prepare.vertices");
     let mut vertices = Vec::with_capacity(triangles.len() * 3);
     let mut min = Vec3::broadcast(f32::INFINITY);
     let mut max = Vec3::broadcast(f32::NEG_INFINITY);
@@ -471,14 +508,20 @@ fn render(triangles: &[Triangle], (width, height): (usize, usize)) -> Vec<u8> {
             min = Vec3::partial_min(min, point);
             max = Vec3::partial_max(max, point);
             vertices.push(MeshVertex {
-                position: point,
-                normal: smooth_normal(&normals, point, face_normal),
+                position: point.into_array(),
+                normal: smooth_normal(&normals, point, face_normal).into_array(),
             });
         }
     }
 
     let center = (min + max) * 0.5;
     let extent = (max - min).reduce_partial_max().max(0.001);
+    if vertices.is_empty()
+        || !extent.is_finite()
+        || !center.into_array().iter().all(|v| v.is_finite())
+    {
+        return Err(PreviewError::InvalidModel);
+    }
     let model =
         Mat4::<f32>::scaling_3d(Vec3::broadcast(2.0 / extent)) * Mat4::translation_3d(-center);
     let view = Mat4::<f32>::look_at_rh(
@@ -493,15 +536,24 @@ fn render(triangles: &[Triangle], (width, height): (usize, usize)) -> Vec<u8> {
         1.0,
         10.0,
     );
-    let pipeline = MeshPipeline {
+    Ok(PreparedMesh {
+        vertices,
         mvp: proj * view * model,
         light_dir: Vec3::new(-0.4, 0.8, 0.45).normalized(),
+    })
+}
+
+fn draw_mesh_cpu(prepared: &PreparedMesh, (width, height): (usize, usize)) -> Vec<u8> {
+    let _span = profiling::span("draw.cpu.mesh");
+    let pipeline = MeshPipeline {
+        mvp: prepared.mvp,
+        light_dir: prepared.light_dir,
     };
 
     let mut color = Buffer2d::new([width, height], [10u8, 40, 58]);
     let mut depth = Buffer2d::new([width, height], 1.0f32);
     pipeline.draw::<rasterizer::Triangles<_, rasterizer::BackfaceCullingDisabled>, _>(
-        &vertices,
+        &prepared.vertices,
         &mut color,
         Some(&mut depth),
     );
@@ -510,6 +562,7 @@ fn render(triangles: &[Triangle], (width, height): (usize, usize)) -> Vec<u8> {
 }
 
 fn encode_png(rgb: &[u8], (width, height): (usize, usize)) -> Result<Vec<u8>, PreviewError> {
+    let _span = profiling::span("encode.png");
     let mut output = Vec::new();
     let mut encoder = png::Encoder::new(&mut output, width as u32, height as u32);
     encoder.set_color(png::ColorType::Rgb);
