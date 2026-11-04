@@ -1,7 +1,7 @@
 {
-  "capturedAt": "2026-11-04T02:12:32+00:00",
+  "capturedAt": "2026-11-04T02:22:04+00:00",
   "scenarioTime": "2026-10-12T12:00:00Z",
-  "sourceCommit": "233bc3d90c90d481d6d1f7d4edc3da3c8467fae9",
+  "sourceCommit": "5c501754ceb3b959b4ed02bb4299e2feb61b8584",
   "frontendSourceSha256": "7ec8d587a2e44a01824cbb33d40d79e76d3f8297d79702319eacad4a13cf6c3c",
   "fixtureSha256": "30e79c5183099da8438ca60ba6825504177b49a360694e63138e42aaa8253485",
   "viewport": {

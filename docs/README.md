@@ -1,6 +1,6 @@
 # Documentation
 
-Last-updated: 2026-10-18
+Last-updated: 2026-11-03
 
 These guides describe the checked-in Rust/Tauri implementation. The workspace,
 frontend, and Tauri package declare version `0.1.0`; nightly installer versions
@@ -19,7 +19,7 @@ implementation decisions rather than the current command reference.
 | [IP cameras](ip-cameras.md) | Tapo setup, streams, desktop playback, troubleshooting |
 | [Smart plugs](smart-plugs.md) | Tapo P110 setup, attachments, power-off semantics, limitations |
 | [Firmware evidence](firmware-updates.md) | Optional sources, provenance, caching and assessment |
-| [Screenshots](screenshots.md) | Fresh sample-data captures of nine current views and reproducible capture instructions |
+| [Screenshots](screenshots.md) | Fresh sample-data captures of current views and reproducible capture instructions |
 
 ## Developing and qualifying Melt
 

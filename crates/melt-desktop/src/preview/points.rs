@@ -522,6 +522,8 @@ mod tests {
         assert_eq!(pcd(&compressed).unwrap(), expected);
         assert!(lzf(&[255], 128).is_err());
         assert!(lzf(&[], MAX_PCD_BYTES + 1).is_err());
+        assert_eq!(lzf(&[0, b'a', 96, 0], 6).unwrap(), b"aaaaaa");
+        assert_eq!(lzf(&[0, b'a', 224, 10, 0], 20).unwrap(), vec![b'a'; 20]);
     }
 
     #[test]

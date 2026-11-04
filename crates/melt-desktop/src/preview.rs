@@ -143,7 +143,7 @@ pub fn from_bytes(
 /// order. Entries are read in-place rather than extracted to disk, and the
 /// decompressed size is bounded before allocation to avoid ZIP bombs.
 pub fn first_model_in_zip(reader: impl Read + Seek) -> Result<(String, Vec<u8>), PreviewError> {
-    let mut archive = zip::ZipArchive::new(reader).map_err(|_| PreviewError::InvalidModel)?;
+    let mut archive = archive::open(reader)?;
     for index in 0..archive.len() {
         let entry = archive
             .by_index(index)
@@ -542,6 +542,33 @@ mod tests {
             bytes.extend_from_slice(&[0u8, 0]); // attribute byte count
         }
         bytes
+    }
+
+    #[test]
+    fn malformed_inputs_never_panic_across_the_shared_format_inventory() {
+        let formats: Vec<String> =
+            serde_json::from_str(include_str!("../../../ui/src/preview-formats.json")).unwrap();
+        let mut random = 0x5eedu32;
+        for length in [0, 1, 7, 12, 24, 48, 128, 1024] {
+            let mut bytes = vec![0; length];
+            for byte in &mut bytes {
+                random ^= random << 13;
+                random ^= random >> 17;
+                random ^= random << 5;
+                *byte = random as u8;
+            }
+            for extension in &formats {
+                assert!(
+                    from_bytes(extension, &bytes, (64, 36)).is_err(),
+                    "{extension}: {length}"
+                );
+            }
+        }
+        for extension in [
+            "ctb", "photon", "goo", "prz", "sl1", "sl1s", "pws", "step", "stp", "iges", "brep",
+        ] {
+            assert!(!supports(extension));
+        }
     }
 
     fn gcode_thumbnail_block(tag: &str, png: &[u8]) -> String {

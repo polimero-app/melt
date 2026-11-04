@@ -30,6 +30,26 @@ STEP/IGES/BREP and all resin formats (including SL1/SL1S) are excluded.
 
 ## Current support
 
+The local library recognizes **40 extensions**, from the inventory shared by
+the frontend and Rust loaders in `ui/src/preview-formats.json`:
+
+| Family | Extensions | Method |
+| --- | --- | --- |
+| Printing meshes | `.stl`, `.obj`, `.amf`, `.off` | Geometry |
+| 3MF | `.3mf` (including `.gcode.3mf`) | Stored image, otherwise geometry |
+| Meshes/scenes | `.ply`, `.glb`, `.gltf`, `.dae`, `.wrl`, `.vrml`, `.x3d`, `.3ds` | Geometry; faceless PLY uses points |
+| Point clouds | `.xyz`, `.pts`, `.asc`, `.pcd`, `.las`, `.e57` | Sampled points |
+| G-code | `.gcode`, `.gco`, `.bgcode` | Stored image |
+| ZIP projects | `.ufp`, `.fcstd`, `.f3d`, `.f3z` | Stored image |
+| LightBurn | `.lbrn`, `.lbrn2` | Stored image |
+| Native applications | `.blend`, `.blend1`, `.3dm`, `.skp`, `.sldprt`, `.sldasm`, `.slddrw`, `.ipt`, `.iam`, `.ipn`, `.idw` | Stored image |
+| General ZIP | `.zip` | First supported non-ZIP entry, in archive order |
+
+Extensions are case-insensitive. Geometry inputs and entries selected from
+general ZIPs are capped at 32 MiB; 3MF mesh XML has a separate aggregate budget
+of 128 MiB. Embedded images are limited to 16 MiB, 4096 pixels per side and
+16 million decoded pixels. Grid renders are 640×360 and dialog renders 1920×1080.
+
 Local files support STL, OBJ, 3MF, and the first supported preview file in ZIP.
 G-code/GCO scan the first 4 MiB and last 1 MiB for PNG, JPEG or QOI comment
 thumbnails and choose by decoded pixel area. BGCode supports version 1 embedded
@@ -112,13 +132,18 @@ payloads are capped at 16 MiB. SolidWorks/Rhino decompression attempts share a
 
 ## Validation and evidence
 
-Format loaders need representative valid, malformed and oversized input tests.
-Image decoding, decompression, recursion and output geometry must be bounded.
+Regression tests cover representative valid, malformed and oversized inputs.
+Image decoding, decompression, recursion and output geometry are bounded.
 The existing cache and two-job concurrency limit remain in use.
+ZIP image searches share a 64 MiB decompression budget and consider at most
+256 candidates per archive. Failed CRC/decompression attempts consume that
+budget too. Entries cannot expand beyond their declared uncompressed size.
 
 Visible changes follow [the screenshot procedure](screenshots.md#required-ui-pr-evidence).
 Browser screenshots use synthetic previews; loader tests establish actual
 format decoding. Neither establishes native-OS or live-printer qualification.
+Generated regression fixtures cover binary layouts and transformations; they
+are not a compatibility matrix for every version of the proprietary applications.
 
 ## Progress
 
@@ -141,4 +166,17 @@ format decoding. Neither establishes native-OS or live-printer qualification.
   the production UI build pass. All gallery captures refreshed and reviewed.
   Native decoders have generated Blender, Rhino, SolidWorks and OLE fixtures;
   upstream attribution is included in desktop bundle resources.
-- Chunk 7: pending.
+- Chunk 7: complete. Workspace tests (553), UI tests (175), workspace
+  formatting/Clippy/build, license checks, dependency policy and production UI
+  build pass. Archive-budget failures, malformed format inputs, LightBurn/UFP
+  previews and LZF overlapping back-references have explicit regressions.
+  Dependency policy reports existing duplicate/yanked-version warnings but no
+  failing advisory, license or source checks.
+
+Final comparison captures use identical sanitized fixture data. Baseline:
+`b2e8d5e09dd5c6824853d155e7f27a0e5f66cad6` in the disposable checkout.
+Before: `/tmp/melt-previews-before-final`; after: `/tmp/melt-previews-after-final`.
+Both directories retain capture manifests. The only changed images are the file
+library and the preview-dialog backdrop. All 14 gallery views were reviewed.
+Comparison captures are local evidence; no PR or uploaded PR attachments have
+been created by this implementation sequence.
