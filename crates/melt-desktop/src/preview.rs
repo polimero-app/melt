@@ -48,6 +48,20 @@ pub enum PreviewError {
     Png,
 }
 
+/// Reads at most `limit` bytes, failing with TooLarge rather than truncating,
+/// so a file that grew after a metadata check is still caught.
+pub(super) fn read_bounded(reader: impl Read, limit: usize) -> Result<Vec<u8>, PreviewError> {
+    let mut out = Vec::new();
+    reader
+        .take(limit as u64 + 1)
+        .read_to_end(&mut out)
+        .map_err(|_| PreviewError::InvalidModel)?;
+    if out.len() > limit {
+        return Err(PreviewError::TooLarge);
+    }
+    Ok(out)
+}
+
 pub fn supports(extension: &str) -> bool {
     static EXTENSIONS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
         serde_json::from_str(include_str!("../../../ui/src/preview-formats.json"))
@@ -104,10 +118,7 @@ pub fn local_preview(
     {
         return Err(PreviewError::TooLarge);
     }
-    let mut bytes = Vec::new();
-    file.take(MAX_MODEL_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| PreviewError::InvalidModel)?;
+    let bytes = read_bounded(file, MAX_MODEL_BYTES)?;
     if matches!(extension.as_str(), "gltf" | "glb") {
         let triangles = {
             let _span = profiling::span("load.geometry");
@@ -178,18 +189,11 @@ pub fn first_model_in_zip(reader: impl Read + Seek) -> Result<(String, Vec<u8>),
         if extension == "zip" || !supports(&extension) {
             continue;
         }
-        if entry.size() > MAX_MODEL_BYTES as u64 {
-            return Err(PreviewError::TooLarge);
-        }
-        let mut bytes = Vec::with_capacity(entry.size() as usize);
-        entry
-            .take(MAX_MODEL_BYTES as u64 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| PreviewError::InvalidModel)?;
-        if bytes.len() > MAX_MODEL_BYTES {
-            return Err(PreviewError::TooLarge);
-        }
-        return Ok((extension, bytes));
+        drop(entry);
+        return Ok((
+            extension,
+            archive::read_index(&mut archive, index, MAX_MODEL_BYTES)?,
+        ));
     }
     Err(PreviewError::InvalidModel)
 }

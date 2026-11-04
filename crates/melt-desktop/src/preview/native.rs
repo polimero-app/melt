@@ -1,6 +1,6 @@
 //! Stored application previews. Format rules adapted from ModelThumbs; see
 //! THIRD_PARTY_NOTICES.md. No application, macro, script or geometry kernel runs.
-use super::{MAX_PREVIEW_BYTES, PreviewError, images};
+use super::{MAX_PREVIEW_BYTES, PreviewError, images, read_bounded};
 use std::io::{Cursor, Read, Seek};
 use std::path::Path;
 
@@ -12,18 +12,6 @@ fn u16_at(data: &[u8], p: usize) -> Option<u16> {
 }
 fn u32_at(data: &[u8], p: usize) -> Option<u32> {
     Some(u32::from_le_bytes(data.get(p..p + 4)?.try_into().ok()?))
-}
-
-fn read_bounded(reader: impl Read, limit: usize) -> Result<Vec<u8>, PreviewError> {
-    let mut out = Vec::new();
-    reader
-        .take(limit as u64 + 1)
-        .read_to_end(&mut out)
-        .map_err(|_| PreviewError::InvalidModel)?;
-    if out.len() > limit {
-        return Err(PreviewError::TooLarge);
-    }
-    Ok(out)
 }
 
 fn png_extent(data: &[u8], start: usize) -> Option<usize> {
