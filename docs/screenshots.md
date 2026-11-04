@@ -39,7 +39,7 @@ presets, appearance, and version/license information.
 Browsing a directory of model files with size and modified date, ready to
 organize, slice, or print.
 
-![Current File library view with sample STL, XYZ point-cloud, FreeCAD, Fusion, BGCode and GLB thumbnails, folder navigation, sorting and search](../screenshots/file-library.png)
+![Current File library view with sample STL, XYZ point-cloud, FreeCAD, Fusion, BGCode, GLB, Blender and SolidWorks thumbnails, folder navigation, sorting and search](../screenshots/file-library.png)
 
 ## File preview
 

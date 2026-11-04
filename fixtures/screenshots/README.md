@@ -31,6 +31,6 @@ records when captures were made.
 
 See [the gallery and reproduction instructions](../../docs/screenshots.md).
 
-The file-library scenario includes XYZ point-cloud, FreeCAD, Fusion, BGCode and GLB cards alongside
+The file-library scenario includes XYZ point-cloud, FreeCAD, Fusion, BGCode, GLB, Blender and SolidWorks cards alongside
 STL models. The capture asserts their preview controls are available. Model
 images remain synthetic illustrations; Rust tests verify the actual decoders.

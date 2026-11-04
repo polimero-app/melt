@@ -166,7 +166,9 @@ Model previews support STL, OBJ, 3MF, AMF, OFF, PLY, GLB/glTF, Collada,
 VRML/X3D, 3DS and supported ZIP contents. XYZ/PTS/ASC, PCD, LAS, E57 and
 faceless PLY show sampled point-cloud previews. G-code/GCO and
 BGCode show stored PNG/JPEG/QOI thumbnails. UFP, FreeCAD, Fusion and LightBurn
-projects show their stored previews when present. Clicking a
+projects show their stored previews when present. Blender, Rhino, SketchUp,
+SolidWorks and Inventor files also use stored previews; missing images remain
+unavailable. Clicking a
 model thumbnail opens a larger static preview with metadata and available
 print, slicer and delete actions. A loading indicator covers the larger render;
 preview failure does not make the source file unprintable or undownloadable.

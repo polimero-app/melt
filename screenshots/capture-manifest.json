@@ -1,9 +1,9 @@
 {
-  "capturedAt": "2026-11-04T02:05:45+00:00",
+  "capturedAt": "2026-11-04T02:12:32+00:00",
   "scenarioTime": "2026-10-12T12:00:00Z",
-  "sourceCommit": "e2cea0da2101923bcf469330e72469b554194830",
-  "frontendSourceSha256": "fce152163edeb50ee91b782fbcdec4930707d80581a42ba85c7fa1e29b3fc891",
-  "fixtureSha256": "848da7fcce6ef72da36c0a5be708ed72332ab6cea64668f21aa3a7e691a61fa3",
+  "sourceCommit": "233bc3d90c90d481d6d1f7d4edc3da3c8467fae9",
+  "frontendSourceSha256": "7ec8d587a2e44a01824cbb33d40d79e76d3f8297d79702319eacad4a13cf6c3c",
+  "fixtureSha256": "30e79c5183099da8438ca60ba6825504177b49a360694e63138e42aaa8253485",
   "viewport": {
     "width": 1600,
     "height": 1100,
@@ -42,7 +42,7 @@
         3200,
         2200
       ],
-      "sha256": "d44a0930b4d9004d2eec9027ab4b6a5bd3857a0303bbe617371e91ad81e0a849",
+      "sha256": "aa8e8250a2828a6c88d78bf5d28f36a0fa7f6c50c041c10e96a05d79e418aa02",
       "playback": []
     },
     {
@@ -122,7 +122,7 @@
         3200,
         2200
       ],
-      "sha256": "d7f974b52bffc247a5630b6ec7498cd870862e200b5d675149a3ef6b791791e7",
+      "sha256": "b01a5259285d488055e2fb1b646fb2c286243c708db7ef1398684b5644a9e796",
       "playback": []
     },
     {

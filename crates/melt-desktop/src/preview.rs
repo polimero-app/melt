@@ -12,6 +12,7 @@ mod images;
 mod legacy;
 mod mesh;
 mod model3mf;
+mod native;
 mod points;
 mod projects;
 mod scene;
@@ -66,6 +67,8 @@ pub fn local_preview(
     }
     let file = std::fs::File::open(path).map_err(|_| PreviewError::InvalidModel)?;
     match extension.as_str() {
+        "blend" | "blend1" | "3dm" | "skp" | "sldprt" | "sldasm" | "slddrw" | "ipt" | "iam"
+        | "ipn" | "idw" => return native::load_file(path, &extension),
         "xyz" | "pts" | "asc" | "pcd" | "las" | "e57" => {
             return points::render(&points::load_file(path, &extension)?, size);
         }
@@ -117,6 +120,8 @@ pub fn from_bytes(
         return Err(PreviewError::TooLarge);
     }
     match extension {
+        "blend" | "blend1" | "3dm" | "skp" | "sldprt" | "sldasm" | "slddrw" | "ipt" | "iam"
+        | "ipn" | "idw" => native::load_bytes(extension, bytes),
         "xyz" | "pts" | "asc" | "pcd" | "las" | "e57" => {
             points::render(&points::load_bytes(extension, bytes)?, size)
         }

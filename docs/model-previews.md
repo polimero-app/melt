@@ -90,6 +90,26 @@ data is capped at 128 MiB; E57 XML at 8 MiB with standard 1024-byte pages.
 Archived scans use the ordinary 32 MiB archive-entry limit. LAZ is excluded.
 Point colours/intensities are not rendered; depth shading uses Melt's model colour.
 
+## Native application previews
+
+Blender (`.blend`/`.blend1`), Rhino (`.3dm`), SketchUp (`.skp`), SolidWorks
+(`.sldprt`/`.sldasm`/`.slddrw`) and Inventor (`.ipt`/`.iam`/`.ipn`/`.idw`) use
+stored images only. Supported containers include Blender TEST blocks (classic
+32/64-bit, both byte orders, newer wide headers, plain or gzip), Rhino compressed
+and plain DIB previews, SketchUp CDib PNGs, SolidWorks DEFLATE preview records,
+and OLE/CFB preview and SummaryInformation bitmap streams.
+
+Missing previews remain unavailable. Zstd-compressed Blender files are excluded.
+Native formats vary by application/version; generic PNG fallbacks can select a
+component image or texture when no identifiable document thumbnail exists.
+No proprietary geometry is parsed, and application code/macros never execute.
+
+Non-OLE native previews search the first 64 MiB; gzip output is likewise limited
+to its first 64 MiB. OLE containers can be up to 512 MiB and use seekable stream
+reads with a cumulative 64 MiB image budget. Individual stored images/bitmap
+payloads are capped at 16 MiB. SolidWorks/Rhino decompression attempts share a
+64 MiB output budget, including unsuccessful attempts.
+
 ## Validation and evidence
 
 Format loaders need representative valid, malformed and oversized input tests.
@@ -117,4 +137,8 @@ format decoding. Neither establishes native-OS or live-printer qualification.
 - Chunk 5: complete. All 35 preview tests, 175 UI tests, desktop Clippy and
   the production UI build pass. LAS/E57 writer-generated round trips verify
   scan decoding and E57 poses; all gallery captures refreshed.
-- Chunks 6–7: pending.
+- Chunk 6: complete. All 40 preview tests, 175 UI tests, desktop Clippy and
+  the production UI build pass. All gallery captures refreshed and reviewed.
+  Native decoders have generated Blender, Rhino, SolidWorks and OLE fixtures;
+  upstream attribution is included in desktop bundle resources.
+- Chunk 7: pending.

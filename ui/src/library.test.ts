@@ -54,7 +54,7 @@ describe('nextSort', () => {
 
 describe('supportsPreview', () => {
   it('recognizes supported preview formats without enabling excluded formats', () => {
-    for (const name of ['part.stl', 'part.gcode.3mf', 'part.FCStd', 'part.f3z', 'part.bgcode', 'part.lbrn2', 'part.amf', 'part.off', 'part.ply', 'part.glb', 'part.gltf', 'part.dae', 'part.vrml', 'part.wrl', 'part.x3d', 'part.3ds', 'scan.xyz', 'scan.pts', 'scan.asc', 'scan.pcd', 'scan.las', 'scan.e57']) {
+    for (const name of ['part.stl', 'part.gcode.3mf', 'part.FCStd', 'part.f3z', 'part.bgcode', 'part.lbrn2', 'part.amf', 'part.off', 'part.ply', 'part.glb', 'part.gltf', 'part.dae', 'part.vrml', 'part.wrl', 'part.x3d', 'part.3ds', 'scan.xyz', 'scan.pts', 'scan.asc', 'scan.pcd', 'scan.las', 'scan.e57', 'part.blend', 'part.blend1', 'part.3dm', 'part.skp', 'part.sldprt', 'part.sldasm', 'part.slddrw', 'part.ipt', 'part.iam', 'part.ipn', 'part.idw']) {
       expect(supportsPreview(name)).toBe(true)
     }
     for (const name of ['part.step', 'part.iges', 'part.brep', 'part.ctb', 'part.sl1', 'part.sl1s', 'part.goo', 'README']) {
