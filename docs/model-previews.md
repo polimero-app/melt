@@ -218,7 +218,8 @@ Step 4 qualification is complete on Linux. `MELT_PREVIEW_RENDERER`
 accepts `auto` (default), `cpu` and `gpu`; explicit GPU mode still falls back on
 failure. `MELT_PREVIEW_ADAPTER` optionally selects an adapter by name substring.
 Automatic selection prefers integrated hardware and excludes CPU adapters;
-forced GPU mode allows software adapters for diagnostics. CPU-only builds use
+forced GPU mode allows software adapters for diagnostics, and automatic mode
+keeps using the CPU if a forced caller started the worker on one. CPU-only builds use
 `--no-default-features`. Cache keys include the renderer mode and a new version.
 
 Step 2 validation: CPU-only unit tests (44) pass. An explicitly invoked hardware
