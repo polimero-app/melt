@@ -70,6 +70,18 @@ pub fn supports(extension: &str) -> bool {
     EXTENSIONS.iter().any(|supported| supported == extension)
 }
 
+/// Applications whose stored preview is read straight from the file.
+const NATIVE: &[&str] = &[
+    "blend", "blend1", "3dm", "skp", "sldprt", "sldasm", "slddrw", "ipt", "iam", "ipn", "idw",
+];
+/// Scans streamed from disk instead of held whole in memory.
+const POINT_CLOUDS: &[&str] = &["xyz", "pts", "asc", "pcd", "las", "e57"];
+
+enum Geometry {
+    Mesh(Vec<Triangle>),
+    Points(Vec<Point>),
+}
+
 /// Read seekable embedded previews before applying the whole-model limit.
 pub fn local_preview(
     path: &std::path::Path,
@@ -80,36 +92,23 @@ pub fn local_preview(
         .and_then(|ext| ext.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if !supports(&extension) {
+    let extension = extension.as_str();
+    if !supports(extension) {
         return Err(PreviewError::Unsupported);
     }
-    let file = std::fs::File::open(path).map_err(|_| PreviewError::InvalidModel)?;
-    match extension.as_str() {
-        "blend" | "blend1" | "3dm" | "skp" | "sldprt" | "sldasm" | "slddrw" | "ipt" | "iam"
-        | "ipn" | "idw" => return native::load_file(path, &extension),
-        "xyz" | "pts" | "asc" | "pcd" | "las" | "e57" => {
-            let points = {
-                let _span = profiling::span("load.geometry");
-                points::load_file(path, &extension)?
-            };
-            return points::render(&points, size);
-        }
-        "gcode" | "gco" | "bgcode" => {
-            return extract_gcode_thumbnail(file).ok_or(PreviewError::Unsupported);
-        }
-        "ufp" | "fcstd" | "f3d" | "f3z" => return projects::zip_thumbnail(file, &extension),
-        "zip" => {
-            let (ext, bytes) = first_model_in_zip(file)?;
-            return from_bytes(&ext, &bytes, size);
-        }
-        "3mf" => {
-            if let Some(png) = extract_3mf_thumbnail(file) {
-                return Ok(png);
-            }
-        }
-        _ => {}
+    if NATIVE.contains(&extension) {
+        return native::load_file(path, extension);
     }
-    let file = std::fs::File::open(path).map_err(|_| PreviewError::InvalidModel)?;
+    if POINT_CLOUDS.contains(&extension) {
+        return render_geometry(
+            || points::load_file(path, extension).map(Geometry::Points),
+            size,
+        );
+    }
+    let mut file = std::fs::File::open(path).map_err(|_| PreviewError::InvalidModel)?;
+    if let Some(preview) = from_reader(extension, &file, size) {
+        return preview;
+    }
     if file
         .metadata()
         .map_err(|_| PreviewError::InvalidModel)?
@@ -118,15 +117,9 @@ pub fn local_preview(
     {
         return Err(PreviewError::TooLarge);
     }
+    file.rewind().map_err(|_| PreviewError::InvalidModel)?;
     let bytes = read_bounded(file, MAX_MODEL_BYTES)?;
-    if matches!(extension.as_str(), "gltf" | "glb") {
-        let triangles = {
-            let _span = profiling::span("load.geometry");
-            scene::gltf(&bytes, Some(path))?
-        };
-        return render_triangles(triangles, size);
-    }
-    from_bytes(&extension, &bytes, size)
+    from_loaded(extension, &bytes, Some(path), size)
 }
 
 pub fn from_bytes(
@@ -134,35 +127,91 @@ pub fn from_bytes(
     bytes: &[u8],
     size: (usize, usize),
 ) -> Result<Vec<u8>, PreviewError> {
-    if extension == "3mf"
-        && let Some(png) = extract_3mf_thumbnail(std::io::Cursor::new(bytes))
-    {
-        return Ok(png);
+    if let Some(preview) = from_reader(extension, std::io::Cursor::new(bytes), size) {
+        return preview;
     }
     if bytes.len() > MAX_MODEL_BYTES {
         return Err(PreviewError::TooLarge);
     }
-    match extension {
-        "blend" | "blend1" | "3dm" | "skp" | "sldprt" | "sldasm" | "slddrw" | "ipt" | "iam"
-        | "ipn" | "idw" => native::load_bytes(extension, bytes),
-        "xyz" | "pts" | "asc" | "pcd" | "las" | "e57" => {
-            let points = {
-                let _span = profiling::span("load.geometry");
-                points::load_bytes(extension, bytes)?
-            };
-            points::render(&points, size)
-        }
-        "3mf" => rasterize_3mf(bytes, size),
-        "stl" | "obj" | "amf" | "off" | "ply" | "glb" | "gltf" | "dae" | "wrl" | "vrml" | "x3d"
-        | "3ds" => rasterize(extension, bytes, size),
+    from_loaded(extension, bytes, None, size)
+}
+
+/// Previews found by seeking, before the whole-model limit applies. `None`
+/// means the format (or a 3mf without a usable thumbnail) needs its bytes.
+fn from_reader(
+    extension: &str,
+    reader: impl Read + Seek,
+    size: (usize, usize),
+) -> Option<Result<Vec<u8>, PreviewError>> {
+    Some(match extension {
+        "3mf" => return extract_3mf_thumbnail(reader).map(Ok),
         "gcode" | "gco" | "bgcode" => {
-            extract_gcode_thumbnail(std::io::Cursor::new(bytes)).ok_or(PreviewError::Unsupported)
+            extract_gcode_thumbnail(reader).ok_or(PreviewError::Unsupported)
         }
-        "ufp" | "fcstd" | "f3d" | "f3z" => {
-            projects::zip_thumbnail(std::io::Cursor::new(bytes), extension)
-        }
+        "ufp" | "fcstd" | "f3d" | "f3z" => projects::zip_thumbnail(reader, extension),
+        "zip" => first_model_in_zip(reader).and_then(|(ext, bytes)| from_bytes(&ext, &bytes, size)),
+        _ => return None,
+    })
+}
+
+/// Formats previewed from a whole, size-checked file. `path` lets glTF
+/// resolve external buffers beside a local file.
+fn from_loaded(
+    extension: &str,
+    bytes: &[u8],
+    path: Option<&std::path::Path>,
+    size: (usize, usize),
+) -> Result<Vec<u8>, PreviewError> {
+    match extension {
+        _ if NATIVE.contains(&extension) => native::load_bytes(extension, bytes),
         "lbrn" | "lbrn2" => projects::lightburn(bytes),
-        _ => Err(PreviewError::Unsupported),
+        _ => render_geometry(|| geometry(extension, bytes, path), size),
+    }
+}
+
+/// The one model-format table. Every render goes through `render_geometry`,
+/// so a new format is timed without remembering to add a span.
+fn geometry(
+    extension: &str,
+    bytes: &[u8],
+    path: Option<&std::path::Path>,
+) -> Result<Geometry, PreviewError> {
+    if POINT_CLOUDS.contains(&extension) {
+        return points::load_bytes(extension, bytes).map(Geometry::Points);
+    }
+    Ok(Geometry::Mesh(match extension {
+        "3mf" => model3mf::load(bytes)?,
+        "obj" => parse_obj(bytes),
+        "stl" => parse_stl(bytes),
+        "ply" => {
+            let (vertices, triangles) = mesh::ply(bytes)?;
+            if triangles.is_empty() {
+                return Ok(Geometry::Points(vertices));
+            }
+            triangles
+        }
+        "amf" => mesh::amf(bytes)?,
+        "off" => mesh::off(bytes)?,
+        "glb" | "gltf" => scene::gltf(bytes, path)?,
+        "dae" => scene::dae(bytes)?,
+        "wrl" | "vrml" => legacy::vrml(bytes)?,
+        "x3d" => legacy::x3d(bytes)?,
+        "3ds" => legacy::studio3ds(bytes)?,
+        _ => return Err(PreviewError::Unsupported),
+    }))
+}
+
+fn render_geometry(
+    load: impl FnOnce() -> Result<Geometry, PreviewError>,
+    size: (usize, usize),
+) -> Result<Vec<u8>, PreviewError> {
+    let geometry = {
+        let _span = profiling::span("load.geometry");
+        load()?
+    };
+    match geometry {
+        Geometry::Mesh(triangles) => render_triangles(triangles, size),
+        Geometry::Points(points) => points::render(&points, size),
     }
 }
 
@@ -213,48 +262,6 @@ pub fn validate_png(bytes: &[u8]) -> bool {
         && width <= MAX_PREVIEW_DIMENSION
         && height <= MAX_PREVIEW_DIMENSION
         && u64::from(width) * u64::from(height) <= MAX_PREVIEW_PIXELS
-}
-
-pub fn rasterize(
-    extension: &str,
-    bytes: &[u8],
-    size: (usize, usize),
-) -> Result<Vec<u8>, PreviewError> {
-    if extension == "ply" {
-        let (vertices, triangles) = {
-            let _span = profiling::span("load.geometry");
-            mesh::ply(bytes)?
-        };
-        return if triangles.is_empty() {
-            points::render(&vertices, size)
-        } else {
-            render_triangles(triangles, size)
-        };
-    }
-    let triangles = {
-        let _span = profiling::span("load.geometry");
-        match extension {
-            "obj" => parse_obj(bytes),
-            "stl" => parse_stl(bytes),
-            "amf" => mesh::amf(bytes)?,
-            "off" => mesh::off(bytes)?,
-            "glb" | "gltf" => scene::gltf(bytes, None)?,
-            "dae" => scene::dae(bytes)?,
-            "wrl" | "vrml" => legacy::vrml(bytes)?,
-            "x3d" => legacy::x3d(bytes)?,
-            "3ds" => legacy::studio3ds(bytes)?,
-            _ => Vec::new(),
-        }
-    };
-    render_triangles(triangles, size)
-}
-
-pub fn rasterize_3mf(bytes: &[u8], size: (usize, usize)) -> Result<Vec<u8>, PreviewError> {
-    let triangles = {
-        let _span = profiling::span("load.geometry");
-        model3mf::load(bytes)?
-    };
-    render_triangles(triangles, size)
 }
 
 fn render_triangles(
@@ -680,14 +687,14 @@ mod tests {
 
     #[test]
     fn rasterizes_a_small_binary_stl() {
-        let png = rasterize("stl", &binary_stl_with_triangles(1), GRID_SIZE).unwrap();
+        let png = from_bytes("stl", &binary_stl_with_triangles(1), GRID_SIZE).unwrap();
         assert!(!png.is_empty());
     }
 
     #[test]
     fn rasterizes_an_obj() {
         let obj = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
-        let png = rasterize("obj", obj.as_bytes(), GRID_SIZE).unwrap();
+        let png = from_bytes("obj", obj.as_bytes(), GRID_SIZE).unwrap();
         assert!(!png.is_empty());
     }
 
@@ -697,7 +704,7 @@ mod tests {
         assert_eq!(parse_obj(obj.as_bytes()).len(), 1);
         let stl = "solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex inf 0 0\nvertex 0 nan 0\nendloop\nendfacet\nendsolid t\n";
         assert_eq!(parse_stl(stl.as_bytes()).len(), 1);
-        assert!(rasterize("obj", obj.as_bytes(), (64, 36)).is_ok());
+        assert!(from_bytes("obj", obj.as_bytes(), (64, 36)).is_ok());
     }
 
     /// The preview dialog shows the render several times the size of the grid
@@ -705,7 +712,7 @@ mod tests {
     /// silently ignored by a leftover constant.
     #[test]
     fn rasterizes_at_the_requested_size() {
-        let png = rasterize("stl", &binary_stl_with_triangles(1), LARGE_SIZE).unwrap();
+        let png = from_bytes("stl", &binary_stl_with_triangles(1), LARGE_SIZE).unwrap();
         assert!(validate_png(&png));
         assert_eq!(
             u32::from_be_bytes(png[16..20].try_into().unwrap()),
@@ -768,7 +775,7 @@ mod tests {
             zip.write_all(model_xml.as_bytes()).unwrap();
             zip.finish().unwrap();
         }
-        let png = rasterize_3mf(&buffer, GRID_SIZE).unwrap();
+        let png = from_bytes("3mf", &buffer, GRID_SIZE).unwrap();
         assert!(!png.is_empty());
     }
 
@@ -789,7 +796,7 @@ mod tests {
         }
         assert!(buffer.len() < MAX_MODEL_BYTES);
         assert!(matches!(
-            rasterize_3mf(&buffer, GRID_SIZE),
+            from_bytes("3mf", &buffer, GRID_SIZE),
             Err(PreviewError::TooLarge)
         ));
     }
@@ -842,7 +849,7 @@ mod tests {
     fn renders_a_high_poly_mesh_without_dropping_faces() {
         let bytes = binary_stl_with_triangles(500_000);
         let start = Instant::now();
-        let png = rasterize("stl", &bytes, GRID_SIZE).unwrap();
+        let png = from_bytes("stl", &bytes, GRID_SIZE).unwrap();
         assert!(!png.is_empty());
         assert!(
             start.elapsed().as_secs() < 8,
