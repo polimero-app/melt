@@ -447,7 +447,7 @@ pub(super) fn prepare(
         .step_by(points.len().div_ceil(MAX_POINTS))
         .map(|[x, y, z]| {
             [
-                (x - y) * 0.70710677,
+                (y - x) * 0.70710677,
                 (x + y) * 0.4082483 - z * 0.8164966,
                 (x + y + z) * 0.57735026,
             ]
@@ -519,6 +519,28 @@ pub(super) fn draw_cpu(prepared: &PreparedPoints, (width, height): (usize, usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A scan and its meshed STL must not render as mirror images.
+    #[test]
+    fn projects_with_the_same_handedness_as_the_mesh_camera() {
+        let view = vek::Mat4::<f32>::look_at_rh(
+            vek::Vec3::new(2.0, 2.0, 2.0),
+            vek::Vec3::zero(),
+            vek::Vec3::new(0.0, 0.0, 1.0),
+        );
+        let cloud = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let prepared = prepare(&cloud, (64, 36)).unwrap();
+        for (point, projected) in cloud.iter().zip(&prepared.projected) {
+            let camera = view * vek::Vec4::from_point(vek::Vec3::from(*point));
+            assert!(
+                (camera.x - projected[0]).abs() < 1e-5,
+                "{point:?}: camera x {} vs projected x {}",
+                camera.x,
+                projected[0]
+            );
+        }
+    }
+
     #[test]
     fn samples_across_the_whole_cloud_and_preserves_survey_precision() {
         let mut sample = Sampler::new(8);
