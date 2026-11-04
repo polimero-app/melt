@@ -959,7 +959,7 @@ impl PreviewCache {
     }
 }
 
-const PREVIEW_CACHE_VERSION: &str = "model-previews-v3";
+const PREVIEW_CACHE_VERSION: &str = "model-previews-v4";
 
 fn preview_cache_key(request: &FilePreviewRequest, printer_key: &str) -> String {
     format!(
