@@ -1,5 +1,8 @@
 //! Bounded 3MF mesh/assembly reader, including production-extension model parts.
-use super::{MAX_MODEL_XML_BYTES, Point, PreviewError, Triangle, archive};
+use super::{
+    MAX_MODEL_XML_BYTES, Point, PreviewError, Triangle, archive,
+    mesh::{MAX_TRIANGLES, MAX_VERTICES},
+};
 use quick_xml::{
     Reader, XmlVersion,
     events::{BytesStart, Event},
@@ -10,8 +13,6 @@ use std::{
     sync::Arc,
 };
 
-const MAX_TRIANGLES: usize = 2_000_000;
-const MAX_VERTICES: usize = 4_000_000;
 const MAX_INSTANCES: usize = 100_000;
 const MAX_DEPTH: usize = 32;
 
