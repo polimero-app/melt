@@ -963,9 +963,8 @@ const PREVIEW_CACHE_VERSION: &str = "model-previews-v4";
 
 fn preview_cache_key(request: &FilePreviewRequest, printer_key: &str) -> String {
     format!(
-        "{}:{}:{}:{}:{}:{}",
+        "{}:{}:{}:{}:{}",
         PREVIEW_CACHE_VERSION,
-        preview::rendering::mode().as_str(),
         printer_key,
         request.device_path,
         request.size_bytes.unwrap_or_default(),
@@ -2938,9 +2937,8 @@ fn library_file_preview(
     // under both keys. Duplicating ~50 KB beats branching the cache lookup on
     // a fact only the renderer downstream knows.
     let cache_key = format!(
-        "{}:library:{}:{}:{}:{}:{}x{}",
+        "{}:library:{}:{}:{}:{}x{}",
         PREVIEW_CACHE_VERSION,
-        preview::rendering::mode().as_str(),
         request.path,
         request.size_bytes.unwrap_or_default(),
         request.modified_at.as_deref().unwrap_or_default(),

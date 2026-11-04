@@ -220,7 +220,9 @@ failure. `MELT_PREVIEW_ADAPTER` optionally selects an adapter by name substring.
 Automatic selection prefers integrated hardware and excludes CPU adapters;
 forced GPU mode allows software adapters for diagnostics, and automatic mode
 keeps using the CPU if a forced caller started the worker on one. CPU-only builds use
-`--no-default-features`. Cache keys include the renderer mode and a new version.
+`--no-default-features`. Cache keys leave the renderer out: CPU and GPU output
+are checked to match within 0.1% of pixels, Auto mixes both, and embedded
+thumbnails don't depend on it, so one image per file serves every mode.
 
 Step 2 validation: CPU-only unit tests (44) pass. An explicitly invoked hardware
 test passes on AMD integrated and NVIDIA discrete Vulkan adapters, comparing
