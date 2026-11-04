@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::{Cursor, Read, Seek},
+    io::{Read, Seek},
 };
 
 use euc::{DepthStrategy, Pipeline, buffer::Buffer2d, rasterizer};
@@ -438,7 +438,10 @@ pub fn extract_gcode_thumbnail(reader: impl Read) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{io::Write, time::Instant};
+    use std::{
+        io::{Cursor, Write},
+        time::Instant,
+    };
 
     fn binary_stl_with_triangles(count: u32) -> Vec<u8> {
         let mut bytes = vec![0u8; 84];
