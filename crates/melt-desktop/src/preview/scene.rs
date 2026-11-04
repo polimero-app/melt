@@ -6,7 +6,6 @@ use super::{
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::{
     collections::{HashMap, HashSet},
-    io::Read,
     path::Path,
 };
 use vek::{Mat4, Vec3, Vec4};
@@ -93,11 +92,7 @@ pub(super) fn gltf(bytes: &[u8], path: Option<&Path>) -> Result<Vec<Triangle>, P
                 {
                     return Err(PreviewError::TooLarge);
                 }
-                let mut data = Vec::new();
-                file.take(budget as u64 + 1)
-                    .read_to_end(&mut data)
-                    .map_err(|_| PreviewError::InvalidModel)?;
-                data
+                super::read_bounded(file, budget)?
             }
         };
         if data.len() > budget || data.len() < buffer.length() {

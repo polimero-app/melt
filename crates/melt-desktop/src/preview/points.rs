@@ -396,16 +396,7 @@ pub(super) fn load_file(path: &Path, extension: &str) -> Result<Vec<Point>, Prev
         "xyz" | "pts" | "asc" => text(file),
         "las" => las(BufReader::new(file)),
         "e57" => e57(BufReader::new(file)),
-        "pcd" => {
-            let mut bytes = Vec::new();
-            file.take(MAX_PCD_BYTES as u64 + 1)
-                .read_to_end(&mut bytes)
-                .map_err(|_| PreviewError::InvalidModel)?;
-            if bytes.len() > MAX_PCD_BYTES {
-                return Err(PreviewError::TooLarge);
-            }
-            pcd(&bytes)
-        }
+        "pcd" => pcd(&super::read_bounded(file, MAX_PCD_BYTES)?),
         _ => Err(PreviewError::Unsupported),
     }
 }
