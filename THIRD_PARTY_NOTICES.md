@@ -12,3 +12,7 @@ by [ModelThumbs](https://github.com/enzoballardin/model-thumbs), revision
 
 Melt implements its preview pipeline in Rust and does not bundle the upstream
 application, Swift runtime or OpenCASCADE bridge.
+
+Desktop packages include this document and the ModelThumbs MIT notice as bundle
+resources alongside Melt's license. Rust dependencies retain their own license
+declarations in Cargo metadata; `cargo deny check` audits the dependency graph.
