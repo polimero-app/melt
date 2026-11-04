@@ -1,6 +1,6 @@
 # Model previews
 
-Last-updated: 2026-11-03
+Last-updated: 2026-11-04
 
 Melt generates static previews locally. Embedded images are preferred; models
 without one use the desktop mesh/point renderer, with CPU fallback. Preview
@@ -51,7 +51,8 @@ general ZIPs are capped at 32 MiB; 3MF mesh XML has a separate aggregate budget
 of 128 MiB. Embedded images are limited to 16 MiB, 4096 pixels per side and
 16 million decoded pixels. Grid renders are 640×360 and dialog renders 1920×1080.
 
-Local files support STL, OBJ, 3MF, and the first supported preview file in ZIP.
+Local files support STL, OBJ, 3MF, and ZIPs: the first of up to eight supported
+entries, in archive order, that renders is shown.
 G-code/GCO scan the first 4 MiB and last 1 MiB for PNG, JPEG or QOI comment
 thumbnails and choose by decoded pixel area. BGCode supports version 1 embedded
 PNG/JPEG/QOI blocks, uncompressed or zlib/DEFLATE compressed; Heatshrink blocks
