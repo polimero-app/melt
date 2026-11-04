@@ -163,6 +163,17 @@ python3 scripts/capture_screenshots.py --output /tmp/melt-screenshots
 The script fails if any `View` in `ui/src/app-types.ts` has no scenario, or
 if the UI calls an IPC command the fixture bridge does not implement.
 
+For renderer qualification, `--preview-bench /path/to/benchmark-output` replaces
+three library previews with actual PNGs from the Rust `preview_bench` example.
+The fixture's `previewBenchCases` maps the STL card to the reference cube, the
+XYZ card to the reference point cloud, and the GLB card to the reference sphere.
+These substitutions compare renderer appearance under the same sanitized file
+labels; they do not test decoding those fixture filenames. Other previews and
+camera media remain illustrated. The capture manifest records the benchmark
+report hash, adapter, actual renderer of each saved first-sample image, and PNG
+hashes. Use `--renderer gpu --require-hardware` when generating GPU evidence;
+automatic mode may save a CPU image during background warmup.
+
 Visually inspect every view, check the recorded playback, and retain the
 manifest alongside the images. Rebuild and recapture whenever UI source or
 dependencies change.
