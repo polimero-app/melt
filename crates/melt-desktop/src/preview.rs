@@ -151,7 +151,7 @@ fn from_reader(
             extract_gcode_thumbnail(reader).ok_or(PreviewError::Unsupported)
         }
         "ufp" | "fcstd" | "f3d" | "f3z" => projects::zip_thumbnail(reader, extension),
-        "zip" => first_model_in_zip(reader).and_then(|(ext, bytes)| from_bytes(&ext, &bytes, size)),
+        "zip" => zip_preview(reader, size),
         _ => return None,
     })
 }
@@ -217,36 +217,49 @@ fn render_geometry(
     }
 }
 
-/// Returns the first supported model stored in a ZIP, preserving archive
-/// order. Entries are read in-place rather than extracted to disk, and the
-/// decompressed size is bounded before allocation to avoid ZIP bombs.
-pub fn first_model_in_zip(reader: impl Read + Seek) -> Result<(String, Vec<u8>), PreviewError> {
+/// Candidates tried before a ZIP is given up on.
+// ponytail: fixed cap bounds work on archives full of broken models; rank
+// meshes ahead of scans/gcode if archive order proves a poor guess.
+const MAX_ZIP_CANDIDATES: usize = 8;
+
+/// Previews the first supported entry that actually renders, in archive
+/// order, so stray notes or a sidecar-dependent glTF don't hide the model
+/// after them. Entries are read in place with bounded decompression.
+fn zip_preview(reader: impl Read + Seek, size: (usize, usize)) -> Result<Vec<u8>, PreviewError> {
     let mut archive = archive::open(reader)?;
+    let mut first_error = None;
+    let mut tried = 0;
     for index in 0..archive.len() {
-        let entry = archive
-            .by_index(index)
-            .map_err(|_| PreviewError::InvalidModel)?;
-        if entry.is_dir() {
-            continue;
-        }
-        // zip 9 surfaces undecodable names as errors; such an entry can't be
-        // a model we recognize, so skip it rather than reject the archive.
-        let Ok(name) = entry.name() else { continue };
-        let extension = name
-            .rsplit('.')
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase();
+        let extension = {
+            let entry = archive
+                .by_index(index)
+                .map_err(|_| PreviewError::InvalidModel)?;
+            if entry.is_dir() {
+                continue;
+            }
+            // zip 9 surfaces undecodable names as errors; such an entry can't
+            // be a model we recognize, so skip it rather than reject the archive.
+            let Ok(name) = entry.name() else { continue };
+            name.rsplit('.')
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+        };
         if extension == "zip" || !supports(&extension) {
             continue;
         }
-        drop(entry);
-        return Ok((
-            extension,
-            archive::read_index(&mut archive, index, MAX_MODEL_BYTES)?,
-        ));
+        let result = archive::read_index(&mut archive, index, MAX_MODEL_BYTES)
+            .and_then(|bytes| from_bytes(&extension, &bytes, size));
+        match result {
+            Ok(png) => return Ok(png),
+            Err(error) => first_error = first_error.or(Some(error)),
+        }
+        tried += 1;
+        if tried == MAX_ZIP_CANDIDATES {
+            break;
+        }
     }
-    Err(PreviewError::InvalidModel)
+    Err(first_error.unwrap_or(PreviewError::InvalidModel))
 }
 
 pub fn validate_png(bytes: &[u8]) -> bool {
@@ -803,26 +816,51 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn selects_only_the_first_supported_model_in_a_zip() {
-        let first = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
-        let second = binary_stl_with_triangles(1);
+    fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut buffer = Vec::new();
-        {
-            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buffer));
-            let options = zip::write::SimpleFileOptions::default();
-            zip.start_file("notes/readme.txt", options).unwrap();
-            zip.write_all(b"not a model").unwrap();
-            zip.start_file("models/first.OBJ", options).unwrap();
-            zip.write_all(first).unwrap();
-            zip.start_file("models/second.stl", options).unwrap();
-            zip.write_all(&second).unwrap();
-            zip.finish().unwrap();
+        let mut zip = zip::ZipWriter::new(Cursor::new(&mut buffer));
+        for (name, bytes) in entries {
+            zip.start_file(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(bytes).unwrap();
         }
+        zip.finish().unwrap();
+        buffer
+    }
 
-        let (extension, bytes) = first_model_in_zip(Cursor::new(buffer)).unwrap();
-        assert_eq!(extension, "obj");
-        assert_eq!(bytes, first);
+    #[test]
+    fn previews_the_first_renderable_model_in_a_zip() {
+        let obj = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        let stl = binary_stl_with_triangles(1);
+        let expected_obj = from_bytes("obj", obj, GRID_SIZE).unwrap();
+        let expected_stl = from_bytes("stl", &stl, GRID_SIZE).unwrap();
+        for (name, entries, expected) in [
+            (
+                "archive order among renderable models",
+                zip_of(&[
+                    ("notes/readme.txt", b"not a model"),
+                    ("models/first.OBJ", obj),
+                    ("models/second.stl", &stl),
+                ]),
+                &expected_obj,
+            ),
+            (
+                "unrenderable supported entries fall through",
+                zip_of(&[
+                    ("notes.asc", b"meeting notes, not a scan"),
+                    ("plate.gcode", b"G28\nG1 X0\n"),
+                    ("scene.gltf", b"{}"),
+                    ("part.stl", &stl),
+                ]),
+                &expected_stl,
+            ),
+        ] {
+            assert_eq!(
+                &zip_preview(Cursor::new(entries), GRID_SIZE).unwrap(),
+                expected,
+                "{name}"
+            );
+        }
     }
 
     /// A library file deleted or locked after listing is the library's
@@ -830,7 +868,13 @@ mod tests {
     #[test]
     fn reports_missing_local_files_as_unavailable() {
         let dir = tempfile::tempdir().unwrap();
-        for name in ["gone.stl", "gone.3mf", "gone.xyz", "gone.blend", "gone.gcode"] {
+        for name in [
+            "gone.stl",
+            "gone.3mf",
+            "gone.xyz",
+            "gone.blend",
+            "gone.gcode",
+        ] {
             assert!(
                 matches!(
                     local_preview(&dir.path().join(name), GRID_SIZE),
@@ -853,7 +897,7 @@ mod tests {
         }
 
         assert!(matches!(
-            first_model_in_zip(Cursor::new(buffer)),
+            zip_preview(Cursor::new(buffer), GRID_SIZE),
             Err(PreviewError::InvalidModel)
         ));
     }
