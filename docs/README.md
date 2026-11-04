@@ -14,6 +14,7 @@ implementation decisions rather than the current command reference.
 | [Project overview](../README.md) | Features, quick start, capability boundaries, license |
 | [CLI reference](cli.md) | Commands, arguments, confirmation, JSON and exit codes |
 | [Desktop guide](desktop.md) | Printers, Control, Cameras, Configuration, File library |
+| [Model previews](model-previews.md) | Supported formats, limits and preview implementation progress |
 | [Configuration](configuration.md) | File locations, schemas, credentials, backup and downgrade |
 | [IP cameras](ip-cameras.md) | Tapo setup, streams, desktop playback, troubleshooting |
 | [Smart plugs](smart-plugs.md) | Tapo P110 setup, attachments, power-off semantics, limitations |

@@ -959,7 +959,7 @@ impl PreviewCache {
     }
 }
 
-const PREVIEW_CACHE_VERSION: &str = "zip-first-model-v1";
+const PREVIEW_CACHE_VERSION: &str = "model-previews-v2";
 
 fn preview_cache_key(request: &FilePreviewRequest, printer_key: &str) -> String {
     format!(
@@ -3128,39 +3128,8 @@ fn write_disk_preview_cache(cache_key: &str, preview: &FilePreviewResponse) {
     }
 }
 
-/// Scans every PNG in the bundle and prefers one with "thumbnail" in its
-/// name, falling back to the first PNG found — slicers don't all use the
-/// same handful of well-known paths, so matching only exact names like
-/// `Metadata/thumbnail.png` silently missed real files.
 fn extract_3mf_thumbnail(reader: impl Read + std::io::Seek) -> Option<Vec<u8>> {
-    let mut archive = zip::ZipArchive::new(reader).ok()?;
-    let names: Vec<String> = archive
-        .file_names()
-        .filter_map(|name| name.ok().map(|name| name.into_owned()))
-        .collect();
-    let mut fallback = None;
-    let mut chosen = None;
-    for name in names {
-        if !name.to_ascii_lowercase().ends_with(".png") {
-            continue;
-        }
-        if name.to_ascii_lowercase().contains("thumbnail") {
-            chosen = Some(name);
-            break;
-        }
-        fallback.get_or_insert(name);
-    }
-    let name = chosen.or(fallback)?;
-    let entry = archive.by_name(&name).ok()?;
-    if entry.size() > preview::MAX_PREVIEW_BYTES as u64 {
-        return None;
-    }
-    let mut thumbnail = Vec::new();
-    entry
-        .take(preview::MAX_PREVIEW_BYTES as u64 + 1)
-        .read_to_end(&mut thumbnail)
-        .ok()?;
-    preview::validate_png(&thumbnail).then_some(thumbnail)
+    preview::extract_3mf_thumbnail(reader)
 }
 
 /// Renders (and caches) a model thumbnail from already-in-memory file bytes,
@@ -4723,9 +4692,14 @@ mod tests {
     }
 
     fn test_png(width: u32, height: u32) -> Vec<u8> {
-        let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
-        bytes.extend_from_slice(&width.to_be_bytes());
-        bytes.extend_from_slice(&height.to_be_bytes());
+        let mut bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut bytes, width, height);
+        encoder.set_color(png::ColorType::Rgb);
+        let mut writer = encoder.write_header().unwrap();
+        writer
+            .write_image_data(&vec![0; (width * height * 3) as usize])
+            .unwrap();
+        drop(writer);
         bytes
     }
 
