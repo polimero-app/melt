@@ -120,6 +120,30 @@ fn number<T: std::str::FromStr>(
         .map_err(|_| PreviewError::InvalidModel)
 }
 
+/// Reads numeric attributes in place. Vertices and triangles are nearly all
+/// of a large mesh, and a map of owned strings per element dominated loading.
+fn numbers<T: std::str::FromStr + Copy + Default, const N: usize>(
+    tag: &BytesStart<'_>,
+    keys: [&str; N],
+) -> Result<[T; N], PreviewError> {
+    let mut found = [None; N];
+    for attr in tag.attributes() {
+        let attr = attr.map_err(|_| PreviewError::InvalidModel)?;
+        let name = attr.key.local_name();
+        if let Some(slot) = keys.iter().position(|key| *key == name.as_ref()) {
+            let value = attr
+                .normalized_value(XmlVersion::Implicit1_0)
+                .map_err(|_| PreviewError::InvalidModel)?;
+            found[slot] = Some(value.parse().map_err(|_| PreviewError::InvalidModel)?);
+        }
+    }
+    let mut out = [T::default(); N];
+    for (out, found) in out.iter_mut().zip(found) {
+        *out = found.ok_or(PreviewError::InvalidModel)?;
+    }
+    Ok(out)
+}
+
 fn parse(xml: &[u8]) -> Result<Part, PreviewError> {
     let mut reader = Reader::from_reader(xml);
     let mut part = Part::default();
@@ -141,26 +165,9 @@ fn parse(xml: &[u8]) -> Result<Part, PreviewError> {
                 if depth > 64 {
                     return Err(PreviewError::TooLarge);
                 }
-                // Vertex/triangle hot paths only need a few attributes.
-                let attrs = attributes(tag)?;
                 match tag.local_name().as_ref() {
-                    "object" => {
-                        if object.is_some() || part.objects.len() >= MAX_INSTANCES {
-                            return Err(PreviewError::InvalidModel);
-                        }
-                        let id = number(&attrs, "id")?;
-                        if part.objects.insert(id, Object::default()).is_some() {
-                            return Err(PreviewError::InvalidModel);
-                        }
-                        object = Some(id);
-                    }
-                    "mesh" => mesh = true,
                     "vertex" if mesh => {
-                        let point: Point = [
-                            number(&attrs, "x")?,
-                            number(&attrs, "y")?,
-                            number(&attrs, "z")?,
-                        ];
+                        let point: Point = numbers(tag, ["x", "y", "z"])?;
                         if !point.iter().all(|v| v.is_finite()) {
                             return Err(PreviewError::InvalidModel);
                         }
@@ -179,43 +186,55 @@ fn parse(xml: &[u8]) -> Result<Part, PreviewError> {
                         if triangles > MAX_TRIANGLES {
                             return Err(PreviewError::TooLarge);
                         }
-                        let indices = [
-                            number(&attrs, "v1")?,
-                            number(&attrs, "v2")?,
-                            number(&attrs, "v3")?,
-                        ];
+                        let indices = numbers(tag, ["v1", "v2", "v3"])?;
                         part.objects
                             .get_mut(&object.ok_or(PreviewError::InvalidModel)?)
                             .ok_or(PreviewError::InvalidModel)?
                             .indices
                             .push(indices);
                     }
-                    "component" => {
-                        let obj = part
-                            .objects
-                            .get_mut(&object.ok_or(PreviewError::InvalidModel)?)
-                            .ok_or(PreviewError::InvalidModel)?;
-                        if obj.components.len() >= MAX_INSTANCES {
-                            return Err(PreviewError::TooLarge);
+                    name => {
+                        let attrs = attributes(tag)?;
+                        match name {
+                            "object" => {
+                                if object.is_some() || part.objects.len() >= MAX_INSTANCES {
+                                    return Err(PreviewError::InvalidModel);
+                                }
+                                let id = number(&attrs, "id")?;
+                                if part.objects.insert(id, Object::default()).is_some() {
+                                    return Err(PreviewError::InvalidModel);
+                                }
+                                object = Some(id);
+                            }
+                            "mesh" => mesh = true,
+                            "component" => {
+                                let obj = part
+                                    .objects
+                                    .get_mut(&object.ok_or(PreviewError::InvalidModel)?)
+                                    .ok_or(PreviewError::InvalidModel)?;
+                                if obj.components.len() >= MAX_INSTANCES {
+                                    return Err(PreviewError::TooLarge);
+                                }
+                                obj.components.push(Instance::parse(&attrs)?);
+                            }
+                            "build" => {
+                                part.has_build = true;
+                                in_build = true;
+                            }
+                            "item" if in_build => {
+                                if part.build.len() >= MAX_INSTANCES {
+                                    return Err(PreviewError::TooLarge);
+                                }
+                                if !attrs
+                                    .get("printable")
+                                    .is_some_and(|s| s == "0" || s == "false")
+                                {
+                                    part.build.push(Instance::parse(&attrs)?);
+                                }
+                            }
+                            _ => {}
                         }
-                        obj.components.push(Instance::parse(&attrs)?);
                     }
-                    "build" => {
-                        part.has_build = true;
-                        in_build = true;
-                    }
-                    "item" if in_build => {
-                        if part.build.len() >= MAX_INSTANCES {
-                            return Err(PreviewError::TooLarge);
-                        }
-                        if !attrs
-                            .get("printable")
-                            .is_some_and(|s| s == "0" || s == "false")
-                        {
-                            part.build.push(Instance::parse(&attrs)?);
-                        }
-                    }
-                    _ => {}
                 }
                 if matches!(event, Event::Empty(_)) {
                     match tag.local_name().as_ref() {
@@ -383,6 +402,25 @@ pub(super) fn load(bytes: &[u8]) -> Result<Vec<Triangle>, PreviewError> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn reads_vertex_and_triangle_numbers_in_place() {
+        let xml = |body: &str| {
+            format!(
+                r#"<model><resources><object id="1"><mesh><vertices>{body}</vertices></mesh></object></resources></model>"#
+            )
+        };
+        let part =
+            parse(xml(r#"<vertex z="3" p:x="1" y="&#50;" extra="ignored"/>"#).as_bytes()).unwrap();
+        assert_eq!(part.objects[&1].vertices, [[1., 2., 3.]]);
+        for bad in [
+            r#"<vertex x="1" y="2"/>"#,
+            r#"<vertex x="1" y="2" z="q"/>"#,
+            r#"<vertex x="1" y="2" z="inf"/>"#,
+        ] {
+            assert!(parse(xml(bad).as_bytes()).is_err(), "{bad}");
+        }
+    }
 
     fn package(parts: &[(&str, &str)]) -> Vec<u8> {
         let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
