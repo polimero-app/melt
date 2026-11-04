@@ -40,12 +40,12 @@ quick-xml = "0.42"
 flate2 = "1"
 gltf = { version = "1.4", default-features = false, features = ["utils", "names"] }
 ply-rs = "0.1"
-roxmltree = "0.20"
+roxmltree = "0.21"
 las = "0.11"
 e57 = "0.11"
-cfb = "0.14"
+cfb = "0.16"
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan", "metal", "dx12"], optional = true }
-pollster = { version = "0.4", optional = true }
+pollster = { version = "1.0", optional = true }
 bytemuck = { version = "1.25", features = ["derive"], optional = true }
 
 [features]
