@@ -31,6 +31,6 @@ records when captures were made.
 
 See [the gallery and reproduction instructions](../../docs/screenshots.md).
 
-The file-library scenario includes FreeCAD, Fusion and BGCode cards alongside
+The file-library scenario includes FreeCAD, Fusion, BGCode and GLB cards alongside
 STL models. The capture asserts their preview controls are available. Model
 images remain synthetic illustrations; Rust tests verify the actual decoders.

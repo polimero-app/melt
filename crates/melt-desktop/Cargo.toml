@@ -38,3 +38,6 @@ notify = "8.2.0"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "qoi", "bmp"] }
 quick-xml = "0.42"
 flate2 = "1"
+gltf = { version = "1.4", default-features = false, features = ["utils", "names"] }
+ply-rs = "0.1"
+roxmltree = "0.20"

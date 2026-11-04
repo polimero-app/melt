@@ -9,8 +9,11 @@ use vek::{Mat4, Vec3, Vec4};
 mod archive;
 mod gcode;
 mod images;
+mod legacy;
+mod mesh;
 mod model3mf;
 mod projects;
+mod scene;
 pub use archive::extract_3mf_thumbnail;
 pub use gcode::extract_gcode_thumbnail;
 
@@ -90,6 +93,9 @@ pub fn local_preview(
     file.take(MAX_MODEL_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| PreviewError::InvalidModel)?;
+    if matches!(extension.as_str(), "gltf" | "glb") {
+        return render_triangles(scene::gltf(&bytes, Some(path))?, size);
+    }
     from_bytes(&extension, &bytes, size)
 }
 
@@ -108,7 +114,8 @@ pub fn from_bytes(
     }
     match extension {
         "3mf" => rasterize_3mf(bytes, size),
-        "stl" | "obj" => rasterize(extension, bytes, size),
+        "stl" | "obj" | "amf" | "off" | "ply" | "glb" | "gltf" | "dae" | "wrl" | "vrml" | "x3d"
+        | "3ds" => rasterize(extension, bytes, size),
         "gcode" | "gco" | "bgcode" => {
             extract_gcode_thumbnail(std::io::Cursor::new(bytes)).ok_or(PreviewError::Unsupported)
         }
@@ -184,16 +191,31 @@ pub fn rasterize(
     let triangles = match extension {
         "obj" => parse_obj(bytes),
         "stl" => parse_stl(bytes),
+        "amf" => mesh::amf(bytes)?,
+        "off" => mesh::off(bytes)?,
+        "ply" => mesh::ply(bytes)?.1,
+        "glb" | "gltf" => scene::gltf(bytes, None)?,
+        "dae" => scene::dae(bytes)?,
+        "wrl" | "vrml" => legacy::vrml(bytes)?,
+        "x3d" => legacy::x3d(bytes)?,
+        "3ds" => legacy::studio3ds(bytes)?,
         _ => Vec::new(),
     };
-    if triangles.is_empty() {
-        return Err(PreviewError::InvalidModel);
-    }
-    encode_png(&render(&triangles, size), size)
+    render_triangles(triangles, size)
 }
 
 pub fn rasterize_3mf(bytes: &[u8], size: (usize, usize)) -> Result<Vec<u8>, PreviewError> {
-    let triangles = model3mf::load(bytes)?;
+    render_triangles(model3mf::load(bytes)?, size)
+}
+
+fn render_triangles(
+    mut triangles: Vec<Triangle>,
+    size: (usize, usize),
+) -> Result<Vec<u8>, PreviewError> {
+    triangles.retain(|triangle| face_normal(triangle).is_some());
+    if triangles.is_empty() || triangles.len() > mesh::MAX_TRIANGLES {
+        return Err(PreviewError::InvalidModel);
+    }
     encode_png(&render(&triangles, size), size)
 }
 

@@ -89,7 +89,7 @@
       {"name": "desk-tray.FCStd", "root": "local", "path": "/samples/Models/desk-tray.FCStd", "devicePath": "/samples/Models/desk-tray.FCStd", "type": "file", "mediaType": "model", "sizeBytes": 3576492, "modifiedAt": "2026-10-11T15:20:00Z"},
       {"name": "mounting-bracket.f3d", "root": "local", "path": "/samples/Models/mounting-bracket.f3d", "devicePath": "/samples/Models/mounting-bracket.f3d", "type": "file", "mediaType": "model", "sizeBytes": 872049, "modifiedAt": "2026-10-11T11:12:00Z"},
       {"name": "planter.bgcode", "root": "local", "path": "/samples/Models/planter.bgcode", "devicePath": "/samples/Models/planter.bgcode", "type": "file", "mediaType": "model", "sizeBytes": 2173879, "modifiedAt": "2026-10-09T13:40:00Z"},
-      {"name": "spool-holder.stl", "root": "local", "path": "/samples/Models/spool-holder.stl", "devicePath": "/samples/Models/spool-holder.stl", "type": "file", "mediaType": "model", "sizeBytes": 937281, "modifiedAt": "2026-10-11T14:12:00Z"}
+      {"name": "spool-holder.glb", "root": "local", "path": "/samples/Models/spool-holder.glb", "devicePath": "/samples/Models/spool-holder.glb", "type": "file", "mediaType": "model", "sizeBytes": 937281, "modifiedAt": "2026-10-11T14:12:00Z"}
     ]
   }
 }

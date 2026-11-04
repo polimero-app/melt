@@ -55,6 +55,27 @@ objects, malformed XML, invalid indices and nonfinite coordinates are rejected.
 The aggregate XML budget is 128 MiB; assembly traversal is limited to 32 levels,
 100,000 instance visits and two million output triangles.
 
+## Mesh formats and limits
+
+Geometry previews additionally support plain/zipped AMF, ASCII OFF, ASCII and
+binary PLY (both byte orders), GLB/glTF 2.0, Collada, VRML 1/2, XML X3D and 3DS.
+Indexed polygons are fan-triangulated; concave polygons and holes are not a
+full tessellation feature. Rendering uses Melt's existing shading, without
+textures, material colours, animation or skin deformation.
+
+GLB/glTF preserves scene instances and transforms and converts Y-up to Z-up.
+Local `.gltf` buffers may use embedded base64 or relative files confined to the
+model directory (including symlink resolution); network/absolute/percent-encoded
+URIs and required glTF extensions are rejected. Archived glTF needs embedded
+buffers. Aggregate buffer reads are limited to 32 MiB.
+
+Collada preserves node transforms and repeated geometry instances. VRML/X3D
+supports indexed face/triangle sets, triangle sets, transforms and DEF/USE.
+Primitive shapes, VRML PROTO/EXTERNPROTO, scripts and external scene resources
+are unsupported. XML entity declarations/internal DTD subsets are rejected;
+external DTD declarations are accepted without fetching resources. Scene walks
+are bounded by 64 levels, 100,000 visits and two million output triangles.
+
 ## Validation and evidence
 
 Format loaders need representative valid, malformed and oversized input tests.
@@ -76,4 +97,7 @@ format decoding. Neither establishes native-OS or live-printer qualification.
 - Chunk 3: complete. All 22 preview tests, 175 UI tests, desktop Clippy and
   the production UI build pass. Refreshed all 14 gallery captures; visually
   checked the mixed-format library.
-- Chunks 4–7: pending.
+- Chunk 4: complete. All 31 preview tests, 175 UI tests, desktop Clippy and
+  the UI production build pass. All 14 gallery captures refreshed, including
+  the GLB library card.
+- Chunks 5–7: pending.
