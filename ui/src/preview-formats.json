@@ -1,5 +1,6 @@
 [
   "stl", "obj", "3mf", "zip", "gcode", "gco", "bgcode",
   "ufp", "fcstd", "f3d", "f3z", "lbrn", "lbrn2",
-  "amf", "off", "ply", "glb", "gltf", "dae", "wrl", "vrml", "x3d", "3ds"
+  "amf", "off", "ply", "glb", "gltf", "dae", "wrl", "vrml", "x3d", "3ds",
+  "xyz", "pts", "asc", "pcd", "las", "e57"
 ]

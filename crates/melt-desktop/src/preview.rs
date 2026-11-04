@@ -12,6 +12,7 @@ mod images;
 mod legacy;
 mod mesh;
 mod model3mf;
+mod points;
 mod projects;
 mod scene;
 pub use archive::extract_3mf_thumbnail;
@@ -65,6 +66,9 @@ pub fn local_preview(
     }
     let file = std::fs::File::open(path).map_err(|_| PreviewError::InvalidModel)?;
     match extension.as_str() {
+        "xyz" | "pts" | "asc" | "pcd" | "las" | "e57" => {
+            return points::render(&points::load_file(path, &extension)?, size);
+        }
         "gcode" | "gco" | "bgcode" => {
             return extract_gcode_thumbnail(file).ok_or(PreviewError::Unsupported);
         }
@@ -113,6 +117,9 @@ pub fn from_bytes(
         return Err(PreviewError::TooLarge);
     }
     match extension {
+        "xyz" | "pts" | "asc" | "pcd" | "las" | "e57" => {
+            points::render(&points::load_bytes(extension, bytes)?, size)
+        }
         "3mf" => rasterize_3mf(bytes, size),
         "stl" | "obj" | "amf" | "off" | "ply" | "glb" | "gltf" | "dae" | "wrl" | "vrml" | "x3d"
         | "3ds" => rasterize(extension, bytes, size),
@@ -188,12 +195,19 @@ pub fn rasterize(
     bytes: &[u8],
     size: (usize, usize),
 ) -> Result<Vec<u8>, PreviewError> {
+    if extension == "ply" {
+        let (vertices, triangles) = mesh::ply(bytes)?;
+        return if triangles.is_empty() {
+            points::render(&vertices, size)
+        } else {
+            render_triangles(triangles, size)
+        };
+    }
     let triangles = match extension {
         "obj" => parse_obj(bytes),
         "stl" => parse_stl(bytes),
         "amf" => mesh::amf(bytes)?,
         "off" => mesh::off(bytes)?,
-        "ply" => mesh::ply(bytes)?.1,
         "glb" | "gltf" => scene::gltf(bytes, None)?,
         "dae" => scene::dae(bytes)?,
         "wrl" | "vrml" => legacy::vrml(bytes)?,

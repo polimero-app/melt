@@ -76,6 +76,20 @@ are unsupported. XML entity declarations/internal DTD subsets are rejected;
 external DTD declarations are accepted without fetching resources. Scene walks
 are bounded by 64 levels, 100,000 visits and two million output triangles.
 
+## Point clouds
+
+XYZ/PTS/ASC text, PCD (ASCII, binary and LZF binary_compressed), LAS and E57
+render as points. PLY without faces also uses the point renderer. E57 combines
+all scans with their poses and converts spherical coordinates when needed.
+LAS/E57/text coordinates are recentered in f64 before f32 rendering.
+
+Point storage/rendering is capped at one million samples, with deterministic
+uniform thinning across the input. Local scans are limited to 512 MiB and
+100 million records. Text lines are capped at 64 KiB. PCD input/decompressed
+data is capped at 128 MiB; E57 XML at 8 MiB with standard 1024-byte pages.
+Archived scans use the ordinary 32 MiB archive-entry limit. LAZ is excluded.
+Point colours/intensities are not rendered; depth shading uses Melt's model colour.
+
 ## Validation and evidence
 
 Format loaders need representative valid, malformed and oversized input tests.
@@ -100,4 +114,7 @@ format decoding. Neither establishes native-OS or live-printer qualification.
 - Chunk 4: complete. All 31 preview tests, 175 UI tests, desktop Clippy and
   the UI production build pass. All 14 gallery captures refreshed, including
   the GLB library card.
-- Chunks 5–7: pending.
+- Chunk 5: complete. All 35 preview tests, 175 UI tests, desktop Clippy and
+  the production UI build pass. LAS/E57 writer-generated round trips verify
+  scan decoding and E57 poses; all gallery captures refreshed.
+- Chunks 6–7: pending.
