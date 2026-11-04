@@ -62,16 +62,17 @@ pub fn with_mode<T>(mode: RenderMode, work: impl FnOnce() -> T) -> T {
     result
 }
 
-// Provisional policy; benchmark qualification refines this before shipping.
+// Warm hardware wins at both production sizes. Auto starts the worker lazily,
+// uses CPU while it initializes, then shares the ready worker across requests.
 #[cfg(any(feature = "gpu-previews", test))]
-fn gpu_candidate(mode: RenderMode, size: (usize, usize)) -> bool {
-    mode == RenderMode::Gpu || (mode == RenderMode::Auto && size.0 * size.1 >= 1_000_000)
+fn gpu_candidate(mode: RenderMode) -> bool {
+    mode != RenderMode::Cpu
 }
 
 pub(super) fn mesh(prepared: PreparedMesh, size: (usize, usize)) -> Vec<u8> {
     let prepared = Arc::new(prepared);
     #[cfg(feature = "gpu-previews")]
-    if gpu_candidate(mode(), size)
+    if gpu_candidate(mode())
         && let Ok(rgb) = super::gpu::draw(super::gpu::Scene::Mesh(prepared.clone()), size, mode())
     {
         return rgb;
@@ -82,7 +83,7 @@ pub(super) fn mesh(prepared: PreparedMesh, size: (usize, usize)) -> Vec<u8> {
 pub(super) fn points(prepared: PreparedPoints, size: (usize, usize)) -> Vec<u8> {
     let prepared = Arc::new(prepared);
     #[cfg(feature = "gpu-previews")]
-    if gpu_candidate(mode(), size)
+    if gpu_candidate(mode())
         && let Ok(rgb) = super::gpu::draw(super::gpu::Scene::Points(prepared.clone()), size, mode())
     {
         return rgb;
@@ -140,8 +141,8 @@ mod tests {
             RenderMode::Auto
         );
         assert_eq!(mode(), RenderMode::Cpu);
-        assert!(!gpu_candidate(RenderMode::Cpu, super::super::LARGE_SIZE));
-        assert!(!gpu_candidate(RenderMode::Auto, super::super::GRID_SIZE));
-        assert!(gpu_candidate(RenderMode::Gpu, super::super::GRID_SIZE));
+        assert!(!gpu_candidate(RenderMode::Cpu));
+        assert!(gpu_candidate(RenderMode::Auto));
+        assert!(gpu_candidate(RenderMode::Gpu));
     }
 }
