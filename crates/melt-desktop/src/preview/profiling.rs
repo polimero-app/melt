@@ -39,17 +39,26 @@ impl Drop for Span {
             stage: self.stage,
             elapsed_us: started.elapsed().as_micros().min(u64::MAX as u128) as u64,
         };
-        if trace_enabled()
-            && let Ok(json) = serde_json::to_string(&timing)
-        {
-            eprintln!("melt-preview {json}");
-        }
-        CAPTURE.with(|capture| {
-            if let Some(capture) = capture.borrow_mut().as_mut() {
-                capture.push(timing);
-            }
-        });
+        record(timing);
     }
+}
+
+pub(super) fn record(timing: StageTiming) {
+    if trace_enabled()
+        && let Ok(json) = serde_json::to_string(&timing)
+    {
+        eprintln!("melt-preview {json}");
+    }
+    append(timing);
+}
+
+// Worker spans have already been traced; merge them into the caller's capture.
+pub(super) fn append(timing: StageTiming) {
+    CAPTURE.with(|capture| {
+        if let Some(capture) = capture.borrow_mut().as_mut() {
+            capture.push(timing);
+        }
+    });
 }
 
 /// Capture timings on this thread, restoring an outer capture even after panic.

@@ -3,7 +3,7 @@
 Last-updated: 2026-11-03
 
 Melt generates static previews locally. Embedded images are preferred; models
-without one use the desktop CPU renderer. Preview support does not imply that
+without one use the desktop mesh/point renderer, with CPU fallback. Preview support does not imply that
 a file can be printed directly or opened by every configured slicer.
 
 ## Implementation sequence
@@ -197,7 +197,28 @@ GPU work applies to generated mesh/point images. Embedded images, decoding,
 normal preparation, PNG encoding and existing preview caches remain independent.
 Step 1 is complete: geometry preparation and CPU drawing are separate, stage
 timings are available without recording filenames, and the benchmark reuses the
-production preview library. Steps 2–4 are in progress.
+production preview library. Step 2 is complete: the optional, default-enabled
+`gpu-previews` feature adds one lazy offscreen worker using `wgpu` 30, WGSL,
+Vulkan/Metal/DX12 and no window or embedded renderer. Devices, pipelines, upload
+buffers and up to two render/readback targets are reused. The queue holds two
+jobs; callers fall back to CPU when busy, unavailable or unsuccessful. Device
+errors disable the worker for the session. GPU waits have a two-second caller
+deadline; targets are bounded to 1920×1080 and uploads to 192 MiB.
+
+The initial automatic policy tries large previews and warms in the background;
+steps 3–4 will finalize that policy and qualification. `MELT_PREVIEW_RENDERER`
+accepts `auto` (default), `cpu` and `gpu`; explicit GPU mode still falls back on
+failure. `MELT_PREVIEW_ADAPTER` optionally selects an adapter by name substring.
+Automatic selection prefers integrated hardware and excludes CPU adapters;
+forced GPU mode allows software adapters for diagnostics. CPU-only builds use
+`--no-default-features`. Cache keys include the renderer mode and a new version.
+
+Step 2 validation: CPU-only unit tests (44) pass. An explicitly invoked hardware
+test passes on AMD integrated and NVIDIA discrete Vulkan adapters, comparing
+asymmetric meshes and depth-shaded point clouds against the CPU at both normal
+sizes and a padded-row size. It also checks target/buffer reuse, concurrent
+requests and CPU recovery after simulated device loss. Ordinary tests never
+require a GPU. Metal and DX12 have not been run on native hosts.
 
 Run an uncached synthetic benchmark with:
 

@@ -431,7 +431,7 @@ pub(super) struct PreparedPoints {
 
 pub(super) fn render(points: &[Point], size: (usize, usize)) -> Result<Vec<u8>, PreviewError> {
     let prepared = prepare(points, size)?;
-    super::encode_png(&draw_cpu(&prepared, size), size)
+    super::encode_png(&super::rendering::points(prepared, size), size)
 }
 
 pub(super) fn prepare(

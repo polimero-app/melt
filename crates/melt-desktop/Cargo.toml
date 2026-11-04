@@ -44,3 +44,10 @@ roxmltree = "0.20"
 las = "0.11"
 e57 = "0.11"
 cfb = "0.14"
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan", "metal", "dx12"], optional = true }
+pollster = { version = "0.4", optional = true }
+bytemuck = { version = "1.25", features = ["derive"], optional = true }
+
+[features]
+default = ["gpu-previews"]
+gpu-previews = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]

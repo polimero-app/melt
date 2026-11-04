@@ -88,9 +88,21 @@ fn cloud() -> Vec<u8> {
 fn run() -> Result<(), String> {
     let mut output = PathBuf::from("/tmp/melt-preview-bench");
     let mut iterations = 3usize;
+    let mut renderer = preview::rendering::RenderMode::Cpu;
+    let mut allow_fallback = false;
+    let mut require_hardware = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--renderer" => {
+                renderer = args
+                    .next()
+                    .ok_or("missing renderer")?
+                    .parse()
+                    .map_err(str::to_owned)?
+            }
+            "--allow-fallback" => allow_fallback = true,
+            "--require-hardware" => require_hardware = true,
             "--output" => output = args.next().ok_or("missing output directory")?.into(),
             "--iterations" => {
                 iterations = args
@@ -116,21 +128,32 @@ fn run() -> Result<(), String> {
             let mut samples = Vec::new();
             for iteration in 0..iterations {
                 let start = Instant::now();
-                let (png, timings) =
-                    preview::profiling::capture(|| preview::from_bytes(extension, &bytes, size));
+                let (png, timings) = preview::rendering::with_mode(renderer, || {
+                    preview::profiling::capture(|| preview::from_bytes(extension, &bytes, size))
+                });
                 let elapsed_ms = start.elapsed().as_secs_f64() * 1000.;
                 let png = png.map_err(|error| format!("{name}: {error:?}"))?;
+                let gpu = timings
+                    .iter()
+                    .any(|timing| timing.stage.starts_with("draw.gpu."));
+                let status = preview::rendering::status();
+                if renderer == preview::rendering::RenderMode::Gpu && !gpu && !allow_fallback {
+                    return Err(format!("GPU requested but CPU fallback used: {status:?}"));
+                }
+                if require_hardware && !status.hardware {
+                    return Err(format!("hardware GPU required: {status:?}"));
+                }
                 if iteration == 0 {
                     std::fs::write(output.join(format!("{name}-{label}.png")), &png)
                         .map_err(|error| error.to_string())?;
                 }
-                samples.push(serde_json::json!({"elapsedMs":elapsed_ms,"pngBytes":png.len(),"stages":timings}));
+                samples.push(serde_json::json!({"elapsedMs":elapsed_ms,"pngBytes":png.len(),"renderer":if gpu { "gpu" } else { "cpu" },"stages":timings}));
             }
             results.push(serde_json::json!({"case":name,"size":size,"items":items,"inputBytes":bytes.len(),"samples":samples}));
             eprintln!("benchmarked {name} {label}");
         }
     }
-    let report = serde_json::json!({"schemaVersion":1,"renderer":"cpu","profile":if cfg!(debug_assertions) {"debug"} else {"release"},"results":results});
+    let report = serde_json::json!({"schemaVersion":1,"renderer":renderer,"gpu":preview::rendering::status(),"profile":if cfg!(debug_assertions) {"debug"} else {"release"},"results":results});
     std::fs::write(
         output.join("report.json"),
         serde_json::to_vec_pretty(&report).unwrap(),

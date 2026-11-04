@@ -8,6 +8,8 @@ use vek::{Mat4, Vec3, Vec4};
 
 mod archive;
 mod gcode;
+#[cfg(feature = "gpu-previews")]
+mod gpu;
 mod images;
 mod legacy;
 mod mesh;
@@ -16,6 +18,7 @@ mod native;
 mod points;
 pub mod profiling;
 mod projects;
+pub mod rendering;
 mod scene;
 pub use archive::extract_3mf_thumbnail;
 pub use gcode::extract_gcode_thumbnail;
@@ -259,7 +262,7 @@ fn render_triangles(
         return Err(PreviewError::InvalidModel);
     }
     let prepared = prepare_mesh(&triangles, size)?;
-    encode_png(&draw_mesh_cpu(&prepared, size), size)
+    encode_png(&rendering::mesh(prepared, size), size)
 }
 
 fn parse_obj(bytes: &[u8]) -> Vec<Triangle> {
@@ -361,6 +364,9 @@ fn parse_stl(bytes: &[u8]) -> Vec<Triangle> {
         .collect()
 }
 
+#[repr(C)]
+#[cfg_attr(feature = "gpu-previews", derive(bytemuck::Pod, bytemuck::Zeroable))]
+#[derive(Clone, Copy)]
 struct MeshVertex {
     position: [f32; 3],
     normal: [f32; 3],
@@ -482,11 +488,7 @@ fn smooth_normal(
         .unwrap_or(face_normal)
 }
 
-/// Renders triangles with `euc`, a real (tested) software triangle
-/// rasterizer, instead of a hand-rolled scanline fill — the previous
-/// hand-rolled bounding-box computation had a correctness bug that silently
-/// turned every render into a near full-canvas fill and pegged a CPU core
-/// on real meshes.
+/// Build the same normals, camera and vertex stream for both rasterizers.
 fn prepare_mesh(
     triangles: &[Triangle],
     (width, height): (usize, usize),
