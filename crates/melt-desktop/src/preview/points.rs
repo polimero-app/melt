@@ -420,10 +420,25 @@ pub(super) fn load_bytes(extension: &str, bytes: &[u8]) -> Result<Vec<Point>, Pr
     }
 }
 
-pub(super) fn render(
+pub(super) struct PreparedPoints {
+    pub(super) projected: Vec<Point>,
+    pub(super) min: Point,
+    pub(super) max: Point,
+    pub(super) scale: f32,
+    pub(super) ox: f32,
+    pub(super) oy: f32,
+}
+
+pub(super) fn render(points: &[Point], size: (usize, usize)) -> Result<Vec<u8>, PreviewError> {
+    let prepared = prepare(points, size)?;
+    super::encode_png(&draw_cpu(&prepared, size), size)
+}
+
+pub(super) fn prepare(
     points: &[Point],
     (width, height): (usize, usize),
-) -> Result<Vec<u8>, PreviewError> {
+) -> Result<PreparedPoints, PreviewError> {
+    let _span = super::profiling::span("prepare.points");
     if points.is_empty() {
         return Err(PreviewError::InvalidModel);
     }
@@ -454,6 +469,29 @@ pub(super) fn render(
     let scale = ((width as f32 * 0.86) / sx).min((height as f32 * 0.86) / sy);
     let ox = (width as f32 - sx * scale) / 2.;
     let oy = (height as f32 - sy * scale) / 2.;
+    if !scale.is_finite() || !ox.is_finite() || !oy.is_finite() {
+        return Err(PreviewError::InvalidModel);
+    }
+    Ok(PreparedPoints {
+        projected,
+        min,
+        max,
+        scale,
+        ox,
+        oy,
+    })
+}
+
+pub(super) fn draw_cpu(prepared: &PreparedPoints, (width, height): (usize, usize)) -> Vec<u8> {
+    let _span = super::profiling::span("draw.cpu.points");
+    let PreparedPoints {
+        projected,
+        min,
+        max,
+        scale,
+        ox,
+        oy,
+    } = prepared;
     let mut rgb = [10, 40, 58].repeat(width * height);
     let mut depth = vec![f32::NEG_INFINITY; width * height];
     let radius = (width / 640).clamp(1, 3) as i32;
@@ -475,7 +513,7 @@ pub(super) fn render(
             }
         }
     }
-    super::encode_png(&rgb, (width, height))
+    rgb
 }
 
 #[cfg(test)]

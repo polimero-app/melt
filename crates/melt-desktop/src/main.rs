@@ -32,7 +32,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
 mod plugs;
-mod preview;
+use melt_desktop::preview;
 mod webrtc_camera;
 
 #[tauri::command(async)]
