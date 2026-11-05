@@ -242,6 +242,7 @@ pub(super) fn xml_document(bytes: &[u8]) -> Result<roxmltree::Document<'_>, Prev
         roxmltree::ParsingOptions {
             allow_dtd: true,
             nodes_limit: 2_000_000,
+            entity_resolver: None,
         },
     )
     .map_err(|_| PreviewError::InvalidModel)
@@ -541,6 +542,25 @@ pub(super) fn dae(bytes: &[u8]) -> Result<Vec<Triangle>, PreviewError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xml_document_preserves_dtd_support_without_resolving_entities() {
+        for xml in [
+            "<X/>",
+            "<!DOCTYPE X><X/>",
+            "<!DOCTYPE X SYSTEM 'file:///missing-melt-preview.dtd'><X/>",
+        ] {
+            let doc = xml_document(xml.as_bytes()).unwrap();
+            assert_eq!(doc.root_element().tag_name().name(), "X");
+        }
+        for xml in [
+            "<!DOCTYPE X [<!ENTITY e 'a'>]><X>&e;</X>",
+            "<!DOCTYPE X [<!ENTITY e SYSTEM 'file:///missing-melt-preview.txt'>]><X>&e;</X>",
+            "<X>&unknown;</X>",
+        ] {
+            assert!(xml_document(xml.as_bytes()).is_err(), "{xml}");
+        }
+    }
 
     fn gltf_fixture(uri: String) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({
