@@ -1,6 +1,6 @@
 # Documentation
 
-Last-updated: 2026-11-03
+Last-updated: 2026-11-04
 
 These guides describe the checked-in Rust/Tauri implementation. The workspace,
 frontend, and Tauri package declare version `0.1.0`; nightly installer versions
@@ -12,6 +12,7 @@ implementation decisions rather than the current command reference.
 | Guide | Contents |
 | --- | --- |
 | [Project overview](../README.md) | Features, quick start, capability boundaries, license |
+| [Homebrew installation](homebrew.md) | macOS desktop and CLI installation, upgrades, removal and cask maintenance |
 | [CLI reference](cli.md) | Commands, arguments, confirmation, JSON and exit codes |
 | [Desktop guide](desktop.md) | Printers, Control, Cameras, Configuration, File library |
 | [Model previews](model-previews.md) | Supported formats, limits and preview implementation progress |
