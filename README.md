@@ -1,6 +1,6 @@
 # Melt
 
-Last-updated: 2026-10-23
+Last-updated: 2026-11-04
 
 <https://melt.polimero.app>
 
@@ -52,6 +52,18 @@ Affero General Public License v3.0 only (`AGPL-3.0-only`). See
   the same executable used by the desktop application.
 
 ## Quick start
+
+On macOS (Apple Silicon or Intel), install the latest nightly desktop app and
+CLI with Homebrew:
+
+```sh
+brew tap polimero-app/melt https://github.com/polimero-app/melt.git
+brew install --cask polimero-app/melt/melt
+melt --help
+```
+
+The tap is hosted in this source repository. See the
+[Homebrew guide](docs/homebrew.md) for upgrades, removal, and release maintenance.
 
 Install the UI dependencies once, then build the complete workspace:
 

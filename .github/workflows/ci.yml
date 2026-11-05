@@ -78,3 +78,11 @@ jobs:
           echo "OPENSSL_LIB_DIR=C:/Program Files/OpenSSL/lib/VC/x64/MD" >> $env:GITHUB_ENV
           echo "OPENSSL_INCLUDE_DIR=C:/Program Files/OpenSSL/include" >> $env:GITHUB_ENV
       - run: cargo build -p melt-desktop --locked
+      - name: Validate and smoke-test the Homebrew cask
+        if: runner.os == 'macOS'
+        run: |
+          brew tap polimero-app/melt "$GITHUB_WORKSPACE"
+          brew style --cask polimero-app/melt/melt
+          brew install --cask polimero-app/melt/melt
+          melt version --output json
+          brew uninstall --cask polimero-app/melt/melt

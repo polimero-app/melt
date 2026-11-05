@@ -1,6 +1,6 @@
 # Release qualification
 
-Last-updated: 2026-10-12
+Last-updated: 2026-11-04
 
 `make release-qualification` is the reproducible qualification gate. It
 installs the locked UI dependencies, runs Rust formatting and Clippy, all Rust
@@ -8,6 +8,7 @@ and UI tests, builds the workspace and UI, checks every CLI fixture, and runs
 the built `target/debug/melt version --output json` entry point with the
 checked-in empty configuration directory. This is a build-tree executable
 smoke test, not installation or launch verification of a native package.
+It also validates the Homebrew cask generator's release metadata handling.
 
 ## Tagged and manual package builds
 
@@ -58,6 +59,13 @@ Cargo/CLI version. It uploads installers to the prerelease and publishes only
 after every package job succeeds. A failed package run removes its draft
 release and tag. Cleanup retains the seven most recent dated prereleases and
 deletes older dated releases and their tags.
+
+Published nightlies also update the macOS [Homebrew cask](homebrew.md) in this
+repository with both installer checksums. The publish job pushes the cask
+update to the default branch before removing old releases; if that update
+fails, cleanup does not run. Cask-only commits do not cause another nightly.
+The macOS builds explicitly select the cask's runtime OpenSSL formula
+(`openssl@4` on Apple Silicon, `openssl@3` on Intel).
 
 Nightly packaging builds the UI and native artifacts but does **not** run
 `make release-qualification` or the frozen-evidence gate. Ordinary CI provides

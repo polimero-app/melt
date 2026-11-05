@@ -1,4 +1,4 @@
-.PHONY: build test lint ci ci-rust ci-ui ui-audit cargo-deny contract bambu-evidence-check help license-check run install-desktop uninstall-desktop release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test screenshots
+.PHONY: build test lint ci ci-rust ci-ui ui-audit cargo-deny contract bambu-evidence-check homebrew-check help license-check run install-desktop uninstall-desktop release-cli-check release-gate release-qualification release-evidence cargo-build cargo-test cargo-lint ui-install ui-build ui-test screenshots
 .DEFAULT_GOAL := help
 
 build: ui-build ## Build a standalone release app with the UI embedded
@@ -11,7 +11,7 @@ lint: cargo-lint ## Check Rust formatting and linting
 ci: ci-rust ci-ui ## Run the continuous-integration checks
 
 # The CI workflow runs these as separate jobs; keep the list here only.
-ci-rust: license-check cargo-deny cargo-lint cargo-test cargo-build contract ## Run the Rust CI checks
+ci-rust: license-check cargo-deny cargo-lint cargo-test cargo-build contract homebrew-check ## Run the Rust CI checks
 
 ci-ui: ui-install ui-audit ui-test ui-build ## Run the UI CI checks
 
@@ -28,6 +28,9 @@ contract: ## Run CLI contract tests
 
 bambu-evidence-check: ## Run Bambu evidence tests
 	cargo test -p melt-core --test bambu_evidence --locked
+
+homebrew-check: ## Validate Homebrew release metadata handling
+	python3 -B -m unittest discover -s scripts -p 'test_update_homebrew_cask.py' -v
 
 run: ## Start the desktop app in development mode
 	@set -e; \

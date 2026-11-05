@@ -31,8 +31,10 @@ jobs:
           set -euo pipefail
           previous=$(git tag --list '[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]*' \
             --sort=-refname | head -1)
-          if [ -n "$previous" ] && [ "$(git rev-list -n 1 "$previous")" = "$GITHUB_SHA" ]; then
-            echo "main has not moved since $previous; nothing to package"
+          # Publishing updates the tap in this repository. That metadata-only
+          # commit must not trigger another nightly of the same application.
+          if [ -n "$previous" ] && git diff --quiet "$previous" "$GITHUB_SHA" -- . ':!Casks/melt.rb'; then
+            echo "application source has not changed since $previous; nothing to package"
             exit 0
           fi
 
@@ -108,6 +110,13 @@ jobs:
           echo "OPENSSL_DIR=C:/Program Files/OpenSSL/" >> $env:GITHUB_ENV
           echo "OPENSSL_LIB_DIR=C:/Program Files/OpenSSL/lib/VC/x64/MD" >> $env:GITHUB_ENV
           echo "OPENSSL_INCLUDE_DIR=C:/Program Files/OpenSSL/include" >> $env:GITHUB_ENV
+      - name: Install the macOS runtime dependency used by the Homebrew cask
+        if: runner.os == 'macOS'
+        env:
+          OPENSSL_FORMULA: ${{ runner.arch == 'ARM64' && 'openssl@4' || 'openssl@3' }}
+        run: |
+          brew install "$OPENSSL_FORMULA"
+          echo "OPENSSL_DIR=$(brew --prefix "$OPENSSL_FORMULA")" >> "$GITHUB_ENV"
       - run: bun install --cwd ui --frozen-lockfile
       - run: bun run --cwd ui build
       - name: Install Tauri CLI
@@ -148,6 +157,24 @@ jobs:
     steps:
       - name: Publish the nightly pre-release
         run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Update the Homebrew tap before pruning old installers
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/homebrew-release.json"
+          python3 scripts/update_homebrew_cask.py "$RUNNER_TEMP/homebrew-release.json"
+          git add Casks/melt.rb
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "chore(homebrew): update Melt to $TAG"
+          git push origin "HEAD:$DEFAULT_BRANCH"
       - name: Keep only the seven most recent nightlies
         run: |
           set -euo pipefail
