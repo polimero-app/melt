@@ -48,7 +48,8 @@ pub fn public_catalogue_url(model: CanonicalModel) -> Option<&'static str> {
 }
 
 /// Returns the model-specific official download page first, optionally followed
-/// by the model's wiki release history or a shared family catalogue page.
+/// by the model's wiki release history or a shared family catalogue page. Every
+/// page is read and the highest stable version among them is reported.
 ///
 /// A fallback is only safe when the page is not another model's own page:
 /// Bambu ships distinct, non-interchangeable firmware per model, so reading
@@ -153,7 +154,6 @@ fn fetch_uncached(
         .redirect(Policy::none())
         .user_agent("Melt firmware availability/1.0")
         .build()?;
-    let mut last_error = PublicCatalogueError::Status;
     for url in urls {
         let parsed = reqwest::Url::parse(url).map_err(|_| PublicCatalogueError::InvalidUrl)?;
         if parsed.scheme() != "https"
@@ -163,49 +163,72 @@ fn fetch_uncached(
         {
             return Err(PublicCatalogueError::InvalidUrl);
         }
-        let mut response = match client.get(parsed).send() {
-            Ok(response) => response,
-            Err(error) => {
-                last_error = PublicCatalogueError::Request(error);
-                continue;
-            }
-        };
-        if !response.status().is_success() {
-            last_error = PublicCatalogueError::Status;
-            continue;
-        }
-        if response
-            .content_length()
-            .is_some_and(|length| length > MAX_PUBLIC_CATALOGUE_BYTES as u64)
-        {
-            last_error = PublicCatalogueError::TooLarge;
-            continue;
-        }
-        let mut body = Vec::new();
-        if response
-            .by_ref()
-            .take((MAX_PUBLIC_CATALOGUE_BYTES + 1) as u64)
-            .read_to_end(&mut body)
-            .is_err()
-        {
-            last_error = PublicCatalogueError::Read;
-            continue;
-        }
-        if body.len() > MAX_PUBLIC_CATALOGUE_BYTES {
-            last_error = PublicCatalogueError::TooLarge;
-            continue;
-        }
-        let html = String::from_utf8_lossy(&body);
-        if let Some(version) = parse_public_firmware_version(&html, model) {
-            return Ok(PublicFirmwareRelease {
-                model,
-                version,
-                url: (*url).to_owned(),
-            });
-        }
-        last_error = PublicCatalogueError::VersionNotFound;
     }
-    Err(last_error)
+    // Bambu updates its sources independently -- the A1 mini wiki listed
+    // 01.09.00.00 while the download page still offered 01.08.01.00 -- so
+    // every page is read and the highest version wins.
+    newest_release(
+        model,
+        urls.iter()
+            .map(|url| (*url, fetch_page_version(&client, url, model))),
+    )
+}
+
+fn fetch_page_version(
+    client: &Client,
+    url: &str,
+    model: CanonicalModel,
+) -> Result<String, PublicCatalogueError> {
+    let mut response = client.get(url).send()?;
+    if !response.status().is_success() {
+        return Err(PublicCatalogueError::Status);
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_PUBLIC_CATALOGUE_BYTES as u64)
+    {
+        return Err(PublicCatalogueError::TooLarge);
+    }
+    let mut body = Vec::new();
+    response
+        .by_ref()
+        .take((MAX_PUBLIC_CATALOGUE_BYTES + 1) as u64)
+        .read_to_end(&mut body)
+        .map_err(|_| PublicCatalogueError::Read)?;
+    if body.len() > MAX_PUBLIC_CATALOGUE_BYTES {
+        return Err(PublicCatalogueError::TooLarge);
+    }
+    parse_public_firmware_version(&String::from_utf8_lossy(&body), model)
+        .ok_or(PublicCatalogueError::VersionNotFound)
+}
+
+/// The highest version any source published, keeping the URL that supplied
+/// it. Fails with the last source's error only when no source answered.
+fn newest_release<'a>(
+    model: CanonicalModel,
+    results: impl IntoIterator<Item = (&'a str, Result<String, PublicCatalogueError>)>,
+) -> Result<PublicFirmwareRelease, PublicCatalogueError> {
+    let mut best: Option<PublicFirmwareRelease> = None;
+    let mut last_error = PublicCatalogueError::Status;
+    for (url, result) in results {
+        match result {
+            Ok(version) => {
+                if best.as_ref().is_none_or(|best| {
+                    crate::bambu::FirmwareVersion::parse(&version)
+                        .numeric_cmp(&crate::bambu::FirmwareVersion::parse(&best.version))
+                        .is_gt()
+                }) {
+                    best = Some(PublicFirmwareRelease {
+                        model,
+                        version,
+                        url: url.to_owned(),
+                    });
+                }
+            }
+            Err(error) => last_error = error,
+        }
+    }
+    best.ok_or(last_error)
 }
 
 /// The shape every Bambu firmware version takes, on the public pages and in
@@ -392,18 +415,20 @@ mod tests {
     }
 
     #[test]
-    fn wiki_fallbacks_are_allowlisted_for_their_own_models() {
-        for (model, wiki) in [
+    fn wiki_models_check_both_download_page_and_wiki() {
+        for (model, download, wiki) in [
             (
                 CanonicalModel::A1Mini,
+                "https://bambulab.com/en-us/support/firmware-download/a1-mini",
                 "https://wiki.bambulab.com/en/a1-mini/manual/a1-mini-firmware-release-history",
             ),
             (
                 CanonicalModel::H2C,
+                "https://bambulab.com/en-us/support/firmware-download/h2c",
                 "https://wiki.bambulab.com/en/h2c/manual/h2c-firmware-release-history",
             ),
         ] {
-            assert_eq!(public_catalogue_urls(model).last(), Some(&wiki));
+            assert_eq!(public_catalogue_urls(model), [download, wiki]);
             let url = reqwest::Url::parse(wiki).unwrap();
             assert!(PUBLIC_CATALOGUE_HOSTS.contains(&url.host_str().unwrap()));
         }
@@ -478,6 +503,51 @@ mod tests {
             parse_public_firmware_version(without_releases, CanonicalModel::H2C),
             None
         );
+    }
+
+    /// The A1 mini download page lagged at 01.08.01.00 while its wiki history
+    /// already listed 01.09.00.00; stopping at the first page that parsed hid
+    /// the update. Every source is read and the highest version wins, and a
+    /// source that fails does not mask one that answered.
+    #[test]
+    fn highest_version_across_sources_wins() {
+        let model = CanonicalModel::A1Mini;
+        let [download, wiki] = public_catalogue_urls(model) else {
+            panic!("A1 mini has a download page and a wiki history");
+        };
+        let release = newest_release(
+            model,
+            [
+                (*download, Ok("01.08.01.00".to_owned())),
+                (*wiki, Ok("01.09.00.00".to_owned())),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            (release.version.as_str(), release.url.as_str()),
+            ("01.09.00.00", *wiki)
+        );
+
+        let release = newest_release(
+            model,
+            [
+                (*download, Ok("01.08.01.00".to_owned())),
+                (*wiki, Err(PublicCatalogueError::Status)),
+            ],
+        )
+        .unwrap();
+        assert_eq!(release.version, "01.08.01.00");
+
+        assert!(matches!(
+            newest_release(
+                model,
+                [
+                    (*download, Err(PublicCatalogueError::Status)),
+                    (*wiki, Err(PublicCatalogueError::VersionNotFound)),
+                ],
+            ),
+            Err(PublicCatalogueError::VersionNotFound)
+        ));
     }
 
     /// Every model ships its own firmware, so a fallback page must never be
