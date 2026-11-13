@@ -2624,7 +2624,14 @@ fn serve_camera_stream(
     }
 }
 
+/// Reads and validates the client's request from a freshly accepted socket.
+///
+/// The listener polls in non-blocking mode, which accepted sockets inherit on
+/// macOS and Windows but not on Linux. Reading the request and streaming the
+/// feed both rely on blocking I/O, so the socket is switched back before first
+/// use.
 fn camera_stream_request(socket: &mut TcpStream) -> bool {
+    let _ = socket.set_nonblocking(false);
     let _ = socket.set_read_timeout(Some(Duration::from_secs(2)));
     let request = read_camera_stream_header(socket);
     let _ = socket.set_read_timeout(None);
@@ -6882,6 +6889,26 @@ mod tests {
         assert!(!claim_stream_client(&active));
         active.store(false, Ordering::Release);
         assert!(claim_stream_client(&active));
+    }
+
+    #[test]
+    fn stream_request_waits_on_a_socket_that_inherited_non_blocking_mode() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut socket, _) = listener.accept().unwrap();
+        // macOS and Windows hand back accepted sockets in the listener's
+        // non-blocking mode; Linux does not, so reproduce it explicitly.
+        socket.set_nonblocking(true).unwrap();
+        let request = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            client
+                .write_all(b"GET /stream HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+                .unwrap();
+            client
+        });
+
+        assert!(camera_stream_request(&mut socket));
+        drop(request.join().unwrap());
     }
 
     #[test]
