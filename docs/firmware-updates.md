@@ -68,9 +68,12 @@ The response limit is 2 MiB, and requests are restricted to `bambulab.com`,
 `crates/melt-core/src/bambu/public_catalogue.rs`; unknown models are not routed
 to a similar printer's page.
 
-Public checks try the official firmware download page first. If it cannot be
-fetched or has no usable version, A1 Mini and H2C checks also try their official
-Bambu Wiki release histories:
+Public checks read every allowlisted page for the model and report the highest
+stable version among them, since Bambu updates its sources independently (the
+A1 Mini wiki listed 01.09.00.00 while the download page still offered
+01.08.01.00). A page that cannot be fetched or has no usable version does not
+mask one that answered. A1 Mini and H2C checks read the official firmware
+download page and their official Bambu Wiki release histories:
 
 - [A1 Mini firmware release history](https://wiki.bambulab.com/en/a1-mini/manual/a1-mini-firmware-release-history)
 - [H2C firmware release history](https://wiki.bambulab.com/en/h2c/manual/h2c-firmware-release-history)
