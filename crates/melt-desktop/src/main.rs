@@ -3500,10 +3500,7 @@ fn proxy_camera_stream(
     expected: &str,
     stop: &AtomicBool,
 ) {
-    let _ = socket.set_read_timeout(Some(Duration::from_secs(5)));
-    let mut request = [0; 4096];
-    let read = socket.read(&mut request).unwrap_or_default();
-    if !camera_preview_request(&request[..read], expected) {
+    if !camera_viewer_authorized(&mut socket, expected) {
         let _ = socket.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
         return;
     }
@@ -3556,10 +3553,7 @@ fn proxy_h264_stream(
     expected: &str,
     stop: &AtomicBool,
 ) {
-    let _ = socket.set_read_timeout(Some(Duration::from_secs(5)));
-    let mut request = [0; 4096];
-    let read = socket.read(&mut request).unwrap_or_default();
-    if !camera_preview_request(&request[..read], expected) {
+    if !camera_viewer_authorized(&mut socket, expected) {
         let _ = socket.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
         return;
     }
@@ -3624,6 +3618,20 @@ fn subscribe_camera(
             capabilities.as_ref(),
         )
         .map_err(|error| operation_error(DriverError::Camera(error), operation))
+}
+
+/// Reads the viewer's request from a freshly accepted socket and checks its
+/// token.
+///
+/// The listener polls in non-blocking mode, which accepted sockets inherit on
+/// macOS and Windows but not on Linux. Reading the request and streaming frames
+/// both rely on blocking I/O, so the socket is switched back before first use.
+fn camera_viewer_authorized(socket: &mut TcpStream, expected: &str) -> bool {
+    let _ = socket.set_nonblocking(false);
+    let _ = socket.set_read_timeout(Some(Duration::from_secs(5)));
+    let mut request = [0; 4096];
+    let read = socket.read(&mut request).unwrap_or_default();
+    camera_preview_request(&request[..read], expected)
 }
 
 fn camera_preview_request(request: &[u8], expected: &str) -> bool {
@@ -4160,7 +4168,7 @@ mod tests {
 
     use std::{
         io::{BufRead, BufReader, Write},
-        net::TcpListener,
+        net::{TcpListener, TcpStream},
         sync::{
             Arc, Mutex,
             atomic::{AtomicBool, Ordering},
@@ -4182,8 +4190,8 @@ mod tests {
         FIRMWARE_UPDATE_STALE_AFTER, FirmwareUpdateEntry, FirmwareUpdateState,
         MonitorConnectionState, MonitorEntry, MonitorState, PresenceCache, PresenceState, Profile,
         STATUS_CACHE_HEARTBEAT, StatusCacheThrottle, Viewer, cached_monitor_entry_at,
-        cached_ui_monitor_entry, camera_error, camera_preview_request, current_firmware_entry,
-        ensure_state, extract_3mf_thumbnail, h264_codec, h264_frame_header,
+        cached_ui_monitor_entry, camera_error, camera_preview_request, camera_viewer_authorized,
+        current_firmware_entry, ensure_state, extract_3mf_thumbnail, h264_codec, h264_frame_header,
         invalidate_firmware_updates, load_status_cache_from, monitor_connection_state,
         operation_error, profile_with_observed_model, retain_firmware_update_failure,
         save_status_cache_to, store_firmware_update,
@@ -4668,6 +4676,26 @@ mod tests {
             TOKEN
         ));
         assert!(!camera_preview_request(b"", TOKEN));
+    }
+
+    #[test]
+    fn camera_viewer_request_waits_on_a_socket_that_inherited_non_blocking_mode() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut socket, _) = listener.accept().unwrap();
+        // macOS and Windows hand back accepted sockets in the listener's
+        // non-blocking mode; Linux does not, so reproduce it explicitly.
+        socket.set_nonblocking(true).unwrap();
+        let request = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            client
+                .write_all(format!("GET {TOKEN} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").as_bytes())
+                .unwrap();
+            client
+        });
+
+        assert!(camera_viewer_authorized(&mut socket, TOKEN));
+        drop(request.join().unwrap());
     }
 
     #[test]
