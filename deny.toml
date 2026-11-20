@@ -15,6 +15,11 @@ ignore = [
   { id = "RUSTSEC-2026-0371", reason = "zbus_names via tauri-plugin-notification > notify-rust > zbus" },
   { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via tauri-plugin-notification > notify-rust > zbus" },
   { id = "RUSTSEC-2023-0071", reason = "rsa via tapo: only tapo's AES UDP discovery (aes_discovery_query_generator.rs) uses it; Melt never calls discovery; no fixed rsa release" },
+  # Maintenance debt: mandatory transitive dependencies, with no patched versions.
+  # Remove these exceptions when tapo and las migrate away from chrono/chrono-tz.
+  # Upstream: https://github.com/chronotope/chrono/issues/1768
+  { id = "RUSTSEC-2026-0543", reason = "chrono via pinned tapo 0.12.2 and las 0.11.2; mandatory dependencies with no feature opt-out; awaiting upstream migration" },
+  { id = "RUSTSEC-2026-0555", reason = "chrono-tz via pinned tapo 0.12.2; mandatory dependency with no feature opt-out; awaiting upstream migration" },
 ]
 
 [licenses]
